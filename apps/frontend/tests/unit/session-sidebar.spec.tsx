@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "@text2sql/shared-types";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
-import { SidebarProvider } from "@/components/ui/sidebar";
 
 const sessions: Session[] = [
   {
@@ -29,16 +28,14 @@ describe("SessionSidebar", () => {
     const onCreateSession = vi.fn();
 
     render(
-      <SidebarProvider>
-        <SessionSidebar
-          sessions={sessions}
-          activeSessionId="session-1"
-          onSelectSession={onSelectSession}
-          onCreateSession={onCreateSession}
-          onRenameSession={async () => {}}
-          onDeleteSession={async () => {}}
-        />
-      </SidebarProvider>
+      <SessionSidebar
+        sessions={sessions}
+        activeSessionId="session-1"
+        onSelectSession={onSelectSession}
+        onCreateSession={onCreateSession}
+        onRenameSession={async () => {}}
+        onDeleteSession={async () => {}}
+      />
     );
 
     expect(screen.getByText("活跃会话")).toBeInTheDocument();

@@ -19,6 +19,20 @@ if (!window.matchMedia) {
     }) as MediaQueryList) as typeof window.matchMedia;
 }
 
+if (!globalThis.ResizeObserver) {
+  class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as typeof globalThis & { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+    ResizeObserver;
+}
+
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 afterEach(() => {
   cleanup();
 });

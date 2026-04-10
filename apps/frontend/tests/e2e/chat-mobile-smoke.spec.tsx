@@ -71,14 +71,12 @@ describe("chat mobile smoke", () => {
   });
 
   it("renders mobile-usable chat controls and sql preview", async () => {
-    const { container } = render(<ChatPage />);
+    render(<ChatPage />);
     await screen.findByText(/Session: session-1/i);
 
     expect(screen.getByLabelText("聊天输入")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
-    expect(screen.getByText("SQL 解释与执行结果")).toBeInTheDocument();
-
-    const gridContainer = container.querySelector(".lg\\:grid-cols-\\[1\\.2fr_1fr\\]");
-    expect(gridContainer).toBeTruthy();
+    expect(screen.getByRole("button", { name: "结果详情" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
+    expect(screen.getByText("执行结果与详情")).toBeInTheDocument();
   });
 });

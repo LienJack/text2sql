@@ -28,21 +28,21 @@ export function SqlExecutionTimeline({ steps }: SqlExecutionTimelineProps) {
       {steps.map((step, index) => (
         <details
           key={`${step.node}-${index}`}
-          className="rounded-md border border-border px-3 py-2"
+          className="rounded-md border border-slate-200 bg-white px-3 py-2"
         >
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{step.node}</p>
-              <p className="text-xs text-muted-foreground">{step.at}</p>
+              <p className="truncate text-sm font-medium text-slate-900">{step.node}</p>
+              <p className="text-xs text-slate-500">{step.at}</p>
             </div>
             <div className="flex items-center gap-2">
               {step.durationMs !== undefined ? (
-                <span className="text-xs text-muted-foreground">{step.durationMs}ms</span>
+                <span className="text-xs text-slate-500">{step.durationMs}ms</span>
               ) : null}
               <Badge variant={statusVariant(step)}>{step.status}</Badge>
             </div>
           </summary>
-          <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+          <div className="mt-2 space-y-2 text-xs text-slate-600">
             {step.detail ? <p>Detail: {step.detail}</p> : null}
             {step.inputSummary ? <p>Input: {step.inputSummary}</p> : null}
             {step.outputSummary ? <p>Output: {step.outputSummary}</p> : null}
