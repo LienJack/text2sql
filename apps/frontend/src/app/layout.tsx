@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { PlatformShell } from "@/components/layout/platform-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,7 +12,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" className="font-sans">
-      <body className="theme">{children}</body>
+      <body className="theme">
+        <PlatformShell>{children}</PlatformShell>
+      </body>
     </html>
   );
 }

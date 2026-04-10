@@ -1,23 +1,37 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { AppShell } from "@/components/app-shell";
-import { StateBlock } from "@/components/ui/state-block";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PlatformShell } from "@/components/layout/platform-shell";
 
-describe("AppShell", () => {
-  it("renders title, description, and children", () => {
+const mockUsePathname = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => mockUsePathname()
+}));
+
+describe("PlatformShell", () => {
+  beforeEach(() => {
+    mockUsePathname.mockReturnValue("/chat");
+  });
+
+  it("renders navigation and children", () => {
     render(
-      <AppShell title="Shell Title" description="Shell description">
+      <PlatformShell>
         <div>Child content</div>
-      </AppShell>
+      </PlatformShell>
     );
 
-    expect(screen.getByRole("heading", { name: "Shell Title" })).toBeInTheDocument();
-    expect(screen.getByText("Shell description")).toBeInTheDocument();
+    expect(screen.getByText("text2sql")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Chat/i })).toBeInTheDocument();
     expect(screen.getByText("Child content")).toBeInTheDocument();
   });
 
-  it("renders state block variants", () => {
-    render(<StateBlock variant="loading">Loading</StateBlock>);
-    expect(screen.getByText("Loading")).toBeInTheDocument();
+  it("uses current pathname as title", () => {
+    render(
+      <PlatformShell>
+        <div>Page body</div>
+      </PlatformShell>
+    );
+
+    expect(screen.getByRole("heading", { name: "Chat" })).toBeInTheDocument();
   });
 });

@@ -1,31 +1,22 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import type { Session } from "@text2sql/shared-types";
-import { PlusIcon } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { SessionActions } from "@/components/chat/session-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarSeparator
-} from "@/components/ui/sidebar";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { StateBlock } from "@/components/ui/state-block";
+import { cn } from "@/lib/utils";
 
 interface SessionSidebarProps {
   sessions: Session[];
   activeSessionId: string;
   loading?: boolean;
   error?: string;
+  className?: string;
   onSelectSession: (sessionId: string) => void;
   onCreateSession: () => void;
   onRenameSession: (sessionId: string, title: string) => Promise<void>;
@@ -44,10 +35,7 @@ function statusLabel(session: Session): string | null {
 
 function displayTitle(session: Session): string {
   const title = session.title?.trim();
-  if (title) {
-    return title;
-  }
-  return "新会话";
+  return title ? title : "新会话";
 }
 
 export function SessionSidebar({
@@ -55,14 +43,27 @@ export function SessionSidebar({
   activeSessionId,
   loading,
   error,
+  className,
   onSelectSession,
   onCreateSession,
   onRenameSession,
   onDeleteSession
 }: SessionSidebarProps) {
-  const [editingSessionId, setEditingSessionId] = useState<string>("");
+  const [editingSessionId, setEditingSessionId] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
+  const [query, setQuery] = useState("");
   const [actionError, setActionError] = useState("");
+
+  const filteredSessions = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) {
+      return sessions;
+    }
+    return sessions.filter((session) => {
+      const title = displayTitle(session).toLowerCase();
+      return title.includes(keyword) || session.id.toLowerCase().includes(keyword);
+    });
+  }, [query, sessions]);
 
   const startRename = (session: Session) => {
     setActionError("");
@@ -84,120 +85,122 @@ export function SessionSidebar({
       await onRenameSession(sessionId, draftTitle.trim());
       cancelRename();
     } catch (renameError) {
-      setActionError(
-        renameError instanceof Error ? renameError.message : "重命名失败"
-      );
+      setActionError(renameError instanceof Error ? renameError.message : "重命名失败");
     }
   };
 
-  const onRenameSubmit = async (
-    event: FormEvent,
-    sessionId: string
-  ): Promise<void> => {
+  const onRenameSubmit = async (event: FormEvent, sessionId: string): Promise<void> => {
     event.preventDefault();
     await submitRename(sessionId);
   };
 
   return (
-    <Sidebar side="left" collapsible="offcanvas">
-      <SidebarHeader>
-        <div className="space-y-1 px-2 py-1">
-          <h2 className="text-sm font-semibold">会话记录</h2>
-          <p className="text-xs text-muted-foreground">切换、重命名或删除历史会话。</p>
-        </div>
+    <aside className={cn("flex h-full w-full flex-col bg-slate-50/70", className)}>
+      <div className="space-y-3 border-b border-slate-200 p-4">
         <Button
-          variant="outline"
-          className="justify-start"
+          variant="default"
+          className="w-full justify-start gap-2 font-semibold shadow-sm"
           disabled={loading}
           onClick={onCreateSession}
         >
-          <PlusIcon />
+          <Plus className="h-4 w-4" />
           新建会话
         </Button>
-      </SidebarHeader>
-      <SidebarSeparator />
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>最近会话</SidebarGroupLabel>
-          <SidebarGroupContent>
-            {error ? <StateBlock variant="error">{error}</StateBlock> : null}
-            {actionError ? <StateBlock variant="error">{actionError}</StateBlock> : null}
-            {sessions.length === 0 ? (
-              <StateBlock variant="idle">暂无会话，点击“新建会话”开始。</StateBlock>
-            ) : null}
-            <SidebarMenu>
-              {sessions.map((session) => {
-                const active = session.id === activeSessionId;
-                const editing = session.id === editingSessionId;
-                const badge = statusLabel(session);
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索历史会话..."
+            className="pl-9"
+          />
+        </div>
+      </div>
 
-                return (
-                  <SidebarMenuItem key={session.id}>
-                    {editing ? (
-                      <form
-                        className="space-y-2 rounded-md border border-border p-2"
-                        onSubmit={(event) => {
-                          void onRenameSubmit(event, session.id);
-                        }}
-                      >
-                        <Input
-                          aria-label="会话标题编辑"
-                          value={draftTitle}
-                          autoFocus
-                          onChange={(event) => setDraftTitle(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              cancelRename();
-                            }
-                          }}
-                        />
-                        <div className="flex items-center gap-2">
-                          <Button type="submit" size="xs" variant="secondary">
-                            保存
-                          </Button>
-                          <Button type="button" size="xs" variant="ghost" onClick={cancelRename}>
-                            取消
-                          </Button>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="space-y-1">
-                        <div className="flex items-start gap-1">
-                          <SidebarMenuButton
-                            isActive={active}
-                            className="h-auto flex-1 items-start py-2"
-                            onClick={() => onSelectSession(session.id)}
-                          >
-                            <div className="min-w-0 space-y-1">
-                              <div className="truncate font-medium">{displayTitle(session)}</div>
-                              <div className="truncate text-xs text-muted-foreground">
-                                {session.id}
-                              </div>
-                            </div>
-                          </SidebarMenuButton>
-                          <SessionActions
-                            disabled={loading}
-                            onRename={() => startRename(session)}
-                            onDelete={() => {
-                              void onDeleteSession(session.id);
-                            }}
-                          />
-                        </div>
-                        {badge ? (
-                          <Badge variant="outline" className="ml-2 text-[11px]">
-                            {badge}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    )}
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-    </Sidebar>
+      {error ? <StateBlock variant="error" className="mx-3 mt-3">{error}</StateBlock> : null}
+      {actionError ? <StateBlock variant="error" className="mx-3 mt-3">{actionError}</StateBlock> : null}
+
+      <ScrollArea className="flex-1">
+        <div className="space-y-2 p-3">
+          {filteredSessions.length === 0 ? (
+            <StateBlock variant="idle">暂无会话，点击“新建会话”开始。</StateBlock>
+          ) : null}
+
+          {filteredSessions.map((session) => {
+            const active = session.id === activeSessionId;
+            const editing = session.id === editingSessionId;
+            const badge = statusLabel(session);
+
+            if (editing) {
+              return (
+                <form
+                  key={session.id}
+                  className="space-y-2 rounded-lg border border-slate-200 bg-white p-3"
+                  onSubmit={(event) => {
+                    void onRenameSubmit(event, session.id);
+                  }}
+                >
+                  <Input
+                    value={draftTitle}
+                    autoFocus
+                    aria-label="会话标题编辑"
+                    onChange={(event) => setDraftTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelRename();
+                      }
+                    }}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button type="submit" size="xs" variant="secondary">
+                      保存
+                    </Button>
+                    <Button type="button" size="xs" variant="ghost" onClick={cancelRename}>
+                      取消
+                    </Button>
+                  </div>
+                </form>
+              );
+            }
+
+            return (
+              <article
+                key={session.id}
+                className={cn(
+                  "group rounded-md border px-3 py-3 transition-colors",
+                  active
+                    ? "border-teal-200 bg-teal-50 shadow-sm"
+                    : "border-transparent bg-transparent hover:bg-slate-100/50"
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => onSelectSession(session.id)}
+                  >
+                    <p className="truncate text-sm font-medium text-slate-900">{displayTitle(session)}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{session.id}</p>
+                  </button>
+                  <SessionActions
+                    disabled={loading}
+                    onRename={() => startRename(session)}
+                    onDelete={() => {
+                      void onDeleteSession(session.id);
+                    }}
+                  />
+                </div>
+                {badge ? (
+                  <Badge variant="outline" className="mt-2 text-[11px]">
+                    {badge}
+                  </Badge>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </aside>
   );
 }

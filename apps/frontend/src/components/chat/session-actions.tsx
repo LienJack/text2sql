@@ -15,7 +15,7 @@ export function SessionActions({
   onDelete
 }: SessionActionsProps) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
       <Button
         size="icon-xs"
         variant="ghost"

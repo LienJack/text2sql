@@ -7,6 +7,7 @@ describe("SqlPreview", () => {
   it("renders empty state when run is null", () => {
     render(<SqlPreview run={null} debugEnabled={false} />);
     expect(screen.getByText("暂无 SQL 预览")).toBeInTheDocument();
+    expect(screen.getByText("执行结果与详情")).toBeInTheDocument();
   });
 
   it("renders sql summary and result table when run exists", () => {
@@ -15,6 +16,7 @@ describe("SqlPreview", () => {
     expect(
       screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
     ).toBeInTheDocument();
+    expect(screen.getByText("执行结果与详情")).toBeInTheDocument();
     expect(screen.getByText("执行步骤时间线")).toBeInTheDocument();
     expect(screen.getByText("Provider: mock / Model: mock-model")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();

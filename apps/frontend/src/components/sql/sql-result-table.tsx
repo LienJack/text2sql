@@ -17,19 +17,21 @@ export function SqlResultTable({ run }: SqlResultTableProps) {
   const rows = run.rows ?? [];
   if (columns.length === 0 || rows.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+      <p className="rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">
         当前无结果数据。
       </p>
     );
   }
 
   return (
-    <div className="w-full overflow-x-auto rounded-md border">
-      <Table className="min-w-lg">
-        <TableHeader>
+    <div className="w-full overflow-x-auto rounded-lg border border-slate-200">
+      <Table className="min-w-lg bg-white">
+        <TableHeader className="bg-slate-50">
           <TableRow>
             {columns.map((column) => (
-              <TableHead key={column}>{column}</TableHead>
+              <TableHead key={column} className="font-semibold text-slate-900">
+                {column}
+              </TableHead>
             ))}
           </TableRow>
         </TableHeader>
@@ -37,7 +39,9 @@ export function SqlResultTable({ run }: SqlResultTableProps) {
           {rows.slice(0, 20).map((row, rowIndex) => (
             <TableRow key={`row-${rowIndex}`}>
               {columns.map((column) => (
-                <TableCell key={`${rowIndex}-${column}`}>{String(row[column] ?? "")}</TableCell>
+                <TableCell key={`${rowIndex}-${column}`} className="font-mono text-xs text-slate-700">
+                  {String(row[column] ?? "")}
+                </TableCell>
               ))}
             </TableRow>
           ))}
