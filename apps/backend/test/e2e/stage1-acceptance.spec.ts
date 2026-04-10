@@ -16,6 +16,8 @@ describe("stage1 acceptance", () => {
       __dirname,
       "../../../../data/sqlite/text2sql.db"
     );
+    process.env.LLM_MOCK_MODE = "true";
+    process.env.LLM_PROVIDER = "volcengine";
   });
 
   it("should pass all 12 stage1 cases", async () => {

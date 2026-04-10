@@ -1,7 +1,7 @@
 # Keep critical fixtures/docs tracked for CI and collaboration
 /data/*
 /vibe/*
-
+/docs/*
 # Node / monorepo artifacts
 node_modules/
 dist/

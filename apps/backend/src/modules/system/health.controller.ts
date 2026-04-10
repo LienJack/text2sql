@@ -41,11 +41,23 @@ export class HealthController {
         },
         llm: {
           provider: this.config.llmProvider,
-          configured: Boolean(this.config.llmApiKey)
+          configured: Boolean(this.config.llmApiKey),
+          baseUrlConfigured: Boolean(this.config.llmBaseUrl),
+          model: this.config.llmModel,
+          mockMode: this.config.llmMockMode
+        },
+        langsmith: {
+          tracingRequested: this.config.langsmithTracing,
+          configured: this.config.langsmithConfigured,
+          ready: this.config.langsmithReady,
+          project: this.config.langsmithProject,
+          endpoint: this.config.langsmithEndpoint
         }
+      },
+      cors: {
+        allowedOrigins: this.config.corsAllowedOrigins
       },
       datasources: this.datasourceRegistry.list()
     });
   }
 }
-

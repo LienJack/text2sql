@@ -9,6 +9,8 @@ describe("agent main flow", () => {
       __dirname,
       "../../../../data/sqlite/text2sql.db"
     );
+    process.env.LLM_MOCK_MODE = "true";
+    process.env.LLM_PROVIDER = "volcengine";
   });
 
   it("should return execution result for clear question", async () => {
@@ -38,4 +40,3 @@ describe("agent main flow", () => {
     expect(run.status).toBe("rejected");
   });
 });
-

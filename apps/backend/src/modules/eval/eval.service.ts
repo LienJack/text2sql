@@ -20,7 +20,7 @@ export class EvalService {
     private readonly appConfig: AppConfigService
   ) {}
 
-  async run(caseFilePath?: string): Promise<EvaluationReport> {
+  async run(caseFilePath?: string, requestId?: string): Promise<EvaluationReport> {
     const cases = await this.loadCases(caseFilePath);
     const results: EvaluationCaseResult[] = [];
     const jobId = uuidv4();
@@ -34,7 +34,14 @@ export class EvalService {
       const run = await this.graphBuilder.run({
         runId: uuidv4(),
         sessionId: evalSessionId,
-        question: item.question
+        question: item.question,
+        traceContext: {
+          source: "evaluation",
+          route: "/api/v1/evaluations/run",
+          requestId,
+          jobId,
+          caseId: item.id
+        }
       });
 
       let passed = true;

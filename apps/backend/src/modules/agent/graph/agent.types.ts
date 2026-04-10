@@ -1,9 +1,18 @@
 import type { ClarificationPrompt, ExecutionTrace } from "@text2sql/shared-types";
 
+export interface GraphTraceContext {
+  source: "chat" | "evaluation";
+  route: string;
+  requestId?: string;
+  jobId?: string;
+  caseId?: string;
+}
+
 export interface GraphInput {
   runId: string;
   sessionId: string;
   question: string;
+  traceContext?: GraphTraceContext;
 }
 
 export interface GraphState extends GraphInput {
@@ -17,4 +26,3 @@ export interface GraphState extends GraphInput {
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
 }
-

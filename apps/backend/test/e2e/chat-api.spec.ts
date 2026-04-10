@@ -15,6 +15,7 @@ describe("chat api (e2e)", () => {
     process.env.DATABASE_URL = "";
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
+    process.env.LLM_MOCK_MODE = "true";
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule]
     }).compile();
@@ -40,5 +41,16 @@ describe("chat api (e2e)", () => {
     expect(runRes.status).toBe(201);
     expect(runRes.body.status).toBe("success");
     expect(runRes.body.data.run.runId).toBeDefined();
+    expect(runRes.body.data.run.sql).toMatch(/select/i);
+    expect(runRes.body.data.run.explanation).toBeTruthy();
+  });
+
+  it("should expose configured cors origins in health response", async () => {
+    const res = await request(app.getHttpServer())
+      .get("/health")
+      .send();
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("success");
+    expect(res.body.data.cors.allowedOrigins).toContain("http://localhost:3001");
   });
 });

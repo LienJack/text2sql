@@ -7,6 +7,15 @@ import { requestIdMiddleware } from "./modules/middleware/request-id.middleware"
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+  const config = app.get(AppConfigService);
+
+  app.enableCors({
+    origin: config.corsAllowedOrigins,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["content-type", "x-request-id"],
+    credentials: false
+  });
+
   app.use(requestIdMiddleware);
   app.useGlobalPipes(
     new ValidationPipe({
@@ -14,11 +23,8 @@ async function bootstrap(): Promise<void> {
       transform: true
     })
   );
-
-  const config = app.get(AppConfigService);
   config.assertCriticalConfig();
   await app.listen(config.port);
 }
 
 void bootstrap();
-

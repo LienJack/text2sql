@@ -54,6 +54,19 @@ log "Preparing environment files..."
 copy_if_missing "apps/backend/.env.example" "apps/backend/.env"
 copy_if_missing "apps/frontend/.env.example" "apps/frontend/.env"
 
+if ! grep -q "^CORS_ALLOWED_ORIGINS=" "apps/backend/.env"; then
+  log "Appending default CORS_ALLOWED_ORIGINS=http://localhost:3001"
+  printf '\nCORS_ALLOWED_ORIGINS=http://localhost:3001\n' >> "apps/backend/.env"
+fi
+
+if grep -q "^LLM_MOCK_MODE=true" "apps/backend/.env"; then
+  log "LLM_MOCK_MODE=true detected: backend will use mock response instead of real provider."
+fi
+
+if grep -q "^LLM_API_KEY=$" "apps/backend/.env"; then
+  log "LLM_API_KEY is empty. Real LLM requests will fail until configured."
+fi
+
 log "Generating Prisma Client..."
 pnpm --filter @text2sql/backend prisma:generate
 

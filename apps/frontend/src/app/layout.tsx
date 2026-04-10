@@ -10,9 +10,8 @@ export default function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang="zh-CN" className="font-sans">
+      <body className="theme">{children}</body>
     </html>
   );
 }
-

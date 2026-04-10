@@ -12,6 +12,8 @@ describe("evaluation report", () => {
       __dirname,
       "../../../../data/sqlite/text2sql.db"
     );
+    process.env.LLM_MOCK_MODE = "true";
+    process.env.LLM_PROVIDER = "volcengine";
   });
 
   it("should generate an evaluation report", async () => {
@@ -39,4 +41,3 @@ describe("evaluation report", () => {
     expect(report.jobId).toBeDefined();
   });
 });
-

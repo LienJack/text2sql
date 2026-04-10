@@ -26,7 +26,11 @@ export class ChatService {
     return session;
   }
 
-  async sendMessage(sessionId: string, message: string): Promise<SqlRun> {
+  async sendMessage(
+    sessionId: string,
+    message: string,
+    requestId?: string
+  ): Promise<SqlRun> {
     const session = await this.repository.getSessionById(sessionId);
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
@@ -45,7 +49,12 @@ export class ChatService {
     const run = await this.graphBuilder.run({
       runId: uuidv4(),
       sessionId,
-      question: message
+      question: message,
+      traceContext: {
+        source: "chat",
+        route: "/api/v1/sessions/:sessionId/messages",
+        requestId
+      }
     });
 
     const assistantMessage: ChatMessage = {
@@ -92,4 +101,3 @@ export class ChatService {
     return run;
   }
 }
-

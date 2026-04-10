@@ -41,7 +41,11 @@ export class ChatController {
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
-      const run = await this.chatService.sendMessage(sessionId, body.message);
+      const run = await this.chatService.sendMessage(
+        sessionId,
+        body.message,
+        req.requestId
+      );
       const responseType =
         run.status === "clarification"
           ? "clarification"

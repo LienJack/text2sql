@@ -9,8 +9,12 @@ export class GenerateSqlNode {
     provider: string;
     sql: string;
     explanation: string;
+    rawText: string;
+    prompt: {
+      systemPrompt: string;
+      userPrompt: string;
+    };
   }> {
     return this.providerRouter.generateSql(question);
   }
 }
-

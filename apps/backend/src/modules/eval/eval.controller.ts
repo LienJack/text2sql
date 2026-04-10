@@ -15,7 +15,7 @@ export class EvalController {
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
-      const report = await this.evalService.run(body.caseFilePath);
+      const report = await this.evalService.run(body.caseFilePath, req.requestId);
       return ok(req.requestId, report);
     } catch (error) {
       return fail(
@@ -38,4 +38,3 @@ export class EvalController {
     return ok(req.requestId, report);
   }
 }
-

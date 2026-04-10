@@ -1,6 +1,10 @@
 "use client";
 
 import type { SqlRun } from "@text2sql/shared-types";
+import { SqlResultTable } from "@/components/sql/sql-result-table";
+import { SqlRunSummary } from "@/components/sql/sql-run-summary";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SectionHeader } from "@/components/ui/section-header";
 
 interface Props {
   run: SqlRun | null;
@@ -9,86 +13,31 @@ interface Props {
 export function SqlPreview({ run }: Props) {
   if (!run) {
     return (
-      <section style={{ padding: 16, border: "1px solid #d0d5dd", borderRadius: 8 }}>
-        暂无 SQL 预览
-      </section>
+      <Card className="h-full">
+        <CardHeader>
+          <SectionHeader title="SQL 解释与执行结果" description="发送消息后会显示 SQL 预览与结果摘要。" />
+        </CardHeader>
+        <CardContent>
+          <p className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+            暂无 SQL 预览
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <section
-      style={{
-        padding: 16,
-        border: "1px solid #d0d5dd",
-        borderRadius: 8,
-        background: "#fff"
-      }}
-    >
-      <h3 style={{ marginTop: 0 }}>SQL 解释与执行结果</h3>
-      <p>
-        <strong>状态：</strong>
-        {run.status}
-      </p>
-      <p>
-        <strong>解释：</strong>
-        {run.explanation ?? "-"}
-      </p>
-      <pre
-        style={{
-          whiteSpace: "pre-wrap",
-          background: "#f8fafc",
-          padding: 12,
-          borderRadius: 6
-        }}
-      >
-        {run.sql ?? "暂无 SQL"}
-      </pre>
-      {run.error ? (
-        <p style={{ color: "#b42318" }}>
-          <strong>错误：</strong>
-          {run.error}
-        </p>
-      ) : null}
-      {run.rows && run.rows.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%" }}>
-            <thead>
-              <tr>
-                {(run.columns ?? []).map((column) => (
-                  <th
-                    key={column}
-                    style={{
-                      borderBottom: "1px solid #e4e7ec",
-                      textAlign: "left",
-                      padding: "8px 6px"
-                    }}
-                  >
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {run.rows.slice(0, 20).map((row, index) => (
-                <tr key={`row-${index}`}>
-                  {(run.columns ?? []).map((column) => (
-                    <td
-                      key={`${index}-${column}`}
-                      style={{
-                        borderBottom: "1px solid #f2f4f7",
-                        padding: "8px 6px"
-                      }}
-                    >
-                      {String(row[column] ?? "")}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-    </section>
+    <Card className="h-full">
+      <CardHeader>
+        <SectionHeader title="SQL 解释与执行结果" description="展示当前执行状态、SQL 文本与结果样本。" />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <SqlRunSummary run={run} />
+        <pre className="max-h-48 overflow-auto rounded-md border bg-secondary/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">
+          {run.sql ?? "暂无 SQL"}
+        </pre>
+        <SqlResultTable run={run} />
+      </CardContent>
+    </Card>
   );
 }
-

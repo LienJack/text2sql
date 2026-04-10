@@ -82,12 +82,14 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return;
     }
-    await this.prisma.session.create({
-      data: {
-        id: session.id,
-        datasource: session.datasource,
-        createdAt: new Date(session.createdAt)
-      }
+    await this.tryPrismaWrite(async () => {
+      await this.prisma?.session.create({
+        data: {
+          id: session.id,
+          datasource: session.datasource,
+          createdAt: new Date(session.createdAt)
+        }
+      });
     });
   }
 
@@ -99,9 +101,11 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return undefined;
     }
-    const row = (await this.prisma.session.findUnique({
-      where: { id: sessionId }
-    })) as { id: string; datasource: string; createdAt: Date } | null;
+    const row = (await this.tryPrismaRead(async () =>
+      this.prisma?.session.findUnique({
+        where: { id: sessionId }
+      })
+    )) as { id: string; datasource: string; createdAt: Date } | null;
     if (!row) {
       return undefined;
     }
@@ -121,15 +125,17 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return;
     }
-    await this.prisma.message.create({
-      data: {
-        id: message.id,
-        sessionId: message.sessionId,
-        role: message.role,
-        content: message.content,
-        metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-        createdAt: new Date(message.createdAt)
-      }
+    await this.tryPrismaWrite(async () => {
+      await this.prisma?.message.create({
+        data: {
+          id: message.id,
+          sessionId: message.sessionId,
+          role: message.role,
+          content: message.content,
+          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
+          createdAt: new Date(message.createdAt)
+        }
+      });
     });
   }
 
@@ -142,19 +148,24 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (inMemory.length > 0 || !this.prisma) {
       return this.paginate(inMemory, page, pageSize);
     }
-    const rows = (await this.prisma.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize
-    })) as Array<{
+    const rows = (await this.tryPrismaRead(async () =>
+      this.prisma?.message.findMany({
+        where: { sessionId },
+        orderBy: { createdAt: "asc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize
+      })
+    )) as Array<{
       id: string;
       sessionId: string;
       role: "user" | "assistant" | "system";
       content: string;
       metadata: string | null;
       createdAt: Date;
-    }>;
+    }> | null;
+    if (!rows) {
+      return this.paginate(inMemory, page, pageSize);
+    }
     return rows.map((row) => ({
       id: row.id,
       sessionId: row.sessionId,
@@ -170,23 +181,25 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return;
     }
-    await this.prisma.sqlRun.create({
-      data: {
-        runId: run.runId,
-        sessionId: run.sessionId,
-        status: run.status,
-        provider: run.provider,
-        question: run.question,
-        sql: run.sql ?? null,
-        explanation: run.explanation ?? null,
-        answer: run.answer ?? null,
-        columns: run.columns ? JSON.stringify(run.columns) : null,
-        rows: run.rows ? JSON.stringify(run.rows) : null,
-        error: run.error ?? null,
-        clarification: run.clarification ? JSON.stringify(run.clarification) : null,
-        trace: JSON.stringify(run.trace),
-        createdAt: new Date(run.createdAt)
-      }
+    await this.tryPrismaWrite(async () => {
+      await this.prisma?.sqlRun.create({
+        data: {
+          runId: run.runId,
+          sessionId: run.sessionId,
+          status: run.status,
+          provider: run.provider,
+          question: run.question,
+          sql: run.sql ?? null,
+          explanation: run.explanation ?? null,
+          answer: run.answer ?? null,
+          columns: run.columns ? JSON.stringify(run.columns) : null,
+          rows: run.rows ? JSON.stringify(run.rows) : null,
+          error: run.error ?? null,
+          clarification: run.clarification ? JSON.stringify(run.clarification) : null,
+          trace: JSON.stringify(run.trace),
+          createdAt: new Date(run.createdAt)
+        }
+      });
     });
   }
 
@@ -198,9 +211,11 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return undefined;
     }
-    const row = (await this.prisma.sqlRun.findUnique({
-      where: { runId }
-    })) as
+    const row = (await this.tryPrismaRead(async () =>
+      this.prisma?.sqlRun.findUnique({
+        where: { runId }
+      })
+    )) as
       | {
           runId: string;
           sessionId: string;
@@ -250,16 +265,18 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return;
     }
-    await this.prisma.evaluationReport.create({
-      data: {
-        jobId: report.jobId,
-        provider: report.provider,
-        total: report.total,
-        passed: report.passed,
-        passRate: report.passRate,
-        payload: JSON.stringify(report),
-        createdAt: new Date(report.createdAt)
-      }
+    await this.tryPrismaWrite(async () => {
+      await this.prisma?.evaluationReport.create({
+        data: {
+          jobId: report.jobId,
+          provider: report.provider,
+          total: report.total,
+          passed: report.passed,
+          passRate: report.passRate,
+          payload: JSON.stringify(report),
+          createdAt: new Date(report.createdAt)
+        }
+      });
     });
   }
 
@@ -271,9 +288,11 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.prisma) {
       return undefined;
     }
-    const row = (await this.prisma.evaluationReport.findUnique({
-      where: { jobId }
-    })) as { payload: string } | null;
+    const row = (await this.tryPrismaRead(async () =>
+      this.prisma?.evaluationReport.findUnique({
+        where: { jobId }
+      })
+    )) as { payload: string } | null;
     if (!row) {
       return undefined;
     }
@@ -286,5 +305,33 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     return items.slice(start, end);
+  }
+
+  private async tryPrismaWrite(operation: () => Promise<void>): Promise<void> {
+    try {
+      await operation();
+    } catch (error) {
+      this.disablePrisma(error);
+    }
+  }
+
+  private async tryPrismaRead<T>(
+    operation: () => Promise<T | undefined>
+  ): Promise<T | null> {
+    try {
+      const value = await operation();
+      return value ?? null;
+    } catch (error) {
+      this.disablePrisma(error);
+      return null;
+    }
+  }
+
+  private disablePrisma(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.warn(
+      `PostgreSQL 持久化失败，已降级为内存模式: ${message}`
+    );
+    this.prisma = undefined;
   }
 }

@@ -9,6 +9,8 @@ describe("data flow", () => {
       __dirname,
       "../../../../data/sqlite/text2sql.db"
     );
+    process.env.LLM_MOCK_MODE = "true";
+    process.env.LLM_PROVIDER = "volcengine";
   });
 
   it("should persist session and messages through repository flow", async () => {
@@ -24,4 +26,3 @@ describe("data flow", () => {
     expect(messages.length).toBeGreaterThanOrEqual(2);
   });
 });
-
