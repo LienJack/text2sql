@@ -1,10 +1,18 @@
 export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
+export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 
 export interface Session {
   id: string;
   datasource: string;
   createdAt: string;
+  title?: string;
+  debugEnabled?: boolean;
+  lastMessageAt?: string;
+  syncStatus?: SessionSyncStatus;
+  deletedAt?: string | null;
+  syncFailedCount?: number;
+  lastSyncFailureAt?: string | null;
 }
 
 export interface ChatMessage {
@@ -26,6 +34,12 @@ export interface ExecutionTraceStep {
   status: "success" | "failed" | "skipped";
   detail?: string;
   at: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  inputSummary?: string;
+  outputSummary?: string;
+  errorSummary?: string;
 }
 
 export interface ExecutionTrace {
@@ -33,6 +47,13 @@ export interface ExecutionTrace {
   provider: string;
   retryCount: number;
   steps: ExecutionTraceStep[];
+}
+
+export interface LlmRawOutput {
+  provider: string;
+  model: string;
+  rawText: string;
+  createdAt: string;
 }
 
 export interface SqlRun {
@@ -49,7 +70,14 @@ export interface SqlRun {
   error?: string;
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
+  llmRaw?: LlmRawOutput | null;
   createdAt: string;
+}
+
+export interface ChatSessionView {
+  session: Session;
+  messages: ChatMessage[];
+  latestRun?: SqlRun;
 }
 
 export interface EvaluationCase {
@@ -93,4 +121,3 @@ export interface ApiFailure {
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-

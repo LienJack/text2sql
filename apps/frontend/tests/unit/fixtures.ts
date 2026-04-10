@@ -9,6 +9,13 @@ export function createMockRun(partial?: Partial<SqlRun>): SqlRun {
     provider: "mock",
     sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
     explanation: "统计近 30 天支付方式分布。",
+    llmRaw: {
+      provider: "mock",
+      model: "mock-model",
+      rawText:
+        "```sql\nSELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method\n```",
+      createdAt: "2026-04-10T00:00:00.000Z"
+    },
     rows: [{ payment_method: "card", cnt: 12 }],
     columns: ["payment_method", "cnt"],
     trace: {
@@ -19,7 +26,10 @@ export function createMockRun(partial?: Partial<SqlRun>): SqlRun {
         {
           node: "generate-sql",
           status: "success",
-          at: "2026-04-10T00:00:00.000Z"
+          at: "2026-04-10T00:00:00.000Z",
+          durationMs: 18,
+          inputSummary: "question=近30天支付方式分布",
+          outputSummary: "sql=SELECT payment_method..."
         }
       ]
     },

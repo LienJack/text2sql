@@ -3,6 +3,7 @@ import { AppConfigModule } from "../config/config.module";
 import { AppConfigService } from "../config/app-config.service";
 import { DatasourceModule } from "../datasource/datasource.module";
 import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+import { PersistenceRetryService } from "./cache/persistence-retry.service";
 import { RedisBufferService } from "./cache/redis-buffer.service";
 import { ChatRepository } from "./persistence/chat.repository";
 import { SqliteQueryService } from "./sqlite/sqlite-query.service";
@@ -30,9 +31,15 @@ class DataBootstrapService implements OnModuleInit {
   providers: [
     SqliteQueryService,
     RedisBufferService,
+    PersistenceRetryService,
     ChatRepository,
     DataBootstrapService
   ],
-  exports: [SqliteQueryService, RedisBufferService, ChatRepository]
+  exports: [
+    SqliteQueryService,
+    RedisBufferService,
+    PersistenceRetryService,
+    ChatRepository
+  ]
 })
 export class DataModule {}

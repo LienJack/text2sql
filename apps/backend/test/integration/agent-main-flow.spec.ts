@@ -25,6 +25,8 @@ describe("agent main flow", () => {
     });
     expect(["executionResult", "failed"]).toContain(run.status);
     expect(run.trace.steps.length).toBeGreaterThan(0);
+    expect(run.llmRaw?.rawText).toBeTruthy();
+    expect(run.trace.steps[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("should reject non-readonly sql intent", async () => {

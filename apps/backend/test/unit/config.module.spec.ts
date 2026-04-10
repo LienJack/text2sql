@@ -24,4 +24,23 @@ describe("AppConfigService", () => {
     expect(config.llmProvider).toBe("volcengine");
     expect(config.sqlitePath).toContain("data/sqlite/text2sql.db");
   });
+
+  it("should build database url from POSTGRES_* env variables", async () => {
+    process.env.POSTGRES_HOST = "localhost";
+    process.env.POSTGRES_PORT = "5432";
+    process.env.POSTGRES_DB = "text2sql";
+    process.env.POSTGRES_USER = "admin";
+    process.env.POSTGRES_PASSWORD = "admin";
+    process.env.POSTGRES_SCHEMA = "public";
+    delete process.env.DATABASE_URL;
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppConfigModule]
+    }).compile();
+
+    const config = moduleRef.get(AppConfigService);
+    expect(config.databaseUrl).toBe(
+      "postgresql://admin:admin@localhost:5432/text2sql?schema=public"
+    );
+  });
 });

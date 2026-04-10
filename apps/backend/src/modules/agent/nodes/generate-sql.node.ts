@@ -7,6 +7,7 @@ export class GenerateSqlNode {
 
   async run(question: string): Promise<{
     provider: string;
+    model: string;
     sql: string;
     explanation: string;
     rawText: string;

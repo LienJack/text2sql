@@ -1,0 +1,10 @@
+ALTER TABLE "sessions"
+ADD COLUMN IF NOT EXISTS "title" TEXT NOT NULL DEFAULT '新会话',
+ADD COLUMN IF NOT EXISTS "syncStatus" TEXT NOT NULL DEFAULT 'healthy',
+ADD COLUMN IF NOT EXISTS "syncFailedCount" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "lastMessageAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "lastSyncFailureAt" TIMESTAMP(3),
+ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMP(3);
+
+CREATE INDEX IF NOT EXISTS "sessions_deletedAt_lastMessageAt_idx"
+  ON "sessions"("deletedAt", "lastMessageAt");

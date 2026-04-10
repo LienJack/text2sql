@@ -1,16 +1,20 @@
 "use client";
 
 import type { SqlRun } from "@text2sql/shared-types";
+import { SqlDebugDetails } from "@/components/sql/sql-debug-details";
+import { SqlExecutionTimeline } from "@/components/sql/sql-execution-timeline";
 import { SqlResultTable } from "@/components/sql/sql-result-table";
 import { SqlRunSummary } from "@/components/sql/sql-run-summary";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
+import { StateBlock } from "@/components/ui/state-block";
 
 interface Props {
   run: SqlRun | null;
+  debugEnabled: boolean;
 }
 
-export function SqlPreview({ run }: Props) {
+export function SqlPreview({ run, debugEnabled }: Props) {
   if (!run) {
     return (
       <Card className="h-full">
@@ -36,6 +40,18 @@ export function SqlPreview({ run }: Props) {
         <pre className="max-h-48 overflow-auto rounded-md border bg-secondary/40 p-3 text-xs leading-relaxed whitespace-pre-wrap">
           {run.sql ?? "暂无 SQL"}
         </pre>
+        <div className="space-y-2">
+          <p className="text-sm font-semibold">执行步骤时间线</p>
+          <SqlExecutionTimeline steps={run.trace.steps} />
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm font-semibold">调试详情</p>
+          {debugEnabled ? (
+            <SqlDebugDetails run={run} />
+          ) : (
+            <StateBlock variant="idle">调试详情已关闭。</StateBlock>
+          )}
+        </div>
         <SqlResultTable run={run} />
       </CardContent>
     </Card>

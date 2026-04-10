@@ -41,6 +41,13 @@ cp apps/frontend/.env.example apps/frontend/.env
 
 关键配置（`apps/backend/.env`）：
 - `CORS_ALLOWED_ORIGINS=http://localhost:3001`
+- `POSTGRES_HOST=localhost`
+- `POSTGRES_PORT=5432`
+- `POSTGRES_DB=text2sql`
+- `POSTGRES_USER=admin`
+- `POSTGRES_PASSWORD=admin`
+- `POSTGRES_SCHEMA=public`
+- `DATABASE_URL=<optional>`（若配置则优先；未配置时后端会自动使用 `POSTGRES_*` 组装）
 - `LLM_PROVIDER=volcengine`（或 siliconflow/minimax）
 - `LLM_BASE_URL=<openai-compatible-base-url>`（支持 `https://xxx`、`https://xxx/v1` 或完整 `/chat/completions` 路径）
 - `LLM_API_KEY=<api-key>`
@@ -50,6 +57,7 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
 - `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
 - `LANGSMITH_ENDPOINT=https://api.smith.langchain.com`（可选）
+- 会话 Redis 缓冲 TTL 固定为 12 小时（43200 秒），用于持久化补偿窗口。
 
 4. 生成 Prisma Client（可选但推荐）
 ```bash
@@ -68,6 +76,7 @@ pnpm dev
 ## 联调检查清单（真实 LLM）
 - 后端健康检查 `GET /health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
 - 如开启 LangSmith，`GET /health` 中 `dependencies.langsmith.ready` 为 `true`。
+- `GET /health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
 - 前端能成功创建会话并发送消息，无跨域报错。
 - `POST /api/v1/sessions/:sessionId/messages` 响应中包含 `run.sql` 与 `run.explanation`。
 - 当 LLM 配置缺失或不可用时，接口返回可读错误（不会回退到规则 SQL）。
@@ -86,12 +95,22 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 
 ## 核心 API
 - `POST /api/v1/sessions`
+- `GET /api/v1/sessions`
+- `PATCH /api/v1/sessions/:sessionId`（支持 `title` 与 `debugEnabled` 局部更新）
+- `DELETE /api/v1/sessions/:sessionId`（软删除，默认列表隐藏）
 - `POST /api/v1/sessions/:sessionId/messages`
-- `GET /api/v1/sessions/:sessionId/messages`
+- `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
 - `GET /api/v1/runs/:runId`
 - `POST /api/v1/evaluations/run`
 - `GET /api/v1/evaluations/:jobId`
 - `GET /health`
+
+## Chat 调试回溯说明
+- 会话级调试开关字段：`Session.debugEnabled`，默认 `false`，按会话持久化保存。
+- 运行记录新增 `SqlRun.llmRaw`：包含 `provider`、`model`、`rawText`、`createdAt`，用于原始输出回溯。
+- `trace.steps` 支持节点级状态 + 可选摘要字段（输入/输出/错误摘要、时长）；前端字段缺失时自动降级为节点态。
+- 历史会话不会回填旧 `llmRaw` 数据；开启调试时会显示“该会话无历史原始返回数据”。
+- 当前策略为永久保留调试数据，不做自动清理任务。
 
 ## 测试
 ```bash

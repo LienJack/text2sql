@@ -13,8 +13,9 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prelint": "pnpm --filter @text2sql/shared-types build",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev"
+    "prisma:generate": "node scripts/prisma-with-database-url.cjs generate",
+    "prisma:migrate": "node scripts/prisma-with-database-url.cjs migrate dev",
+    "prisma:studio": "node scripts/prisma-with-database-url.cjs studio"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.98",

@@ -4,6 +4,7 @@ import type { ApiResponse } from "@text2sql/shared-types";
 import { ok } from "../../common/api-response";
 import { AppConfigService } from "../config/app-config.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
+import { ChatRepository } from "../data/persistence/chat.repository";
 import { SqliteQueryService } from "../data/sqlite/sqlite-query.service";
 import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
 
@@ -13,6 +14,7 @@ export class HealthController {
     private readonly config: AppConfigService,
     private readonly sqlite: SqliteQueryService,
     private readonly redis: RedisBufferService,
+    private readonly repository: ChatRepository,
     private readonly datasourceRegistry: DatasourceRegistryService
   ) {}
 
@@ -20,6 +22,7 @@ export class HealthController {
   async health(@Req() req: Request): Promise<ApiResponse<unknown>> {
     const sqliteReady = await this.sqlite.healthCheck();
     const redisReady = await this.redis.healthCheck();
+    const sessionSyncStats = await this.repository.getSessionSyncStats();
     const postgresEnabled = Boolean(this.config.databaseUrl);
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
@@ -52,6 +55,9 @@ export class HealthController {
           ready: this.config.langsmithReady,
           project: this.config.langsmithProject,
           endpoint: this.config.langsmithEndpoint
+        },
+        sessions: {
+          sync: sessionSyncStats
         }
       },
       cors: {
