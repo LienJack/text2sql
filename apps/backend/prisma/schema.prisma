@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id         String    @id
+  datasource String
+  createdAt  DateTime  @default(now())
+  messages   Message[]
+  runs       SqlRun[]
+
+  @@map("sessions")
+}
+
+model Message {
+  id        String   @id
+  sessionId String
+  role      String
+  content   String
+  metadata  String?
+  createdAt DateTime @default(now())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("messages")
+}
+
+model SqlRun {
+  runId         String   @id
+  sessionId     String
+  status        String
+  provider      String
+  question      String
+  sql           String?
+  explanation   String?
+  answer        String?
+  columns       String?
+  rows          String?
+  error         String?
+  clarification String?
+  trace         String
+  createdAt     DateTime @default(now())
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("sql_runs")
+}
+
+model EvaluationReport {
+  jobId     String   @id
+  provider  String
+  total     Int
+  passed    Int
+  passRate  Float
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@map("evaluation_reports")
+}
+

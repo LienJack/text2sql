@@ -1,0 +1,29 @@
+{
+  "name": "@text2sql/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "pnpm --filter @text2sql/shared-types build",
+    "dev": "next dev -p 3001",
+    "prebuild": "pnpm --filter @text2sql/shared-types build",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "pretest": "pnpm --filter @text2sql/shared-types build",
+    "test": "vitest run",
+    "prelint": "pnpm --filter @text2sql/shared-types build",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@text2sql/shared-types": "workspace:*",
+    "next": "^14.2.12",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.1"
+  }
+}
