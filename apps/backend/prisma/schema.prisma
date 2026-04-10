@@ -8,12 +8,20 @@ datasource db {
 }
 
 model Session {
-  id         String    @id
-  datasource String
-  createdAt  DateTime  @default(now())
-  messages   Message[]
-  runs       SqlRun[]
+  id                String    @id
+  datasource        String
+  title             String    @default("新会话")
+  debugEnabled      Boolean   @default(false)
+  syncStatus        String    @default("healthy")
+  syncFailedCount   Int       @default(0)
+  lastMessageAt     DateTime?
+  lastSyncFailureAt DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  messages          Message[]
+  runs              SqlRun[]
 
+  @@index([deletedAt, lastMessageAt])
   @@map("sessions")
 }
 
@@ -44,6 +52,7 @@ model SqlRun {
   error         String?
   clarification String?
   trace         String
+  llmRaw        String?
   createdAt     DateTime @default(now())
   session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -62,4 +71,3 @@ model EvaluationReport {
 
   @@map("evaluation_reports")
 }
-

@@ -5,8 +5,8 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" run dev",
-    "prisma:studio": "pnpm --filter @text2sql/backend exec prisma studio",
-    "db:studio": "pnpm --filter @text2sql/backend exec prisma studio",
+    "prisma:studio": "pnpm --filter @text2sql/backend run prisma:studio",
+    "db:studio": "pnpm --filter @text2sql/backend run prisma:studio",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:backend": "pnpm --filter @text2sql/backend test",

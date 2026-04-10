@@ -17,6 +17,7 @@ export interface LangGraphSpanEvent {
 
 export interface LangGraphState extends GraphInput {
   provider: string;
+  llmRaw?: SqlRun["llmRaw"];
   sql?: string;
   explanation?: string;
   rows?: Array<Record<string, unknown>>;
@@ -49,6 +50,7 @@ export const createInitialLangGraphState = (
     ...input,
     traceContext,
     provider: fallbackProvider,
+    llmRaw: undefined,
     trace: {
       runId: input.runId,
       provider: fallbackProvider,

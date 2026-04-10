@@ -2,25 +2,52 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "@/components/chat-panel";
-import { createSession, getMessages, sendMessage } from "@/lib/api-client";
+import {
+  createSession,
+  deleteSession,
+  getMessages,
+  listSessions,
+  renameSession,
+  setSessionDebugEnabled,
+  sendMessage
+} from "@/lib/api-client";
 import { createMockMessages, createMockRun } from "./fixtures";
 
 vi.mock("@/lib/api-client", () => ({
   createSession: vi.fn(),
+  listSessions: vi.fn(),
+  renameSession: vi.fn(),
+  setSessionDebugEnabled: vi.fn(),
+  deleteSession: vi.fn(),
   sendMessage: vi.fn(),
   getMessages: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
+const mockListSessions = vi.mocked(listSessions);
+const mockRenameSession = vi.mocked(renameSession);
+const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
+const mockDeleteSession = vi.mocked(deleteSession);
 const mockSendMessage = vi.mocked(sendMessage);
 const mockGetMessages = vi.mocked(getMessages);
 
 describe("chat to sql preview integration", () => {
   beforeEach(() => {
-    mockCreateSession.mockResolvedValue({
+    const session = {
       id: "session-1",
       datasource: "sqlite_main",
+      title: "新会话",
+      debugEnabled: false,
+      syncStatus: "healthy" as const,
       createdAt: "2026-04-10T00:00:00.000Z"
+    };
+    mockCreateSession.mockResolvedValue(session);
+    mockListSessions.mockResolvedValue([session]);
+    mockRenameSession.mockResolvedValue(session);
+    mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
+    mockSetSessionDebugEnabled.mockResolvedValue({
+      ...session,
+      debugEnabled: true
     });
     mockSendMessage.mockResolvedValue({
       responseType: "answer",
@@ -29,7 +56,14 @@ describe("chat to sql preview integration", () => {
         explanation: "返回最近 20 条订单。"
       })
     });
-    mockGetMessages.mockResolvedValue(createMockMessages());
+    mockGetMessages.mockResolvedValue({
+      session,
+      messages: createMockMessages(),
+      latestRun: createMockRun({
+        sql: "SELECT * FROM orders LIMIT 20",
+        explanation: "返回最近 20 条订单。"
+      })
+    });
   });
 
   afterEach(() => {

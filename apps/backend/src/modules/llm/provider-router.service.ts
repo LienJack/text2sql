@@ -5,6 +5,7 @@ import { OpenAiCompatibleClient } from "./openai-compatible.client";
 
 export interface SqlDraft {
   provider: string;
+  model: string;
   sql: string;
   explanation: string;
   rawText: string;
@@ -42,6 +43,7 @@ export class ProviderRouterService {
     const extracted = this.extractor.extract(completion.rawText);
     return {
       provider: this.config.llmProvider,
+      model: this.config.llmModel,
       sql: extracted.sql,
       explanation: extracted.explanation || completion.rawText,
       rawText: completion.rawText,

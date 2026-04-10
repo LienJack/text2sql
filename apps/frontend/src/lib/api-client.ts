@@ -1,4 +1,9 @@
-import type { ApiResponse, ChatMessage, Session, SqlRun } from "@text2sql/shared-types";
+import type {
+  ApiResponse,
+  ChatSessionView,
+  Session,
+  SqlRun
+} from "@text2sql/shared-types";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
@@ -47,6 +52,44 @@ export async function createSession(): Promise<Session> {
   });
 }
 
+export async function listSessions(
+  status?: "healthy" | "pending" | "degraded"
+): Promise<Session[]> {
+  const query = status ? `?status=${status}` : "";
+  return request<Session[]>(`/api/v1/sessions${query}`);
+}
+
+export async function renameSession(
+  sessionId: string,
+  title: string
+): Promise<Session> {
+  return request<Session>(`/api/v1/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title })
+  });
+}
+
+export async function setSessionDebugEnabled(
+  sessionId: string,
+  debugEnabled: boolean
+): Promise<Session> {
+  return request<Session>(`/api/v1/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ debugEnabled })
+  });
+}
+
+export async function deleteSession(
+  sessionId: string
+): Promise<{ deleted: boolean; sessionId: string }> {
+  return request<{ deleted: boolean; sessionId: string }>(
+    `/api/v1/sessions/${sessionId}`,
+    {
+      method: "DELETE"
+    }
+  );
+}
+
 export async function sendMessage(
   sessionId: string,
   message: string
@@ -60,6 +103,6 @@ export async function sendMessage(
   );
 }
 
-export async function getMessages(sessionId: string): Promise<ChatMessage[]> {
-  return request<ChatMessage[]>(`/api/v1/sessions/${sessionId}/messages`);
+export async function getMessages(sessionId: string): Promise<ChatSessionView> {
+  return request<ChatSessionView>(`/api/v1/sessions/${sessionId}/messages`);
 }

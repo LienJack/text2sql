@@ -144,6 +144,7 @@ export class GraphBuilderService {
       error: state.error,
       clarification: state.clarification,
       trace: state.trace,
+      llmRaw: state.llmRaw ?? null,
       createdAt: new Date().toISOString()
     };
   }

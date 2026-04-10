@@ -46,7 +46,25 @@ export class AppConfigService {
   }
 
   get databaseUrl(): string {
-    return this.config.get<string>("DATABASE_URL", "");
+    const explicit = this.config.get<string>("DATABASE_URL", "").trim();
+    if (explicit) {
+      return explicit;
+    }
+
+    const host = this.config.get<string>("POSTGRES_HOST", "localhost").trim();
+    const port = this.config.get<string>("POSTGRES_PORT", "5432").trim();
+    const database = this.config.get<string>("POSTGRES_DB", "").trim();
+    const user = this.config.get<string>("POSTGRES_USER", "").trim();
+    const password = this.config.get<string>("POSTGRES_PASSWORD", "").trim();
+    const schema = this.config.get<string>("POSTGRES_SCHEMA", "public").trim();
+
+    if (!host || !port || !database || !user || !password) {
+      return "";
+    }
+
+    return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(
+      password
+    )}@${host}:${port}/${database}?schema=${encodeURIComponent(schema || "public")}`;
   }
 
   get llmProvider(): string {
