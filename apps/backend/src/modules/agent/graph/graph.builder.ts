@@ -163,9 +163,37 @@ export class GraphBuilderService {
       columns: state.columns,
       error: state.error,
       clarification: state.clarification,
-      trace: state.trace,
+      trace: this.normalizeTrace(state.trace, state.runId, state.provider),
       llmRaw: state.llmRaw ?? null,
       createdAt: new Date().toISOString()
+    };
+  }
+
+  private normalizeTrace(
+    trace: SqlRun["trace"],
+    runId: string,
+    provider: string
+  ): SqlRun["trace"] {
+    return {
+      ...trace,
+      runId: trace.runId ?? runId,
+      provider: trace.provider ?? provider,
+      retryCount: trace.retryCount ?? 0,
+      steps: (trace.steps ?? []).map((step, index) => {
+        const sequence = step.sequence ?? index + 1;
+        return {
+          ...step,
+          sequence,
+          stepId: step.stepId ?? `${runId}:${step.node}:${sequence}`,
+          lifecycle:
+            step.lifecycle ??
+            (step.status === "failed"
+              ? "failed"
+              : step.status === "skipped"
+                ? "skipped"
+                : "completed")
+        };
+      })
     };
   }
 

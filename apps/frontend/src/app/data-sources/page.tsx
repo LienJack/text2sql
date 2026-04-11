@@ -120,15 +120,15 @@ export default function DataSourcesPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-[640px] overflow-hidden bg-white">
-      <aside className="hidden w-72 border-r border-slate-200 bg-slate-50/60 md:flex md:flex-col">
-        <div className="space-y-3 border-b border-slate-200 p-4">
-          <Button className="w-full justify-start bg-slate-900 text-white hover:bg-slate-800">
+    <div className="flex h-[calc(100vh-4rem)] min-h-[640px] overflow-hidden bg-[var(--surface-page)]">
+      <aside className="hidden w-72 border-r border-[var(--border-default)] bg-[var(--surface-sidebar)] md:flex md:flex-col">
+        <div className="space-y-3 border-b border-[var(--border-default)] p-4">
+          <Button className="w-full justify-start">
             <Database className="h-4 w-4" />
             添加数据源
           </Button>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
             <Input
               value={connectionQuery}
               onChange={(event) => setConnectionQuery(event.target.value)}
@@ -152,12 +152,12 @@ export default function DataSourcesPage() {
                   className={cn(
                     "w-full rounded-lg border px-3 py-3 text-left transition-colors",
                     active
-                      ? "border-teal-300 bg-teal-50/70"
-                      : "border-transparent bg-transparent hover:border-slate-200 hover:bg-slate-100"
+                      ? "border-[var(--border-brand)] bg-[var(--surface-active)]"
+                      : "border-transparent bg-transparent hover:border-[var(--border-default)] hover:bg-[var(--surface-hover)]"
                   )}
                 >
-                  <p className="truncate text-sm font-medium text-slate-900">{connection.name}</p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{connection.name}</p>
+                  <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
                     <span>{connection.engine}</span>
                     <span
                       className={cn(
@@ -179,18 +179,18 @@ export default function DataSourcesPage() {
         </ScrollArea>
       </aside>
 
-      <section className="flex min-w-0 flex-1 flex-col border-r border-slate-200">
-        <div className="space-y-3 border-b border-slate-200 p-4">
+      <section className="flex min-w-0 flex-1 flex-col border-r border-[var(--border-default)]">
+        <div className="space-y-3 border-b border-[var(--border-default)] bg-[var(--surface-panel)] p-4">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">
               {activeConnection?.name ?? "数据源"}
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-[var(--text-secondary)]">
               最近同步：{activeConnection?.lastSync ?? "-"}
             </p>
           </div>
           <div className="relative max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
             <Input
               value={tableQuery}
               onChange={(event) => setTableQuery(event.target.value)}
@@ -208,9 +208,9 @@ export default function DataSourcesPage() {
           ) : null}
 
           {!loading && !error && tables.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)]">
               <Table>
-                <TableHeader className="bg-slate-50">
+                <TableHeader>
                   <TableRow>
                     <TableHead className="w-[220px]">表名</TableHead>
                     <TableHead>说明</TableHead>
@@ -222,14 +222,14 @@ export default function DataSourcesPage() {
                   {tables.map((table) => (
                     <TableRow
                       key={table.id}
-                      className={cn("cursor-pointer", table.id === activeTable?.id ? "bg-teal-50/60" : "")}
+                      className={cn("cursor-pointer", table.id === activeTable?.id ? "bg-[var(--surface-active)]" : "")}
                       onClick={() => setActiveTableId(table.id)}
                     >
-                      <TableCell className="font-mono text-sm font-medium text-slate-900">
+                      <TableCell className="font-mono text-sm font-medium">
                         {table.name}
                       </TableCell>
-                      <TableCell className="text-sm text-slate-600">{table.description}</TableCell>
-                      <TableCell className="text-center text-sm text-slate-500">{table.fieldCount}</TableCell>
+                      <TableCell className="text-sm text-[var(--text-secondary)]">{table.description}</TableCell>
+                      <TableCell className="text-center text-sm text-[var(--text-tertiary)]">{table.fieldCount}</TableCell>
                       <TableCell className="text-center">
                         <div onClick={(event) => event.stopPropagation()}>
                           <Switch
@@ -248,40 +248,40 @@ export default function DataSourcesPage() {
         </div>
       </section>
 
-      <aside className="hidden w-96 flex-col bg-slate-50/60 lg:flex">
-        <div className="border-b border-slate-200 p-4">
-          <h3 className="font-mono text-lg font-semibold text-slate-900">{activeTable?.name ?? "-"}</h3>
-          <p className="mt-1 text-sm text-slate-500">{activeTable?.description ?? "请选择数据表查看字段。"}</p>
+      <aside className="hidden w-96 flex-col bg-[var(--surface-sidebar)] lg:flex">
+        <div className="border-b border-[var(--border-default)] p-4">
+          <h3 className="font-mono text-lg font-semibold text-[var(--text-primary)]">{activeTable?.name ?? "-"}</h3>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">{activeTable?.description ?? "请选择数据表查看字段。"}</p>
         </div>
         <ScrollArea className="flex-1">
           <div className="space-y-3 p-4">
             {(activeTable?.fields ?? []).map((field) => (
-              <article key={field.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <article key={field.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)] p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     {field.mode === "metric" ? (
-                      <Hash className="h-4 w-4 text-teal-600" />
+                      <Hash className="h-4 w-4 text-[var(--action-primary)]" />
                     ) : field.mode === "sensitive" ? (
                       <AlertTriangle className="h-4 w-4 text-rose-500" />
                     ) : (
                       <KeyRound className="h-4 w-4 text-amber-500" />
                     )}
-                    <span className="font-mono text-sm font-semibold text-slate-900">{field.name}</span>
+                    <span className="font-mono text-sm font-semibold text-[var(--text-primary)]">{field.name}</span>
                   </div>
                   <Badge variant="secondary" className="font-mono text-[11px]">
                     {field.type}
                   </Badge>
                 </div>
-                <p className="mt-2 text-sm text-slate-600">{field.description}</p>
-                <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2 text-xs">
-                  <span className="text-slate-500">
+                <p className="mt-2 text-sm text-[var(--text-secondary)]">{field.description}</p>
+                <div className="mt-3 flex items-center justify-between border-t border-[var(--border-subtle)] pt-2 text-xs">
+                  <span className="text-[var(--text-tertiary)]">
                     {field.mode === "metric"
                       ? "度量字段"
                       : field.mode === "sensitive"
                         ? "敏感字段"
                         : "维度字段"}
                   </span>
-                  <span className={cn("font-medium", field.enabled ? "text-teal-700" : "text-slate-500")}>
+                  <span className={cn("font-medium", field.enabled ? "text-[var(--action-primary-hover)]" : "text-[var(--text-tertiary)]")}>
                     {field.enabled ? "参与问数" : "不参与问数"}
                   </span>
                 </div>

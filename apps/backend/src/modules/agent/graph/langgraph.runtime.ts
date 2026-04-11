@@ -107,6 +107,25 @@ const latestStep = (
   traceState: Pick<LangGraphState, "trace">
 ): ExecutionTraceStep | undefined => traceState.trace.steps.at(-1);
 
+const buildRunningStep = (
+  state: Pick<LangGraphState, "runId" | "trace">,
+  node: string,
+  startedAt: string,
+  detail: string
+): ExecutionTraceStep => {
+  const sequence = state.trace.steps.length + 1;
+  return {
+    node,
+    status: "success",
+    lifecycle: "running",
+    stepId: `${state.runId}:${node}:${sequence}`,
+    sequence,
+    detail,
+    at: startedAt,
+    startedAt
+  };
+};
+
 export interface LangGraphNodeDependencies {
   clarifyNode: Pick<ClarifyNode, "run">;
   generateSqlNode: Pick<GenerateSqlNode, "run">;
@@ -119,6 +138,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
   const graph = new StateGraph(LangGraphStateAnnotation)
     .addNode("clarify", async (state, config) => {
       const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "clarify", startedAt, "正在理解问题")
+      );
       const clarification = deps.clarifyNode.run(state.question);
       const endedAt = new Date().toISOString();
       if (clarification) {
@@ -157,6 +180,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     })
     .addNode("generate-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "generate-sql", startedAt, "正在生成 SQL")
+      );
       const callbacks = getCallbacks(config);
       try {
         const generated = await deps.generateSqlNode.run(
@@ -247,6 +274,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     })
     .addNode("safety-check", async (state, config) => {
       const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "safety-check", startedAt, "正在执行安全校验")
+      );
       if (!state.sql) {
         const reason = "未生成 SQL，无法执行安全校验。";
         const endedAt = new Date().toISOString();
@@ -310,6 +341,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     })
     .addNode("execute-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "execute-sql", startedAt, "正在执行查询")
+      );
       if (!state.sql) {
         const reason = "未生成 SQL，无法执行查询。";
         const endedAt = new Date().toISOString();
@@ -390,6 +425,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     })
     .addNode("format-answer", async (state, config) => {
       const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "format-answer", startedAt, "正在整理回答")
+      );
       const answer = deps.formatNode.run(
         state.question,
         state.rows ?? [],

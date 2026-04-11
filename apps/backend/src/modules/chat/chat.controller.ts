@@ -128,6 +128,19 @@ export class ChatController {
     }
   }
 
+  @Post("/models/:modelCatalogId/probe")
+  async probeModel(
+    @Param("modelCatalogId") modelCatalogId: string,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const result = await this.chatService.probeModelConnectivity(modelCatalogId);
+      return ok(req.requestId, result);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
   @Post("/sessions/:sessionId/messages/stream")
   async streamMessage(
     @Param("sessionId") sessionId: string,
@@ -189,12 +202,13 @@ export class ChatController {
   async getMessages(
     @Param("sessionId") sessionId: string,
     @Query("page") pageRaw = "1",
-    @Query("pageSize") pageSizeRaw = "50",
+    @Query("pageSize") pageSizeRaw = "0",
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
       const page = Number.parseInt(pageRaw, 10) || 1;
-      const pageSize = Number.parseInt(pageSizeRaw, 10) || 50;
+      const parsedPageSize = Number.parseInt(pageSizeRaw, 10);
+      const pageSize = Number.isNaN(parsedPageSize) ? 0 : parsedPageSize;
       const data = await this.chatService.getSessionView(sessionId, page, pageSize);
       return ok(req.requestId, data);
     } catch (error) {

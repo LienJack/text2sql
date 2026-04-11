@@ -12,24 +12,34 @@ interface SqlResultTableProps {
   run: SqlRun;
 }
 
+function isNumericValue(value: unknown): boolean {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    return Number.isFinite(Number(value));
+  }
+  return false;
+}
+
 export function SqlResultTable({ run }: SqlResultTableProps) {
   const columns = run.columns ?? [];
   const rows = run.rows ?? [];
   if (columns.length === 0 || rows.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500">
+      <p className="rounded-[10px] border border-dashed border-[var(--border-strong)] px-3 py-2 text-sm text-[var(--text-secondary)]">
         当前无结果数据。
       </p>
     );
   }
 
   return (
-    <div className="w-full overflow-x-auto rounded-lg border border-slate-200">
-      <Table className="min-w-lg bg-white">
-        <TableHeader className="bg-slate-50">
+    <div className="w-full overflow-x-auto rounded-[12px] border border-[var(--border-default)]">
+      <Table className="min-w-lg bg-[var(--surface-panel)]">
+        <TableHeader>
           <TableRow>
             {columns.map((column) => (
-              <TableHead key={column} className="font-semibold text-slate-900">
+              <TableHead key={column}>
                 {column}
               </TableHead>
             ))}
@@ -38,11 +48,15 @@ export function SqlResultTable({ run }: SqlResultTableProps) {
         <TableBody>
           {rows.slice(0, 20).map((row, rowIndex) => (
             <TableRow key={`row-${rowIndex}`}>
-              {columns.map((column) => (
-                <TableCell key={`${rowIndex}-${column}`} className="font-mono text-xs text-slate-700">
-                  {String(row[column] ?? "")}
-                </TableCell>
-              ))}
+              {columns.map((column) => {
+                const value = row[column];
+                const alignClass = isNumericValue(value) ? "text-right" : "text-left";
+                return (
+                  <TableCell key={`${rowIndex}-${column}`} className={`font-mono text-xs ${alignClass}`}>
+                    {String(value ?? "")}
+                  </TableCell>
+                );
+              })}
             </TableRow>
           ))}
         </TableBody>

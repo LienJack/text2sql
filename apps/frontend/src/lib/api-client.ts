@@ -96,6 +96,23 @@ export async function setSessionModel(
   });
 }
 
+export async function probeModelConnectivity(modelCatalogId: string): Promise<{
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+}> {
+  return request<{
+    ok: boolean;
+    provider: string;
+    model: string;
+    latencyMs: number;
+  }>(`/api/v1/models/${modelCatalogId}/probe`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
 export async function deleteSession(
   sessionId: string
 ): Promise<{ deleted: boolean; sessionId: string }> {
@@ -125,8 +142,28 @@ export async function sendMessageStream(
   message: string,
   handlers?: {
     onEvent?: (event: ChatStreamEvent) => void;
+    abortSignal?: AbortSignal;
   }
 ): Promise<void> {
+  for await (const event of streamMessageEvents(
+    sessionId,
+    message,
+    handlers?.abortSignal
+  )) {
+    handlers?.onEvent?.(event);
+    if (event.type === "error") {
+      const messageText =
+        (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
+      throw new Error(messageText);
+    }
+  }
+}
+
+export async function* streamMessageEvents(
+  sessionId: string,
+  message: string,
+  abortSignal?: AbortSignal
+): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
   const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
@@ -136,6 +173,7 @@ export async function sendMessageStream(
       "x-user-role": role,
       "x-user-id": userId
     },
+    signal: abortSignal,
     body: JSON.stringify({
       message
     })
@@ -167,18 +205,18 @@ export async function sendMessageStream(
         continue;
       }
       const eventLine = lines.find((line) => line.startsWith("event:"));
-      const dataLine = lines.find((line) => line.startsWith("data:"));
-      if (!eventLine || !dataLine) {
+      const dataLines = lines.filter((line) => line.startsWith("data:"));
+      if (!eventLine || dataLines.length === 0) {
         continue;
       }
       const eventType = eventLine.replace(/^event:\s*/, "");
-      const payload = dataLine.replace(/^data:\s*/, "");
+      const payload = dataLines
+        .map((line) => line.replace(/^data:\s*/, ""))
+        .join("\n");
       const event = JSON.parse(payload) as ChatStreamEvent;
-      handlers?.onEvent?.(event);
+      yield event;
       if (eventType === "error") {
-        const messageText =
-          (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
-        throw new Error(messageText);
+        return;
       }
     }
   }
@@ -186,6 +224,10 @@ export async function sendMessageStream(
 
 export async function getMessages(sessionId: string): Promise<ChatSessionView> {
   return request<ChatSessionView>(`/api/v1/sessions/${sessionId}/messages`);
+}
+
+export async function getRun(runId: string): Promise<AgentRunResponse["run"]> {
+  return request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
 }
 
 export async function getSettingsModelsView(): Promise<LlmSettingsView> {

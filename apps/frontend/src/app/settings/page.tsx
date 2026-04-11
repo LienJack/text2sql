@@ -120,8 +120,8 @@ export default function SettingsPage() {
   }, [modelRows, query, view]);
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] w-full max-w-[1400px] flex-col gap-4 p-4 sm:p-6">
-      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex sm:items-center sm:justify-between sm:space-y-0">
+    <div className="mx-auto flex h-[calc(100vh-4rem)] w-full max-w-[1400px] flex-col gap-4 bg-[var(--surface-page)] p-4 sm:p-6">
+      <section className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:flex sm:items-center sm:justify-between sm:space-y-0">
         <Tabs value={tab} onValueChange={(value) => setTab(value as SettingsTab)} className="w-full sm:w-auto">
           <TabsList className="h-10">
             <TabsTrigger value="models">
@@ -136,7 +136,7 @@ export default function SettingsPage() {
         </Tabs>
         <div className="flex w-full items-center gap-2 sm:w-auto">
           <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -144,13 +144,13 @@ export default function SettingsPage() {
               placeholder={tab === "models" ? "搜索模型..." : "搜索用户..."}
             />
           </div>
-          <Button className="bg-slate-900 text-white hover:bg-slate-800" onClick={() => void load()}>
+          <Button onClick={() => void load()}>
             {refreshing ? "刷新中..." : "刷新"}
           </Button>
         </div>
       </section>
 
-      <section className="min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
         {initialLoading && !view ? <StateBlock variant="loading">正在加载设置数据...</StateBlock> : null}
         {refreshing && view ? <StateBlock variant="loading">正在刷新数据...</StateBlock> : null}
         {error ? <StateBlock variant="error">{error}</StateBlock> : null}
@@ -216,7 +216,7 @@ function UsersTable({ rows }: { rows: PlatformUser[] }) {
 
   return (
     <Table>
-      <TableHeader className="bg-slate-50">
+      <TableHeader>
         <TableRow>
           <TableHead className="w-[260px]">用户</TableHead>
           <TableHead className="w-[160px]">角色</TableHead>
@@ -229,17 +229,17 @@ function UsersTable({ rows }: { rows: PlatformUser[] }) {
         {rows.map((user) => (
           <TableRow key={user.id}>
             <TableCell>
-              <p className="font-medium text-slate-900">{user.name}</p>
-              <p className="text-xs text-slate-500">{user.email}</p>
+              <p className="font-medium text-[var(--text-primary)]">{user.name}</p>
+              <p className="text-xs text-[var(--text-tertiary)]">{user.email}</p>
             </TableCell>
-            <TableCell className="text-sm text-slate-700">{user.role}</TableCell>
-            <TableCell className="text-sm text-slate-600">{user.department}</TableCell>
+            <TableCell className="text-sm text-[var(--text-secondary)]">{user.role}</TableCell>
+            <TableCell className="text-sm text-[var(--text-secondary)]">{user.department}</TableCell>
             <TableCell>
-              <span className="text-sm font-medium text-slate-600">
+              <span className="text-sm font-medium text-[var(--text-secondary)]">
                 {user.status === "active" ? "正常" : "停用"}
               </span>
             </TableCell>
-            <TableCell className="text-sm text-slate-500">{user.lastLogin}</TableCell>
+            <TableCell className="text-sm text-[var(--text-tertiary)]">{user.lastLogin}</TableCell>
           </TableRow>
         ))}
       </TableBody>

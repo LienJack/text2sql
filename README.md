@@ -81,6 +81,12 @@ pnpm dev
 - 后端：`http://localhost:3000`
 - 前端：`http://localhost:3001/chat`
 
+## Chat 前端交互结构
+- 聊天主区已迁移到 `assistant-ui` primitives（Thread / Message / Composer）。
+- 页面采用“聊天主区优先”布局，SQL 详情改为 assistant 消息内展开，不再固定右侧详情栏。
+- 会话侧栏、会话级模型切换、调试开关能力保持不变，仍按会话粒度生效。
+- 移动端保留“会话”与“结果详情”入口，其中“结果详情”用于快速展开最新 SQL 详情块。
+
 ## 联调检查清单（真实 LLM）
 - 后端健康检查 `GET /health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
 - `GET /health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。

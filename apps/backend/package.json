@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "pnpm --filter @text2sql/shared-types build",
     "dev": "nest start --watch",
+    "backend:restart": "node scripts/backend-restart.cjs",
     "prebuild": "pnpm --filter @text2sql/shared-types build",
     "build": "nest build",
     "start": "node dist/main.js",

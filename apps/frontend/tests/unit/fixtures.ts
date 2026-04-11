@@ -52,6 +52,10 @@ export function createMockMessages(partial?: Partial<ChatMessage>[]): ChatMessag
       sessionId: "session-1",
       role: "assistant",
       content: "已为你生成 SQL，并展示结果。",
+      metadata: {
+        runId: "run-1",
+        status: "executionResult"
+      },
       createdAt: "2026-04-10T00:00:01.000Z"
     }
   ];

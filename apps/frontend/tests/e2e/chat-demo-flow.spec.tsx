@@ -6,12 +6,14 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
-  sendMessageStream
+  streamMessageEvents
 } from "@/lib/api-client";
 import { createMockMessages, createMockRun } from "../unit/fixtures";
 
@@ -20,22 +22,27 @@ vi.mock("@/lib/api-client", () => ({
   listSessions: vi.fn(),
   listEnabledModels: vi.fn(),
   renameSession: vi.fn(),
+  probeModelConnectivity: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
-  getMessages: vi.fn()
+  streamMessageEvents: vi.fn(),
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
 const mockListSessions = vi.mocked(listSessions);
 const mockListEnabledModels = vi.mocked(listEnabledModels);
 const mockRenameSession = vi.mocked(renameSession);
+const mockProbeModelConnectivity = vi.mocked(probeModelConnectivity);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
-const mockSendMessageStream = vi.mocked(sendMessageStream);
+const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("chat demo flow", () => {
   beforeEach(() => {
@@ -70,14 +77,29 @@ describe("chat demo flow", () => {
     mockCreateSession.mockResolvedValue(session);
     mockListSessions.mockResolvedValue([session]);
     mockRenameSession.mockResolvedValue(session);
+    mockProbeModelConnectivity.mockResolvedValue({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      latencyMs: 120
+    });
     mockSetSessionModel.mockResolvedValue(session);
     mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
     mockSetSessionDebugEnabled.mockResolvedValue({
       ...session,
       debugEnabled: true
     });
-    mockSendMessageStream.mockImplementation(async (_sessionId, _message, handlers) => {
-      handlers?.onEvent?.({
+    mockStreamMessageEvents.mockImplementation(async function* () {
+      yield {
+        type: "start",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          requestId: null
+        }
+      };
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",
@@ -85,7 +107,17 @@ describe("chat demo flow", () => {
         data: {
           text: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method"
         }
-      });
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1
+        }
+      };
     });
     mockGetMessages.mockResolvedValue({
       session,
@@ -95,6 +127,7 @@ describe("chat demo flow", () => {
         explanation: "统计订单支付方式分布。"
       })
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {
@@ -110,13 +143,11 @@ describe("chat demo flow", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(mockSendMessageStream).toHaveBeenCalled();
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText("统计订单支付方式分布。")).toBeInTheDocument();
-    expect(
-      screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
   });
 });

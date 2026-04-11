@@ -1,43 +1,165 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ChatMessage, ModelCatalogItem, Session, SqlRun } from "@text2sql/shared-types";
-import { Menu, Terminal } from "lucide-react";
-import { MessageComposer } from "@/components/chat/message-composer";
+import type {
+  ChatMessage,
+  ChatStreamEvent,
+  ExecutionTraceStep,
+  ModelCatalogItem,
+  ReasoningStage,
+  Session,
+  SqlRun
+} from "@text2sql/shared-types";
+import { Menu } from "lucide-react";
+import { AssistantThread } from "@/components/chat/assistant-thread";
 import { ModelSelector } from "@/components/chat/model-selector";
-import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
-import { SqlPreview } from "@/components/sql-preview";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { StateBlock } from "@/components/ui/state-block";
-import { Switch } from "@/components/ui/switch";
 import {
   createSession,
   deleteSession as deleteSessionRequest,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession as renameSessionRequest,
-  sendMessageStream,
-  setSessionModel,
-  setSessionDebugEnabled
+  setSessionModel
 } from "@/lib/api-client";
+
+interface ThinkingStateEventData {
+  node: string;
+  status: ExecutionTraceStep["status"];
+  stepId?: string;
+  sequence?: number;
+  lifecycle?: ExecutionTraceStep["lifecycle"];
+  detail: string;
+  stage?: ReasoningStage;
+  title?: string;
+  at?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  inputSummary?: string;
+  outputSummary?: string;
+  errorSummary?: string;
+}
+
+type ThinkingStep = ExecutionTraceStep & {
+  stage?: ReasoningStage;
+  title?: string;
+};
+
+function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
+  if (event.type !== "state") {
+    return null;
+  }
+  const payload = event.data as ThinkingStateEventData;
+  return {
+    node: payload.node,
+    status: payload.status,
+    stepId: payload.stepId,
+    sequence: payload.sequence,
+    lifecycle: payload.lifecycle,
+    detail: payload.detail,
+    at: payload.at ?? event.at,
+    startedAt: payload.startedAt,
+    endedAt: payload.endedAt,
+    durationMs: payload.durationMs,
+    inputSummary: payload.inputSummary,
+    outputSummary: payload.outputSummary,
+    errorSummary: payload.errorSummary,
+    stage: payload.stage,
+    title: payload.title
+  };
+}
+
+function appendThinkingStep(
+  previous: Record<string, ThinkingStep[]>,
+  runId: string,
+  incoming: ThinkingStep
+): Record<string, ThinkingStep[]> {
+  const current = previous[runId] ?? [];
+  const stepKey =
+    incoming.stepId ??
+    `${incoming.node}:${incoming.sequence ?? "na"}:${incoming.at ?? "na"}`;
+  const existingIndex = current.findIndex((step) => {
+    const existingKey =
+      step.stepId ??
+      `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
+    return existingKey === stepKey;
+  });
+
+  const nextForRun = [...current];
+  if (existingIndex >= 0) {
+    nextForRun[existingIndex] = {
+      ...nextForRun[existingIndex],
+      ...incoming
+    };
+  } else {
+    nextForRun.push(incoming);
+  }
+
+  nextForRun.sort((left, right) => {
+    const leftSequence = left.sequence ?? 0;
+    const rightSequence = right.sequence ?? 0;
+    if (leftSequence !== rightSequence) {
+      return leftSequence - rightSequence;
+    }
+    const leftTime = left.at ?? left.startedAt ?? "";
+    const rightTime = right.at ?? right.startedAt ?? "";
+    return leftTime.localeCompare(rightTime);
+  });
+
+  return {
+    ...previous,
+    [runId]: nextForRun
+  };
+}
+
+function mergeSessionMessages(
+  previous: ChatMessage[],
+  incoming: ChatMessage[],
+  sessionId: string
+): ChatMessage[] {
+  const merged = new Map<string, ChatMessage>();
+  for (const message of previous) {
+    if (message.sessionId !== sessionId) {
+      continue;
+    }
+    merged.set(message.id, message);
+  }
+  for (const message of incoming) {
+    if (message.sessionId !== sessionId) {
+      continue;
+    }
+    merged.set(message.id, message);
+  }
+  return Array.from(merged.values()).sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt)
+  );
+}
 
 export function ChatPanel() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
-  const [lastRun, setLastRun] = useState<SqlRun | null>(null);
+  const [runsById, setRunsById] = useState<Record<string, SqlRun>>({});
+  const [streamThinkingByRunId, setStreamThinkingByRunId] = useState<
+    Record<string, ThinkingStep[]>
+  >({});
+  const [runLoadingById, setRunLoadingById] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [activeStreamRunId, setActiveStreamRunId] = useState<string | null>(null);
+  const [thinkingRequestPending, setThinkingRequestPending] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
-  const [error, setError] = useState("");
   const [sessionError, setSessionError] = useState("");
-  const [sendState, setSendState] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
-  const [mobileSqlOpen, setMobileSqlOpen] = useState(false);
+  const [threadVersion, setThreadVersion] = useState(0);
 
   const activeSession = sessions.find((session) => session.id === sessionId);
 
@@ -55,8 +177,21 @@ export function ChatPanel() {
 
   const loadMessages = async (targetSessionId: string): Promise<void> => {
     const sessionView = await getMessages(targetSessionId);
-    setMessages(sessionView.messages);
-    setLastRun(sessionView.latestRun ?? null);
+    setMessages((previous) =>
+      mergeSessionMessages(previous, sessionView.messages, targetSessionId)
+    );
+    const latestRun = sessionView.latestRun;
+    if (latestRun) {
+      setRunsById((previous) => ({
+        ...previous,
+        [latestRun.runId]: latestRun
+      }));
+    }
+    setStreamThinkingByRunId({});
+    setRunLoadingById({});
+    setActiveStreamRunId(null);
+    setThinkingRequestPending(false);
+    setThreadVersion((previous) => previous + 1);
     setSessions((previous) => {
       const index = previous.findIndex((session) => session.id === sessionView.session.id);
       if (index < 0) {
@@ -85,10 +220,8 @@ export function ChatPanel() {
           setSessionId(initialSessionId);
           await loadMessages(initialSessionId);
         }
-        setSendState("idle");
       } catch (initError) {
         setSessionError(initError instanceof Error ? initError.message : "初始化会话失败");
-        setSendState("error");
       } finally {
         setSessionLoading(false);
       }
@@ -99,8 +232,6 @@ export function ChatPanel() {
   const onSelectSession = async (targetSessionId: string) => {
     setSessionLoading(true);
     setSessionError("");
-    setError("");
-    setSendState("idle");
     try {
       setSessionId(targetSessionId);
       await loadMessages(targetSessionId);
@@ -120,9 +251,12 @@ export function ChatPanel() {
       const latest = await refreshSessions();
       setSessionId(created.id);
       setMessages([]);
-      setLastRun(null);
-      setInput("");
-      setSendState("idle");
+      setRunsById({});
+      setStreamThinkingByRunId({});
+      setRunLoadingById({});
+      setActiveStreamRunId(null);
+      setThinkingRequestPending(false);
+      setThreadVersion((previous) => previous + 1);
       if (!latest.some((session) => session.id === created.id)) {
         setSessions([created, ...latest]);
       }
@@ -157,94 +291,15 @@ export function ChatPanel() {
         setSessions([created]);
         setSessionId(created.id);
         setMessages([]);
+        setRunsById({});
+        setStreamThinkingByRunId({});
+        setRunLoadingById({});
+        setActiveStreamRunId(null);
+        setThinkingRequestPending(false);
+        setThreadVersion((previous) => previous + 1);
       }
-      setLastRun(null);
     } catch (deleteError) {
       setSessionError(deleteError instanceof Error ? deleteError.message : "删除会话失败");
-    } finally {
-      setSessionLoading(false);
-    }
-  };
-
-  const onSubmit = async () => {
-    if (!input.trim() || !sessionId) {
-      return;
-    }
-    const userContent = input.trim();
-    const optimisticUserId = `temp-user-${Date.now()}`;
-    const optimisticAssistantId = `temp-assistant-${Date.now()}`;
-    const createdAt = new Date().toISOString();
-
-    setMessages((previous) => [
-      ...previous,
-      {
-        id: optimisticUserId,
-        sessionId,
-        role: "user",
-        content: userContent,
-        createdAt
-      },
-      {
-        id: optimisticAssistantId,
-        sessionId,
-        role: "assistant",
-        content: "",
-        createdAt
-      }
-    ]);
-    setInput("");
-    setLoading(true);
-    setError("");
-    setSendState("sending");
-    try {
-      await sendMessageStream(sessionId, userContent, {
-        onEvent: (event) => {
-          if (event.type === "text-delta") {
-            const delta = (event.data as { text?: string } | undefined)?.text ?? "";
-            if (!delta) {
-              return;
-            }
-            setMessages((previous) =>
-              previous.map((message) =>
-                message.id === optimisticAssistantId
-                  ? {
-                      ...message,
-                      content: `${message.content}${delta}`
-                    }
-                  : message
-              )
-            );
-          }
-        }
-      });
-      await loadMessages(sessionId);
-      await refreshSessions();
-      setSendState("success");
-      if (window.matchMedia("(max-width: 1023px)").matches) {
-        setMobileSqlOpen(true);
-      }
-    } catch (submitError) {
-      await loadMessages(sessionId).catch(() => undefined);
-      setError(submitError instanceof Error ? submitError.message : "发送失败");
-      setSendState("error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onDebugToggle = async (enabled: boolean): Promise<void> => {
-    if (!sessionId) {
-      return;
-    }
-    setSessionLoading(true);
-    setSessionError("");
-    try {
-      const updated = await setSessionDebugEnabled(sessionId, enabled);
-      setSessions((previous) =>
-        previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
-      );
-    } catch (toggleError) {
-      setSessionError(toggleError instanceof Error ? toggleError.message : "更新调试开关失败");
     } finally {
       setSessionLoading(false);
     }
@@ -254,9 +309,13 @@ export function ChatPanel() {
     if (!sessionId || !modelCatalogId) {
       return;
     }
+    if (activeSession?.modelCatalogId === modelCatalogId) {
+      return;
+    }
     setSessionLoading(true);
     setSessionError("");
     try {
+      await probeModelConnectivity(modelCatalogId);
       const updated = await setSessionModel(sessionId, modelCatalogId);
       setSessions((previous) =>
         previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
@@ -269,9 +328,34 @@ export function ChatPanel() {
     }
   };
 
+  const ensureRunLoaded = async (runId: string): Promise<void> => {
+    if (!runId || runsById[runId] || runLoadingById[runId]) {
+      return;
+    }
+    setRunLoadingById((previous) => ({
+      ...previous,
+      [runId]: true
+    }));
+    try {
+      const run = await getRun(runId);
+      setRunsById((previous) => ({
+        ...previous,
+        [runId]: run
+      }));
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "加载运行轨迹失败");
+    } finally {
+      setRunLoadingById((previous) => {
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
+    }
+  };
+
   return (
-    <div className="relative flex h-full w-full overflow-hidden bg-white text-slate-950">
-      <aside className="hidden h-full w-64 border-r border-slate-200 bg-slate-50/50 md:block">
+    <div className="relative flex h-full w-full overflow-hidden bg-[var(--surface-page)] text-[var(--text-primary)]">
+      <aside className="hidden h-full w-80 border-r border-[var(--border-default)] bg-[var(--surface-sidebar)] md:block">
         <SessionSidebar
           sessions={sessions}
           activeSessionId={sessionId}
@@ -285,7 +369,7 @@ export function ChatPanel() {
       </aside>
 
       <Sheet open={mobileSessionsOpen} onOpenChange={setMobileSessionsOpen}>
-        <SheetContent side="left" className="w-80 p-0">
+        <SheetContent side="left" className="w-80 border-[var(--border-default)] bg-[var(--surface-sidebar)] p-0">
           <SheetTitle className="sr-only">会话列表</SheetTitle>
           <SessionSidebar
             sessions={sessions}
@@ -300,12 +384,12 @@ export function ChatPanel() {
         </SheetContent>
       </Sheet>
 
-      <section className="relative flex min-w-0 flex-1 flex-col bg-white">
-        <header className="space-y-3 border-b border-slate-200 px-4 py-4 sm:px-6">
+      <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--surface-page)]">
+        <header className="space-y-3 border-b border-[var(--border-default)] bg-[var(--surface-panel)] px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-slate-900">Text2SQL 演示聊天</h2>
-              <p className="truncate text-xs text-slate-500">
+              <h2 className="truncate text-base font-semibold text-[var(--text-primary)]">Text2SQL Assistant</h2>
+              <p className="truncate text-xs text-[var(--text-tertiary)]">
                 {sessionId ? `Session: ${sessionId}` : "Session 初始化中..."}
               </p>
             </div>
@@ -330,16 +414,6 @@ export function ChatPanel() {
                 <Menu className="h-3.5 w-3.5" />
                 会话
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="lg:hidden"
-                onClick={() => setMobileSqlOpen(true)}
-              >
-                <Terminal className="h-3.5 w-3.5" />
-                详情
-              </Button>
             </div>
           </div>
 
@@ -354,62 +428,72 @@ export function ChatPanel() {
             />
           </div>
 
-          <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-            <div>
-              <p className="text-sm font-medium text-slate-900">调试详情</p>
-              <p className="text-xs text-slate-500">开启后展示 LLM 原始返回与步骤明细</p>
-            </div>
-            <Switch
-              checked={Boolean(activeSession?.debugEnabled)}
-              disabled={sessionLoading || !sessionId}
-              aria-label="调试详情开关"
-              onCheckedChange={(checked) => {
-                void onDebugToggle(checked);
-              }}
-            />
-          </div>
           {activeSession?.syncStatus === "degraded" ? (
             <StateBlock variant="error">当前会话存在待同步异常，请稍后重试。</StateBlock>
           ) : null}
-          {sendState === "sending" ? <StateBlock variant="loading">正在发送请求...</StateBlock> : null}
-          {sendState === "success" ? <StateBlock variant="success">发送成功，已收到后端响应。</StateBlock> : null}
-          {sendState === "error" || error ? (
-            <StateBlock variant="error">{error || "发送失败，请稍后重试。"}</StateBlock>
-          ) : null}
         </header>
 
-        <MessageList messages={messages} />
-        <MessageComposer
-          value={input}
-          disabled={loading || !sessionId || !input.trim()}
-          loading={loading}
-          onChange={setInput}
-          onSubmit={onSubmit}
-          onOpenDetail={() => setMobileSqlOpen(true)}
+        <AssistantThread
+          key={`${sessionId}-${threadVersion}`}
+          sessionId={sessionId}
+          messages={messages}
+          runsById={runsById}
+          streamThinkingByRunId={streamThinkingByRunId}
+          runLoadingById={runLoadingById}
+          activeStreamRunId={activeStreamRunId}
+          thinkingRequestPending={thinkingRequestPending}
+          debugEnabled={Boolean(activeSession?.debugEnabled)}
+          disabled={sessionLoading || !sessionId}
+          onRequestRun={ensureRunLoaded}
+          onRunStart={() => {
+            setActiveStreamRunId(null);
+            setThinkingRequestPending(true);
+          }}
+          onStreamEvent={(event) => {
+            if (event.type === "start") {
+              setActiveStreamRunId(event.runId);
+              setStreamThinkingByRunId((previous) => ({
+                ...previous,
+                [event.runId]: []
+              }));
+              setThinkingRequestPending(true);
+              return;
+            }
+            const step = toThinkingStep(event);
+            if (!step) {
+              if (event.type === "finish" || event.type === "error") {
+                setActiveStreamRunId((current) =>
+                  current === event.runId ? null : current
+                );
+                setThinkingRequestPending(false);
+              }
+              return;
+            }
+            setStreamThinkingByRunId((previous) =>
+              appendThinkingStep(previous, event.runId, step)
+            );
+          }}
+          onRunFinish={async (runId) => {
+            setActiveStreamRunId((current) => (current === runId ? null : current));
+            setThinkingRequestPending(false);
+            if (!sessionId) {
+              return;
+            }
+            await loadMessages(sessionId);
+            if (runId) {
+              await ensureRunLoaded(runId);
+            }
+            await refreshSessions();
+          }}
+          onRunError={async () => {
+            setActiveStreamRunId(null);
+            setThinkingRequestPending(false);
+            if (sessionId) {
+              await loadMessages(sessionId).catch(() => undefined);
+            }
+          }}
         />
       </section>
-
-      <aside className="hidden h-full w-80 border-l border-slate-200 bg-slate-50/50 lg:block xl:w-[440px]">
-        <SqlPreview run={lastRun} debugEnabled={Boolean(activeSession?.debugEnabled)} />
-      </aside>
-
-      {mobileSqlOpen ? (
-        <>
-          <button
-            type="button"
-            aria-label="关闭详情"
-            className="fixed inset-0 z-30 bg-slate-950/60 lg:hidden"
-            onClick={() => setMobileSqlOpen(false)}
-          />
-          <div className="fixed inset-y-0 right-0 z-40 w-80 max-w-[92vw] border-l border-slate-200 bg-slate-50/50 shadow-xl lg:hidden">
-            <SqlPreview
-              run={lastRun}
-              debugEnabled={Boolean(activeSession?.debugEnabled)}
-              onClose={() => setMobileSqlOpen(false)}
-            />
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }

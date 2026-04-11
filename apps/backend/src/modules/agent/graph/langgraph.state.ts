@@ -67,11 +67,25 @@ export const appendStep = (
   state: Pick<LangGraphState, "trace" | "spanEvents">,
   event: LangGraphSpanEvent
 ): Pick<LangGraphState, "trace" | "spanEvents"> => {
+  const nextSequence = state.trace.steps.length + 1;
+  const normalizedStep: ExecutionTraceStep = {
+    ...event.step,
+    sequence: event.step.sequence ?? nextSequence,
+    stepId: event.step.stepId ?? `${state.trace.runId}:${event.step.node}:${nextSequence}`,
+    lifecycle:
+      event.step.lifecycle ??
+      (event.step.status === "failed"
+        ? "failed"
+        : event.step.status === "skipped"
+          ? "skipped"
+          : "completed")
+  };
+
   return {
     trace: {
       ...state.trace,
-      steps: [...state.trace.steps, event.step]
+      steps: [...state.trace.steps, normalizedStep]
     },
-    spanEvents: [...state.spanEvents, event]
+    spanEvents: [...state.spanEvents, { ...event, step: normalizedStep }]
   };
 };

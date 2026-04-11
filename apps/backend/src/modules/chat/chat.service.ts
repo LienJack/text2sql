@@ -3,6 +3,7 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
+  ReasoningStage,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -14,7 +15,13 @@ import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.ser
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
+import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
+
+const MODEL_PROBE_PROMPT = {
+  systemPrompt: "You are a health check assistant. Reply with exactly OK.",
+  userPrompt: "Reply with OK."
+};
 
 @Injectable()
 export class ChatService {
@@ -24,6 +31,7 @@ export class ChatService {
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
     private readonly providerCatalog: ProviderCatalogService,
+    private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
   ) {}
 
@@ -141,6 +149,66 @@ export class ChatService {
     await this.redisBuffer.clearBufferedMessages(sessionId);
   }
 
+  async probeModelConnectivity(modelCatalogId: string): Promise<{
+    ok: boolean;
+    provider: string;
+    model: string;
+    latencyMs: number;
+  }> {
+    const normalizedModelId = modelCatalogId.trim();
+    if (!normalizedModelId) {
+      throw new DomainError("VALIDATION_ERROR", "模型 ID 不能为空", 400, {
+        modelCatalogId
+      });
+    }
+
+    const startedAt = Date.now();
+    try {
+      const draft = await this.providerRouter.generate(MODEL_PROBE_PROMPT, {
+        modelCatalogId: normalizedModelId
+      });
+      const responseText = draft.rawText.trim().toUpperCase();
+      if (!responseText) {
+        throw new DomainError(
+          "MODEL_PROBE_EMPTY",
+          "模型探活返回为空响应，请稍后重试。",
+          502,
+          {
+            modelCatalogId: normalizedModelId
+          }
+        );
+      }
+      return {
+        ok: true,
+        provider: draft.provider,
+        model: draft.model,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      if (error instanceof DomainError) {
+        throw new DomainError(
+          "MODEL_UNREACHABLE",
+          `模型连通性检测失败：${error.message}`,
+          409,
+          {
+            modelCatalogId: normalizedModelId,
+            latencyMs: Date.now() - startedAt,
+            reasonCode: error.code
+          }
+        );
+      }
+      throw new DomainError(
+        "MODEL_UNREACHABLE",
+        `模型连通性检测失败：${error instanceof Error ? error.message : String(error)}`,
+        409,
+        {
+          modelCatalogId: normalizedModelId,
+          latencyMs: Date.now() - startedAt
+        }
+      );
+    }
+  }
+
   async sendMessage(
     sessionId: string,
     message: string,
@@ -216,6 +284,7 @@ export class ChatService {
     });
 
     const toolCalls: NonNullable<NonNullable<SqlRun["trace"]>["toolCalls"]> = [];
+    let stepSequence = 0;
 
     try {
       const run = await this.graphBuilder.run(
@@ -287,10 +356,22 @@ export class ChatService {
             });
           },
           onStep: async ({ step }) => {
+            const streamSequence = step.sequence ?? stepSequence + 1;
+            stepSequence = Math.max(stepSequence, streamSequence);
+            const stepTimestamp = step.at ?? step.endedAt ?? step.startedAt ?? new Date().toISOString();
             await emit("state", {
               node: step.node,
               status: step.status,
+              stepId: step.stepId ?? `${runId}:${step.node}:${streamSequence}`,
+              sequence: streamSequence,
+              lifecycle: step.lifecycle ?? this.resolveStepLifecycle(step.status),
               detail: step.detail ?? "",
+              stage: this.resolveReasoningStage(step.node),
+              title: this.resolveReasoningTitle(step.node),
+              at: stepTimestamp,
+              startedAt: step.startedAt,
+              endedAt: step.endedAt,
+              durationMs: step.durationMs,
               inputSummary: step.inputSummary,
               outputSummary: step.outputSummary,
               errorSummary: step.errorSummary
@@ -350,7 +431,7 @@ export class ChatService {
   async listMessages(
     sessionId: string,
     page = 1,
-    pageSize = 50
+    pageSize = 0
   ): Promise<ChatMessage[]> {
     const session = await this.repository.getSessionById(sessionId);
     if (!session) {
@@ -371,7 +452,7 @@ export class ChatService {
   async getSessionView(
     sessionId: string,
     page = 1,
-    pageSize = 50
+    pageSize = 0
   ): Promise<ChatSessionView> {
     const session = await this.repository.getSessionById(sessionId);
     if (!session) {
@@ -430,5 +511,51 @@ export class ChatService {
         new Date().toISOString()
       );
     }
+  }
+
+  private resolveReasoningStage(node: string): ReasoningStage {
+    switch (node) {
+      case "clarify":
+        return "analysis";
+      case "generate-sql":
+        return "generation";
+      case "safety-check":
+        return "validation";
+      case "execute-sql":
+        return "execution";
+      case "format-answer":
+        return "response";
+      default:
+        return "unknown";
+    }
+  }
+
+  private resolveReasoningTitle(node: string): string {
+    switch (node) {
+      case "clarify":
+        return "理解问题";
+      case "generate-sql":
+        return "生成 SQL";
+      case "safety-check":
+        return "安全校验";
+      case "execute-sql":
+        return "执行查询";
+      case "format-answer":
+        return "整理回答";
+      default:
+        return node;
+    }
+  }
+
+  private resolveStepLifecycle(
+    status: "success" | "failed" | "skipped"
+  ): "completed" | "failed" | "skipped" {
+    if (status === "failed") {
+      return "failed";
+    }
+    if (status === "skipped") {
+      return "skipped";
+    }
+    return "completed";
   }
 }

@@ -5,12 +5,14 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
-  sendMessageStream
+  streamMessageEvents
 } from "@/lib/api-client";
 import { createMockMessages, createMockRun } from "../unit/fixtures";
 
@@ -19,22 +21,27 @@ vi.mock("@/lib/api-client", () => ({
   listSessions: vi.fn(),
   listEnabledModels: vi.fn(),
   renameSession: vi.fn(),
+  probeModelConnectivity: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
-  getMessages: vi.fn()
+  streamMessageEvents: vi.fn(),
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
 const mockListSessions = vi.mocked(listSessions);
 const mockListEnabledModels = vi.mocked(listEnabledModels);
 const mockRenameSession = vi.mocked(renameSession);
+const mockProbeModelConnectivity = vi.mocked(probeModelConnectivity);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
-const mockSendMessageStream = vi.mocked(sendMessageStream);
+const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("chat mobile smoke", () => {
   beforeEach(() => {
@@ -76,14 +83,20 @@ describe("chat mobile smoke", () => {
     mockCreateSession.mockResolvedValue(session);
     mockListSessions.mockResolvedValue([session]);
     mockRenameSession.mockResolvedValue(session);
+    mockProbeModelConnectivity.mockResolvedValue({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      latencyMs: 120
+    });
     mockSetSessionModel.mockResolvedValue(session);
     mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
     mockSetSessionDebugEnabled.mockResolvedValue({
       ...session,
       debugEnabled: true
     });
-    mockSendMessageStream.mockImplementation(async (_sessionId, _message, handlers) => {
-      handlers?.onEvent?.({
+    mockStreamMessageEvents.mockImplementation(async function* () {
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",
@@ -91,13 +104,24 @@ describe("chat mobile smoke", () => {
         data: {
           text: "SELECT 1"
         }
-      });
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1
+        }
+      };
     });
     mockGetMessages.mockResolvedValue({
       session,
       messages: createMockMessages(),
       latestRun: createMockRun()
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {
@@ -111,6 +135,5 @@ describe("chat mobile smoke", () => {
     expect(screen.getByLabelText("聊天输入")).toBeEnabled();
     expect(screen.getByRole("button", { name: "结果详情" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
-    expect(screen.getByText("执行结果与详情")).toBeInTheDocument();
   });
 });

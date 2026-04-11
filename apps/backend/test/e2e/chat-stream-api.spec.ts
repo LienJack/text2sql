@@ -40,8 +40,14 @@ describe("chat stream api (e2e)", () => {
     expect(streamRes.status).toBe(200);
     expect(streamRes.headers["content-type"]).toContain("text/event-stream");
     expect(streamRes.text).toContain("event: start");
+    expect(streamRes.text).toContain("event: state");
     expect(streamRes.text).toContain("event: text-delta");
     expect(streamRes.text).toContain("event: finish");
+    expect(streamRes.text).toContain("\"stage\":");
+    expect(streamRes.text).toContain("\"title\":");
+    expect(streamRes.text).toContain("\"sequence\":");
+    expect(streamRes.text).toContain("\"stepId\":");
+    expect(streamRes.text).toContain("\"lifecycle\":");
 
     const messagesRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)

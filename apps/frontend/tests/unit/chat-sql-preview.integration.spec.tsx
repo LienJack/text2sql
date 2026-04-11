@@ -6,12 +6,14 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
-  sendMessageStream
+  streamMessageEvents
 } from "@/lib/api-client";
 import { createMockMessages, createMockRun } from "./fixtures";
 
@@ -20,22 +22,27 @@ vi.mock("@/lib/api-client", () => ({
   listSessions: vi.fn(),
   listEnabledModels: vi.fn(),
   renameSession: vi.fn(),
+  probeModelConnectivity: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
-  getMessages: vi.fn()
+  streamMessageEvents: vi.fn(),
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
 const mockListSessions = vi.mocked(listSessions);
 const mockListEnabledModels = vi.mocked(listEnabledModels);
 const mockRenameSession = vi.mocked(renameSession);
+const mockProbeModelConnectivity = vi.mocked(probeModelConnectivity);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
-const mockSendMessageStream = vi.mocked(sendMessageStream);
+const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("chat to sql preview integration", () => {
   beforeEach(() => {
@@ -70,14 +77,37 @@ describe("chat to sql preview integration", () => {
     mockCreateSession.mockResolvedValue(session);
     mockListSessions.mockResolvedValue([session]);
     mockRenameSession.mockResolvedValue(session);
+    mockProbeModelConnectivity.mockResolvedValue({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      latencyMs: 120
+    });
     mockSetSessionModel.mockResolvedValue(session);
     mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
     mockSetSessionDebugEnabled.mockResolvedValue({
       ...session,
       debugEnabled: true
     });
-    mockSendMessageStream.mockImplementation(async (_sessionId, _message, handlers) => {
-      handlers?.onEvent?.({
+    mockStreamMessageEvents.mockImplementation(async function* () {
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "generate-sql",
+          status: "success",
+          stepId: "run-1:generate-sql:1",
+          sequence: 1,
+          lifecycle: "completed",
+          detail: "volcengine",
+          stage: "generation",
+          title: "生成 SQL",
+          durationMs: 12
+        }
+      };
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",
@@ -85,7 +115,17 @@ describe("chat to sql preview integration", () => {
         data: {
           text: "SELECT * FROM orders LIMIT 20"
         }
-      });
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 20
+        }
+      };
     });
     mockGetMessages.mockResolvedValue({
       session,
@@ -95,6 +135,7 @@ describe("chat to sql preview integration", () => {
         explanation: "返回最近 20 条订单。"
       })
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {
@@ -110,10 +151,10 @@ describe("chat to sql preview integration", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(mockSendMessageStream).toHaveBeenCalled();
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText("返回最近 20 条订单。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
     expect(screen.getByText("SELECT * FROM orders LIMIT 20")).toBeInTheDocument();
   });
 });
