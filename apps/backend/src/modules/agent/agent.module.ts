@@ -21,6 +21,12 @@ import { FormatAnswerNode } from "./nodes/format-answer.node";
     ExecuteSqlNode,
     FormatAnswerNode
   ],
-  exports: [GraphBuilderService]
+  exports: [
+    GraphBuilderService,
+    ClarifyNode,
+    SafetyCheckNode,
+    ExecuteSqlNode,
+    FormatAnswerNode
+  ]
 })
 export class AgentModule {}

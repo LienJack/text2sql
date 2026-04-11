@@ -14,6 +14,13 @@ export interface OpenAiCompletionOutput {
   model: string;
 }
 
+export interface OpenAiRuntimeConfig {
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 export const resolveChatCompletionsUrl = (baseUrl: string): string => {
   const normalized = baseUrl.trim().replace(/\/+$/, "");
   if (!normalized) {
@@ -32,14 +39,22 @@ export const resolveChatCompletionsUrl = (baseUrl: string): string => {
 export class OpenAiCompatibleClient {
   constructor(private readonly config: AppConfigService) {}
 
-  async complete(input: OpenAiCompletionInput): Promise<OpenAiCompletionOutput> {
+  async complete(
+    input: OpenAiCompletionInput,
+    runtime?: OpenAiRuntimeConfig
+  ): Promise<OpenAiCompletionOutput> {
+    const provider = runtime?.provider ?? this.config.llmProvider;
+    const model = runtime?.model ?? this.config.llmModel;
+    const baseUrl = runtime?.baseUrl ?? this.config.llmBaseUrl;
+    const apiKey = runtime?.apiKey ?? this.config.llmApiKey;
+
     if (this.config.llmMockMode) {
       const isWriteIntent = /\b(delete|update|insert|drop|alter|truncate)\b/i.test(
         input.userPrompt
       );
       return {
-        provider: this.config.llmProvider,
-        model: this.config.llmModel,
+        provider,
+        model,
         prompt: input,
         rawText: isWriteIntent
           ? [
@@ -62,7 +77,7 @@ export class OpenAiCompatibleClient {
       };
     }
 
-    if (!this.config.llmBaseUrl || !this.config.llmApiKey || !this.config.llmModel) {
+    if (!baseUrl || !apiKey || !model) {
       throw new DomainError(
         "LLM_CONFIG_MISSING",
         "LLM 配置不完整，请检查 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL。",
@@ -70,15 +85,15 @@ export class OpenAiCompatibleClient {
       );
     }
 
-    const completionUrl = resolveChatCompletionsUrl(this.config.llmBaseUrl);
+    const completionUrl = resolveChatCompletionsUrl(baseUrl);
     const response = await fetch(completionUrl, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${this.config.llmApiKey}`
+        authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: this.config.llmModel,
+        model,
         temperature: 0.2,
         messages: [
           {
@@ -104,7 +119,7 @@ export class OpenAiCompatibleClient {
           : `LLM 请求失败: HTTP ${response.status}`,
         502,
         {
-          provider: this.config.llmProvider,
+          provider,
           requestUrl: completionUrl,
           body: errorBody.slice(0, 1000)
         }
@@ -121,14 +136,14 @@ export class OpenAiCompatibleClient {
         "LLM 返回为空，无法生成 SQL。",
         502,
         {
-          provider: this.config.llmProvider
+          provider
         }
       );
     }
 
     return {
-      provider: this.config.llmProvider,
-      model: this.config.llmModel,
+      provider,
+      model,
       prompt: input,
       rawText: content
     };

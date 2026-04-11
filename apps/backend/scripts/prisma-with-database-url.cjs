@@ -77,11 +77,22 @@ function main() {
     env.DATABASE_URL = derived;
   }
 
-  const prismaBin = process.platform === "win32" ? "prisma.cmd" : "prisma";
-  const result = spawnSync(prismaBin, args, {
-    stdio: "inherit",
-    env
-  });
+  let result;
+  try {
+    const prismaCliPath = require.resolve("prisma/build/index.js", {
+      paths: [process.cwd()]
+    });
+    result = spawnSync(process.execPath, [prismaCliPath, ...args], {
+      stdio: "inherit",
+      env
+    });
+  } catch (_error) {
+    const prismaBin = process.platform === "win32" ? "prisma.cmd" : "prisma";
+    result = spawnSync(prismaBin, args, {
+      stdio: "inherit",
+      env
+    });
+  }
 
   if (result.error) {
     console.error(result.error.message);

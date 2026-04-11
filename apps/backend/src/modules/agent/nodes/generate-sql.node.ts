@@ -5,9 +5,13 @@ import { ProviderRouterService } from "../../llm/provider-router.service";
 export class GenerateSqlNode {
   constructor(private readonly providerRouter: ProviderRouterService) {}
 
-  async run(question: string): Promise<{
+  async run(
+    question: string,
+    modelCatalogId?: string
+  ): Promise<{
     provider: string;
     model: string;
+    modelCatalogId?: string;
     sql: string;
     explanation: string;
     rawText: string;
@@ -16,6 +20,8 @@ export class GenerateSqlNode {
       userPrompt: string;
     };
   }> {
-    return this.providerRouter.generateSql(question);
+    return this.providerRouter.generateSql(question, {
+      modelCatalogId
+    });
   }
 }

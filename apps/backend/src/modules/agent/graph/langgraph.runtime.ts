@@ -17,8 +17,10 @@ const LangGraphStateAnnotation = Annotation.Root({
   runId: Annotation<string>(),
   sessionId: Annotation<string>(),
   question: Annotation<string>(),
+  modelCatalogId: Annotation<string | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
+  model: Annotation<string | undefined>(),
   llmRaw: Annotation<LangGraphState["llmRaw"]>(),
   sql: Annotation<string | undefined>(),
   explanation: Annotation<string | undefined>(),
@@ -119,16 +121,21 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     .addNode("generate-sql", async (state) => {
       const startedAt = new Date().toISOString();
       try {
-        const generated = await deps.generateSqlNode.run(state.question);
+        const generated = await deps.generateSqlNode.run(
+          state.question,
+          state.modelCatalogId
+        );
         const endedAt = new Date().toISOString();
         const inputs = {
           question: state.question,
+          modelCatalogId: state.modelCatalogId,
           systemPrompt: generated.prompt.systemPrompt,
           userPrompt: generated.prompt.userPrompt
         };
         const outputs = {
           provider: generated.provider,
           model: generated.model,
+          modelCatalogId: generated.modelCatalogId,
           sql: generated.sql,
           rawText: generated.rawText
         };
@@ -152,6 +159,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
             provider: generated.provider
           },
           provider: generated.provider,
+          model: generated.model,
           llmRaw: {
             provider: generated.provider,
             model: generated.model,

@@ -1,12 +1,29 @@
 export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
+export type StreamStatus = "in_progress" | "completed" | "failed";
+export type LlmProviderCode =
+  | "openai"
+  | "gemini"
+  | "deepseek"
+  | "kimi"
+  | "volcengine"
+  | "siliconflow"
+  | "openrouter"
+  | "minimax"
+  | "tencent-hunyuan"
+  | "tongyi";
+export type ProviderSyncStatus = "idle" | "syncing" | "healthy" | "degraded" | "failed";
+export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 
 export interface Session {
   id: string;
   datasource: string;
   createdAt: string;
   title?: string;
+  modelCatalogId?: string | null;
+  modelProvider?: string | null;
+  modelName?: string | null;
   debugEnabled?: boolean;
   lastMessageAt?: string;
   syncStatus?: SessionSyncStatus;
@@ -47,6 +64,14 @@ export interface ExecutionTrace {
   provider: string;
   retryCount: number;
   steps: ExecutionTraceStep[];
+  streamStatus?: StreamStatus;
+  toolCalls?: Array<{
+    toolName: string;
+    toolCallId: string;
+    status: "called" | "result" | "error";
+    detail?: string;
+    at: string;
+  }>;
 }
 
 export interface LlmRawOutput {
@@ -62,6 +87,7 @@ export interface SqlRun {
   question: string;
   status: RunStatus;
   provider: string;
+  model?: string;
   sql?: string;
   explanation?: string;
   answer?: string;
@@ -78,6 +104,67 @@ export interface ChatSessionView {
   session: Session;
   messages: ChatMessage[];
   latestRun?: SqlRun;
+}
+
+export interface ChatStreamEvent {
+  type:
+    | "start"
+    | "text-delta"
+    | "tool-call"
+    | "tool-result"
+    | "tool-error"
+    | "step"
+    | "finish"
+    | "error";
+  runId: string;
+  sessionId: string;
+  at: string;
+  data?: Record<string, unknown> | string;
+}
+
+export interface ProviderConfig {
+  id: string;
+  provider: LlmProviderCode;
+  displayName: string;
+  baseUrl?: string | null;
+  enabled: boolean;
+  hasApiKey: boolean;
+  apiKeyMasked?: string | null;
+  lastSyncAt?: string | null;
+  lastSyncStatus: ProviderSyncStatus;
+  lastSyncError?: string | null;
+  modelCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelCatalogItem {
+  id: string;
+  providerConfigId: string;
+  provider: LlmProviderCode;
+  model: string;
+  displayName: string;
+  capabilities?: string[];
+  contextWindow?: number | null;
+  enabled: boolean;
+  healthStatus: ModelHealthStatus;
+  lastHealthCheckAt?: string | null;
+  lastSyncedAt?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SettingsActor {
+  id: string;
+  role: "admin" | "user";
+}
+
+export interface LlmSettingsView {
+  actor: SettingsActor;
+  providers: ProviderConfig[];
+  models: ModelCatalogItem[];
+  defaultModelId?: string | null;
 }
 
 export interface EvaluationCase {

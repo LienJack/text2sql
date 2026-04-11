@@ -9,4 +9,9 @@ export class RenameSessionDto {
   @IsOptional()
   @IsBoolean()
   debugEnabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  modelCatalogId?: string;
 }

@@ -8,6 +8,7 @@ import { EvalModule } from "./modules/eval/eval.module";
 import { LlmModule } from "./modules/llm/llm.module";
 import { ObservabilityModule } from "./modules/observability/observability.module";
 import { DatasourceModule } from "./modules/datasource/datasource.module";
+import { SettingsModule } from "./modules/settings/settings.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { DatasourceModule } from "./modules/datasource/datasource.module";
     ObservabilityModule,
     DataModule,
     LlmModule,
+    SettingsModule,
     AgentModule,
     ChatModule,
     EvalModule,
@@ -23,4 +25,3 @@ import { DatasourceModule } from "./modules/datasource/datasource.module";
   ]
 })
 export class AppModule {}
-

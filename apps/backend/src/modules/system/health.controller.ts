@@ -47,7 +47,12 @@ export class HealthController {
           configured: Boolean(this.config.llmApiKey),
           baseUrlConfigured: Boolean(this.config.llmBaseUrl),
           model: this.config.llmModel,
-          mockMode: this.config.llmMockMode
+          mockMode: this.config.llmMockMode,
+          gateway: "vercel-ai-sdk-core",
+          streamingEnabled: true,
+          streamEndpoint: "/api/v1/sessions/:sessionId/messages/stream",
+          toolCallingEnabled: true,
+          toolRegistry: ["runReadOnlySql"]
         },
         langsmith: {
           tracingRequested: this.config.langsmithTracing,

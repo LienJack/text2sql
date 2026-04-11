@@ -39,6 +39,9 @@ type SessionRow = {
   id: string;
   datasource: string;
   title: string;
+  modelCatalogId: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
   debugEnabled: boolean;
   syncStatus: string;
   syncFailedCount: number;
@@ -53,6 +56,7 @@ type SqlRunRow = {
   sessionId: string;
   status: SqlRun["status"];
   provider: string;
+  model: string | null;
   question: string;
   sql: string | null;
   explanation: string | null;
@@ -70,6 +74,9 @@ type SessionPatch = Partial<
   Pick<
     Session,
     | "title"
+    | "modelCatalogId"
+    | "modelProvider"
+    | "modelName"
     | "debugEnabled"
     | "lastMessageAt"
     | "syncStatus"
@@ -232,7 +239,10 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
 
   async updateSession(
     sessionId: string,
-    patch: Pick<SessionPatch, "title" | "debugEnabled">
+    patch: Pick<
+      SessionPatch,
+      "title" | "debugEnabled" | "modelCatalogId" | "modelProvider" | "modelName"
+    >
   ): Promise<Session | undefined> {
     return this.patchSession(sessionId, patch);
   }
@@ -440,6 +450,7 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
         update: {
           status: run.status,
           provider: run.provider,
+          model: run.model ?? null,
           question: run.question,
           sql: run.sql ?? null,
           explanation: run.explanation ?? null,
@@ -457,6 +468,7 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
           sessionId: run.sessionId,
           status: run.status,
           provider: run.provider,
+          model: run.model ?? null,
           question: run.question,
           sql: run.sql ?? null,
           explanation: run.explanation ?? null,
@@ -602,6 +614,9 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     return {
       ...session,
       title: session.title ?? "新会话",
+      modelCatalogId: session.modelCatalogId ?? null,
+      modelProvider: session.modelProvider ?? null,
+      modelName: session.modelName ?? null,
       debugEnabled: session.debugEnabled ?? false,
       syncStatus: session.syncStatus ?? "healthy",
       syncFailedCount: session.syncFailedCount ?? 0,
@@ -615,6 +630,9 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
       id: row.id,
       datasource: row.datasource,
       title: row.title,
+      modelCatalogId: row.modelCatalogId,
+      modelProvider: row.modelProvider,
+      modelName: row.modelName,
       debugEnabled: row.debugEnabled,
       syncStatus: this.toSyncStatus(row.syncStatus),
       syncFailedCount: row.syncFailedCount,
@@ -631,6 +649,9 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     return {
       datasource: session.datasource,
       title: session.title ?? "新会话",
+      modelCatalogId: session.modelCatalogId ?? null,
+      modelProvider: session.modelProvider ?? null,
+      modelName: session.modelName ?? null,
       debugEnabled: session.debugEnabled ?? false,
       syncStatus: session.syncStatus ?? "healthy",
       syncFailedCount: session.syncFailedCount ?? 0,
@@ -649,6 +670,7 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
       sessionId: row.sessionId,
       status: row.status,
       provider: row.provider,
+      model: row.model ?? undefined,
       question: row.question,
       sql: row.sql ?? undefined,
       explanation: row.explanation ?? undefined,

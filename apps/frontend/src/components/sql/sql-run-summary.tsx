@@ -25,7 +25,10 @@ export function SqlRunSummary({ run }: SqlRunSummaryProps) {
         >
           {statusLabel}
         </Badge>
-        <span className="text-xs text-slate-500">Provider: {run.provider}</span>
+        <span className="text-xs text-slate-500">
+          Provider: {run.provider}
+          {run.model ? ` / ${run.model}` : ""}
+        </span>
       </div>
       <p className="text-sm text-muted-foreground">
         <span className="font-semibold text-foreground">解释：</span>

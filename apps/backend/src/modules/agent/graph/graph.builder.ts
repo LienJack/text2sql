@@ -136,6 +136,7 @@ export class GraphBuilderService {
       question: state.question,
       status,
       provider: state.provider,
+      model: state.model,
       sql: state.sql,
       explanation: state.explanation,
       answer: state.answer,
