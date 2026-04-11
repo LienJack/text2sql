@@ -12,13 +12,8 @@ describe("chat langsmith trace", () => {
     );
     process.env.LLM_MOCK_MODE = "true";
     process.env.LLM_PROVIDER = "volcengine";
-    process.env.LANGSMITH_TRACING = "true";
+    process.env.LANGSMITH_TRACING = "false";
     process.env.LANGSMITH_API_KEY = "";
-  });
-
-  afterAll(() => {
-    delete process.env.LANGSMITH_TRACING;
-    delete process.env.LANGSMITH_API_KEY;
   });
 
   it("should pass chat context into langsmith tracing hooks", async () => {
