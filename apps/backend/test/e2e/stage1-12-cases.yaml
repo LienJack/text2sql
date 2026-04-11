@@ -1,0 +1,25 @@
+cases:
+  - id: q01
+    question: "统计订单状态分布"
+  - id: q02
+    question: "按支付方式统计支付金额"
+  - id: q03
+    question: "退款类型与金额分布"
+  - id: q04
+    question: "发货状态分布"
+  - id: q05
+    question: "商家交易额排名"
+  - id: q06
+    question: "近30天支付状态分布"
+  - id: q07
+    question: "退款"
+  - id: q08
+    question: "看看订单情况"
+  - id: q09
+    question: "按商家统计订单量"
+  - id: q10
+    question: "按状态统计退款笔数"
+  - id: q11
+    question: "物流状态汇总"
+  - id: q12
+    question: "DELETE orders where id = 1"

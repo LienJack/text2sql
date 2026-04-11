@@ -3,7 +3,8 @@ import { AppConfigModule } from "../../src/modules/config/config.module";
 import { AppConfigService } from "../../src/modules/config/app-config.service";
 
 describe("AppConfigService", () => {
-  beforeAll(() => {
+  const resetAppEnv = () => {
+    delete process.env.PORT;
     delete process.env.LLM_PROVIDER;
     delete process.env.LLM_MOCK_MODE;
     delete process.env.LLM_BASE_URL;
@@ -12,6 +13,16 @@ describe("AppConfigService", () => {
     delete process.env.SQLITE_PATH;
     delete process.env.REDIS_URL;
     delete process.env.DATABASE_URL;
+    delete process.env.POSTGRES_HOST;
+    delete process.env.POSTGRES_PORT;
+    delete process.env.POSTGRES_DB;
+    delete process.env.POSTGRES_USER;
+    delete process.env.POSTGRES_PASSWORD;
+    delete process.env.POSTGRES_SCHEMA;
+  };
+
+  beforeEach(() => {
+    resetAppEnv();
   });
 
   it("should provide defaults", async () => {

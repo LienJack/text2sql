@@ -1,17 +1,17 @@
-import { resolve } from "node:path";
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
+import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 describe("chat api (e2e)", () => {
   let app: INestApplication;
+  let cleanupFixture: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
-    process.env.SQLITE_PATH = resolve(
-      __dirname,
-      "../../../../data/sqlite/text2sql.db"
-    );
+    const fixture = await createSeededSqliteFixture("chat-api");
+    cleanupFixture = fixture.cleanup;
+    process.env.SQLITE_PATH = fixture.dbPath;
     process.env.DATABASE_URL = "";
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
@@ -25,6 +25,9 @@ describe("chat api (e2e)", () => {
 
   afterAll(async () => {
     await app.close();
+    if (cleanupFixture) {
+      await cleanupFixture();
+    }
   });
 
   it("should create session and send one message", async () => {

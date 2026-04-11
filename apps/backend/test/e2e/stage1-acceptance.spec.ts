@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
 import { GraphBuilderService } from "../../src/modules/agent/graph/graph.builder";
+import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 interface StageCase {
   id: string;
@@ -11,13 +12,20 @@ interface StageCase {
 }
 
 describe("stage1 acceptance", () => {
-  beforeAll(() => {
-    process.env.SQLITE_PATH = resolve(
-      __dirname,
-      "../../../../data/sqlite/text2sql.db"
-    );
+  let cleanupFixture: (() => Promise<void>) | undefined;
+
+  beforeAll(async () => {
+    const fixture = await createSeededSqliteFixture("stage1-acceptance");
+    cleanupFixture = fixture.cleanup;
+    process.env.SQLITE_PATH = fixture.dbPath;
     process.env.LLM_MOCK_MODE = "true";
     process.env.LLM_PROVIDER = "volcengine";
+  });
+
+  afterAll(async () => {
+    if (cleanupFixture) {
+      await cleanupFixture();
+    }
   });
 
   it("should pass all 12 stage1 cases", async () => {
@@ -58,6 +66,8 @@ describe("stage1 acceptance", () => {
 
 async function resolveStageCasePath(): Promise<string> {
   const candidates = [
+    resolve(__dirname, "stage1-12-cases.yaml"),
+    resolve(process.cwd(), "test/e2e/stage1-12-cases.yaml"),
     resolve(process.cwd(), "vibe/plain/eval/stage1-12-cases.yaml"),
     resolve(process.cwd(), "../../vibe/plain/eval/stage1-12-cases.yaml")
   ];
