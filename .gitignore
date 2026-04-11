@@ -1,0 +1,22 @@
+# Keep critical fixtures/docs tracked for CI and collaboration
+/data/*
+/vibe/*
+/docs/*
+!/docs/standards/
+!/docs/standards/*.md
+# Node / monorepo artifacts
+node_modules/
+dist/
+coverage/
+.next/
+*.tsbuildinfo
+apps/backend/src/generated/
+
+# Python cache from legacy tests
+__pycache__/
+*.pyc
+
+# Env
+.env
+.env.local
+.env.*.local

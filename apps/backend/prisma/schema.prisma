@@ -1,0 +1,128 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Session {
+  id                String    @id
+  datasource        String
+  title             String    @default("新会话")
+  modelCatalogId    String?
+  modelProvider     String?
+  modelName         String?
+  debugEnabled      Boolean   @default(false)
+  syncStatus        String    @default("healthy")
+  syncFailedCount   Int       @default(0)
+  lastMessageAt     DateTime?
+  lastSyncFailureAt DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  messages          Message[]
+  runs              SqlRun[]
+  modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
+
+  @@index([deletedAt, lastMessageAt])
+  @@index([modelCatalogId])
+  @@map("sessions")
+}
+
+model Message {
+  id        String   @id
+  sessionId String
+  role      String
+  content   String
+  metadata  String?
+  createdAt DateTime @default(now())
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("messages")
+}
+
+model SqlRun {
+  runId         String   @id
+  sessionId     String
+  status        String
+  provider      String
+  model         String?
+  question      String
+  sql           String?
+  explanation   String?
+  answer        String?
+  columns       String?
+  rows          String?
+  error         String?
+  clarification String?
+  trace         String
+  llmRaw        String?
+  createdAt     DateTime @default(now())
+  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("sql_runs")
+}
+
+model EvaluationReport {
+  jobId     String   @id
+  provider  String
+  total     Int
+  passed    Int
+  passRate  Float
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@map("evaluation_reports")
+}
+
+model ProviderConfig {
+  id               String   @id
+  provider         String
+  displayName      String
+  baseUrl          String?
+  apiKeyCiphertext String?
+  apiKeyMasked     String?
+  enabled          Boolean  @default(true)
+  metadata         String?
+  lastSyncAt       DateTime?
+  lastSyncStatus   String   @default("idle")
+  lastSyncError    String?
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  models           ModelCatalog[]
+
+  @@index([provider, deletedAt])
+  @@map("provider_configs")
+}
+
+model ModelCatalog {
+  id                String   @id
+  providerConfigId  String
+  provider          String
+  model             String
+  displayName       String
+  capabilities      String?
+  contextWindow     Int?
+  enabled           Boolean  @default(true)
+  healthStatus      String   @default("unknown")
+  lastHealthCheckAt DateTime?
+  lastSyncedAt      DateTime?
+  metadata          String?
+  deletedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  providerConfig    ProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+  sessions          Session[]
+
+  @@unique([provider, model])
+  @@index([enabled, deletedAt])
+  @@index([providerConfigId])
+  @@map("model_catalogs")
+}
