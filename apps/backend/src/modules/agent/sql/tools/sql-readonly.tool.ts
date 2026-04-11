@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
-import type { LlmGatewayToolDefinition } from "../llm-gateway.interface";
-import { ToolExecutionGuard } from "./tool-execution-guard";
+import { SqliteQueryService } from "../../../data/sqlite/sqlite-query.service";
+import type { LlmGatewayToolDefinition } from "../../../llm/llm-gateway.interface";
+import { SqlSafetyGuard } from "./sql-safety.guard";
 
 const sqlReadonlyInputSchema = z.object({
   sql: z.string().min(1),
@@ -13,7 +13,7 @@ const sqlReadonlyInputSchema = z.object({
 export class SqlReadonlyTool {
   constructor(
     private readonly sqliteQuery: SqliteQueryService,
-    private readonly guard: ToolExecutionGuard
+    private readonly guard: SqlSafetyGuard
   ) {}
 
   toDefinition(): LlmGatewayToolDefinition {

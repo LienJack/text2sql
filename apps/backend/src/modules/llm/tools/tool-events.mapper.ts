@@ -1,10 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
-import type { SqlStreamEvent } from "../provider-router.service";
+
+export interface ToolStreamEvent {
+  type: "tool-call" | "tool-result" | "tool-error";
+  payload: Record<string, unknown>;
+}
 
 @Injectable()
 export class ToolEventsMapper {
-  toTraceStep(event: SqlStreamEvent): ExecutionTraceStep | undefined {
+  toTraceStep(event: ToolStreamEvent): ExecutionTraceStep | undefined {
     if (event.type === "tool-call") {
       return {
         node: "tool-call",

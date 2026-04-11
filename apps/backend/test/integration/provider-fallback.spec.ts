@@ -11,9 +11,12 @@ describe("provider router", () => {
       imports: [AppConfigModule, LlmModule]
     }).compile();
     const service = moduleRef.get(ProviderRouterService);
-    const draft = await service.generateSql("统计退款金额");
+    const draft = await service.generate({
+      systemPrompt: "sys",
+      userPrompt: "统计退款金额"
+    });
     expect(draft.provider).toBe("volcengine");
-    expect(draft.sql.toLowerCase()).toContain("select");
+    expect(draft.rawText.toLowerCase()).toContain("select");
   });
 
   it("should fail directly when llm config is missing", async () => {
@@ -26,7 +29,12 @@ describe("provider router", () => {
       imports: [AppConfigModule, LlmModule]
     }).compile();
     const service = moduleRef.get(ProviderRouterService);
-    await expect(service.generateSql("统计退款金额")).rejects.toMatchObject({
+    await expect(
+      service.generate({
+        systemPrompt: "sys",
+        userPrompt: "统计退款金额"
+      })
+    ).rejects.toMatchObject({
       code: "LLM_CONFIG_MISSING"
     });
   });

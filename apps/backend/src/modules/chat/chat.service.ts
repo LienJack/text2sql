@@ -3,8 +3,6 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
-  ExecutionTrace,
-  ExecutionTraceStep,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -12,32 +10,20 @@ import type {
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
-import { ClarifyNode } from "../agent/nodes/clarify.node";
-import { ExecuteSqlNode } from "../agent/nodes/execute-sql.node";
-import { FormatAnswerNode } from "../agent/nodes/format-answer.node";
-import { SafetyCheckNode } from "../agent/nodes/safety-check.node";
+import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
-import { ProviderRouterService } from "../llm/provider-router.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
-import { ToolEventsMapper } from "../llm/tools/tool-events.mapper";
-import { ToolRegistryService } from "../llm/tools/tool-registry.service";
 import { TraceService } from "../observability/trace.service";
 
 @Injectable()
 export class ChatService {
   constructor(
     private readonly graphBuilder: GraphBuilderService,
-    private readonly clarifyNode: ClarifyNode,
-    private readonly safetyNode: SafetyCheckNode,
-    private readonly executeNode: ExecuteSqlNode,
-    private readonly formatNode: FormatAnswerNode,
+    private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
     private readonly providerCatalog: ProviderCatalogService,
-    private readonly providerRouter: ProviderRouterService,
-    private readonly toolRegistry: ToolRegistryService,
-    private readonly toolEventsMapper: ToolEventsMapper,
     private readonly traceService: TraceService
   ) {}
 
@@ -229,247 +215,99 @@ export class ChatService {
       requestId: requestId ?? null
     });
 
-    const traceSteps: ExecutionTraceStep[] = [];
-    const toolCalls: NonNullable<ExecutionTrace["toolCalls"]> = [];
-    const appendStep = (
-      node: string,
-      status: ExecutionTraceStep["status"],
-      detail: string,
-      extra?: Partial<ExecutionTraceStep>
-    ) => {
-      traceSteps.push({
-        node,
-        status,
-        detail,
-        at: new Date().toISOString(),
-        ...extra
-      });
-    };
-
-    const clarification = this.clarifyNode.run(message);
-    if (clarification) {
-      appendStep("clarify", "success", clarification.reason, {
-        outputSummary: clarification.question
-      });
-      const run: SqlRun = {
-        runId,
-        sessionId,
-        question: message,
-        status: "clarification",
-        provider: session.modelProvider ?? "unknown",
-        model: session.modelName ?? undefined,
-        answer: clarification.question,
-        clarification,
-        trace: {
-          runId,
-          provider: session.modelProvider ?? "unknown",
-          retryCount: 0,
-          steps: traceSteps,
-          streamStatus: "completed",
-          toolCalls
-        },
-        llmRaw: null,
-        createdAt: new Date().toISOString()
-      };
-      await emit("finish", {
-        status: run.status,
-        rowCount: 0
-      });
-      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-      return run;
-    }
-
-    appendStep("clarify", "skipped", "问题信息充足，跳过澄清。");
+    const toolCalls: NonNullable<NonNullable<SqlRun["trace"]>["toolCalls"]> = [];
 
     try {
-      const draft = await this.providerRouter.streamSql(
-        message,
+      const run = await this.graphBuilder.run(
         {
-          modelCatalogId: session.modelCatalogId ?? undefined
+          runId,
+          sessionId,
+          question: message,
+          modelCatalogId: session.modelCatalogId ?? undefined,
+          traceContext: {
+            source: "chat",
+            route: "/api/v1/sessions/:sessionId/messages/stream",
+            requestId
+          }
         },
         {
-          tools: this.toolRegistry.getTools(),
-          onEvent: async (event) => {
+          streamMode: true,
+          tools: this.sqlToolRegistry.getTools(),
+          onLlmEvent: async (event) => {
             if (event.type === "text-delta") {
               await emit("text-delta", {
-                text: String(event.payload)
+                text: event.text
               });
               return;
             }
-            const mappedStep = this.toolEventsMapper.toTraceStep(event);
-            if (mappedStep) {
-              traceSteps.push(mappedStep);
-              await emit("state", {
-                node: mappedStep.node,
-                status: mappedStep.status,
-                detail: mappedStep.detail ?? "",
-                inputSummary: mappedStep.inputSummary,
-                outputSummary: mappedStep.outputSummary,
-                errorSummary: mappedStep.errorSummary
-              });
-            }
-            if (
-              event.type === "tool-call" ||
-              event.type === "tool-result" ||
-              event.type === "tool-error"
-            ) {
-              const payload = event.payload as {
-                toolName?: string;
-                toolCallId?: string;
-                output?: unknown;
-                input?: unknown;
-                message?: string;
-              };
+
+            if (event.type === "tool-call") {
               toolCalls.push({
-                toolName: payload.toolName ?? "unknown",
-                toolCallId: payload.toolCallId ?? "unknown",
-                status:
-                  event.type === "tool-call"
-                    ? "called"
-                    : event.type === "tool-result"
-                      ? "result"
-                      : "error",
-                detail:
-                  typeof payload.message === "string"
-                    ? payload.message
-                    : JSON.stringify(payload.output ?? payload.input ?? payload),
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                status: "called",
+                detail: JSON.stringify(event.input ?? {}),
                 at: new Date().toISOString()
               });
-            }
-            if (event.type === "tool-call") {
-              const payload = event.payload as {
-                toolName?: string;
-                toolCallId?: string;
-                input?: unknown;
-              };
               await emit("tool-call", {
-                toolName: payload.toolName ?? "unknown",
-                toolCallId: payload.toolCallId ?? "unknown",
-                input: payload.input
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                input: event.input
               });
+              return;
             }
+
             if (event.type === "tool-result") {
-              const payload = event.payload as {
-                toolName?: string;
-                toolCallId?: string;
-                output?: unknown;
-              };
+              toolCalls.push({
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                status: "result",
+                detail: JSON.stringify(event.output ?? {}),
+                at: new Date().toISOString()
+              });
               await emit("tool-result", {
-                toolName: payload.toolName ?? "unknown",
-                toolCallId: payload.toolCallId ?? "unknown",
-                output: payload.output
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                output: event.output
               });
+              return;
             }
-            if (event.type === "tool-error") {
-              const payload = event.payload as {
-                toolName?: string;
-                toolCallId?: string;
-                message?: string;
-              };
-              await emit("tool-error", {
-                toolName: payload.toolName ?? "unknown",
-                toolCallId: payload.toolCallId ?? "unknown",
-                message: payload.message ?? "tool execution failed"
-              });
-            }
+
+            toolCalls.push({
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              status: "error",
+              detail: event.message,
+              at: new Date().toISOString()
+            });
+            await emit("tool-error", {
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              message: event.message
+            });
+          },
+          onStep: async ({ step }) => {
+            await emit("state", {
+              node: step.node,
+              status: step.status,
+              detail: step.detail ?? "",
+              inputSummary: step.inputSummary,
+              outputSummary: step.outputSummary,
+              errorSummary: step.errorSummary
+            });
           }
         }
       );
 
-      appendStep("generate-sql", "success", draft.provider, {
-        outputSummary: draft.sql
-      });
-
-      const safety = this.safetyNode.run(draft.sql);
-      if (!safety.safe) {
-        appendStep("safety-check", "failed", safety.reason, {
-          errorSummary: safety.reason
-        });
-        const run: SqlRun = {
-          runId,
-          sessionId,
-          question: message,
-          status: "rejected",
-          provider: draft.provider,
-          model: draft.model,
-          sql: draft.sql,
-          explanation: draft.explanation,
-          error: safety.reason,
-          trace: {
-            runId,
-            provider: draft.provider,
-            retryCount: 0,
-            steps: traceSteps,
-            streamStatus: "failed",
-            toolCalls
-          },
-          llmRaw: {
-            provider: draft.provider,
-            model: draft.model,
-            rawText: draft.rawText,
-            createdAt: new Date().toISOString()
-          },
-          createdAt: new Date().toISOString()
-        };
+      run.trace.streamStatus = run.error ? "failed" : "completed";
+      run.trace.toolCalls = toolCalls;
+      if (run.error) {
         await emit("error", {
-          code: "SQL_READONLY_REJECTED",
-          message: safety.reason,
+          code: run.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
+          message: run.error,
           details: null
         });
-        await this.persistAssistantAndRun(
-          sessionId,
-          run,
-          userPersistResult.primaryPersisted
-        );
-        return run;
       }
-
-      appendStep("safety-check", "success", "SQL 通过只读校验。");
-      const execution = await this.executeNode.run(draft.sql);
-      appendStep("execute-sql", "success", `rows=${execution.rows.length}`, {
-        outputSummary: JSON.stringify({
-          rowCount: execution.rows.length,
-          columns: execution.columns
-        })
-      });
-      const answer = this.formatNode.run(
-        message,
-        execution.rows,
-        execution.columns
-      );
-      appendStep("format-answer", "success", "结果已格式化。", {
-        outputSummary: answer
-      });
-
-      const run: SqlRun = {
-        runId,
-        sessionId,
-        question: message,
-        status: "executionResult",
-        provider: draft.provider,
-        model: draft.model,
-        sql: draft.sql,
-        explanation: draft.explanation,
-        answer,
-        rows: execution.rows,
-        columns: execution.columns,
-        trace: {
-          runId,
-          provider: draft.provider,
-          retryCount: 0,
-          steps: traceSteps,
-          streamStatus: "completed",
-          toolCalls
-        },
-        llmRaw: {
-          provider: draft.provider,
-          model: draft.model,
-          rawText: draft.rawText,
-          createdAt: new Date().toISOString()
-        },
-        createdAt: new Date().toISOString()
-      };
-
       await emit("finish", {
         status: run.status,
         rowCount: run.rows?.length ?? 0
@@ -478,9 +316,6 @@ export class ChatService {
       return run;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
-      appendStep("generate-sql", "failed", messageText, {
-        errorSummary: messageText
-      });
       const run: SqlRun = {
         runId,
         sessionId,
@@ -493,7 +328,7 @@ export class ChatService {
           runId,
           provider: session.modelProvider ?? "unknown",
           retryCount: 0,
-          steps: traceSteps,
+          steps: [],
           streamStatus: "failed",
           toolCalls
         },

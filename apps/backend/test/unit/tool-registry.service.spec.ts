@@ -1,8 +1,8 @@
-import { SqlReadonlyTool } from "../../src/modules/llm/tools/sql-readonly.tool";
-import { ToolExecutionGuard } from "../../src/modules/llm/tools/tool-execution-guard";
-import { ToolRegistryService } from "../../src/modules/llm/tools/tool-registry.service";
+import { SqlReadonlyTool } from "../../src/modules/agent/sql/tools/sql-readonly.tool";
+import { SqlSafetyGuard } from "../../src/modules/agent/sql/tools/sql-safety.guard";
+import { SqlToolRegistryService } from "../../src/modules/agent/sql/tools/sql-tool-registry.service";
 
-describe("ToolRegistryService", () => {
+describe("SqlToolRegistryService", () => {
   it("should expose read-only sql tool", async () => {
     const sqliteQuery = {
       query: jest.fn(async () => ({
@@ -10,9 +10,9 @@ describe("ToolRegistryService", () => {
         columns: ["status", "order_count"]
       }))
     };
-    const guard = new ToolExecutionGuard();
+    const guard = new SqlSafetyGuard();
     const sqlTool = new SqlReadonlyTool(sqliteQuery as never, guard);
-    const registry = new ToolRegistryService(sqlTool);
+    const registry = new SqlToolRegistryService(sqlTool);
 
     const tools = registry.getTools();
     expect(tools.runReadOnlySql).toBeTruthy();

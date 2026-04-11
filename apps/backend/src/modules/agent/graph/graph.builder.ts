@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { SqlRun } from "@text2sql/shared-types";
+import type { ExecutionTraceStep, SqlRun } from "@text2sql/shared-types";
+import type {
+  LlmGatewayStreamEvent,
+  LlmGatewayToolDefinition
+} from "../../llm/llm-gateway.interface";
 import type { GraphInput } from "./agent.types";
 import {
   createInitialLangGraphState,
@@ -10,6 +14,13 @@ import {
 import { LangGraphRuntimeService } from "./langgraph.runtime";
 import { LangsmithTraceService } from "../../observability/langsmith-trace.service";
 
+export interface GraphRunOptions {
+  streamMode?: boolean;
+  tools?: Record<string, LlmGatewayToolDefinition>;
+  onLlmEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
+  onStep?: (event: LangGraphSpanEvent) => Promise<void> | void;
+}
+
 @Injectable()
 export class GraphBuilderService {
   constructor(
@@ -17,7 +28,7 @@ export class GraphBuilderService {
     private readonly langsmithTrace: LangsmithTraceService
   ) {}
 
-  async run(input: GraphInput): Promise<SqlRun> {
+  async run(input: GraphInput, options?: GraphRunOptions): Promise<SqlRun> {
     const traceContext = normalizeTraceContext(input.traceContext);
     const initialState = createInitialLangGraphState(
       {
@@ -43,7 +54,15 @@ export class GraphBuilderService {
       runtimeState = await this.langGraphRuntime.invoke(initialState, {
         configurable: {
           thread_id: input.runId,
-          runId: input.runId
+          runId: input.runId,
+          streamMode: options?.streamMode,
+          tools: options?.tools,
+          onLlmEvent: options?.onLlmEvent,
+          onStep: async (step: ExecutionTraceStep) => {
+            await options?.onStep?.({
+              step
+            });
+          }
         }
       });
       this.flushSpanEvents(rootTrace, runtimeState.spanEvents);
