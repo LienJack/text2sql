@@ -125,8 +125,28 @@ export async function sendMessageStream(
   message: string,
   handlers?: {
     onEvent?: (event: ChatStreamEvent) => void;
+    abortSignal?: AbortSignal;
   }
 ): Promise<void> {
+  for await (const event of streamMessageEvents(
+    sessionId,
+    message,
+    handlers?.abortSignal
+  )) {
+    handlers?.onEvent?.(event);
+    if (event.type === "error") {
+      const messageText =
+        (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
+      throw new Error(messageText);
+    }
+  }
+}
+
+export async function* streamMessageEvents(
+  sessionId: string,
+  message: string,
+  abortSignal?: AbortSignal
+): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
   const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
@@ -136,6 +156,7 @@ export async function sendMessageStream(
       "x-user-role": role,
       "x-user-id": userId
     },
+    signal: abortSignal,
     body: JSON.stringify({
       message
     })
@@ -174,11 +195,9 @@ export async function sendMessageStream(
       const eventType = eventLine.replace(/^event:\s*/, "");
       const payload = dataLine.replace(/^data:\s*/, "");
       const event = JSON.parse(payload) as ChatStreamEvent;
-      handlers?.onEvent?.(event);
+      yield event;
       if (eventType === "error") {
-        const messageText =
-          (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
-        throw new Error(messageText);
+        return;
       }
     }
   }

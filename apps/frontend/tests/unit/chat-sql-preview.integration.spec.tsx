@@ -11,7 +11,7 @@ import {
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
-  sendMessageStream
+  streamMessageEvents
 } from "@/lib/api-client";
 import { createMockMessages, createMockRun } from "./fixtures";
 
@@ -24,6 +24,7 @@ vi.mock("@/lib/api-client", () => ({
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
+  streamMessageEvents: vi.fn(),
   getMessages: vi.fn()
 }));
 
@@ -34,7 +35,7 @@ const mockRenameSession = vi.mocked(renameSession);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
-const mockSendMessageStream = vi.mocked(sendMessageStream);
+const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
 
 describe("chat to sql preview integration", () => {
@@ -76,8 +77,8 @@ describe("chat to sql preview integration", () => {
       ...session,
       debugEnabled: true
     });
-    mockSendMessageStream.mockImplementation(async (_sessionId, _message, handlers) => {
-      handlers?.onEvent?.({
+    mockStreamMessageEvents.mockImplementation(async function* () {
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",
@@ -85,7 +86,17 @@ describe("chat to sql preview integration", () => {
         data: {
           text: "SELECT * FROM orders LIMIT 20"
         }
-      });
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 20
+        }
+      };
     });
     mockGetMessages.mockResolvedValue({
       session,
@@ -110,10 +121,10 @@ describe("chat to sql preview integration", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     await waitFor(() => {
-      expect(mockSendMessageStream).toHaveBeenCalled();
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText("返回最近 20 条订单。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
     expect(screen.getByText("SELECT * FROM orders LIMIT 20")).toBeInTheDocument();
   });
 });

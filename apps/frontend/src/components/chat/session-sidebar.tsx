@@ -38,6 +38,13 @@ function displayTitle(session: Session): string {
   return title ? title : "新会话";
 }
 
+function shortSessionId(sessionId: string): string {
+  if (sessionId.length <= 16) {
+    return sessionId;
+  }
+  return `${sessionId.slice(0, 8)}…${sessionId.slice(-6)}`;
+}
+
 export function SessionSidebar({
   sessions,
   activeSessionId,
@@ -95,11 +102,11 @@ export function SessionSidebar({
   };
 
   return (
-    <aside className={cn("flex h-full w-full flex-col bg-slate-50/70", className)}>
-      <div className="space-y-3 border-b border-slate-200 p-4">
+    <aside className={cn("flex h-full w-full flex-col bg-[#171717] text-zinc-200", className)}>
+      <div className="space-y-3 border-b border-zinc-800/90 p-4">
         <Button
           variant="default"
-          className="w-full justify-start gap-2 font-semibold shadow-sm"
+          className="h-10 w-full justify-start gap-2 rounded-xl bg-zinc-100 font-semibold text-zinc-900 shadow-none hover:bg-zinc-200"
           disabled={loading}
           onClick={onCreateSession}
         >
@@ -107,23 +114,33 @@ export function SessionSidebar({
           新建会话
         </Button>
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索历史会话..."
-            className="pl-9"
+            className="h-9 rounded-lg border-zinc-700 bg-zinc-900/80 pl-9 text-zinc-100 placeholder:text-zinc-500"
           />
         </div>
       </div>
 
-      {error ? <StateBlock variant="error" className="mx-3 mt-3">{error}</StateBlock> : null}
-      {actionError ? <StateBlock variant="error" className="mx-3 mt-3">{actionError}</StateBlock> : null}
+      {error ? (
+        <StateBlock variant="error" className="mx-3 mt-3 border-red-900/70 bg-red-950/40 text-red-200">
+          {error}
+        </StateBlock>
+      ) : null}
+      {actionError ? (
+        <StateBlock variant="error" className="mx-3 mt-3 border-red-900/70 bg-red-950/40 text-red-200">
+          {actionError}
+        </StateBlock>
+      ) : null}
 
       <ScrollArea className="flex-1">
-        <div className="space-y-2 p-3">
+        <div className="space-y-2 p-3 pb-8">
           {filteredSessions.length === 0 ? (
-            <StateBlock variant="idle">暂无会话，点击“新建会话”开始。</StateBlock>
+            <StateBlock variant="idle" className="border-zinc-700 bg-zinc-900/80 text-zinc-300">
+              暂无会话，点击“新建会话”开始。
+            </StateBlock>
           ) : null}
 
           {filteredSessions.map((session) => {
@@ -135,7 +152,7 @@ export function SessionSidebar({
               return (
                 <form
                   key={session.id}
-                  className="space-y-2 rounded-lg border border-slate-200 bg-white p-3"
+                  className="space-y-2 rounded-xl border border-zinc-700 bg-zinc-900 p-3"
                   onSubmit={(event) => {
                     void onRenameSubmit(event, session.id);
                   }}
@@ -152,11 +169,11 @@ export function SessionSidebar({
                       }
                     }}
                   />
-                  <div className="flex items-center gap-2">
-                    <Button type="submit" size="xs" variant="secondary">
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button type="submit" size="xs" variant="secondary" className="bg-zinc-100 text-zinc-900">
                       保存
                     </Button>
-                    <Button type="button" size="xs" variant="ghost" onClick={cancelRename}>
+                    <Button type="button" size="xs" variant="ghost" className="text-zinc-300" onClick={cancelRename}>
                       取消
                     </Button>
                   </div>
@@ -168,20 +185,25 @@ export function SessionSidebar({
               <article
                 key={session.id}
                 className={cn(
-                  "group rounded-md border px-3 py-3 transition-colors",
+                  "group rounded-xl border px-3 py-3 transition-colors",
                   active
-                    ? "border-teal-200 bg-teal-50 shadow-sm"
-                    : "border-transparent bg-transparent hover:bg-slate-100/50"
+                    ? "border-zinc-600 bg-zinc-800/95 shadow-sm"
+                    : "border-transparent bg-transparent hover:bg-zinc-800/70"
                 )}
               >
                 <div className="flex items-start gap-2">
                   <button
                     type="button"
                     className="min-w-0 flex-1 text-left"
+                    title={session.id}
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <p className="truncate text-sm font-medium text-slate-900">{displayTitle(session)}</p>
-                    <p className="mt-1 truncate text-xs text-slate-500">{session.id}</p>
+                    <p className="line-clamp-2 text-sm leading-5 font-medium text-zinc-100">
+                      {displayTitle(session)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      {shortSessionId(session.id)}
+                    </p>
                   </button>
                   <SessionActions
                     disabled={loading}
@@ -192,7 +214,7 @@ export function SessionSidebar({
                   />
                 </div>
                 {badge ? (
-                  <Badge variant="outline" className="mt-2 text-[11px]">
+                  <Badge variant="outline" className="mt-2 border-amber-600/50 bg-amber-900/20 text-[11px] text-amber-300">
                     {badge}
                   </Badge>
                 ) : null}
