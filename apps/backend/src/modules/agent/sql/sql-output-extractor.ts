@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { DomainError } from "../../common/domain-error";
+import { DomainError } from "../../../common/domain-error";
 
 export interface ExtractedSql {
   sql: string;
@@ -7,7 +7,7 @@ export interface ExtractedSql {
 }
 
 @Injectable()
-export class FreeTextSqlExtractor {
+export class SqlOutputExtractor {
   extract(rawText: string): ExtractedSql {
     const sqlFromCodeBlock = this.extractFromCodeBlock(rawText);
     if (sqlFromCodeBlock) {
@@ -62,4 +62,3 @@ export class FreeTextSqlExtractor {
       .slice(0, 1500);
   }
 }
-

@@ -9,6 +9,12 @@ import { GenerateSqlNode } from "./nodes/generate-sql.node";
 import { SafetyCheckNode } from "./nodes/safety-check.node";
 import { ExecuteSqlNode } from "./nodes/execute-sql.node";
 import { FormatAnswerNode } from "./nodes/format-answer.node";
+import { SqlGenerationService } from "./sql/sql-generation.service";
+import { SqlOutputExtractor } from "./sql/sql-output-extractor";
+import { SqlPromptBuilder } from "./sql/sql-prompt.builder";
+import { SqlReadonlyTool } from "./sql/tools/sql-readonly.tool";
+import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
+import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
 
 @Module({
   imports: [DataModule, LlmModule, ObservabilityModule],
@@ -19,14 +25,21 @@ import { FormatAnswerNode } from "./nodes/format-answer.node";
     GenerateSqlNode,
     SafetyCheckNode,
     ExecuteSqlNode,
-    FormatAnswerNode
+    FormatAnswerNode,
+    SqlPromptBuilder,
+    SqlOutputExtractor,
+    SqlGenerationService,
+    SqlSafetyGuard,
+    SqlReadonlyTool,
+    SqlToolRegistryService
   ],
   exports: [
     GraphBuilderService,
     ClarifyNode,
     SafetyCheckNode,
     ExecuteSqlNode,
-    FormatAnswerNode
+    FormatAnswerNode,
+    SqlToolRegistryService
   ]
 })
 export class AgentModule {}

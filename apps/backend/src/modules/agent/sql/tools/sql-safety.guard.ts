@@ -1,8 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import { DomainError } from "../../../common/domain-error";
+import { DomainError } from "../../../../common/domain-error";
 
 @Injectable()
-export class ToolExecutionGuard {
+export class SqlSafetyGuard {
   private readonly forbiddenKeywords = [
     "insert",
     "update",

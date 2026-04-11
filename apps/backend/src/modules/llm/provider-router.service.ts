@@ -1,30 +1,20 @@
 import { Injectable } from "@nestjs/common";
 import { AppConfigService } from "../config/app-config.service";
-import { FreeTextSqlExtractor } from "./free-text-sql-extractor";
 import { LlmGatewayService } from "./llm-gateway.service";
 import type {
+  LlmGatewayPrompt,
   LlmGatewayRuntimeConfig,
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
 } from "./llm-gateway.interface";
 import { ProviderCatalogService } from "./provider-catalog.service";
 
-export interface SqlDraft {
+export interface LlmDraft {
   provider: string;
   model: string;
   modelCatalogId?: string;
-  sql: string;
-  explanation: string;
   rawText: string;
-  prompt: {
-    systemPrompt: string;
-    userPrompt: string;
-  };
-}
-
-export interface SqlStreamEvent {
-  type: "text-delta" | "tool-call" | "tool-result" | "tool-error";
-  payload: string | Record<string, unknown>;
+  prompt: LlmGatewayPrompt;
 }
 
 @Injectable()
@@ -32,82 +22,44 @@ export class ProviderRouterService {
   constructor(
     private readonly config: AppConfigService,
     private readonly providerCatalog: ProviderCatalogService,
-    private readonly llmGateway: LlmGatewayService,
-    private readonly extractor: FreeTextSqlExtractor
+    private readonly llmGateway: LlmGatewayService
   ) {}
 
-  async generateSql(
-    question: string,
+  async generate(
+    prompt: LlmGatewayPrompt,
     selection?: {
       modelCatalogId?: string;
     }
-  ): Promise<SqlDraft> {
-    const prompt = this.buildPrompt(question);
+  ): Promise<LlmDraft> {
     const resolved = await this.resolveRuntime(selection?.modelCatalogId);
-
-    const completion = await this.llmGateway.generate(
-      prompt,
-      resolved.runtime
-    );
-
-    const extracted = this.extractor.extract(completion.rawText);
+    const completion = await this.llmGateway.generate(prompt, resolved.runtime);
     return {
       provider: completion.provider,
       model: completion.model,
       modelCatalogId: resolved.modelCatalogId,
-      sql: extracted.sql,
-      explanation: extracted.explanation || completion.rawText,
       rawText: completion.rawText,
       prompt
     };
   }
 
-  async streamSql(
-    question: string,
+  async stream(
+    prompt: LlmGatewayPrompt,
     selection?: {
       modelCatalogId?: string;
     },
     options?: {
       tools?: Record<string, LlmGatewayToolDefinition>;
-      onEvent?: (event: SqlStreamEvent) => Promise<void> | void;
+      onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }
-  ): Promise<SqlDraft> {
-    const prompt = this.buildPrompt(question);
+  ): Promise<LlmDraft> {
     const resolved = await this.resolveRuntime(selection?.modelCatalogId);
-    const completion = await this.llmGateway.stream(prompt, resolved.runtime, {
-      tools: options?.tools,
-      onEvent: async (event) => {
-        await options?.onEvent?.(this.toSqlStreamEvent(event));
-      }
-    });
-    const extracted = this.extractor.extract(completion.rawText);
+    const completion = await this.llmGateway.stream(prompt, resolved.runtime, options);
     return {
       provider: completion.provider,
       model: completion.model,
       modelCatalogId: resolved.modelCatalogId,
-      sql: extracted.sql,
-      explanation: extracted.explanation || completion.rawText,
       rawText: completion.rawText,
       prompt
-    };
-  }
-
-  private buildPrompt(question: string): {
-    systemPrompt: string;
-    userPrompt: string;
-  } {
-    return {
-      systemPrompt: [
-        "You are a senior SQL analyst for a SQLite ecommerce database.",
-        "Only produce read-only SQL queries.",
-        "Prefer SELECT or WITH ... SELECT statements.",
-        "Never generate INSERT/UPDATE/DELETE/DDL.",
-        "Respond in free text with explanation plus SQL in a markdown code block."
-      ].join(" "),
-      userPrompt: [
-        `Question: ${question}`,
-        "Return one best SQL query and a short explanation."
-      ].join("\n")
     };
   }
 
@@ -157,42 +109,5 @@ export class ProviderRouterService {
         }
       };
     }
-  }
-
-  private toSqlStreamEvent(event: LlmGatewayStreamEvent): SqlStreamEvent {
-    if (event.type === "text-delta") {
-      return {
-        type: "text-delta",
-        payload: event.text
-      };
-    }
-    if (event.type === "tool-call") {
-      return {
-        type: "tool-call",
-        payload: {
-          toolName: event.toolName,
-          toolCallId: event.toolCallId,
-          input: event.input
-        }
-      };
-    }
-    if (event.type === "tool-result") {
-      return {
-        type: "tool-result",
-        payload: {
-          toolName: event.toolName,
-          toolCallId: event.toolCallId,
-          output: event.output
-        }
-      };
-    }
-    return {
-      type: "tool-error",
-      payload: {
-        toolName: event.toolName,
-        toolCallId: event.toolCallId,
-        message: event.message
-      }
-    };
   }
 }

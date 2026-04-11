@@ -1,7 +1,7 @@
-import { ToolExecutionGuard } from "../../src/modules/llm/tools/tool-execution-guard";
+import { SqlSafetyGuard } from "../../src/modules/agent/sql/tools/sql-safety.guard";
 
-describe("ToolExecutionGuard", () => {
-  const guard = new ToolExecutionGuard();
+describe("SqlSafetyGuard", () => {
+  const guard = new SqlSafetyGuard();
 
   it("should allow read-only select sql", () => {
     expect(() =>
