@@ -411,20 +411,29 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   async getMessages(
     sessionId: string,
     page = 1,
-    pageSize = 50
+    pageSize = 0
   ): Promise<ChatMessage[]> {
     const inMemory = this.messages.get(sessionId) ?? [];
     if (inMemory.length > 0 || !this.prisma) {
       return this.paginate(inMemory, page, pageSize);
     }
 
+    const query: {
+      where: { sessionId: string };
+      orderBy: { createdAt: "asc" };
+      skip?: number;
+      take?: number;
+    } = {
+      where: { sessionId },
+      orderBy: { createdAt: "asc" }
+    };
+    if (pageSize > 0) {
+      query.skip = (page - 1) * pageSize;
+      query.take = pageSize;
+    }
+
     const rows = (await this.tryPrismaRead(async () =>
-      this.prisma?.message.findMany({
-        where: { sessionId },
-        orderBy: { createdAt: "asc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize
-      })
+      this.prisma?.message.findMany(query)
     )) as Array<{
       id: string;
       sessionId: string;
@@ -752,6 +761,9 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   }
 
   private paginate<T>(items: T[], page: number, pageSize: number): T[] {
+    if (pageSize <= 0) {
+      return [...items];
+    }
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
     return items.slice(start, end);

@@ -79,6 +79,20 @@ describe("chat to sql preview integration", () => {
     });
     mockStreamMessageEvents.mockImplementation(async function* () {
       yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "generate-sql",
+          status: "success",
+          detail: "volcengine",
+          stage: "generation",
+          title: "生成 SQL",
+          durationMs: 12
+        }
+      };
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",

@@ -13,6 +13,7 @@ import {
 } from "@assistant-ui/react";
 import { ArrowDown } from "lucide-react";
 import { AssistantComposer } from "@/components/chat/assistant-composer";
+import type { ThinkingStreamStep } from "@/components/chat/assistant-thinking-panel";
 import {
   AssistantMessageBubble,
   UserMessageBubble
@@ -26,6 +27,8 @@ interface AssistantThreadProps {
   sessionId: string;
   messages: ChatMessage[];
   run: SqlRun | null;
+  thinkingSteps: ThinkingStreamStep[];
+  thinkingInProgress: boolean;
   debugEnabled: boolean;
   disabled?: boolean;
   onRunStart?: () => void;
@@ -38,6 +41,8 @@ export function AssistantThread({
   sessionId,
   messages,
   run,
+  thinkingSteps,
+  thinkingInProgress,
   debugEnabled,
   disabled = false,
   onRunStart,
@@ -96,6 +101,8 @@ export function AssistantThread({
                     <AssistantMessageBubble
                       run={isLatestAssistant ? run : null}
                       debugEnabled={debugEnabled}
+                      thinkingSteps={isLatestAssistant ? thinkingSteps : []}
+                      thinkingInProgress={isLatestAssistant && thinkingInProgress}
                       openSqlSignal={isLatestAssistant ? sqlOpenSignal : 0}
                       highlightSql={isLatestAssistant}
                     />

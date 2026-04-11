@@ -189,12 +189,13 @@ export class ChatController {
   async getMessages(
     @Param("sessionId") sessionId: string,
     @Query("page") pageRaw = "1",
-    @Query("pageSize") pageSizeRaw = "50",
+    @Query("pageSize") pageSizeRaw = "0",
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
       const page = Number.parseInt(pageRaw, 10) || 1;
-      const pageSize = Number.parseInt(pageSizeRaw, 10) || 50;
+      const parsedPageSize = Number.parseInt(pageSizeRaw, 10);
+      const pageSize = Number.isNaN(parsedPageSize) ? 0 : parsedPageSize;
       const data = await this.chatService.getSessionView(sessionId, page, pageSize);
       return ok(req.requestId, data);
     } catch (error) {

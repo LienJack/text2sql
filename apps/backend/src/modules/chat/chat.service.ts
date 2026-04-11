@@ -3,6 +3,7 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
+  ReasoningStage,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -291,6 +292,12 @@ export class ChatService {
               node: step.node,
               status: step.status,
               detail: step.detail ?? "",
+              stage: this.resolveReasoningStage(step.node),
+              title: this.resolveReasoningTitle(step.node),
+              at: step.at,
+              startedAt: step.startedAt,
+              endedAt: step.endedAt,
+              durationMs: step.durationMs,
               inputSummary: step.inputSummary,
               outputSummary: step.outputSummary,
               errorSummary: step.errorSummary
@@ -350,7 +357,7 @@ export class ChatService {
   async listMessages(
     sessionId: string,
     page = 1,
-    pageSize = 50
+    pageSize = 0
   ): Promise<ChatMessage[]> {
     const session = await this.repository.getSessionById(sessionId);
     if (!session) {
@@ -371,7 +378,7 @@ export class ChatService {
   async getSessionView(
     sessionId: string,
     page = 1,
-    pageSize = 50
+    pageSize = 0
   ): Promise<ChatSessionView> {
     const session = await this.repository.getSessionById(sessionId);
     if (!session) {
@@ -429,6 +436,40 @@ export class ChatService {
         sessionId,
         new Date().toISOString()
       );
+    }
+  }
+
+  private resolveReasoningStage(node: string): ReasoningStage {
+    switch (node) {
+      case "clarify":
+        return "analysis";
+      case "generate-sql":
+        return "generation";
+      case "safety-check":
+        return "validation";
+      case "execute-sql":
+        return "execution";
+      case "format-answer":
+        return "response";
+      default:
+        return "unknown";
+    }
+  }
+
+  private resolveReasoningTitle(node: string): string {
+    switch (node) {
+      case "clarify":
+        return "理解问题";
+      case "generate-sql":
+        return "生成 SQL";
+      case "safety-check":
+        return "安全校验";
+      case "execute-sql":
+        return "执行查询";
+      case "format-answer":
+        return "整理回答";
+      default:
+        return node;
     }
   }
 }

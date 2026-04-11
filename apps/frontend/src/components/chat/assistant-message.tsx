@@ -1,8 +1,9 @@
 "use client";
 
-import type { SqlRun } from "@text2sql/shared-types";
+import type { ExecutionTraceStep, ReasoningStage, SqlRun } from "@text2sql/shared-types";
 import { MessagePartPrimitive, MessagePrimitive } from "@assistant-ui/react";
 import { Database } from "lucide-react";
+import { AssistantThinkingPanel } from "@/components/chat/assistant-thinking-panel";
 import { SqlInlinePanel } from "@/components/chat/sql-inline-panel";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +37,8 @@ export function UserMessageBubble() {
 interface AssistantMessageBubbleProps {
   run: SqlRun | null;
   debugEnabled: boolean;
+  thinkingSteps: Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>;
+  thinkingInProgress: boolean;
   openSqlSignal?: number;
   highlightSql?: boolean;
 }
@@ -43,6 +46,8 @@ interface AssistantMessageBubbleProps {
 export function AssistantMessageBubble({
   run,
   debugEnabled,
+  thinkingSteps,
+  thinkingInProgress,
   openSqlSignal = 0,
   highlightSql = false
 }: AssistantMessageBubbleProps) {
@@ -60,6 +65,11 @@ export function AssistantMessageBubble({
             }}
           />
         </div>
+        <AssistantThinkingPanel
+          run={run}
+          streamSteps={thinkingSteps}
+          inProgress={thinkingInProgress}
+        />
         <SqlInlinePanel
           run={run}
           debugEnabled={debugEnabled}

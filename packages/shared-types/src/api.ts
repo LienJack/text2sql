@@ -2,6 +2,13 @@ export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 export type StreamStatus = "in_progress" | "completed" | "failed";
+export type ReasoningStage =
+  | "analysis"
+  | "generation"
+  | "validation"
+  | "execution"
+  | "response"
+  | "unknown";
 export type LlmProviderCode =
   | "openai"
   | "gemini"
@@ -155,6 +162,12 @@ export type ChatStreamEventData =
       node: string;
       status: "success" | "failed" | "skipped";
       detail: string;
+      stage?: ReasoningStage;
+      title?: string;
+      at?: string;
+      startedAt?: string;
+      endedAt?: string;
+      durationMs?: number;
       inputSummary?: string;
       outputSummary?: string;
       errorSummary?: string;

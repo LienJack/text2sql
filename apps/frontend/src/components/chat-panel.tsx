@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ChatMessage, ModelCatalogItem, Session, SqlRun } from "@text2sql/shared-types";
+import type {
+  ChatMessage,
+  ChatStreamEvent,
+  ExecutionTraceStep,
+  ModelCatalogItem,
+  ReasoningStage,
+  Session,
+  SqlRun
+} from "@text2sql/shared-types";
 import { Menu } from "lucide-react";
 import { AssistantThread } from "@/components/chat/assistant-thread";
 import { ModelSelector } from "@/components/chat/model-selector";
@@ -19,12 +27,75 @@ import {
   setSessionModel
 } from "@/lib/api-client";
 
+interface ThinkingStateEventData {
+  node: string;
+  status: ExecutionTraceStep["status"];
+  detail: string;
+  stage?: ReasoningStage;
+  title?: string;
+  at?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  inputSummary?: string;
+  outputSummary?: string;
+  errorSummary?: string;
+}
+
+function toThinkingStep(event: ChatStreamEvent): (ExecutionTraceStep & { stage?: ReasoningStage; title?: string }) | null {
+  if (event.type !== "state") {
+    return null;
+  }
+  const payload = event.data as ThinkingStateEventData;
+  return {
+    node: payload.node,
+    status: payload.status,
+    detail: payload.detail,
+    at: payload.at ?? event.at,
+    startedAt: payload.startedAt,
+    endedAt: payload.endedAt,
+    durationMs: payload.durationMs,
+    inputSummary: payload.inputSummary,
+    outputSummary: payload.outputSummary,
+    errorSummary: payload.errorSummary,
+    stage: payload.stage,
+    title: payload.title
+  };
+}
+
+function mergeSessionMessages(
+  previous: ChatMessage[],
+  incoming: ChatMessage[],
+  sessionId: string
+): ChatMessage[] {
+  const merged = new Map<string, ChatMessage>();
+  for (const message of previous) {
+    if (message.sessionId !== sessionId) {
+      continue;
+    }
+    merged.set(message.id, message);
+  }
+  for (const message of incoming) {
+    if (message.sessionId !== sessionId) {
+      continue;
+    }
+    merged.set(message.id, message);
+  }
+  return Array.from(merged.values()).sort((left, right) =>
+    left.createdAt.localeCompare(right.createdAt)
+  );
+}
+
 export function ChatPanel() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [lastRun, setLastRun] = useState<SqlRun | null>(null);
+  const [thinkingSteps, setThinkingSteps] = useState<
+    Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>
+  >([]);
+  const [thinkingInProgress, setThinkingInProgress] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [sessionError, setSessionError] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
@@ -46,8 +117,12 @@ export function ChatPanel() {
 
   const loadMessages = async (targetSessionId: string): Promise<void> => {
     const sessionView = await getMessages(targetSessionId);
-    setMessages(sessionView.messages);
+    setMessages((previous) =>
+      mergeSessionMessages(previous, sessionView.messages, targetSessionId)
+    );
     setLastRun(sessionView.latestRun ?? null);
+    setThinkingSteps([]);
+    setThinkingInProgress(false);
     setThreadVersion((previous) => previous + 1);
     setSessions((previous) => {
       const index = previous.findIndex((session) => session.id === sessionView.session.id);
@@ -109,6 +184,8 @@ export function ChatPanel() {
       setSessionId(created.id);
       setMessages([]);
       setLastRun(null);
+      setThinkingSteps([]);
+      setThinkingInProgress(false);
       setThreadVersion((previous) => previous + 1);
       if (!latest.some((session) => session.id === created.id)) {
         setSessions([created, ...latest]);
@@ -144,6 +221,8 @@ export function ChatPanel() {
         setSessions([created]);
         setSessionId(created.id);
         setMessages([]);
+        setThinkingSteps([]);
+        setThinkingInProgress(false);
         setThreadVersion((previous) => previous + 1);
       }
       setLastRun(null);
@@ -258,9 +337,24 @@ export function ChatPanel() {
           sessionId={sessionId}
           messages={messages}
           run={lastRun}
+          thinkingSteps={thinkingSteps}
+          thinkingInProgress={thinkingInProgress}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
           disabled={sessionLoading || !sessionId}
+          onRunStart={() => {
+            setLastRun(null);
+            setThinkingSteps([]);
+            setThinkingInProgress(true);
+          }}
+          onStreamEvent={(event) => {
+            const step = toThinkingStep(event);
+            if (!step) {
+              return;
+            }
+            setThinkingSteps((previous) => [...previous, step]);
+          }}
           onRunFinish={async () => {
+            setThinkingInProgress(false);
             if (!sessionId) {
               return;
             }
@@ -268,6 +362,7 @@ export function ChatPanel() {
             await refreshSessions();
           }}
           onRunError={async () => {
+            setThinkingInProgress(false);
             if (sessionId) {
               await loadMessages(sessionId).catch(() => undefined);
             }

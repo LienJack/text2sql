@@ -88,6 +88,20 @@ describe("ChatPanel", () => {
         }
       };
       yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "generate-sql",
+          status: "success",
+          detail: "volcengine",
+          stage: "generation",
+          title: "生成 SQL",
+          durationMs: 18
+        }
+      };
+      yield {
         type: "text-delta",
         runId: "run-1",
         sessionId: "session-1",
@@ -138,6 +152,11 @@ describe("ChatPanel", () => {
     });
 
     expect(screen.queryByText("发送成功，已收到后端响应。")).not.toBeInTheDocument();
+    expect(screen.getByText("AI 思考过程")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
+    expect(screen.getByText("已为你生成 SQL，并展示结果。")).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
     expect(
       screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
