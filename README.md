@@ -66,7 +66,13 @@ cp apps/frontend/.env.example apps/frontend/.env
 pnpm --filter @text2sql/backend prisma:generate
 ```
 
-5. 启动前后端
+5. 校验空库迁移回放（发布前强烈建议）
+```bash
+DATABASE_URL=postgresql://admin:admin@localhost:5432/text2sql_ci \
+pnpm --filter @text2sql/backend run prisma:verify-empty-db
+```
+
+6. 启动前后端
 ```bash
 pnpm dev
 ```
@@ -133,6 +139,16 @@ pnpm test
 pnpm test:backend
 pnpm test:frontend
 ```
+
+## 后端发布完成门禁（Prisma V7）
+- 依赖与生成：`pnpm --filter @text2sql/backend run prisma:generate`
+- 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
+- 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
+- 启动 smoke：至少验证 `GET /health`；关键接口建议覆盖：
+  - `POST /api/v1/sessions`
+  - `POST /api/v1/sessions/:sessionId/messages`
+  - `GET /api/v1/settings/models`（管理员上下文）
+- CI 可参考：`.github/workflows/backend-prisma-quality.yml`
 
 ## 前端质量门禁
 ```bash

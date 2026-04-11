@@ -5,12 +5,14 @@
 
 ## 2. 适用范围
 - 适用于 `apps/backend/prisma/schema.prisma`。
+- 适用于 `apps/backend/prisma.config.ts`。
 - 适用于 `apps/backend/prisma/migrations/*/migration.sql`。
 - 适用于所有 PostgreSQL 结构变更（表、列、索引、约束、外键）。
 
 ## 3. 强制约束（MUST）
 - 迁移 SQL 必须由 Prisma CLI 生成，禁止手写或手改 `migration.sql`。
 - 所有结构变更必须先修改 `schema.prisma`，再通过 CLI 生成迁移。
+- Prisma ORM v7 起禁止在 `schema.prisma` 中声明 `datasource.url`，连接串统一配置在 `prisma.config.ts`。
 - 迁移命令必须通过仓库脚本执行，统一使用 `apps/backend/scripts/prisma-with-database-url.cjs` 注入 `DATABASE_URL`。
 - 在 CI/非交互环境只允许执行 `migrate deploy`，禁止执行 `migrate dev`。
 - 合并前必须验证“从空库回放迁移链可成功”，避免 shadow DB 报错（如 `P1014`）。
@@ -25,6 +27,8 @@
    - `pnpm --filter @text2sql/backend exec node scripts/prisma-with-database-url.cjs migrate deploy`
 5. 校验迁移状态：
    - `pnpm --filter @text2sql/backend exec node scripts/prisma-with-database-url.cjs migrate status`
+6. 发布前空库回放校验（推荐统一脚本）：
+   - `pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 
 ## 5. 基线重建流程（仅在迁移链损坏时）
 1. 使用 Prisma CLI 从空 Schema 生成基线 SQL：
@@ -33,9 +37,15 @@
 3. 使用空数据库执行 `migrate deploy`，确认整条迁移链可回放。
 4. 在 PR 说明中明确标注“基线重建”，并附回放验证结果。
 
-## 6. PR 检查清单
+## 6. 回退策略
+- 未引入新迁移时：优先采用“代码版本回退 + `prisma generate` + `migrate status` 复核”。
+- 引入新迁移时：发布前必须准备数据库快照或备份，并演练回滚路径。
+- 任一环境若 `migrate status` 不一致，禁止继续发布，需先修复迁移链状态。
+
+## 7. PR 检查清单
 - [ ] `migration.sql` 由 Prisma CLI 生成，无手工编辑。
 - [ ] `schema.prisma` 与迁移内容一致。
 - [ ] 空库 `migrate deploy` 回放通过。
 - [ ] `migrate status` 显示数据库与迁移目录一致。
+- [ ] 已执行 `prisma:verify-empty-db`（或等效空库回放流程）。
 - [ ] 已执行 `prisma:generate` 并通过后端相关测试。

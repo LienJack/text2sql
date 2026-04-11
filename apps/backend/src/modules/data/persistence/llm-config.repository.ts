@@ -133,23 +133,34 @@ export class LlmConfigRepository implements OnModuleInit, OnModuleDestroy {
       return;
     }
     try {
-      const prismaModule = (await import("@prisma/client")) as unknown as {
+      const prismaClientModulePath = "../../../generated/prisma/client";
+      const prismaModule = (await import(prismaClientModulePath)) as unknown as {
         PrismaClient?: new (...args: unknown[]) => PrismaClientLike;
         default?: {
           PrismaClient?: new (...args: unknown[]) => PrismaClientLike;
         };
       };
+      const adapterModule = (await import("@prisma/adapter-pg")) as unknown as {
+        PrismaPg?: new (...args: unknown[]) => unknown;
+        default?: {
+          PrismaPg?: new (...args: unknown[]) => unknown;
+        };
+      };
       const PrismaCtor =
         prismaModule.PrismaClient ?? prismaModule.default?.PrismaClient;
+      const PrismaPgCtor =
+        adapterModule.PrismaPg ?? adapterModule.default?.PrismaPg;
       if (!PrismaCtor) {
         throw new Error("PrismaClient 未生成，请先执行 prisma generate");
       }
+      if (!PrismaPgCtor) {
+        throw new Error("Prisma PostgreSQL adapter 未安装");
+      }
+      const adapter = new PrismaPgCtor({
+        connectionString: this.appConfig.databaseUrl
+      });
       this.prisma = new PrismaCtor({
-        datasources: {
-          db: {
-            url: this.appConfig.databaseUrl
-          }
-        }
+        adapter
       }) as PrismaClientLike;
       this.logger.log("LLM 配置仓储已启用 PostgreSQL 持久化。");
     } catch (error) {

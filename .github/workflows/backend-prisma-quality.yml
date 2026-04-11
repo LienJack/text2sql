@@ -1,0 +1,122 @@
+name: backend-prisma-quality
+
+on:
+  pull_request:
+    paths:
+      - "apps/backend/**"
+      - "packages/shared-types/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/backend-prisma-quality.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/backend/**"
+      - "packages/shared-types/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/backend-prisma-quality.yml"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/text2sql_ci
+      SQLITE_PATH: data/sqlite/text2sql.db
+      REDIS_URL: ""
+      LLM_PROVIDER: volcengine
+      LLM_MOCK_MODE: "true"
+      LANGSMITH_TRACING: "false"
+      PORT: "3100"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        run: pnpm --filter @text2sql/backend run prisma:generate
+
+      - name: Backend lint
+        run: pnpm --filter @text2sql/backend run lint
+
+      - name: Backend build
+        run: pnpm --filter @text2sql/backend run build
+
+      - name: Backend test
+        run: pnpm --filter @text2sql/backend run test
+
+      - name: Verify empty database migration replay
+        run: pnpm --filter @text2sql/backend run prisma:verify-empty-db
+
+      - name: Start backend
+        run: |
+          pnpm --filter @text2sql/backend run start > /tmp/backend.log 2>&1 &
+          echo $! > /tmp/backend.pid
+
+      - name: Health and API smoke
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3100/health > /tmp/health.json; then
+              break
+            fi
+            sleep 1
+          done
+
+          jq -e '.status == "success"' /tmp/health.json
+          jq -e '.data.dependencies.postgres.configured == true' /tmp/health.json
+
+          session_json=$(curl -sS -X POST http://127.0.0.1:3100/api/v1/sessions \
+            -H "content-type: application/json" \
+            -d '{}')
+          echo "$session_json" | jq -e '.status == "success"'
+
+          session_id=$(echo "$session_json" | jq -r '.data.id')
+          test -n "$session_id"
+          test "$session_id" != "null"
+
+          run_json=$(curl -sS -X POST "http://127.0.0.1:3100/api/v1/sessions/$session_id/messages" \
+            -H "content-type: application/json" \
+            -d '{"message":"统计订单状态分布"}')
+          echo "$run_json" | jq -e '.status == "success"'
+          echo "$run_json" | jq -e '.data.kind == "agent-run"'
+
+          settings_json=$(curl -sS "http://127.0.0.1:3100/api/v1/settings/models" \
+            -H "x-user-role: admin" \
+            -H "x-user-id: ci-admin")
+          echo "$settings_json" | jq -e '.status == "success"'
+
+      - name: Stop backend
+        if: always()
+        run: |
+          if [ -f /tmp/backend.pid ]; then
+            kill "$(cat /tmp/backend.pid)" || true
+          fi
+          if [ -f /tmp/backend.log ]; then
+            tail -n 200 /tmp/backend.log
+          fi
