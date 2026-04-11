@@ -10,6 +10,7 @@ dist/
 coverage/
 .next/
 *.tsbuildinfo
+apps/backend/src/generated/
 
 # Python cache from legacy tests
 __pycache__/
