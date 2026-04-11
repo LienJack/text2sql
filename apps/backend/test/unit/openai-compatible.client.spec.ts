@@ -1,21 +1,21 @@
-import { resolveChatCompletionsUrl } from "../../src/modules/llm/openai-compatible.client";
+import { resolveProviderBaseUrl } from "../../src/modules/llm/llm-model-factory";
 
-describe("resolveChatCompletionsUrl", () => {
-  it("should append /v1/chat/completions when base url has no version", () => {
-    expect(resolveChatCompletionsUrl("https://api.example.com")).toBe(
-      "https://api.example.com/v1/chat/completions"
+describe("resolveProviderBaseUrl", () => {
+  it("should keep base url when no path suffix is provided", () => {
+    expect(resolveProviderBaseUrl("https://api.example.com")).toBe(
+      "https://api.example.com"
     );
   });
 
-  it("should append /chat/completions when base url already ends with version path", () => {
-    expect(resolveChatCompletionsUrl("https://api.example.com/v1")).toBe(
-      "https://api.example.com/v1/chat/completions"
+  it("should keep versioned base url", () => {
+    expect(resolveProviderBaseUrl("https://api.example.com/v1")).toBe(
+      "https://api.example.com/v1"
     );
   });
 
-  it("should keep url when full chat completions path is provided", () => {
-    expect(
-      resolveChatCompletionsUrl("https://api.example.com/v1/chat/completions")
-    ).toBe("https://api.example.com/v1/chat/completions");
+  it("should trim chat completion suffix", () => {
+    expect(resolveProviderBaseUrl("https://api.example.com/v1/chat/completions")).toBe(
+      "https://api.example.com/v1"
+    );
   });
 });

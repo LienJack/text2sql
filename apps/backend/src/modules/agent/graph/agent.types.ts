@@ -12,11 +12,13 @@ export interface GraphInput {
   runId: string;
   sessionId: string;
   question: string;
+  modelCatalogId?: string;
   traceContext?: GraphTraceContext;
 }
 
 export interface GraphState extends GraphInput {
   provider: string;
+  model?: string;
   sql?: string;
   explanation?: string;
   rows?: Array<Record<string, unknown>>;

@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
   Session,
@@ -9,25 +10,62 @@ import type {
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
+import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
+import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { TraceService } from "../observability/trace.service";
 
 @Injectable()
 export class ChatService {
   constructor(
     private readonly graphBuilder: GraphBuilderService,
+    private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
+    private readonly providerCatalog: ProviderCatalogService,
     private readonly traceService: TraceService
   ) {}
 
-  async createSession(datasource = "sqlite_main"): Promise<Session> {
+  async createSession(
+    datasource = "sqlite_main",
+    modelCatalogId?: string
+  ): Promise<Session> {
+    let defaultModel:
+      | {
+          id: string;
+          provider: string;
+          model: string;
+        }
+      | undefined;
+    if (modelCatalogId) {
+      const resolved = await this.providerCatalog.resolveModelById(modelCatalogId);
+      defaultModel = {
+        id: resolved.id,
+        provider: resolved.provider,
+        model: resolved.model
+      };
+    } else {
+      try {
+        const resolved = await this.providerCatalog.resolveDefaultModel();
+        defaultModel = {
+          id: resolved.id,
+          provider: resolved.provider,
+          model: resolved.model
+        };
+      } catch {
+        defaultModel = undefined;
+      }
+    }
+
     const session: Session = {
       id: uuidv4(),
       datasource,
       createdAt: new Date().toISOString(),
       title: "新会话",
+      modelCatalogId: defaultModel?.id ?? null,
+      modelProvider: defaultModel?.provider ?? null,
+      modelName: defaultModel?.model ?? null,
       debugEnabled: false,
       syncStatus: "healthy",
       syncFailedCount: 0,
@@ -52,11 +90,15 @@ export class ChatService {
     patch: {
       title?: string;
       debugEnabled?: boolean;
+      modelCatalogId?: string;
     }
   ): Promise<Session> {
     const sanitizedPatch: {
       title?: string;
       debugEnabled?: boolean;
+      modelCatalogId?: string;
+      modelProvider?: string;
+      modelName?: string;
     } = {};
 
     if (patch.title !== undefined) {
@@ -70,6 +112,18 @@ export class ChatService {
     }
     if (patch.debugEnabled !== undefined) {
       sanitizedPatch.debugEnabled = patch.debugEnabled;
+    }
+    if (patch.modelCatalogId !== undefined) {
+      const modelId = patch.modelCatalogId.trim();
+      if (!modelId) {
+        throw new DomainError("VALIDATION_ERROR", "模型 ID 不能为空", 400, {
+          sessionId
+        });
+      }
+      const model = await this.providerCatalog.resolveModelById(modelId);
+      sanitizedPatch.modelCatalogId = model.id;
+      sanitizedPatch.modelProvider = model.provider;
+      sanitizedPatch.modelName = model.model;
     }
 
     const session = await this.repository.updateSession(sessionId, sanitizedPatch);
@@ -112,6 +166,7 @@ export class ChatService {
       runId: uuidv4(),
       sessionId,
       question: message,
+      modelCatalogId: session.modelCatalogId ?? undefined,
       traceContext: {
         source: "chat",
         route: "/api/v1/sessions/:sessionId/messages",
@@ -119,35 +174,177 @@ export class ChatService {
       }
     });
 
-    const assistantMessage: ChatMessage = {
-      id: uuidv4(),
-      sessionId,
-      role: "assistant",
-      content: run.answer ?? run.error ?? "系统未返回结果。",
-      metadata: {
-        runId: run.runId,
-        status: run.status
-      },
-      createdAt: new Date().toISOString()
-    };
-    await this.redisBuffer.bufferMessage(assistantMessage);
-    const assistantPersistResult = await this.repository.persistMessage(assistantMessage);
-    await this.repository.persistRun(run);
-    this.traceService.record(run.trace);
+    await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
+    return run;
+  }
 
-    const allPrimaryPersisted =
-      userPersistResult.primaryPersisted && assistantPersistResult.primaryPersisted;
-    if (allPrimaryPersisted) {
-      await this.redisBuffer.clearBufferedMessages(sessionId);
-      await this.repository.markSessionSyncHealthy(sessionId);
-    } else {
-      await this.repository.markSessionSyncPending(
-        sessionId,
-        new Date().toISOString()
-      );
+  async streamMessage(
+    sessionId: string,
+    message: string,
+    requestId: string | undefined,
+    onEvent: (event: ChatStreamEvent) => Promise<void> | void
+  ): Promise<SqlRun> {
+    const session = await this.repository.getSessionById(sessionId);
+    if (!session) {
+      throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
 
-    return run;
+    const runId = uuidv4();
+    const userMessage: ChatMessage = {
+      id: uuidv4(),
+      sessionId,
+      role: "user",
+      content: message,
+      createdAt: new Date().toISOString()
+    };
+    await this.redisBuffer.bufferMessage(userMessage);
+    const userPersistResult = await this.repository.persistMessage(userMessage);
+    await this.repository.ensureSessionTitleFromFirstMessage(sessionId, message);
+
+    const emit = async (type: ChatStreamEvent["type"], data: ChatStreamEvent["data"]) => {
+      await onEvent({
+        type,
+        runId,
+        sessionId,
+        at: new Date().toISOString(),
+        data
+      });
+    };
+
+    await emit("start", {
+      requestId: requestId ?? null
+    });
+
+    const toolCalls: NonNullable<NonNullable<SqlRun["trace"]>["toolCalls"]> = [];
+
+    try {
+      const run = await this.graphBuilder.run(
+        {
+          runId,
+          sessionId,
+          question: message,
+          modelCatalogId: session.modelCatalogId ?? undefined,
+          traceContext: {
+            source: "chat",
+            route: "/api/v1/sessions/:sessionId/messages/stream",
+            requestId
+          }
+        },
+        {
+          streamMode: true,
+          tools: this.sqlToolRegistry.getTools(),
+          onLlmEvent: async (event) => {
+            if (event.type === "text-delta") {
+              await emit("text-delta", {
+                text: event.text
+              });
+              return;
+            }
+
+            if (event.type === "tool-call") {
+              toolCalls.push({
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                status: "called",
+                detail: JSON.stringify(event.input ?? {}),
+                at: new Date().toISOString()
+              });
+              await emit("tool-call", {
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                input: event.input
+              });
+              return;
+            }
+
+            if (event.type === "tool-result") {
+              toolCalls.push({
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                status: "result",
+                detail: JSON.stringify(event.output ?? {}),
+                at: new Date().toISOString()
+              });
+              await emit("tool-result", {
+                toolName: event.toolName,
+                toolCallId: event.toolCallId,
+                output: event.output
+              });
+              return;
+            }
+
+            toolCalls.push({
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              status: "error",
+              detail: event.message,
+              at: new Date().toISOString()
+            });
+            await emit("tool-error", {
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              message: event.message
+            });
+          },
+          onStep: async ({ step }) => {
+            await emit("state", {
+              node: step.node,
+              status: step.status,
+              detail: step.detail ?? "",
+              inputSummary: step.inputSummary,
+              outputSummary: step.outputSummary,
+              errorSummary: step.errorSummary
+            });
+          }
+        }
+      );
+
+      run.trace.streamStatus = run.error ? "failed" : "completed";
+      run.trace.toolCalls = toolCalls;
+      if (run.error) {
+        await emit("error", {
+          code: run.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
+          message: run.error,
+          details: null
+        });
+      }
+      await emit("finish", {
+        status: run.status,
+        rowCount: run.rows?.length ?? 0
+      });
+      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
+      return run;
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      const run: SqlRun = {
+        runId,
+        sessionId,
+        question: message,
+        status: "failed",
+        provider: session.modelProvider ?? "unknown",
+        model: session.modelName ?? undefined,
+        error: messageText,
+        trace: {
+          runId,
+          provider: session.modelProvider ?? "unknown",
+          retryCount: 0,
+          steps: [],
+          streamStatus: "failed",
+          toolCalls
+        },
+        llmRaw: null,
+        createdAt: new Date().toISOString()
+      };
+      const domainError =
+        error instanceof DomainError ? error : undefined;
+      await emit("error", {
+        code: domainError?.code,
+        message: messageText,
+        details: (domainError?.details as Record<string, unknown> | undefined) ?? null
+      });
+      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
+      return run;
+    }
   }
 
   async listMessages(
@@ -199,5 +396,39 @@ export class ChatService {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
     return run;
+  }
+
+  private async persistAssistantAndRun(
+    sessionId: string,
+    run: SqlRun,
+    userPrimaryPersisted: boolean
+  ): Promise<void> {
+    const assistantMessage: ChatMessage = {
+      id: uuidv4(),
+      sessionId,
+      role: "assistant",
+      content: run.answer ?? run.error ?? "系统未返回结果。",
+      metadata: {
+        runId: run.runId,
+        status: run.status
+      },
+      createdAt: new Date().toISOString()
+    };
+    await this.redisBuffer.bufferMessage(assistantMessage);
+    const assistantPersistResult = await this.repository.persistMessage(assistantMessage);
+    await this.repository.persistRun(run);
+    this.traceService.record(run.trace);
+
+    const allPrimaryPersisted =
+      userPrimaryPersisted && assistantPersistResult.primaryPersisted;
+    if (allPrimaryPersisted) {
+      await this.redisBuffer.clearBufferedMessages(sessionId);
+      await this.repository.markSessionSyncHealthy(sessionId);
+    } else {
+      await this.repository.markSessionSyncPending(
+        sessionId,
+        new Date().toISOString()
+      );
+    }
   }
 }

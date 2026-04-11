@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ChatMessage, Session, SqlRun } from "@text2sql/shared-types";
+import type { ChatMessage, ModelCatalogItem, Session, SqlRun } from "@text2sql/shared-types";
 import { Menu, Terminal } from "lucide-react";
 import { MessageComposer } from "@/components/chat/message-composer";
+import { ModelSelector } from "@/components/chat/model-selector";
 import { MessageList } from "@/components/chat/message-list";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
 import { SqlPreview } from "@/components/sql-preview";
@@ -15,9 +16,11 @@ import {
   createSession,
   deleteSession as deleteSessionRequest,
   getMessages,
+  listEnabledModels,
   listSessions,
   renameSession as renameSessionRequest,
-  sendMessage,
+  sendMessageStream,
+  setSessionModel,
   setSessionDebugEnabled
 } from "@/lib/api-client";
 
@@ -29,6 +32,7 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(false);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [lastRun, setLastRun] = useState<SqlRun | null>(null);
+  const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [error, setError] = useState("");
   const [sessionError, setSessionError] = useState("");
   const [sendState, setSendState] = useState<"idle" | "sending" | "success" | "error">("idle");
@@ -41,6 +45,12 @@ export function ChatPanel() {
     const latest = await listSessions();
     setSessions(latest);
     return latest;
+  };
+
+  const refreshModels = async (): Promise<ModelCatalogItem[]> => {
+    const models = await listEnabledModels();
+    setAvailableModels(models);
+    return models;
   };
 
   const loadMessages = async (targetSessionId: string): Promise<void> => {
@@ -63,6 +73,7 @@ export function ChatPanel() {
       setSessionLoading(true);
       setSessionError("");
       try {
+        await refreshModels();
         let latestSessions = await refreshSessions();
         if (latestSessions.length === 0) {
           const created = await createSession();
@@ -159,20 +170,61 @@ export function ChatPanel() {
     if (!input.trim() || !sessionId) {
       return;
     }
+    const userContent = input.trim();
+    const optimisticUserId = `temp-user-${Date.now()}`;
+    const optimisticAssistantId = `temp-assistant-${Date.now()}`;
+    const createdAt = new Date().toISOString();
+
+    setMessages((previous) => [
+      ...previous,
+      {
+        id: optimisticUserId,
+        sessionId,
+        role: "user",
+        content: userContent,
+        createdAt
+      },
+      {
+        id: optimisticAssistantId,
+        sessionId,
+        role: "assistant",
+        content: "",
+        createdAt
+      }
+    ]);
+    setInput("");
     setLoading(true);
     setError("");
     setSendState("sending");
     try {
-      const latestRunWrapper = await sendMessage(sessionId, input.trim());
+      await sendMessageStream(sessionId, userContent, {
+        onEvent: (event) => {
+          if (event.type === "text-delta") {
+            const delta = (event.data as { text?: string } | undefined)?.text ?? "";
+            if (!delta) {
+              return;
+            }
+            setMessages((previous) =>
+              previous.map((message) =>
+                message.id === optimisticAssistantId
+                  ? {
+                      ...message,
+                      content: `${message.content}${delta}`
+                    }
+                  : message
+              )
+            );
+          }
+        }
+      });
       await loadMessages(sessionId);
       await refreshSessions();
-      setLastRun(latestRunWrapper.run);
-      setInput("");
       setSendState("success");
       if (window.matchMedia("(max-width: 1023px)").matches) {
         setMobileSqlOpen(true);
       }
     } catch (submitError) {
+      await loadMessages(sessionId).catch(() => undefined);
       setError(submitError instanceof Error ? submitError.message : "发送失败");
       setSendState("error");
     } finally {
@@ -193,6 +245,25 @@ export function ChatPanel() {
       );
     } catch (toggleError) {
       setSessionError(toggleError instanceof Error ? toggleError.message : "更新调试开关失败");
+    } finally {
+      setSessionLoading(false);
+    }
+  };
+
+  const onSessionModelChange = async (modelCatalogId: string): Promise<void> => {
+    if (!sessionId || !modelCatalogId) {
+      return;
+    }
+    setSessionLoading(true);
+    setSessionError("");
+    try {
+      const updated = await setSessionModel(sessionId, modelCatalogId);
+      setSessions((previous) =>
+        previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
+      );
+      await refreshModels();
+    } catch (switchError) {
+      setSessionError(switchError instanceof Error ? switchError.message : "切换模型失败");
     } finally {
       setSessionLoading(false);
     }
@@ -238,6 +309,16 @@ export function ChatPanel() {
                 {sessionId ? `Session: ${sessionId}` : "Session 初始化中..."}
               </p>
             </div>
+            <div className="hidden md:block">
+              <ModelSelector
+                models={availableModels}
+                value={activeSession?.modelCatalogId ?? undefined}
+                disabled={sessionLoading || !sessionId}
+                onChange={(modelCatalogId) => {
+                  void onSessionModelChange(modelCatalogId);
+                }}
+              />
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
@@ -260,6 +341,17 @@ export function ChatPanel() {
                 详情
               </Button>
             </div>
+          </div>
+
+          <div className="md:hidden">
+            <ModelSelector
+              models={availableModels}
+              value={activeSession?.modelCatalogId ?? undefined}
+              disabled={sessionLoading || !sessionId}
+              onChange={(modelCatalogId) => {
+                void onSessionModelChange(modelCatalogId);
+              }}
+            />
           </div>
 
           <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2">

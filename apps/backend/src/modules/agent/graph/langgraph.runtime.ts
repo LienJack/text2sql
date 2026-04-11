@@ -6,19 +6,26 @@ import {
   StateGraph,
   type LangGraphRunnableConfig
 } from "@langchain/langgraph";
+import type { ExecutionTraceStep } from "@text2sql/shared-types";
 import { ClarifyNode } from "../nodes/clarify.node";
 import { ExecuteSqlNode } from "../nodes/execute-sql.node";
 import { FormatAnswerNode } from "../nodes/format-answer.node";
 import { GenerateSqlNode } from "../nodes/generate-sql.node";
 import { SafetyCheckNode } from "../nodes/safety-check.node";
+import type {
+  LlmGatewayStreamEvent,
+  LlmGatewayToolDefinition
+} from "../../llm/llm-gateway.interface";
 import { appendStep, type LangGraphState } from "./langgraph.state";
 
 const LangGraphStateAnnotation = Annotation.Root({
   runId: Annotation<string>(),
   sessionId: Annotation<string>(),
   question: Annotation<string>(),
+  modelCatalogId: Annotation<string | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
+  model: Annotation<string | undefined>(),
   llmRaw: Annotation<LangGraphState["llmRaw"]>(),
   sql: Annotation<string | undefined>(),
   explanation: Annotation<string | undefined>(),
@@ -71,6 +78,35 @@ const withTiming = (startedAt: string, endedAt: string) => ({
   durationMs: Math.max(0, Date.parse(endedAt) - Date.parse(startedAt))
 });
 
+interface RuntimeCallbacks {
+  streamMode?: boolean;
+  tools?: Record<string, LlmGatewayToolDefinition>;
+  onStep?: (step: ExecutionTraceStep) => Promise<void> | void;
+  onLlmEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
+}
+
+const getCallbacks = (config?: LangGraphRunnableConfig): RuntimeCallbacks => {
+  return (config?.configurable as RuntimeCallbacks | undefined) ?? {};
+};
+
+const emitStep = async (
+  config: LangGraphRunnableConfig | undefined,
+  step?: ExecutionTraceStep
+) => {
+  if (!step) {
+    return;
+  }
+  const callbacks = getCallbacks(config);
+  if (!callbacks.onStep) {
+    return;
+  }
+  await callbacks.onStep(step);
+};
+
+const latestStep = (
+  traceState: Pick<LangGraphState, "trace">
+): ExecutionTraceStep | undefined => traceState.trace.steps.at(-1);
+
 export interface LangGraphNodeDependencies {
   clarifyNode: Pick<ClarifyNode, "run">;
   generateSqlNode: Pick<GenerateSqlNode, "run">;
@@ -81,7 +117,7 @@ export interface LangGraphNodeDependencies {
 
 export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
   const graph = new StateGraph(LangGraphStateAnnotation)
-    .addNode("clarify", (state) => {
+    .addNode("clarify", async (state, config) => {
       const startedAt = new Date().toISOString();
       const clarification = deps.clarifyNode.run(state.question);
       const endedAt = new Date().toISOString();
@@ -100,6 +136,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           runType: "tool",
           outputs
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           clarification,
@@ -107,7 +144,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           terminalStatus: "clarification"
         };
       }
-      return appendStep(state, {
+      const trace = appendStep(state, {
         step: {
           node: "clarify",
           status: "skipped",
@@ -115,20 +152,35 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           ...withTiming(startedAt, endedAt)
         }
       });
+      await emitStep(config, latestStep(trace));
+      return trace;
     })
-    .addNode("generate-sql", async (state) => {
+    .addNode("generate-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
+      const callbacks = getCallbacks(config);
       try {
-        const generated = await deps.generateSqlNode.run(state.question);
+        const generated = await deps.generateSqlNode.run(
+          state.question,
+          state.modelCatalogId,
+          callbacks.streamMode
+            ? {
+                stream: true,
+                tools: callbacks.tools,
+                onEvent: callbacks.onLlmEvent
+              }
+            : undefined
+        );
         const endedAt = new Date().toISOString();
         const inputs = {
           question: state.question,
+          modelCatalogId: state.modelCatalogId,
           systemPrompt: generated.prompt.systemPrompt,
           userPrompt: generated.prompt.userPrompt
         };
         const outputs = {
           provider: generated.provider,
           model: generated.model,
+          modelCatalogId: generated.modelCatalogId,
           sql: generated.sql,
           rawText: generated.rawText
         };
@@ -145,6 +197,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputs,
           outputs
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           trace: {
@@ -152,6 +205,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
             provider: generated.provider
           },
           provider: generated.provider,
+          model: generated.model,
           llmRaw: {
             provider: generated.provider,
             model: generated.model,
@@ -182,6 +236,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputs,
           error: message
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: message,
@@ -190,7 +245,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
     })
-    .addNode("safety-check", (state) => {
+    .addNode("safety-check", async (state, config) => {
       const startedAt = new Date().toISOString();
       if (!state.sql) {
         const reason = "未生成 SQL，无法执行安全校验。";
@@ -206,6 +261,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           runType: "tool",
           error: reason
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: reason,
@@ -232,6 +288,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputs,
           error: safety.reason
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: safety.reason,
@@ -239,7 +296,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
 
-      return appendStep(state, {
+      const trace = appendStep(state, {
         step: {
           node: "safety-check",
           status: "success",
@@ -248,8 +305,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputSummary: summarize(inputs)
         }
       });
+      await emitStep(config, latestStep(trace));
+      return trace;
     })
-    .addNode("execute-sql", async (state) => {
+    .addNode("execute-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
       if (!state.sql) {
         const reason = "未生成 SQL，无法执行查询。";
@@ -265,6 +324,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           runType: "tool",
           error: reason
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: reason,
@@ -294,6 +354,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputs,
           outputs
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           rows: execution.rows,
@@ -319,6 +380,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           inputs,
           error: message
         });
+        await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: message,
@@ -326,7 +388,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
     })
-    .addNode("format-answer", (state) => {
+    .addNode("format-answer", async (state, config) => {
       const startedAt = new Date().toISOString();
       const answer = deps.formatNode.run(
         state.question,
@@ -343,6 +405,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           outputSummary: summarize(answer)
         }
       });
+      await emitStep(config, latestStep(trace));
       return {
         ...trace,
         answer,

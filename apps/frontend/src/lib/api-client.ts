@@ -1,20 +1,27 @@
 import type {
+  AgentRunResponse,
   ApiResponse,
+  ChatStreamEvent,
   ChatSessionView,
-  Session,
-  SqlRun
+  LlmSettingsView,
+  ModelCatalogItem,
+  Session
 } from "@text2sql/shared-types";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
+  const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${url}`, {
       ...init,
       headers: {
         "content-type": "application/json",
+        "x-user-role": role,
+        "x-user-id": userId,
         ...(init?.headers ?? {})
       }
     });
@@ -79,6 +86,16 @@ export async function setSessionDebugEnabled(
   });
 }
 
+export async function setSessionModel(
+  sessionId: string,
+  modelCatalogId: string
+): Promise<Session> {
+  return request<Session>(`/api/v1/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ modelCatalogId })
+  });
+}
+
 export async function deleteSession(
   sessionId: string
 ): Promise<{ deleted: boolean; sessionId: string }> {
@@ -93,8 +110,8 @@ export async function deleteSession(
 export async function sendMessage(
   sessionId: string,
   message: string
-): Promise<{ responseType: string; run: SqlRun }> {
-  return request<{ responseType: string; run: SqlRun }>(
+): Promise<AgentRunResponse> {
+  return request<AgentRunResponse>(
     `/api/v1/sessions/${sessionId}/messages`,
     {
       method: "POST",
@@ -103,6 +120,79 @@ export async function sendMessage(
   );
 }
 
+export async function sendMessageStream(
+  sessionId: string,
+  message: string,
+  handlers?: {
+    onEvent?: (event: ChatStreamEvent) => void;
+  }
+): Promise<void> {
+  const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
+  const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-user-role": role,
+      "x-user-id": userId
+    },
+    body: JSON.stringify({
+      message
+    })
+  });
+  if (!response.ok) {
+    throw new Error(`流式请求失败（HTTP ${response.status}）`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("流式响应体不可读。");
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+
+    for (const block of blocks) {
+      const lines = block
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length === 0) {
+        continue;
+      }
+      const eventLine = lines.find((line) => line.startsWith("event:"));
+      const dataLine = lines.find((line) => line.startsWith("data:"));
+      if (!eventLine || !dataLine) {
+        continue;
+      }
+      const eventType = eventLine.replace(/^event:\s*/, "");
+      const payload = dataLine.replace(/^data:\s*/, "");
+      const event = JSON.parse(payload) as ChatStreamEvent;
+      handlers?.onEvent?.(event);
+      if (eventType === "error") {
+        const messageText =
+          (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
+        throw new Error(messageText);
+      }
+    }
+  }
+}
+
 export async function getMessages(sessionId: string): Promise<ChatSessionView> {
   return request<ChatSessionView>(`/api/v1/sessions/${sessionId}/messages`);
+}
+
+export async function getSettingsModelsView(): Promise<LlmSettingsView> {
+  return request<LlmSettingsView>("/api/v1/settings/models");
+}
+
+export async function listEnabledModels(): Promise<ModelCatalogItem[]> {
+  const view = await getSettingsModelsView();
+  return view.models.filter((item) => item.enabled);
 }

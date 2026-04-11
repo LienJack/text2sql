@@ -11,6 +11,8 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ## 项目规范
 - 前端重写规范：`docs/standards/frontend-react-shadcn-spec.md`
+- 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
+- LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
 ## 目录结构
@@ -75,6 +77,7 @@ pnpm dev
 
 ## 联调检查清单（真实 LLM）
 - 后端健康检查 `GET /health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
+- `GET /health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。
 - 如开启 LangSmith，`GET /health` 中 `dependencies.langsmith.ready` 为 `true`。
 - `GET /health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
 - 前端能成功创建会话并发送消息，无跨域报错。
@@ -99,6 +102,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `PATCH /api/v1/sessions/:sessionId`（支持 `title` 与 `debugEnabled` 局部更新）
 - `DELETE /api/v1/sessions/:sessionId`（软删除，默认列表隐藏）
 - `POST /api/v1/sessions/:sessionId/messages`
+- `POST /api/v1/sessions/:sessionId/messages/stream`（SSE 流式）
 - `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
 - `GET /api/v1/runs/:runId`
 - `POST /api/v1/evaluations/run`
@@ -111,6 +115,17 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `trace.steps` 支持节点级状态 + 可选摘要字段（输入/输出/错误摘要、时长）；前端字段缺失时自动降级为节点态。
 - 历史会话不会回填旧 `llmRaw` 数据；开启调试时会显示“该会话无历史原始返回数据”。
 - 当前策略为永久保留调试数据，不做自动清理任务。
+
+## Stream & Tool Calling 说明
+- 流式主路径：`POST /api/v1/sessions/:sessionId/messages/stream`。
+- 同步消息接口 `POST /api/v1/sessions/:sessionId/messages` 返回 `AgentRunResponse`：
+  - `kind`：固定为 `agent-run`
+  - `outcome`：`clarification | executionResult | rejected | failed`
+  - `run`：完整运行结果（含 `trace` 与可选 `llmRaw`）
+  - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
+- SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
+- SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
+- 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
 
 ## 测试
 ```bash

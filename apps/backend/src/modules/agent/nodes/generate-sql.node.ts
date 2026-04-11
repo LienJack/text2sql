@@ -1,13 +1,26 @@
 import { Injectable } from "@nestjs/common";
-import { ProviderRouterService } from "../../llm/provider-router.service";
+import type {
+  LlmGatewayStreamEvent,
+  LlmGatewayToolDefinition
+} from "../../llm/llm-gateway.interface";
+import { SqlGenerationService } from "../sql/sql-generation.service";
 
 @Injectable()
 export class GenerateSqlNode {
-  constructor(private readonly providerRouter: ProviderRouterService) {}
+  constructor(private readonly sqlGeneration: SqlGenerationService) {}
 
-  async run(question: string): Promise<{
+  async run(
+    question: string,
+    modelCatalogId?: string,
+    options?: {
+      stream?: boolean;
+      tools?: Record<string, LlmGatewayToolDefinition>;
+      onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
+    }
+  ): Promise<{
     provider: string;
     model: string;
+    modelCatalogId?: string;
     sql: string;
     explanation: string;
     rawText: string;
@@ -16,6 +29,20 @@ export class GenerateSqlNode {
       userPrompt: string;
     };
   }> {
-    return this.providerRouter.generateSql(question);
+    if (options?.stream) {
+      return this.sqlGeneration.stream(
+        question,
+        {
+          modelCatalogId
+        },
+        {
+          tools: options.tools,
+          onEvent: options.onEvent
+        }
+      );
+    }
+    return this.sqlGeneration.generate(question, {
+      modelCatalogId
+    });
   }
 }

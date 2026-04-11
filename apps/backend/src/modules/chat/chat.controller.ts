@@ -7,10 +7,15 @@ import {
   Param,
   Post,
   Query,
-  Req
+  Req,
+  Res
 } from "@nestjs/common";
-import type { Request } from "express";
-import type { ApiResponse } from "@text2sql/shared-types";
+import type { Request, Response } from "express";
+import type {
+  AgentRunResponse,
+  ApiResponse,
+  ChatStreamEvent
+} from "@text2sql/shared-types";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { CreateSessionDto } from "./dto/create-session.dto";
@@ -30,7 +35,8 @@ export class ChatController {
   ): Promise<ApiResponse<unknown>> {
     try {
       const session = await this.chatService.createSession(
-        body.datasource ?? "sqlite_main"
+        body.datasource ?? "sqlite_main",
+        body.modelCatalogId
       );
       return ok(req.requestId, session);
     } catch (error) {
@@ -58,16 +64,21 @@ export class ChatController {
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
-      if (body.title === undefined && body.debugEnabled === undefined) {
+      if (
+        body.title === undefined &&
+        body.debugEnabled === undefined &&
+        body.modelCatalogId === undefined
+      ) {
         throw new DomainError(
           "VALIDATION_ERROR",
-          "至少需要提供 title 或 debugEnabled",
+          "至少需要提供 title、debugEnabled 或 modelCatalogId",
           400
         );
       }
       const session = await this.chatService.updateSession(sessionId, {
         title: body.title,
-        debugEnabled: body.debugEnabled
+        debugEnabled: body.debugEnabled,
+        modelCatalogId: body.modelCatalogId
       });
       return ok(req.requestId, session);
     } catch (error) {
@@ -93,25 +104,84 @@ export class ChatController {
     @Param("sessionId") sessionId: string,
     @Body() body: SendMessageDto,
     @Req() req: Request
-  ): Promise<ApiResponse<unknown>> {
+  ): Promise<ApiResponse<AgentRunResponse>> {
     try {
       const run = await this.chatService.sendMessage(
         sessionId,
         body.message,
         req.requestId
       );
-      const responseType =
-        run.status === "clarification"
-          ? "clarification"
-          : run.status === "executionResult"
-            ? "executionResult"
-            : "sqlPreview";
       return ok(req.requestId, {
-        responseType,
-        run
+        kind: "agent-run",
+        outcome: run.status,
+        run,
+        agent: {
+          provider: run.provider,
+          model: run.model,
+          hasSql: Boolean(run.sql),
+          hasToolCalls: Boolean(run.trace.toolCalls?.length),
+          hasError: Boolean(run.error)
+        }
       });
     } catch (error) {
       return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/sessions/:sessionId/messages/stream")
+  async streamMessage(
+    @Param("sessionId") sessionId: string,
+    @Body() body: SendMessageDto,
+    @Req() req: Request,
+    @Res() res: Response
+  ): Promise<void> {
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    const sendEvent = (type: string, data: unknown) => {
+      if (res.writableEnded) {
+        return;
+      }
+      res.write(`event: ${type}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      await this.chatService.streamMessage(
+        sessionId,
+        body.message,
+        req.requestId,
+        async (event) => {
+          sendEvent(event.type, event);
+        }
+      );
+    } catch (error) {
+      const fallbackEvent: ChatStreamEvent = {
+        type: "error",
+        runId: "unavailable",
+        sessionId,
+        at: new Date().toISOString(),
+        data:
+          error instanceof DomainError
+            ? {
+                code: error.code,
+                message: error.message,
+                details: error.details ?? null
+              }
+            : {
+                code: "INTERNAL_ERROR",
+                message: error instanceof Error ? error.message : "未知错误",
+                details: null
+              }
+      };
+      sendEvent("error", fallbackEvent);
+    } finally {
+      if (!res.writableEnded) {
+        res.end();
+      }
     }
   }
 

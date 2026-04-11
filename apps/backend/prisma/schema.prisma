@@ -11,6 +11,9 @@ model Session {
   id                String    @id
   datasource        String
   title             String    @default("新会话")
+  modelCatalogId    String?
+  modelProvider     String?
+  modelName         String?
   debugEnabled      Boolean   @default(false)
   syncStatus        String    @default("healthy")
   syncFailedCount   Int       @default(0)
@@ -20,8 +23,10 @@ model Session {
   createdAt         DateTime  @default(now())
   messages          Message[]
   runs              SqlRun[]
+  modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt, lastMessageAt])
+  @@index([modelCatalogId])
   @@map("sessions")
 }
 
@@ -43,6 +48,7 @@ model SqlRun {
   sessionId     String
   status        String
   provider      String
+  model         String?
   question      String
   sql           String?
   explanation   String?
@@ -70,4 +76,52 @@ model EvaluationReport {
   createdAt DateTime @default(now())
 
   @@map("evaluation_reports")
+}
+
+model ProviderConfig {
+  id               String   @id
+  provider         String
+  displayName      String
+  baseUrl          String?
+  apiKeyCiphertext String?
+  apiKeyMasked     String?
+  enabled          Boolean  @default(true)
+  metadata         String?
+  lastSyncAt       DateTime?
+  lastSyncStatus   String   @default("idle")
+  lastSyncError    String?
+  createdBy        String?
+  updatedBy        String?
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  models           ModelCatalog[]
+
+  @@index([provider, deletedAt])
+  @@map("provider_configs")
+}
+
+model ModelCatalog {
+  id                String   @id
+  providerConfigId  String
+  provider          String
+  model             String
+  displayName       String
+  capabilities      String?
+  contextWindow     Int?
+  enabled           Boolean  @default(true)
+  healthStatus      String   @default("unknown")
+  lastHealthCheckAt DateTime?
+  lastSyncedAt      DateTime?
+  metadata          String?
+  deletedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  providerConfig    ProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
+  sessions          Session[]
+
+  @@unique([provider, model])
+  @@index([enabled, deletedAt])
+  @@index([providerConfigId])
+  @@map("model_catalogs")
 }

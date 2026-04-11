@@ -6,6 +6,7 @@ import { DatasourceRegistryService } from "../datasource/datasource-registry.ser
 import { PersistenceRetryService } from "./cache/persistence-retry.service";
 import { RedisBufferService } from "./cache/redis-buffer.service";
 import { ChatRepository } from "./persistence/chat.repository";
+import { LlmConfigRepository } from "./persistence/llm-config.repository";
 import { SqliteQueryService } from "./sqlite/sqlite-query.service";
 
 @Injectable()
@@ -33,13 +34,15 @@ class DataBootstrapService implements OnModuleInit {
     RedisBufferService,
     PersistenceRetryService,
     ChatRepository,
+    LlmConfigRepository,
     DataBootstrapService
   ],
   exports: [
     SqliteQueryService,
     RedisBufferService,
     PersistenceRetryService,
-    ChatRepository
+    ChatRepository,
+    LlmConfigRepository
   ]
 })
 export class DataModule {}

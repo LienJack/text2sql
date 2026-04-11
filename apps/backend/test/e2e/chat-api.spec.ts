@@ -40,6 +40,8 @@ describe("chat api (e2e)", () => {
       .send({ message: "统计订单状态分布" });
     expect(runRes.status).toBe(201);
     expect(runRes.body.status).toBe("success");
+    expect(runRes.body.data.kind).toBe("agent-run");
+    expect(runRes.body.data.outcome).toBe("executionResult");
     expect(runRes.body.data.run.runId).toBeDefined();
     expect(runRes.body.data.run.sql).toMatch(/select/i);
     expect(runRes.body.data.run.explanation).toBeTruthy();
