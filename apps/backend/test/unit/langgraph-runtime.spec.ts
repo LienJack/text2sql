@@ -55,6 +55,11 @@ describe("langgraph runtime", () => {
       "execute-sql",
       "format-answer"
     ]);
+    expect(output.trace.steps[0]?.sequence).toBe(1);
+    expect(output.trace.steps[0]?.stepId).toBe("run-1:clarify:1");
+    expect(output.trace.steps[0]?.lifecycle).toBe("skipped");
+    expect(output.trace.steps[1]?.sequence).toBe(2);
+    expect(output.trace.steps[1]?.lifecycle).toBe("completed");
   });
 
   it("should normalize missing trace context", () => {
@@ -103,6 +108,9 @@ describe("langgraph runtime", () => {
       "generate-sql"
     ]);
     expect(output.trace.steps[1]?.status).toBe("failed");
+    expect(output.trace.steps[1]?.sequence).toBe(2);
+    expect(output.trace.steps[1]?.stepId).toBe("run-2:generate-sql:2");
+    expect(output.trace.steps[1]?.lifecycle).toBe("failed");
     expect(output.trace.steps[1]?.errorSummary).toContain("llm failed");
   });
 });

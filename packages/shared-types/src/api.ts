@@ -56,6 +56,9 @@ export interface ClarificationPrompt {
 export interface ExecutionTraceStep {
   node: string;
   status: "success" | "failed" | "skipped";
+  stepId?: string;
+  sequence?: number;
+  lifecycle?: "running" | "completed" | "failed" | "skipped";
   detail?: string;
   at: string;
   startedAt?: string;
@@ -161,6 +164,9 @@ export type ChatStreamEventData =
   | {
       node: string;
       status: "success" | "failed" | "skipped";
+      stepId?: string;
+      sequence?: number;
+      lifecycle?: "running" | "completed" | "failed" | "skipped";
       detail: string;
       stage?: ReasoningStage;
       title?: string;

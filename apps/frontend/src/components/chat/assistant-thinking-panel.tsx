@@ -20,6 +20,9 @@ interface AssistantThinkingPanelProps {
   run: SqlRun | null;
   streamSteps: ThinkingStreamStep[];
   inProgress: boolean;
+  hasRunReference?: boolean;
+  runLoading?: boolean;
+  onRequestRun?: () => void;
 }
 
 const stageLabels: Record<ReasoningStage, string> = {
@@ -79,16 +82,28 @@ function formatTime(value?: string): string {
 export function AssistantThinkingPanel({
   run,
   streamSteps,
-  inProgress
+  inProgress,
+  hasRunReference = false,
+  runLoading = false,
+  onRequestRun
 }: AssistantThinkingPanelProps) {
   const [open, setOpen] = useState(false);
+  const [requested, setRequested] = useState(false);
 
   const steps = useMemo<ThinkingStreamStep[]>(() => {
     if (run?.trace.steps?.length) {
-      return run.trace.steps;
+      return [...run.trace.steps].sort(
+        (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
+      );
     }
-    return streamSteps;
+    return [...streamSteps].sort(
+      (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
+    );
   }, [run, streamSteps]);
+  const latestStep = steps.at(-1);
+  const completedCount = steps.filter((step) => step.status !== "failed").length;
+  const hasFailedStep = steps.some((step) => step.status === "failed");
+  const latestStageLabel = latestStep?.stage ? stageLabels[latestStep.stage] : undefined;
 
   useEffect(() => {
     if (inProgress) {
@@ -96,23 +111,67 @@ export function AssistantThinkingPanel({
     }
   }, [inProgress]);
 
-  if (!inProgress && steps.length === 0) {
+  useEffect(() => {
+    if (!open || run) {
+      setRequested(false);
+    }
+  }, [open, run]);
+
+  useEffect(() => {
+    if (
+      open &&
+      hasRunReference &&
+      !run &&
+      !runLoading &&
+      !requested &&
+      !inProgress &&
+      steps.length === 0
+    ) {
+      setRequested(true);
+      onRequestRun?.();
+    }
+  }, [
+    hasRunReference,
+    inProgress,
+    onRequestRun,
+    open,
+    requested,
+    run,
+    runLoading,
+    steps.length
+  ]);
+
+  if (!inProgress && steps.length === 0 && !hasRunReference) {
     return null;
   }
 
   return (
     <section className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-subtle)]">
       <div className="flex items-center justify-between gap-3 px-3 py-2">
-        <p className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-[var(--text-secondary)]">
-          <BrainCircuit className="h-3.5 w-3.5 text-[var(--action-primary)]" />
-          AI 思考过程
-          {inProgress ? (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--action-primary)]">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              思考中
-            </span>
+        <div className="min-w-0 space-y-1">
+          <p className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-[var(--text-secondary)]">
+            <BrainCircuit className="h-3.5 w-3.5 text-[var(--action-primary)]" />
+            AI 思考过程
+            {inProgress ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--action-primary)]">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                思考中
+              </span>
+            ) : null}
+          </p>
+          {steps.length > 0 ? (
+            <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+              {latestStageLabel ? `当前阶段：${latestStageLabel} · ` : null}
+              已记录 {steps.length} 步
+              {inProgress ? `，已完成 ${completedCount} 步` : null}
+              {hasFailedStep ? "（含失败步骤）" : null}
+            </p>
+          ) : hasRunReference ? (
+            <p className="truncate text-[11px] text-[var(--text-tertiary)]">
+              可展开查看该轮结构化思考摘要
+            </p>
           ) : null}
-        </p>
+        </div>
         <Button
           type="button"
           variant="ghost"
@@ -138,12 +197,19 @@ export function AssistantThinkingPanel({
 
       {open ? (
         <div className="space-y-2 border-t border-[var(--border-default)] px-3 py-3">
-          {steps.length === 0 ? (
-            <StateBlock variant="idle">模型正在组织思路，请稍候...</StateBlock>
+          {runLoading ? (
+            <StateBlock variant="idle">正在加载该轮思考轨迹...</StateBlock>
+          ) : steps.length === 0 ? (
+            <StateBlock variant="idle">
+              {inProgress ? "模型正在组织思路，请稍候..." : "暂未加载到该轮思考轨迹。"}
+            </StateBlock>
           ) : (
             steps.map((step, index) => (
               <details
-                key={`${step.node}-${step.at ?? step.endedAt ?? index}`}
+                key={
+                  step.stepId ??
+                  `${step.node}-${step.sequence ?? index}-${step.at ?? step.endedAt ?? index}`
+                }
                 className="rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3">

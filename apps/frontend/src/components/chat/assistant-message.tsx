@@ -36,18 +36,24 @@ export function UserMessageBubble() {
 
 interface AssistantMessageBubbleProps {
   run: SqlRun | null;
+  runId?: string;
   debugEnabled: boolean;
   thinkingSteps: Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>;
   thinkingInProgress: boolean;
+  runLoading?: boolean;
+  onRequestRun?: () => void;
   openSqlSignal?: number;
   highlightSql?: boolean;
 }
 
 export function AssistantMessageBubble({
   run,
+  runId,
   debugEnabled,
   thinkingSteps,
   thinkingInProgress,
+  runLoading = false,
+  onRequestRun,
   openSqlSignal = 0,
   highlightSql = false
 }: AssistantMessageBubbleProps) {
@@ -69,6 +75,9 @@ export function AssistantMessageBubble({
           run={run}
           streamSteps={thinkingSteps}
           inProgress={thinkingInProgress}
+          hasRunReference={Boolean(runId)}
+          runLoading={runLoading}
+          onRequestRun={onRequestRun}
         />
         <SqlInlinePanel
           run={run}

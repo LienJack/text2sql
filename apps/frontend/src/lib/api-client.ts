@@ -188,12 +188,14 @@ export async function* streamMessageEvents(
         continue;
       }
       const eventLine = lines.find((line) => line.startsWith("event:"));
-      const dataLine = lines.find((line) => line.startsWith("data:"));
-      if (!eventLine || !dataLine) {
+      const dataLines = lines.filter((line) => line.startsWith("data:"));
+      if (!eventLine || dataLines.length === 0) {
         continue;
       }
       const eventType = eventLine.replace(/^event:\s*/, "");
-      const payload = dataLine.replace(/^data:\s*/, "");
+      const payload = dataLines
+        .map((line) => line.replace(/^data:\s*/, ""))
+        .join("\n");
       const event = JSON.parse(payload) as ChatStreamEvent;
       yield event;
       if (eventType === "error") {
@@ -205,6 +207,10 @@ export async function* streamMessageEvents(
 
 export async function getMessages(sessionId: string): Promise<ChatSessionView> {
   return request<ChatSessionView>(`/api/v1/sessions/${sessionId}/messages`);
+}
+
+export async function getRun(runId: string): Promise<AgentRunResponse["run"]> {
+  return request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
 }
 
 export async function getSettingsModelsView(): Promise<LlmSettingsView> {

@@ -45,6 +45,9 @@ describe("chat stream api (e2e)", () => {
     expect(streamRes.text).toContain("event: finish");
     expect(streamRes.text).toContain("\"stage\":");
     expect(streamRes.text).toContain("\"title\":");
+    expect(streamRes.text).toContain("\"sequence\":");
+    expect(streamRes.text).toContain("\"stepId\":");
+    expect(streamRes.text).toContain("\"lifecycle\":");
 
     const messagesRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)

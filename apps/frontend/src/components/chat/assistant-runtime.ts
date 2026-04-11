@@ -25,8 +25,9 @@ function mapToThreadMessages(messages: ChatMessage[]): ThreadMessageLike[] {
     id: message.id,
     role: message.role,
     createdAt: new Date(message.createdAt),
-    content: message.content
-  }));
+    content: message.content,
+    metadata: message.metadata
+  } as ThreadMessageLike));
 }
 
 function extractLatestUserText(messages: readonly ThreadMessageLike[]): string {

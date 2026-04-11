@@ -6,6 +6,7 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
   renameSession,
@@ -25,7 +26,8 @@ vi.mock("@/lib/api-client", () => ({
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
   streamMessageEvents: vi.fn(),
-  getMessages: vi.fn()
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
@@ -37,10 +39,23 @@ const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
 const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("ChatPanel", () => {
+  let session: {
+    id: string;
+    datasource: string;
+    title: string;
+    modelCatalogId: string;
+    modelProvider: string;
+    modelName: string;
+    debugEnabled: boolean;
+    syncStatus: "healthy";
+    createdAt: string;
+  };
+
   beforeEach(() => {
-    const session = {
+    session = {
       id: "session-1",
       datasource: "sqlite_main",
       title: "新会话",
@@ -95,6 +110,9 @@ describe("ChatPanel", () => {
         data: {
           node: "generate-sql",
           status: "success",
+          stepId: "run-1:generate-sql:1",
+          sequence: 1,
+          lifecycle: "completed",
           detail: "volcengine",
           stage: "generation",
           title: "生成 SQL",
@@ -126,6 +144,7 @@ describe("ChatPanel", () => {
       messages: createMockMessages(),
       latestRun: createMockRun()
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {
@@ -169,6 +188,24 @@ describe("ChatPanel", () => {
     await screen.findByText(/Session: session-1/i);
     expect(screen.queryByLabelText("调试详情开关")).not.toBeInTheDocument();
     expect(mockSetSessionDebugEnabled).not.toHaveBeenCalled();
+  });
+
+  it("lazy loads run details for historical assistant messages", async () => {
+    const user = userEvent.setup();
+    mockGetMessages.mockResolvedValueOnce({
+      session,
+      messages: createMockMessages(),
+      latestRun: undefined
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Session: session-1/i);
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+
+    await waitFor(() => {
+      expect(mockGetRun).toHaveBeenCalledWith("run-1");
+    });
   });
 
   it("shows initialization failure when session creation fails", async () => {

@@ -5,6 +5,7 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
   renameSession,
@@ -24,7 +25,8 @@ vi.mock("@/lib/api-client", () => ({
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
   streamMessageEvents: vi.fn(),
-  getMessages: vi.fn()
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
@@ -36,6 +38,7 @@ const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
 const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("chat mobile smoke", () => {
   beforeEach(() => {
@@ -109,6 +112,7 @@ describe("chat mobile smoke", () => {
       messages: createMockMessages(),
       latestRun: createMockRun()
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {

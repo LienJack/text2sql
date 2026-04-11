@@ -26,25 +26,47 @@ import {
 interface AssistantThreadProps {
   sessionId: string;
   messages: ChatMessage[];
-  run: SqlRun | null;
-  thinkingSteps: ThinkingStreamStep[];
-  thinkingInProgress: boolean;
+  runsById: Record<string, SqlRun>;
+  streamThinkingByRunId: Record<string, ThinkingStreamStep[]>;
+  runLoadingById: Record<string, boolean>;
+  activeStreamRunId: string | null;
   debugEnabled: boolean;
   disabled?: boolean;
+  onRequestRun?: (runId: string) => Promise<void> | void;
   onRunStart?: () => void;
   onRunFinish?: (runId: string | undefined) => Promise<void> | void;
   onRunError?: (error: Error) => Promise<void> | void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
 }
 
+function resolveMessageRunId(metadata: unknown): string | undefined {
+  if (!metadata || typeof metadata !== "object") {
+    return undefined;
+  }
+  const record = metadata as Record<string, unknown>;
+  if (typeof record.runId === "string" && record.runId) {
+    return record.runId;
+  }
+  if (
+    record.custom &&
+    typeof record.custom === "object" &&
+    typeof (record.custom as Record<string, unknown>).runId === "string"
+  ) {
+    return (record.custom as Record<string, unknown>).runId as string;
+  }
+  return undefined;
+}
+
 export function AssistantThread({
   sessionId,
   messages,
-  run,
-  thinkingSteps,
-  thinkingInProgress,
+  runsById,
+  streamThinkingByRunId,
+  runLoadingById,
+  activeStreamRunId,
   debugEnabled,
   disabled = false,
+  onRequestRun,
   onRunStart,
   onRunFinish,
   onRunError,
@@ -54,6 +76,19 @@ export function AssistantThread({
 
   const latestAssistantMessageId = useMemo(() => {
     return [...messages].reverse().find((message) => message.role === "assistant")?.id;
+  }, [messages]);
+  const runIdByMessageId = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    for (const message of messages) {
+      if (message.role !== "assistant") {
+        continue;
+      }
+      const runId = resolveMessageRunId(message.metadata);
+      if (runId) {
+        mapping[message.id] = runId;
+      }
+    }
+    return mapping;
   }, [messages]);
 
   const callbacks = useMemo<AssistantRuntimeCallbacks>(
@@ -97,12 +132,33 @@ export function AssistantThread({
                 }
                 if (message.role === "assistant") {
                   const isLatestAssistant = message.id === latestAssistantMessageId;
+                  const metadata = (message as { metadata?: unknown }).metadata;
+                  const resolvedRunId =
+                    runIdByMessageId[message.id] ??
+                    resolveMessageRunId(metadata) ??
+                    (isLatestAssistant ? activeStreamRunId ?? undefined : undefined);
+                  const thinkingSteps = resolvedRunId
+                    ? streamThinkingByRunId[resolvedRunId] ?? []
+                    : [];
+                  const thinkingInProgress = Boolean(
+                    resolvedRunId && activeStreamRunId === resolvedRunId
+                  );
+                  const run = resolvedRunId ? runsById[resolvedRunId] ?? null : null;
                   return (
                     <AssistantMessageBubble
-                      run={isLatestAssistant ? run : null}
+                      run={run}
+                      runId={resolvedRunId}
                       debugEnabled={debugEnabled}
-                      thinkingSteps={isLatestAssistant ? thinkingSteps : []}
-                      thinkingInProgress={isLatestAssistant && thinkingInProgress}
+                      thinkingSteps={thinkingSteps}
+                      thinkingInProgress={thinkingInProgress}
+                      runLoading={Boolean(
+                        resolvedRunId && runLoadingById[resolvedRunId]
+                      )}
+                      onRequestRun={
+                        resolvedRunId && !run && !thinkingInProgress
+                          ? () => onRequestRun?.(resolvedRunId)
+                          : undefined
+                      }
                       openSqlSignal={isLatestAssistant ? sqlOpenSignal : 0}
                       highlightSql={isLatestAssistant}
                     />

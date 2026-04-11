@@ -685,6 +685,14 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   }
 
   private fromSqlRunRow(row: SqlRunRow): SqlRun {
+    const parsedTrace =
+      this.parseJsonSafely<SqlRun["trace"]>(row.trace) ?? {
+        runId: row.runId,
+        provider: row.provider,
+        retryCount: 0,
+        steps: []
+      };
+
     return {
       runId: row.runId,
       sessionId: row.sessionId,
@@ -701,14 +709,39 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
       clarification: this.parseJsonSafely<SqlRun["clarification"]>(
         row.clarification
       ),
-      trace: (this.parseJsonSafely<SqlRun["trace"]>(row.trace) ?? {
-        runId: row.runId,
-        provider: row.provider,
-        retryCount: 0,
-        steps: []
-      }) as SqlRun["trace"],
+      trace: this.normalizeTrace(parsedTrace, row.runId, row.provider),
       llmRaw: this.parseJsonSafely<SqlRun["llmRaw"]>(row.llmRaw) ?? null,
       createdAt: row.createdAt.toISOString()
+    };
+  }
+
+  private normalizeTrace(
+    trace: SqlRun["trace"],
+    runId: string,
+    provider: string
+  ): SqlRun["trace"] {
+    const normalizedSteps = (trace.steps ?? []).map((step, index) => {
+      const sequence = step.sequence ?? index + 1;
+      return {
+        ...step,
+        sequence,
+        stepId: step.stepId ?? `${runId}:${step.node}:${sequence}`,
+        lifecycle:
+          step.lifecycle ??
+          (step.status === "failed"
+            ? "failed"
+            : step.status === "skipped"
+              ? "skipped"
+              : "completed")
+      };
+    });
+
+    return {
+      ...trace,
+      runId: trace.runId ?? runId,
+      provider: trace.provider ?? provider,
+      retryCount: trace.retryCount ?? 0,
+      steps: normalizedSteps
     };
   }
 

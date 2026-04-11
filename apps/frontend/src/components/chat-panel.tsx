@@ -21,6 +21,7 @@ import {
   createSession,
   deleteSession as deleteSessionRequest,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
   renameSession as renameSessionRequest,
@@ -30,6 +31,9 @@ import {
 interface ThinkingStateEventData {
   node: string;
   status: ExecutionTraceStep["status"];
+  stepId?: string;
+  sequence?: number;
+  lifecycle?: ExecutionTraceStep["lifecycle"];
   detail: string;
   stage?: ReasoningStage;
   title?: string;
@@ -42,7 +46,12 @@ interface ThinkingStateEventData {
   errorSummary?: string;
 }
 
-function toThinkingStep(event: ChatStreamEvent): (ExecutionTraceStep & { stage?: ReasoningStage; title?: string }) | null {
+type ThinkingStep = ExecutionTraceStep & {
+  stage?: ReasoningStage;
+  title?: string;
+};
+
+function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
   if (event.type !== "state") {
     return null;
   }
@@ -50,6 +59,9 @@ function toThinkingStep(event: ChatStreamEvent): (ExecutionTraceStep & { stage?:
   return {
     node: payload.node,
     status: payload.status,
+    stepId: payload.stepId,
+    sequence: payload.sequence,
+    lifecycle: payload.lifecycle,
     detail: payload.detail,
     at: payload.at ?? event.at,
     startedAt: payload.startedAt,
@@ -60,6 +72,31 @@ function toThinkingStep(event: ChatStreamEvent): (ExecutionTraceStep & { stage?:
     errorSummary: payload.errorSummary,
     stage: payload.stage,
     title: payload.title
+  };
+}
+
+function appendThinkingStep(
+  previous: Record<string, ThinkingStep[]>,
+  runId: string,
+  incoming: ThinkingStep
+): Record<string, ThinkingStep[]> {
+  const current = previous[runId] ?? [];
+  const dedupeKey =
+    incoming.stepId ??
+    `${incoming.node}:${incoming.sequence ?? "na"}:${incoming.at ?? "na"}`;
+  if (
+    current.some((step) => {
+      const stepKey =
+        step.stepId ??
+        `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
+      return stepKey === dedupeKey;
+    })
+  ) {
+    return previous;
+  }
+  return {
+    ...previous,
+    [runId]: [...current, incoming]
   };
 }
 
@@ -91,11 +128,14 @@ export function ChatPanel() {
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionLoading, setSessionLoading] = useState(false);
-  const [lastRun, setLastRun] = useState<SqlRun | null>(null);
-  const [thinkingSteps, setThinkingSteps] = useState<
-    Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>
-  >([]);
-  const [thinkingInProgress, setThinkingInProgress] = useState(false);
+  const [runsById, setRunsById] = useState<Record<string, SqlRun>>({});
+  const [streamThinkingByRunId, setStreamThinkingByRunId] = useState<
+    Record<string, ThinkingStep[]>
+  >({});
+  const [runLoadingById, setRunLoadingById] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [activeStreamRunId, setActiveStreamRunId] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [sessionError, setSessionError] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
@@ -120,9 +160,16 @@ export function ChatPanel() {
     setMessages((previous) =>
       mergeSessionMessages(previous, sessionView.messages, targetSessionId)
     );
-    setLastRun(sessionView.latestRun ?? null);
-    setThinkingSteps([]);
-    setThinkingInProgress(false);
+    const latestRun = sessionView.latestRun;
+    if (latestRun) {
+      setRunsById((previous) => ({
+        ...previous,
+        [latestRun.runId]: latestRun
+      }));
+    }
+    setStreamThinkingByRunId({});
+    setRunLoadingById({});
+    setActiveStreamRunId(null);
     setThreadVersion((previous) => previous + 1);
     setSessions((previous) => {
       const index = previous.findIndex((session) => session.id === sessionView.session.id);
@@ -183,9 +230,10 @@ export function ChatPanel() {
       const latest = await refreshSessions();
       setSessionId(created.id);
       setMessages([]);
-      setLastRun(null);
-      setThinkingSteps([]);
-      setThinkingInProgress(false);
+      setRunsById({});
+      setStreamThinkingByRunId({});
+      setRunLoadingById({});
+      setActiveStreamRunId(null);
       setThreadVersion((previous) => previous + 1);
       if (!latest.some((session) => session.id === created.id)) {
         setSessions([created, ...latest]);
@@ -221,11 +269,12 @@ export function ChatPanel() {
         setSessions([created]);
         setSessionId(created.id);
         setMessages([]);
-        setThinkingSteps([]);
-        setThinkingInProgress(false);
+        setRunsById({});
+        setStreamThinkingByRunId({});
+        setRunLoadingById({});
+        setActiveStreamRunId(null);
         setThreadVersion((previous) => previous + 1);
       }
-      setLastRun(null);
     } catch (deleteError) {
       setSessionError(deleteError instanceof Error ? deleteError.message : "删除会话失败");
     } finally {
@@ -249,6 +298,31 @@ export function ChatPanel() {
       setSessionError(switchError instanceof Error ? switchError.message : "切换模型失败");
     } finally {
       setSessionLoading(false);
+    }
+  };
+
+  const ensureRunLoaded = async (runId: string): Promise<void> => {
+    if (!runId || runsById[runId] || runLoadingById[runId]) {
+      return;
+    }
+    setRunLoadingById((previous) => ({
+      ...previous,
+      [runId]: true
+    }));
+    try {
+      const run = await getRun(runId);
+      setRunsById((previous) => ({
+        ...previous,
+        [runId]: run
+      }));
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : "加载运行轨迹失败");
+    } finally {
+      setRunLoadingById((previous) => {
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
     }
   };
 
@@ -336,33 +410,51 @@ export function ChatPanel() {
           key={`${sessionId}-${threadVersion}`}
           sessionId={sessionId}
           messages={messages}
-          run={lastRun}
-          thinkingSteps={thinkingSteps}
-          thinkingInProgress={thinkingInProgress}
+          runsById={runsById}
+          streamThinkingByRunId={streamThinkingByRunId}
+          runLoadingById={runLoadingById}
+          activeStreamRunId={activeStreamRunId}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
           disabled={sessionLoading || !sessionId}
+          onRequestRun={ensureRunLoaded}
           onRunStart={() => {
-            setLastRun(null);
-            setThinkingSteps([]);
-            setThinkingInProgress(true);
+            setActiveStreamRunId(null);
           }}
           onStreamEvent={(event) => {
-            const step = toThinkingStep(event);
-            if (!step) {
+            if (event.type === "start") {
+              setActiveStreamRunId(event.runId);
+              setStreamThinkingByRunId((previous) => ({
+                ...previous,
+                [event.runId]: []
+              }));
               return;
             }
-            setThinkingSteps((previous) => [...previous, step]);
+            const step = toThinkingStep(event);
+            if (!step) {
+              if (event.type === "finish" || event.type === "error") {
+                setActiveStreamRunId((current) =>
+                  current === event.runId ? null : current
+                );
+              }
+              return;
+            }
+            setStreamThinkingByRunId((previous) =>
+              appendThinkingStep(previous, event.runId, step)
+            );
           }}
-          onRunFinish={async () => {
-            setThinkingInProgress(false);
+          onRunFinish={async (runId) => {
+            setActiveStreamRunId((current) => (current === runId ? null : current));
             if (!sessionId) {
               return;
             }
             await loadMessages(sessionId);
+            if (runId) {
+              await ensureRunLoaded(runId);
+            }
             await refreshSessions();
           }}
           onRunError={async () => {
-            setThinkingInProgress(false);
+            setActiveStreamRunId(null);
             if (sessionId) {
               await loadMessages(sessionId).catch(() => undefined);
             }

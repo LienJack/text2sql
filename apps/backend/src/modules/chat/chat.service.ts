@@ -217,6 +217,7 @@ export class ChatService {
     });
 
     const toolCalls: NonNullable<NonNullable<SqlRun["trace"]>["toolCalls"]> = [];
+    let stepSequence = 0;
 
     try {
       const run = await this.graphBuilder.run(
@@ -288,13 +289,19 @@ export class ChatService {
             });
           },
           onStep: async ({ step }) => {
+            const streamSequence = step.sequence ?? stepSequence + 1;
+            stepSequence = Math.max(stepSequence, streamSequence);
+            const stepTimestamp = step.at ?? step.endedAt ?? step.startedAt ?? new Date().toISOString();
             await emit("state", {
               node: step.node,
               status: step.status,
+              stepId: step.stepId ?? `${runId}:${step.node}:${streamSequence}`,
+              sequence: streamSequence,
+              lifecycle: step.lifecycle ?? this.resolveStepLifecycle(step.status),
               detail: step.detail ?? "",
               stage: this.resolveReasoningStage(step.node),
               title: this.resolveReasoningTitle(step.node),
-              at: step.at,
+              at: stepTimestamp,
               startedAt: step.startedAt,
               endedAt: step.endedAt,
               durationMs: step.durationMs,
@@ -471,5 +478,17 @@ export class ChatService {
       default:
         return node;
     }
+  }
+
+  private resolveStepLifecycle(
+    status: "success" | "failed" | "skipped"
+  ): "completed" | "failed" | "skipped" {
+    if (status === "failed") {
+      return "failed";
+    }
+    if (status === "skipped") {
+      return "skipped";
+    }
+    return "completed";
   }
 }

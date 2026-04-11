@@ -6,6 +6,7 @@ import {
   createSession,
   deleteSession,
   getMessages,
+  getRun,
   listEnabledModels,
   listSessions,
   renameSession,
@@ -25,7 +26,8 @@ vi.mock("@/lib/api-client", () => ({
   deleteSession: vi.fn(),
   sendMessageStream: vi.fn(),
   streamMessageEvents: vi.fn(),
-  getMessages: vi.fn()
+  getMessages: vi.fn(),
+  getRun: vi.fn()
 }));
 
 const mockCreateSession = vi.mocked(createSession);
@@ -37,6 +39,7 @@ const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
 const mockStreamMessageEvents = vi.mocked(streamMessageEvents);
 const mockGetMessages = vi.mocked(getMessages);
+const mockGetRun = vi.mocked(getRun);
 
 describe("chat to sql preview integration", () => {
   beforeEach(() => {
@@ -86,6 +89,9 @@ describe("chat to sql preview integration", () => {
         data: {
           node: "generate-sql",
           status: "success",
+          stepId: "run-1:generate-sql:1",
+          sequence: 1,
+          lifecycle: "completed",
           detail: "volcengine",
           stage: "generation",
           title: "生成 SQL",
@@ -120,6 +126,7 @@ describe("chat to sql preview integration", () => {
         explanation: "返回最近 20 条订单。"
       })
     });
+    mockGetRun.mockResolvedValue(createMockRun());
   });
 
   afterEach(() => {
