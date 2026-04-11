@@ -2,6 +2,7 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": "..",
   "testRegex": "e2e/.*\\.spec\\.ts$",
+  "setupFiles": ["<rootDir>/test/jest.setup.ts"],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
@@ -10,4 +11,3 @@
     "^@text2sql/shared-types$": "<rootDir>/../../packages/shared-types/src"
   }
 }
-

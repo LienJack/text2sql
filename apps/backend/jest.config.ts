@@ -4,6 +4,7 @@ const config: Config = {
   moduleFileExtensions: ["js", "json", "ts"],
   rootDir: ".",
   testRegex: ".*\\.spec\\.ts$",
+  setupFiles: ["<rootDir>/test/jest.setup.ts"],
   transform: {
     "^.+\\.(t|j)s$": "ts-jest"
   },
@@ -16,4 +17,3 @@ const config: Config = {
 };
 
 export default config;
-
