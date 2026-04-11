@@ -18,12 +18,12 @@ export function ModelSelector({
 }: ModelSelectorProps) {
   return (
     <div className="flex items-center gap-2">
-      <Label htmlFor="session-model-selector" className="text-xs text-slate-600">
+      <Label htmlFor="session-model-selector" className="text-xs text-[var(--text-secondary)]">
         会话模型
       </Label>
       <select
         id="session-model-selector"
-        className="h-8 min-w-[220px] rounded-md border border-input bg-background px-2 text-xs"
+        className="h-9 min-w-[220px] rounded-[10px] border border-input bg-input-background px-3 text-xs text-[var(--text-primary)] transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:text-[var(--text-disabled)]"
         value={value ?? ""}
         disabled={disabled || models.length === 0}
         onChange={(event) => onChange(event.target.value)}

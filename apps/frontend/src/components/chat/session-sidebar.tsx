@@ -102,11 +102,11 @@ export function SessionSidebar({
   };
 
   return (
-    <aside className={cn("flex h-full w-full flex-col bg-[#171717] text-zinc-200", className)}>
-      <div className="space-y-3 border-b border-zinc-800/90 p-4">
+    <aside className={cn("flex h-full w-full flex-col bg-[var(--surface-sidebar)] text-[var(--text-secondary)]", className)}>
+      <div className="space-y-3 border-b border-[var(--border-default)] p-4">
         <Button
           variant="default"
-          className="h-10 w-full justify-start gap-2 rounded-xl bg-zinc-100 font-semibold text-zinc-900 shadow-none hover:bg-zinc-200"
+          className="h-10 w-full justify-start gap-2 rounded-[10px] font-semibold shadow-none"
           disabled={loading}
           onClick={onCreateSession}
         >
@@ -114,23 +114,23 @@ export function SessionSidebar({
           新建会话
         </Button>
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+          <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-[var(--text-tertiary)]" />
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="搜索历史会话..."
-            className="h-9 rounded-lg border-zinc-700 bg-zinc-900/80 pl-9 text-zinc-100 placeholder:text-zinc-500"
+            className="h-9 rounded-[10px] border-[var(--border-strong)] bg-[var(--surface-panel)] pl-9 text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
           />
         </div>
       </div>
 
       {error ? (
-        <StateBlock variant="error" className="mx-3 mt-3 border-red-900/70 bg-red-950/40 text-red-200">
+        <StateBlock variant="error" className="mx-3 mt-3">
           {error}
         </StateBlock>
       ) : null}
       {actionError ? (
-        <StateBlock variant="error" className="mx-3 mt-3 border-red-900/70 bg-red-950/40 text-red-200">
+        <StateBlock variant="error" className="mx-3 mt-3">
           {actionError}
         </StateBlock>
       ) : null}
@@ -138,7 +138,7 @@ export function SessionSidebar({
       <ScrollArea className="flex-1">
         <div className="space-y-2 p-3 pb-8">
           {filteredSessions.length === 0 ? (
-            <StateBlock variant="idle" className="border-zinc-700 bg-zinc-900/80 text-zinc-300">
+            <StateBlock variant="idle" className="border-[var(--border-default)] bg-[var(--surface-panel)] text-[var(--text-secondary)]">
               暂无会话，点击“新建会话”开始。
             </StateBlock>
           ) : null}
@@ -152,7 +152,7 @@ export function SessionSidebar({
               return (
                 <form
                   key={session.id}
-                  className="space-y-2 rounded-xl border border-zinc-700 bg-zinc-900 p-3"
+                  className="space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-3"
                   onSubmit={(event) => {
                     void onRenameSubmit(event, session.id);
                   }}
@@ -170,10 +170,10 @@ export function SessionSidebar({
                     }}
                   />
                   <div className="flex items-center gap-2 pt-1">
-                    <Button type="submit" size="xs" variant="secondary" className="bg-zinc-100 text-zinc-900">
+                    <Button type="submit" size="xs" variant="default">
                       保存
                     </Button>
-                    <Button type="button" size="xs" variant="ghost" className="text-zinc-300" onClick={cancelRename}>
+                    <Button type="button" size="xs" variant="ghost" onClick={cancelRename}>
                       取消
                     </Button>
                   </div>
@@ -187,8 +187,8 @@ export function SessionSidebar({
                 className={cn(
                   "group rounded-xl border px-3 py-3 transition-colors",
                   active
-                    ? "border-zinc-600 bg-zinc-800/95 shadow-sm"
-                    : "border-transparent bg-transparent hover:bg-zinc-800/70"
+                    ? "border-[var(--border-brand)] bg-[var(--surface-active)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                    : "border-transparent bg-transparent hover:bg-[var(--surface-hover)]"
                 )}
               >
                 <div className="flex items-start gap-2">
@@ -198,10 +198,10 @@ export function SessionSidebar({
                     title={session.id}
                     onClick={() => onSelectSession(session.id)}
                   >
-                    <p className="line-clamp-2 text-sm leading-5 font-medium text-zinc-100">
+                    <p className="line-clamp-2 text-sm leading-5 font-medium text-[var(--text-primary)]">
                       {displayTitle(session)}
                     </p>
-                    <p className="mt-1 text-xs text-zinc-400">
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
                       {shortSessionId(session.id)}
                     </p>
                   </button>
@@ -214,7 +214,7 @@ export function SessionSidebar({
                   />
                 </div>
                 {badge ? (
-                  <Badge variant="outline" className="mt-2 border-amber-600/50 bg-amber-900/20 text-[11px] text-amber-300">
+                  <Badge variant="outline" className="mt-2 border-amber-300 bg-amber-50 text-[11px] text-amber-700">
                     {badge}
                   </Badge>
                 ) : null}

@@ -11,7 +11,7 @@ function TextPart({ user }: { user: boolean }) {
     <p
       className={cn(
         "text-sm leading-relaxed whitespace-pre-wrap",
-        user ? "text-slate-50" : "text-slate-900"
+        user ? "text-[var(--text-primary)]" : "text-[var(--text-primary)]"
       )}
     >
       <MessagePartPrimitive.Text />
@@ -22,7 +22,7 @@ function TextPart({ user }: { user: boolean }) {
 export function UserMessageBubble() {
   return (
     <MessagePrimitive.Root className="flex justify-end py-2">
-      <div className="max-w-[85%] rounded-3xl rounded-tr-md border border-zinc-900 bg-zinc-900 px-4 py-3 text-white shadow-sm">
+      <div className="max-w-[85%] rounded-2xl rounded-tr-md border border-[var(--border-brand)] bg-[var(--surface-active)] px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
         <MessagePrimitive.Parts
           components={{
             Text: () => <TextPart user />
@@ -48,15 +48,15 @@ export function AssistantMessageBubble({
 }: AssistantMessageBubbleProps) {
   return (
     <MessagePrimitive.Root className="flex justify-start gap-3 py-2">
-      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-teal-200/70 bg-teal-100/90 text-teal-700">
+      <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--border-brand)] bg-[var(--surface-active)] text-[var(--action-primary)]">
         <Database className="h-4 w-4" />
       </div>
       <div className="min-w-0 max-w-[92%] flex-1">
-        <div className="rounded-2xl rounded-tl-md border border-slate-200/90 bg-white px-4 py-3 shadow-sm">
+        <div className="rounded-2xl rounded-tl-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
           <MessagePrimitive.Parts
             components={{
               Text: () => <TextPart user={false} />,
-              Empty: () => <span className="inline-block h-4 w-2 animate-pulse rounded bg-slate-300" />
+              Empty: () => <span className="inline-block h-4 w-2 animate-pulse rounded bg-[var(--text-disabled)]" />
             }}
           />
         </div>

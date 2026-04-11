@@ -124,7 +124,7 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
-  it("sends message and updates success state with sql preview", async () => {
+  it("sends message and keeps sql preview available in chat flow", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
 
@@ -137,23 +137,19 @@ describe("ChatPanel", () => {
       expect(mockGetMessages).toHaveBeenCalledWith("session-1");
     });
 
-    expect(await screen.findByText("发送成功，已收到后端响应。")).toBeInTheDocument();
+    expect(screen.queryByText("发送成功，已收到后端响应。")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
     expect(
       screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
     ).toBeInTheDocument();
   });
 
-  it("persists debug switch at session level", async () => {
-    const user = userEvent.setup();
+  it("does not render debug switch control", async () => {
     render(<ChatPanel />);
 
     await screen.findByText(/Session: session-1/i);
-    await user.click(screen.getByLabelText("调试详情开关"));
-
-    await waitFor(() => {
-      expect(mockSetSessionDebugEnabled).toHaveBeenCalledWith("session-1", true);
-    });
+    expect(screen.queryByLabelText("调试详情开关")).not.toBeInTheDocument();
+    expect(mockSetSessionDebugEnabled).not.toHaveBeenCalled();
   });
 
   it("shows initialization failure when session creation fails", async () => {

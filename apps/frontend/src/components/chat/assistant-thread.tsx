@@ -77,10 +77,10 @@ export function AssistantThread({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto bg-[#f7f7f8] px-4 py-6 sm:px-8">
+        <ThreadPrimitive.Viewport className="min-h-0 flex-1 overflow-y-auto bg-[var(--surface-page)] px-4 py-6 sm:px-8">
           <div className="mx-auto w-full max-w-4xl">
             <AuiIf condition={(state) => state.thread.isEmpty}>
-              <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-4 text-sm text-slate-500 shadow-sm">
+              <p className="rounded-2xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-panel)] px-5 py-4 text-sm text-[var(--text-secondary)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                 发送第一条消息开始演示。
               </p>
             </AuiIf>
@@ -106,7 +106,7 @@ export function AssistantThread({
             </ThreadPrimitive.Messages>
           </div>
 
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 bg-gradient-to-t from-[#f7f7f8] to-transparent pt-4">
+          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 bg-gradient-to-t from-[var(--surface-page)] to-transparent pt-4">
             <AssistantComposer
               disabled={disabled}
               onOpenDetail={() => {
@@ -120,7 +120,7 @@ export function AssistantThread({
           <button
             type="button"
             aria-label="回到底部"
-            className="absolute bottom-28 right-8 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm"
+            className="absolute bottom-28 right-8 inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-panel)] text-[var(--text-secondary)] shadow-[0_1px_2px_rgba(15,23,42,0.06)]"
           >
             <ArrowDown className="h-4 w-4" />
           </button>

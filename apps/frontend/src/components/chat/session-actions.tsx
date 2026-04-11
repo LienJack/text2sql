@@ -19,7 +19,7 @@ export function SessionActions({
       <Button
         size="icon-xs"
         variant="ghost"
-        className="text-zinc-400 hover:bg-zinc-700/70 hover:text-zinc-100"
+        className="text-[var(--text-tertiary)] hover:bg-[var(--surface-active)] hover:text-[var(--action-primary-hover)]"
         disabled={disabled}
         aria-label="重命名会话"
         onClick={(event) => {
@@ -32,7 +32,7 @@ export function SessionActions({
       <Button
         size="icon-xs"
         variant="ghost"
-        className="text-zinc-400 hover:bg-zinc-700/70 hover:text-zinc-100"
+        className="text-[var(--text-tertiary)] hover:bg-[var(--surface-active)] hover:text-[var(--action-primary-hover)]"
         disabled={disabled}
         aria-label="删除会话"
         onClick={(event) => {

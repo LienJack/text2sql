@@ -174,8 +174,8 @@ export function ChatPanel() {
   };
 
   return (
-    <div className="relative flex h-full w-full overflow-hidden bg-[#f7f7f8] text-slate-950">
-      <aside className="hidden h-full w-80 border-r border-zinc-800/90 bg-[#171717] md:block">
+    <div className="relative flex h-full w-full overflow-hidden bg-[var(--surface-page)] text-[var(--text-primary)]">
+      <aside className="hidden h-full w-80 border-r border-[var(--border-default)] bg-[var(--surface-sidebar)] md:block">
         <SessionSidebar
           sessions={sessions}
           activeSessionId={sessionId}
@@ -189,7 +189,7 @@ export function ChatPanel() {
       </aside>
 
       <Sheet open={mobileSessionsOpen} onOpenChange={setMobileSessionsOpen}>
-        <SheetContent side="left" className="w-80 border-zinc-800 bg-[#171717] p-0">
+        <SheetContent side="left" className="w-80 border-[var(--border-default)] bg-[var(--surface-sidebar)] p-0">
           <SheetTitle className="sr-only">会话列表</SheetTitle>
           <SessionSidebar
             sessions={sessions}
@@ -204,12 +204,12 @@ export function ChatPanel() {
         </SheetContent>
       </Sheet>
 
-      <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#f7f7f8]">
-        <header className="space-y-3 border-b border-slate-200/80 bg-white/85 px-4 py-4 backdrop-blur sm:px-6">
+      <section className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--surface-page)]">
+        <header className="space-y-3 border-b border-[var(--border-default)] bg-[var(--surface-panel)] px-4 py-4 sm:px-6">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-slate-900">Text2SQL Assistant</h2>
-              <p className="truncate text-xs text-slate-500/90">
+              <h2 className="truncate text-base font-semibold text-[var(--text-primary)]">Text2SQL Assistant</h2>
+              <p className="truncate text-xs text-[var(--text-tertiary)]">
                 {sessionId ? `Session: ${sessionId}` : "Session 初始化中..."}
               </p>
             </div>

@@ -48,9 +48,9 @@ const quickLinks = [
 ];
 
 const statStyles: Record<OverviewStat["status"], string> = {
-  healthy: "border-emerald-200 bg-emerald-50/80 text-emerald-700",
-  warning: "border-amber-200 bg-amber-50/90 text-amber-700",
-  error: "border-rose-200 bg-rose-50/90 text-rose-700"
+  healthy: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-700",
+  error: "border-rose-200 bg-rose-50 text-rose-700"
 };
 
 export default function OverviewPage() {
@@ -87,10 +87,10 @@ export default function OverviewPage() {
   }, []);
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-6 p-4 sm:p-6 lg:p-8">
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-xl font-semibold text-slate-900">Text2SQL 平台总览</h2>
-        <p className="mt-1 text-sm text-slate-500">
+    <div className="mx-auto w-full max-w-[1400px] space-y-6 bg-[var(--surface-page)] p-4 sm:p-6 lg:p-8">
+      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-5 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+        <h2 className="text-xl font-semibold text-[var(--text-primary)]">Text2SQL 平台总览</h2>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
           当前页面用于展示平台健康态与各模块入口，Chat 模块已连接真实后端接口。
         </p>
       </section>
@@ -119,14 +119,14 @@ export default function OverviewPage() {
           const Icon = link.icon;
           return (
             <Link key={link.href} href={link.href} className="group">
-              <Card className="h-full border-slate-200 transition-all group-hover:-translate-y-0.5 group-hover:border-teal-300 group-hover:shadow-md">
+              <Card className="h-full border-[var(--border-default)] transition-all group-hover:-translate-y-0.5 group-hover:border-[var(--border-brand)] group-hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]">
                 <CardHeader>
-                  <div className="flex items-center gap-2 text-teal-700">
+                  <div className="flex items-center gap-2 text-[var(--action-primary-hover)]">
                     <Icon className="h-4 w-4" />
                     <CardTitle className="text-base">{link.title}</CardTitle>
                   </div>
                 </CardHeader>
-                <CardContent className="text-sm text-slate-600">{link.description}</CardContent>
+                <CardContent className="text-sm text-[var(--text-secondary)]">{link.description}</CardContent>
               </Card>
             </Link>
           );

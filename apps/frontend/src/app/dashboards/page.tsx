@@ -68,10 +68,10 @@ export default function DashboardsPage() {
   }, [dashboards, folder, query]);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-[640px] overflow-hidden bg-slate-50">
-      <aside className="hidden w-64 flex-col border-r border-slate-200 bg-white md:flex">
-        <div className="border-b border-slate-200 p-4">
-          <Button className="w-full justify-start bg-slate-900 text-white hover:bg-slate-800">
+    <div className="flex h-[calc(100vh-4rem)] min-h-[640px] overflow-hidden bg-[var(--surface-page)]">
+      <aside className="hidden w-64 flex-col border-r border-[var(--border-default)] bg-[var(--surface-panel)] md:flex">
+        <div className="border-b border-[var(--border-default)] p-4">
+          <Button className="w-full justify-start">
             <Plus className="h-4 w-4" />
             新建看板
           </Button>
@@ -82,40 +82,40 @@ export default function DashboardsPage() {
             className={cn(
               "flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm font-medium",
               folder === "mine"
-                ? "border-teal-300 bg-teal-50 text-teal-700"
-                : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100"
+                ? "border-[var(--border-brand)] bg-[var(--surface-active)] text-[var(--action-primary-hover)]"
+                : "border-transparent text-[var(--text-secondary)] hover:border-[var(--border-default)] hover:bg-[var(--surface-hover)]"
             )}
             onClick={() => setFolder("mine")}
           >
             <span>我的看板</span>
-            <span className="text-xs text-slate-500">{dashboards.filter((item) => item.owner === "我").length}</span>
+            <span className="text-xs text-[var(--text-tertiary)]">{dashboards.filter((item) => item.owner === "我").length}</span>
           </button>
           <button
             type="button"
             className={cn(
               "flex w-full items-center justify-between rounded-md border px-3 py-2 text-sm font-medium",
               folder === "team"
-                ? "border-teal-300 bg-teal-50 text-teal-700"
-                : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100"
+                ? "border-[var(--border-brand)] bg-[var(--surface-active)] text-[var(--action-primary-hover)]"
+                : "border-transparent text-[var(--text-secondary)] hover:border-[var(--border-default)] hover:bg-[var(--surface-hover)]"
             )}
             onClick={() => setFolder("team")}
           >
             <span>团队看板</span>
-            <span className="text-xs text-slate-500">{dashboards.filter((item) => item.owner !== "我").length}</span>
+            <span className="text-xs text-[var(--text-tertiary)]">{dashboards.filter((item) => item.owner !== "我").length}</span>
           </button>
         </nav>
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <div className="space-y-3 border-b border-slate-200 bg-white p-4 sm:flex sm:items-center sm:justify-between sm:space-y-0">
+        <div className="space-y-3 border-b border-[var(--border-default)] bg-[var(--surface-panel)] p-4 sm:flex sm:items-center sm:justify-between sm:space-y-0">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">
               {folder === "mine" ? "我的看板" : "团队看板"}
             </h2>
-            <p className="text-sm text-slate-500">沉淀并复用稳定的数据分析结果。</p>
+            <p className="text-sm text-[var(--text-secondary)]">沉淀并复用稳定的数据分析结果。</p>
           </div>
           <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -139,7 +139,7 @@ export default function DashboardsPage() {
                   return (
                     <Card
                       key={dashboard.id}
-                      className="border-slate-200 transition-all hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-md"
+                      className="border-[var(--border-default)] transition-all hover:-translate-y-0.5 hover:border-[var(--border-brand)] hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]"
                     >
                       <CardHeader className="space-y-2">
                         <div className="flex items-center justify-between">
@@ -148,21 +148,21 @@ export default function DashboardsPage() {
                             className={cn(
                               "font-medium",
                               dashboard.status === "published"
-                                ? "bg-teal-600 text-white"
-                                : "bg-slate-100 text-slate-600"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-[var(--surface-subtle)] text-[var(--text-secondary)]"
                             )}
                           >
                             {dashboard.status === "published" ? "已发布" : "草稿"}
                           </Badge>
-                          <span className="text-xs text-slate-500">{dashboard.owner}</span>
+                          <span className="text-xs text-[var(--text-tertiary)]">{dashboard.owner}</span>
                         </div>
-                        <CardTitle className="text-base text-slate-900">{dashboard.title}</CardTitle>
+                        <CardTitle className="text-base text-[var(--text-primary)]">{dashboard.title}</CardTitle>
                       </CardHeader>
-                      <CardContent className="flex h-24 items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 text-slate-500">
-                        <ChartIcon className="mr-2 h-4 w-4 text-teal-600" />
+                      <CardContent className="flex h-24 items-center justify-center rounded-md border border-dashed border-[var(--border-default)] bg-[var(--surface-subtle)] text-[var(--text-secondary)]">
+                        <ChartIcon className="mr-2 h-4 w-4 text-[var(--action-primary)]" />
                         图表预览区域
                       </CardContent>
-                      <CardFooter className="mt-3 flex items-center justify-between text-xs text-slate-500">
+                      <CardFooter className="mt-3 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
                         <span>更新于 {dashboard.updatedAt}</span>
                         <span className="inline-flex items-center gap-1">
                           <Star className="h-3 w-3" />
@@ -177,7 +177,7 @@ export default function DashboardsPage() {
             {!loading && !error ? (
               <button
                 type="button"
-                className="flex h-[240px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-300 hover:text-teal-700"
+                className="flex h-[240px] flex-col items-center justify-center rounded-xl border-2 border-dashed border-[var(--border-default)] bg-[var(--surface-panel)] text-[var(--text-secondary)] transition-colors hover:border-[var(--border-brand)] hover:text-[var(--action-primary-hover)]"
               >
                 <Plus className="mb-2 h-6 w-6" />
                 <span className="text-sm font-medium">新建空白看板</span>

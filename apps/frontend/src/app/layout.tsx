@@ -12,7 +12,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" className="font-sans">
-      <body className="theme">
+      <body className="theme bg-[var(--surface-page)]">
         <PlatformShell>{children}</PlatformShell>
       </body>
     </html>
