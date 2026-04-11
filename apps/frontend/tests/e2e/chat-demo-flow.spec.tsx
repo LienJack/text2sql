@@ -9,6 +9,7 @@ import {
   getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
@@ -21,6 +22,7 @@ vi.mock("@/lib/api-client", () => ({
   listSessions: vi.fn(),
   listEnabledModels: vi.fn(),
   renameSession: vi.fn(),
+  probeModelConnectivity: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
@@ -34,6 +36,7 @@ const mockCreateSession = vi.mocked(createSession);
 const mockListSessions = vi.mocked(listSessions);
 const mockListEnabledModels = vi.mocked(listEnabledModels);
 const mockRenameSession = vi.mocked(renameSession);
+const mockProbeModelConnectivity = vi.mocked(probeModelConnectivity);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
@@ -74,6 +77,12 @@ describe("chat demo flow", () => {
     mockCreateSession.mockResolvedValue(session);
     mockListSessions.mockResolvedValue([session]);
     mockRenameSession.mockResolvedValue(session);
+    mockProbeModelConnectivity.mockResolvedValue({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      latencyMs: 120
+    });
     mockSetSessionModel.mockResolvedValue(session);
     mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
     mockSetSessionDebugEnabled.mockResolvedValue({

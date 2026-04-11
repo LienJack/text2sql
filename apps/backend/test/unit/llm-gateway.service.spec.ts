@@ -169,4 +169,42 @@ describe("LlmGatewayService", () => {
     expect(output.rawText).toContain("```sql");
     expect(output.rawText).toContain("SELECT status FROM orders");
   });
+
+  it("should recover from stream timeout via non-stream retry", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        throw new Error("The operation was aborted due to timeout");
+      })(),
+      text: Promise.resolve("")
+    } as unknown as ReturnType<typeof streamText>);
+
+    mockedGenerateText.mockResolvedValue({
+      text: "SELECT COUNT(*) FROM orders;"
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const events: string[] = [];
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime,
+      {
+        onEvent: (event) => {
+          events.push(event.type);
+        }
+      }
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) FROM orders;");
+    expect(events).toEqual(["text-delta"]);
+    expect(mockedGenerateText).toHaveBeenCalledTimes(1);
+  });
 });

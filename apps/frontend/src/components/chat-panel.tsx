@@ -24,6 +24,7 @@ import {
   getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession as renameSessionRequest,
   setSessionModel
 } from "@/lib/api-client";
@@ -81,22 +82,40 @@ function appendThinkingStep(
   incoming: ThinkingStep
 ): Record<string, ThinkingStep[]> {
   const current = previous[runId] ?? [];
-  const dedupeKey =
+  const stepKey =
     incoming.stepId ??
     `${incoming.node}:${incoming.sequence ?? "na"}:${incoming.at ?? "na"}`;
-  if (
-    current.some((step) => {
-      const stepKey =
-        step.stepId ??
-        `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
-      return stepKey === dedupeKey;
-    })
-  ) {
-    return previous;
+  const existingIndex = current.findIndex((step) => {
+    const existingKey =
+      step.stepId ??
+      `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
+    return existingKey === stepKey;
+  });
+
+  const nextForRun = [...current];
+  if (existingIndex >= 0) {
+    nextForRun[existingIndex] = {
+      ...nextForRun[existingIndex],
+      ...incoming
+    };
+  } else {
+    nextForRun.push(incoming);
   }
+
+  nextForRun.sort((left, right) => {
+    const leftSequence = left.sequence ?? 0;
+    const rightSequence = right.sequence ?? 0;
+    if (leftSequence !== rightSequence) {
+      return leftSequence - rightSequence;
+    }
+    const leftTime = left.at ?? left.startedAt ?? "";
+    const rightTime = right.at ?? right.startedAt ?? "";
+    return leftTime.localeCompare(rightTime);
+  });
+
   return {
     ...previous,
-    [runId]: [...current, incoming]
+    [runId]: nextForRun
   };
 }
 
@@ -136,6 +155,7 @@ export function ChatPanel() {
     {}
   );
   const [activeStreamRunId, setActiveStreamRunId] = useState<string | null>(null);
+  const [thinkingRequestPending, setThinkingRequestPending] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [sessionError, setSessionError] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
@@ -170,6 +190,7 @@ export function ChatPanel() {
     setStreamThinkingByRunId({});
     setRunLoadingById({});
     setActiveStreamRunId(null);
+    setThinkingRequestPending(false);
     setThreadVersion((previous) => previous + 1);
     setSessions((previous) => {
       const index = previous.findIndex((session) => session.id === sessionView.session.id);
@@ -234,6 +255,7 @@ export function ChatPanel() {
       setStreamThinkingByRunId({});
       setRunLoadingById({});
       setActiveStreamRunId(null);
+      setThinkingRequestPending(false);
       setThreadVersion((previous) => previous + 1);
       if (!latest.some((session) => session.id === created.id)) {
         setSessions([created, ...latest]);
@@ -273,6 +295,7 @@ export function ChatPanel() {
         setStreamThinkingByRunId({});
         setRunLoadingById({});
         setActiveStreamRunId(null);
+        setThinkingRequestPending(false);
         setThreadVersion((previous) => previous + 1);
       }
     } catch (deleteError) {
@@ -286,9 +309,13 @@ export function ChatPanel() {
     if (!sessionId || !modelCatalogId) {
       return;
     }
+    if (activeSession?.modelCatalogId === modelCatalogId) {
+      return;
+    }
     setSessionLoading(true);
     setSessionError("");
     try {
+      await probeModelConnectivity(modelCatalogId);
       const updated = await setSessionModel(sessionId, modelCatalogId);
       setSessions((previous) =>
         previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
@@ -414,11 +441,13 @@ export function ChatPanel() {
           streamThinkingByRunId={streamThinkingByRunId}
           runLoadingById={runLoadingById}
           activeStreamRunId={activeStreamRunId}
+          thinkingRequestPending={thinkingRequestPending}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
           disabled={sessionLoading || !sessionId}
           onRequestRun={ensureRunLoaded}
           onRunStart={() => {
             setActiveStreamRunId(null);
+            setThinkingRequestPending(true);
           }}
           onStreamEvent={(event) => {
             if (event.type === "start") {
@@ -427,6 +456,7 @@ export function ChatPanel() {
                 ...previous,
                 [event.runId]: []
               }));
+              setThinkingRequestPending(true);
               return;
             }
             const step = toThinkingStep(event);
@@ -435,6 +465,7 @@ export function ChatPanel() {
                 setActiveStreamRunId((current) =>
                   current === event.runId ? null : current
                 );
+                setThinkingRequestPending(false);
               }
               return;
             }
@@ -444,6 +475,7 @@ export function ChatPanel() {
           }}
           onRunFinish={async (runId) => {
             setActiveStreamRunId((current) => (current === runId ? null : current));
+            setThinkingRequestPending(false);
             if (!sessionId) {
               return;
             }
@@ -455,6 +487,7 @@ export function ChatPanel() {
           }}
           onRunError={async () => {
             setActiveStreamRunId(null);
+            setThinkingRequestPending(false);
             if (sessionId) {
               await loadMessages(sessionId).catch(() => undefined);
             }

@@ -96,6 +96,23 @@ export async function setSessionModel(
   });
 }
 
+export async function probeModelConnectivity(modelCatalogId: string): Promise<{
+  ok: boolean;
+  provider: string;
+  model: string;
+  latencyMs: number;
+}> {
+  return request<{
+    ok: boolean;
+    provider: string;
+    model: string;
+    latencyMs: number;
+  }>(`/api/v1/models/${modelCatalogId}/probe`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
 export async function deleteSession(
   sessionId: string
 ): Promise<{ deleted: boolean; sessionId: string }> {

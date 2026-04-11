@@ -128,6 +128,19 @@ export class ChatController {
     }
   }
 
+  @Post("/models/:modelCatalogId/probe")
+  async probeModel(
+    @Param("modelCatalogId") modelCatalogId: string,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const result = await this.chatService.probeModelConnectivity(modelCatalogId);
+      return ok(req.requestId, result);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
   @Post("/sessions/:sessionId/messages/stream")
   async streamMessage(
     @Param("sessionId") sessionId: string,

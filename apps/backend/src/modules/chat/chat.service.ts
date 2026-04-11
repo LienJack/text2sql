@@ -15,7 +15,13 @@ import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.ser
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
+import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
+
+const MODEL_PROBE_PROMPT = {
+  systemPrompt: "You are a health check assistant. Reply with exactly OK.",
+  userPrompt: "Reply with OK."
+};
 
 @Injectable()
 export class ChatService {
@@ -25,6 +31,7 @@ export class ChatService {
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
     private readonly providerCatalog: ProviderCatalogService,
+    private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
   ) {}
 
@@ -140,6 +147,66 @@ export class ChatService {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
     await this.redisBuffer.clearBufferedMessages(sessionId);
+  }
+
+  async probeModelConnectivity(modelCatalogId: string): Promise<{
+    ok: boolean;
+    provider: string;
+    model: string;
+    latencyMs: number;
+  }> {
+    const normalizedModelId = modelCatalogId.trim();
+    if (!normalizedModelId) {
+      throw new DomainError("VALIDATION_ERROR", "模型 ID 不能为空", 400, {
+        modelCatalogId
+      });
+    }
+
+    const startedAt = Date.now();
+    try {
+      const draft = await this.providerRouter.generate(MODEL_PROBE_PROMPT, {
+        modelCatalogId: normalizedModelId
+      });
+      const responseText = draft.rawText.trim().toUpperCase();
+      if (!responseText) {
+        throw new DomainError(
+          "MODEL_PROBE_EMPTY",
+          "模型探活返回为空响应，请稍后重试。",
+          502,
+          {
+            modelCatalogId: normalizedModelId
+          }
+        );
+      }
+      return {
+        ok: true,
+        provider: draft.provider,
+        model: draft.model,
+        latencyMs: Date.now() - startedAt
+      };
+    } catch (error) {
+      if (error instanceof DomainError) {
+        throw new DomainError(
+          "MODEL_UNREACHABLE",
+          `模型连通性检测失败：${error.message}`,
+          409,
+          {
+            modelCatalogId: normalizedModelId,
+            latencyMs: Date.now() - startedAt,
+            reasonCode: error.code
+          }
+        );
+      }
+      throw new DomainError(
+        "MODEL_UNREACHABLE",
+        `模型连通性检测失败：${error instanceof Error ? error.message : String(error)}`,
+        409,
+        {
+          modelCatalogId: normalizedModelId,
+          latencyMs: Date.now() - startedAt
+        }
+      );
+    }
   }
 
   async sendMessage(

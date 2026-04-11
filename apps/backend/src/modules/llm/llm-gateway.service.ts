@@ -19,6 +19,18 @@ const toErrorMessage = (error: unknown): string => {
   return String(error);
 };
 
+const isTimeoutAbortError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const normalized = `${error.name} ${error.message}`.toLowerCase();
+  return (
+    normalized.includes("aborted due to timeout") ||
+    normalized.includes("aborterror") ||
+    normalized.includes("timeouterror")
+  );
+};
+
 @Injectable()
 export class LlmGatewayService implements LlmGateway {
   constructor(
@@ -129,6 +141,8 @@ export class LlmGatewayService implements LlmGateway {
       };
     }
 
+    let streamedText = "";
+    let toolCallSql: string | undefined;
     try {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
@@ -141,8 +155,6 @@ export class LlmGatewayService implements LlmGateway {
         tools: normalizedTools
       });
 
-      let streamedText = "";
-      let toolCallSql: string | undefined;
       for await (const chunk of result.fullStream) {
         if (chunk.type === "text-delta") {
           streamedText += chunk.text;
@@ -209,6 +221,47 @@ export class LlmGatewayService implements LlmGateway {
       if (error instanceof DomainError) {
         throw error;
       }
+
+      const toolFallbackText = this.buildToolFallbackText(toolCallSql);
+      if (toolFallbackText) {
+        const delta = this.resolveFallbackDelta(streamedText, toolFallbackText);
+        if (delta) {
+          await options?.onEvent?.({
+            type: "text-delta",
+            text: delta
+          });
+        }
+        return {
+          provider: runtime.provider,
+          model: runtime.model,
+          prompt,
+          rawText: toolFallbackText
+        };
+      }
+
+      if (isTimeoutAbortError(error)) {
+        const recoveredText = await this.tryRecoverFromStreamTimeout(
+          prompt,
+          runtime,
+          streamedText
+        );
+        if (recoveredText) {
+          const delta = this.resolveFallbackDelta(streamedText, recoveredText);
+          if (delta) {
+            await options?.onEvent?.({
+              type: "text-delta",
+              text: delta
+            });
+          }
+          return {
+            provider: runtime.provider,
+            model: runtime.model,
+            prompt,
+            rawText: recoveredText
+          };
+        }
+      }
+
       throw new DomainError(
         "LLM_REQUEST_FAILED",
         `LLM 流式请求失败: ${toErrorMessage(error)}`,
@@ -217,6 +270,38 @@ export class LlmGatewayService implements LlmGateway {
           provider: runtime.provider
         }
       );
+    }
+  }
+
+  private async tryRecoverFromStreamTimeout(
+    prompt: LlmGatewayPrompt,
+    runtime: LlmGatewayRuntimeConfig,
+    streamedText: string
+  ): Promise<string | undefined> {
+    const timeoutMs = Math.min(
+      Math.max(runtime.timeoutMs * 2, runtime.timeoutMs + 15000),
+      120000
+    );
+
+    try {
+      const model = this.modelFactory.createChatModel(runtime) as never;
+      const result = await generateText({
+        model,
+        system: prompt.systemPrompt,
+        prompt: prompt.userPrompt,
+        temperature: 0.2,
+        abortSignal: AbortSignal.timeout(timeoutMs)
+      });
+      const fallbackText = result.text?.trim();
+      if (!fallbackText) {
+        return undefined;
+      }
+      if (streamedText.trim().length > 0 && fallbackText.trim() === streamedText.trim()) {
+        return streamedText;
+      }
+      return fallbackText;
+    } catch {
+      return undefined;
     }
   }
 
@@ -251,5 +336,15 @@ export class LlmGatewayService implements LlmGateway {
       return "";
     }
     return ["下面是工具调用生成的 SQL。", "```sql", sql, "```"].join("\n");
+  }
+
+  private resolveFallbackDelta(existingText: string, fallbackText: string): string {
+    if (!existingText) {
+      return fallbackText;
+    }
+    if (fallbackText.startsWith(existingText)) {
+      return fallbackText.slice(existingText.length);
+    }
+    return "";
   }
 }

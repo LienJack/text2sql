@@ -9,6 +9,7 @@ import {
   getRun,
   listEnabledModels,
   listSessions,
+  probeModelConnectivity,
   renameSession,
   setSessionModel,
   setSessionDebugEnabled,
@@ -21,6 +22,7 @@ vi.mock("@/lib/api-client", () => ({
   listSessions: vi.fn(),
   listEnabledModels: vi.fn(),
   renameSession: vi.fn(),
+  probeModelConnectivity: vi.fn(),
   setSessionModel: vi.fn(),
   setSessionDebugEnabled: vi.fn(),
   deleteSession: vi.fn(),
@@ -34,6 +36,7 @@ const mockCreateSession = vi.mocked(createSession);
 const mockListSessions = vi.mocked(listSessions);
 const mockListEnabledModels = vi.mocked(listEnabledModels);
 const mockRenameSession = vi.mocked(renameSession);
+const mockProbeModelConnectivity = vi.mocked(probeModelConnectivity);
 const mockSetSessionModel = vi.mocked(setSessionModel);
 const mockSetSessionDebugEnabled = vi.mocked(setSessionDebugEnabled);
 const mockDeleteSession = vi.mocked(deleteSession);
@@ -86,6 +89,12 @@ describe("ChatPanel", () => {
     mockCreateSession.mockResolvedValue(session);
     mockListSessions.mockResolvedValue([session]);
     mockRenameSession.mockResolvedValue(session);
+    mockProbeModelConnectivity.mockResolvedValue({
+      ok: true,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      latencyMs: 120
+    });
     mockSetSessionModel.mockResolvedValue(session);
     mockDeleteSession.mockResolvedValue({ deleted: true, sessionId: "session-1" });
     mockSetSessionDebugEnabled.mockResolvedValue({
@@ -215,5 +224,39 @@ describe("ChatPanel", () => {
 
     expect(await screen.findByText("初始化失败")).toBeInTheDocument();
     expect(mockStreamMessageEvents).not.toHaveBeenCalled();
+  });
+
+  it("shows thinking indicator immediately before first stream event arrives", async () => {
+    const user = userEvent.setup();
+    mockStreamMessageEvents.mockImplementationOnce(async function* () {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      yield {
+        type: "text-delta",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          text: "SELECT payment_method"
+        }
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1
+        }
+      };
+    });
+
+    render(<ChatPanel />);
+    await screen.findByText(/Session: session-1/i);
+
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    expect(await screen.findByText(/思考中/)).toBeInTheDocument();
   });
 });

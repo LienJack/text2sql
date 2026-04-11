@@ -11,7 +11,7 @@ import {
   AuiIf,
   ThreadPrimitive
 } from "@assistant-ui/react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Loader2 } from "lucide-react";
 import { AssistantComposer } from "@/components/chat/assistant-composer";
 import type { ThinkingStreamStep } from "@/components/chat/assistant-thinking-panel";
 import {
@@ -30,6 +30,7 @@ interface AssistantThreadProps {
   streamThinkingByRunId: Record<string, ThinkingStreamStep[]>;
   runLoadingById: Record<string, boolean>;
   activeStreamRunId: string | null;
+  thinkingRequestPending: boolean;
   debugEnabled: boolean;
   disabled?: boolean;
   onRequestRun?: (runId: string) => Promise<void> | void;
@@ -64,6 +65,7 @@ export function AssistantThread({
   streamThinkingByRunId,
   runLoadingById,
   activeStreamRunId,
+  thinkingRequestPending,
   debugEnabled,
   disabled = false,
   onRequestRun,
@@ -140,9 +142,9 @@ export function AssistantThread({
                   const thinkingSteps = resolvedRunId
                     ? streamThinkingByRunId[resolvedRunId] ?? []
                     : [];
-                  const thinkingInProgress = Boolean(
-                    resolvedRunId && activeStreamRunId === resolvedRunId
-                  );
+                  const thinkingInProgress = resolvedRunId
+                    ? activeStreamRunId === resolvedRunId
+                    : isLatestAssistant && thinkingRequestPending;
                   const run = resolvedRunId ? runsById[resolvedRunId] ?? null : null;
                   return (
                     <AssistantMessageBubble
@@ -167,6 +169,12 @@ export function AssistantThread({
                 return null;
               }}
             </ThreadPrimitive.Messages>
+            {thinkingRequestPending && !activeStreamRunId ? (
+              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+                <Loader2 className="h-3 w-3 animate-spin text-[var(--action-primary)]" />
+                思考中...
+              </div>
+            ) : null}
           </div>
 
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 bg-gradient-to-t from-[var(--surface-page)] to-transparent pt-4">

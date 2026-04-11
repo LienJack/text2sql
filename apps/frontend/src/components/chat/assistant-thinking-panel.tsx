@@ -47,6 +47,9 @@ function resolveStepTitle(step: ThinkingStreamStep): string {
 }
 
 function statusVariant(step: ThinkingStreamStep): "default" | "destructive" | "secondary" {
+  if (step.lifecycle === "running") {
+    return "secondary";
+  }
   if (step.status === "failed") {
     return "destructive";
   }
@@ -57,6 +60,9 @@ function statusVariant(step: ThinkingStreamStep): "default" | "destructive" | "s
 }
 
 function statusLabel(step: ThinkingStreamStep): string {
+  if (step.lifecycle === "running") {
+    return "进行中";
+  }
   if (step.status === "failed") {
     return "失败";
   }
@@ -101,8 +107,14 @@ export function AssistantThinkingPanel({
     );
   }, [run, streamSteps]);
   const latestStep = steps.at(-1);
-  const completedCount = steps.filter((step) => step.status !== "failed").length;
-  const hasFailedStep = steps.some((step) => step.status === "failed");
+  const completedCount = steps.filter(
+    (step) =>
+      step.lifecycle === "completed" ||
+      (!step.lifecycle && step.status === "success")
+  ).length;
+  const hasFailedStep = steps.some(
+    (step) => step.lifecycle === "failed" || step.status === "failed"
+  );
   const latestStageLabel = latestStep?.stage ? stageLabels[latestStep.stage] : undefined;
 
   useEffect(() => {
