@@ -4,7 +4,6 @@ import { DataModule } from "../data/data.module";
 import { FreeTextSqlExtractor } from "./free-text-sql-extractor";
 import { LlmGatewayService } from "./llm-gateway.service";
 import { LlmModelFactory } from "./llm-model-factory";
-import { OpenAiCompatibleClient } from "./openai-compatible.client";
 import { ProviderCatalogService } from "./provider-catalog.service";
 import { ProviderRouterService } from "./provider-router.service";
 import { SqlReadonlyTool } from "./tools/sql-readonly.tool";
@@ -21,7 +20,6 @@ import { ToolRegistryService } from "./tools/tool-registry.service";
     SqlReadonlyTool,
     ToolRegistryService,
     ToolEventsMapper,
-    OpenAiCompatibleClient,
     FreeTextSqlExtractor,
     ProviderCatalogService,
     ProviderRouterService
@@ -31,7 +29,6 @@ import { ToolRegistryService } from "./tools/tool-registry.service";
     LlmGatewayService,
     ToolRegistryService,
     ToolEventsMapper,
-    OpenAiCompatibleClient,
     FreeTextSqlExtractor,
     ProviderCatalogService,
     ProviderRouterService

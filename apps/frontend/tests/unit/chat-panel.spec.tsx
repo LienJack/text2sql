@@ -82,7 +82,9 @@ describe("ChatPanel", () => {
         runId: "run-1",
         sessionId: "session-1",
         at: "2026-04-10T00:00:00.000Z",
-        data: "SELECT payment_method"
+        data: {
+          text: "SELECT payment_method"
+        }
       });
     });
     mockGetMessages.mockResolvedValue({

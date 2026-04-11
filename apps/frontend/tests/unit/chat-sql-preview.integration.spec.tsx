@@ -82,7 +82,9 @@ describe("chat to sql preview integration", () => {
         runId: "run-1",
         sessionId: "session-1",
         at: "2026-04-10T00:00:00.000Z",
-        data: "SELECT * FROM orders LIMIT 20"
+        data: {
+          text: "SELECT * FROM orders LIMIT 20"
+        }
       });
     });
     mockGetMessages.mockResolvedValue({

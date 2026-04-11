@@ -88,7 +88,9 @@ describe("chat mobile smoke", () => {
         runId: "run-1",
         sessionId: "session-1",
         at: "2026-04-10T00:00:00.000Z",
-        data: "SELECT 1"
+        data: {
+          text: "SELECT 1"
+        }
       });
     });
     mockGetMessages.mockResolvedValue({

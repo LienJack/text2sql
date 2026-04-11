@@ -215,10 +215,7 @@ export class ChatService {
     const userPersistResult = await this.repository.persistMessage(userMessage);
     await this.repository.ensureSessionTitleFromFirstMessage(sessionId, message);
 
-    const emit = async (
-      type: ChatStreamEvent["type"],
-      data?: ChatStreamEvent["data"]
-    ) => {
+    const emit = async (type: ChatStreamEvent["type"], data: ChatStreamEvent["data"]) => {
       await onEvent({
         type,
         runId,
@@ -275,7 +272,8 @@ export class ChatService {
         createdAt: new Date().toISOString()
       };
       await emit("finish", {
-        status: run.status
+        status: run.status,
+        rowCount: 0
       });
       await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
       return run;
@@ -293,12 +291,22 @@ export class ChatService {
           tools: this.toolRegistry.getTools(),
           onEvent: async (event) => {
             if (event.type === "text-delta") {
-              await emit("text-delta", event.payload);
+              await emit("text-delta", {
+                text: String(event.payload)
+              });
               return;
             }
             const mappedStep = this.toolEventsMapper.toTraceStep(event);
             if (mappedStep) {
               traceSteps.push(mappedStep);
+              await emit("state", {
+                node: mappedStep.node,
+                status: mappedStep.status,
+                detail: mappedStep.detail ?? "",
+                inputSummary: mappedStep.inputSummary,
+                outputSummary: mappedStep.outputSummary,
+                errorSummary: mappedStep.errorSummary
+              });
             }
             if (
               event.type === "tool-call" ||
@@ -328,7 +336,42 @@ export class ChatService {
                 at: new Date().toISOString()
               });
             }
-            await emit(event.type, event.payload);
+            if (event.type === "tool-call") {
+              const payload = event.payload as {
+                toolName?: string;
+                toolCallId?: string;
+                input?: unknown;
+              };
+              await emit("tool-call", {
+                toolName: payload.toolName ?? "unknown",
+                toolCallId: payload.toolCallId ?? "unknown",
+                input: payload.input
+              });
+            }
+            if (event.type === "tool-result") {
+              const payload = event.payload as {
+                toolName?: string;
+                toolCallId?: string;
+                output?: unknown;
+              };
+              await emit("tool-result", {
+                toolName: payload.toolName ?? "unknown",
+                toolCallId: payload.toolCallId ?? "unknown",
+                output: payload.output
+              });
+            }
+            if (event.type === "tool-error") {
+              const payload = event.payload as {
+                toolName?: string;
+                toolCallId?: string;
+                message?: string;
+              };
+              await emit("tool-error", {
+                toolName: payload.toolName ?? "unknown",
+                toolCallId: payload.toolCallId ?? "unknown",
+                message: payload.message ?? "tool execution failed"
+              });
+            }
           }
         }
       );
@@ -368,7 +411,11 @@ export class ChatService {
           },
           createdAt: new Date().toISOString()
         };
-        await emit("error", safety.reason);
+        await emit("error", {
+          code: "SQL_READONLY_REJECTED",
+          message: safety.reason,
+          details: null
+        });
         await this.persistAssistantAndRun(
           sessionId,
           run,
@@ -453,7 +500,13 @@ export class ChatService {
         llmRaw: null,
         createdAt: new Date().toISOString()
       };
-      await emit("error", messageText);
+      const domainError =
+        error instanceof DomainError ? error : undefined;
+      await emit("error", {
+        code: domainError?.code,
+        message: messageText,
+        details: (domainError?.details as Record<string, unknown> | undefined) ?? null
+      });
       await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
       return run;
     }

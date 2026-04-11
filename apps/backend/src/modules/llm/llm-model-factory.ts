@@ -3,7 +3,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { DomainError } from "../../common/domain-error";
 import type { LlmGatewayRuntimeConfig } from "./llm-gateway.interface";
 
-const normalizeBaseUrl = (baseUrl: string): string => {
+export const resolveProviderBaseUrl = (baseUrl: string): string => {
   const normalized = baseUrl.trim().replace(/\/+$/, "");
   if (!normalized) {
     return "";
@@ -14,7 +14,7 @@ const normalizeBaseUrl = (baseUrl: string): string => {
 @Injectable()
 export class LlmModelFactory {
   createChatModel(runtime: LlmGatewayRuntimeConfig): unknown {
-    const baseUrl = normalizeBaseUrl(runtime.baseUrl);
+    const baseUrl = resolveProviderBaseUrl(runtime.baseUrl);
     if (!baseUrl || !runtime.apiKey || !runtime.model) {
       throw new DomainError(
         "LLM_CONFIG_MISSING",

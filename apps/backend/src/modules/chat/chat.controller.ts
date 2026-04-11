@@ -11,7 +11,11 @@ import {
   Res
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import type { ApiResponse } from "@text2sql/shared-types";
+import type {
+  AgentRunResponse,
+  ApiResponse,
+  ChatStreamEvent
+} from "@text2sql/shared-types";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { CreateSessionDto } from "./dto/create-session.dto";
@@ -100,22 +104,24 @@ export class ChatController {
     @Param("sessionId") sessionId: string,
     @Body() body: SendMessageDto,
     @Req() req: Request
-  ): Promise<ApiResponse<unknown>> {
+  ): Promise<ApiResponse<AgentRunResponse>> {
     try {
       const run = await this.chatService.sendMessage(
         sessionId,
         body.message,
         req.requestId
       );
-      const responseType =
-        run.status === "clarification"
-          ? "clarification"
-          : run.status === "executionResult"
-            ? "executionResult"
-            : "sqlPreview";
       return ok(req.requestId, {
-        responseType,
-        run
+        kind: "agent-run",
+        outcome: run.status,
+        run,
+        agent: {
+          provider: run.provider,
+          model: run.model,
+          hasSql: Boolean(run.sql),
+          hasToolCalls: Boolean(run.trace.toolCalls?.length),
+          hasError: Boolean(run.error)
+        }
       });
     } catch (error) {
       return this.toError(req.requestId, error);
@@ -153,18 +159,25 @@ export class ChatController {
         }
       );
     } catch (error) {
-      if (error instanceof DomainError) {
-        sendEvent("error", {
-          code: error.code,
-          message: error.message,
-          details: error.details ?? null
-        });
-      } else {
-        sendEvent("error", {
-          code: "INTERNAL_ERROR",
-          message: error instanceof Error ? error.message : "未知错误"
-        });
-      }
+      const fallbackEvent: ChatStreamEvent = {
+        type: "error",
+        runId: "unavailable",
+        sessionId,
+        at: new Date().toISOString(),
+        data:
+          error instanceof DomainError
+            ? {
+                code: error.code,
+                message: error.message,
+                details: error.details ?? null
+              }
+            : {
+                code: "INTERNAL_ERROR",
+                message: error instanceof Error ? error.message : "未知错误",
+                details: null
+              }
+      };
+      sendEvent("error", fallbackEvent);
     } finally {
       if (!res.writableEnded) {
         res.end();

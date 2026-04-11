@@ -199,13 +199,17 @@ export function ChatPanel() {
     try {
       await sendMessageStream(sessionId, userContent, {
         onEvent: (event) => {
-          if (event.type === "text-delta" && typeof event.data === "string") {
+          if (event.type === "text-delta") {
+            const delta = (event.data as { text?: string } | undefined)?.text ?? "";
+            if (!delta) {
+              return;
+            }
             setMessages((previous) =>
               previous.map((message) =>
                 message.id === optimisticAssistantId
                   ? {
                       ...message,
-                      content: `${message.content}${event.data}`
+                      content: `${message.content}${delta}`
                     }
                   : message
               )

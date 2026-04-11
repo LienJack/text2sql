@@ -49,8 +49,10 @@ export class HealthController {
           model: this.config.llmModel,
           mockMode: this.config.llmMockMode,
           gateway: "vercel-ai-sdk-core",
+          contractVersion: "agent-first-v1",
           streamingEnabled: true,
           streamEndpoint: "/api/v1/sessions/:sessionId/messages/stream",
+          eventRequiredFields: ["type", "runId", "sessionId", "at", "data"],
           toolCallingEnabled: true,
           toolRegistry: ["runReadOnlySql"]
         },

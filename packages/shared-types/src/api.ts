@@ -106,20 +106,75 @@ export interface ChatSessionView {
   latestRun?: SqlRun;
 }
 
+export interface AgentRunResponse {
+  kind: "agent-run";
+  outcome: RunStatus;
+  run: SqlRun;
+  agent: {
+    provider: string;
+    model?: string;
+    hasSql: boolean;
+    hasToolCalls: boolean;
+    hasError: boolean;
+  };
+}
+
+export type ChatStreamEventType =
+  | "start"
+  | "text-delta"
+  | "tool-call"
+  | "tool-result"
+  | "tool-error"
+  | "state"
+  | "finish"
+  | "error";
+
+export type ChatStreamEventData =
+  | {
+      requestId: string | null;
+    }
+  | {
+      text: string;
+    }
+  | {
+      toolName: string;
+      toolCallId: string;
+      input?: unknown;
+    }
+  | {
+      toolName: string;
+      toolCallId: string;
+      output?: unknown;
+    }
+  | {
+      toolName: string;
+      toolCallId: string;
+      message: string;
+    }
+  | {
+      node: string;
+      status: "success" | "failed" | "skipped";
+      detail: string;
+      inputSummary?: string;
+      outputSummary?: string;
+      errorSummary?: string;
+    }
+  | {
+      status: RunStatus;
+      rowCount: number;
+    }
+  | {
+      code?: string;
+      message: string;
+      details?: Record<string, unknown> | null;
+    };
+
 export interface ChatStreamEvent {
-  type:
-    | "start"
-    | "text-delta"
-    | "tool-call"
-    | "tool-result"
-    | "tool-error"
-    | "step"
-    | "finish"
-    | "error";
+  type: ChatStreamEventType;
   runId: string;
   sessionId: string;
   at: string;
-  data?: Record<string, unknown> | string;
+  data: ChatStreamEventData;
 }
 
 export interface ProviderConfig {

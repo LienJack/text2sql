@@ -1,11 +1,11 @@
 import type {
+  AgentRunResponse,
   ApiResponse,
   ChatStreamEvent,
   ChatSessionView,
   LlmSettingsView,
   ModelCatalogItem,
-  Session,
-  SqlRun
+  Session
 } from "@text2sql/shared-types";
 
 const API_BASE =
@@ -110,8 +110,8 @@ export async function deleteSession(
 export async function sendMessage(
   sessionId: string,
   message: string
-): Promise<{ responseType: string; run: SqlRun }> {
-  return request<{ responseType: string; run: SqlRun }>(
+): Promise<AgentRunResponse> {
+  return request<AgentRunResponse>(
     `/api/v1/sessions/${sessionId}/messages`,
     {
       method: "POST",
@@ -177,10 +177,7 @@ export async function sendMessageStream(
       handlers?.onEvent?.(event);
       if (eventType === "error") {
         const messageText =
-          typeof event.data === "string"
-            ? event.data
-            : (event.data as { message?: string } | undefined)?.message ??
-              "流式响应失败";
+          (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
         throw new Error(messageText);
       }
     }
