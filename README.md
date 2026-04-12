@@ -12,6 +12,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 ## 项目规范
 - 前端重写规范：`docs/standards/frontend-react-shadcn-spec.md`
 - 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
+- R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
@@ -59,6 +60,8 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
 - `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
 - `LANGSMITH_ENDPOINT=https://api.smith.langchain.com`（可选）
+- `AGENT_PLANNING_SCAFFOLD_ENABLED=false`（R1 规划骨架开关，默认关闭）
+- `R1_GATE_WINDOW_MINUTES=60`（线上 Gate 指标窗口）
 - 会话 Redis 缓冲 TTL 固定为 12 小时（43200 秒），用于持久化补偿窗口。
 
 4. 生成 Prisma Client（可选但推荐）
@@ -92,6 +95,7 @@ pnpm dev
 - `GET /health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。
 - 如开启 LangSmith，`GET /health` 中 `dependencies.langsmith.ready` 为 `true`。
 - `GET /health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
+- `GET /health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
 - 前端能成功创建会话并发送消息，无跨域报错。
 - `POST /api/v1/sessions/:sessionId/messages` 响应中包含 `run.sql` 与 `run.explanation`。
 - 当 LLM 配置缺失或不可用时，接口返回可读错误（不会回退到规则 SQL）。
@@ -149,6 +153,7 @@ pnpm test:frontend
 ## 后端发布完成门禁（Prisma V7）
 - 依赖与生成：`pnpm --filter @text2sql/backend run prisma:generate`
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
+- R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - 启动 smoke：至少验证 `GET /health`；关键接口建议覆盖：
   - `POST /api/v1/sessions`

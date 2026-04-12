@@ -13,6 +13,7 @@ export interface GraphInput {
   sessionId: string;
   question: string;
   modelCatalogId?: string;
+  planningScaffoldEnabled?: boolean;
   traceContext?: GraphTraceContext;
 }
 

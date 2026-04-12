@@ -10,7 +10,9 @@ describe("SqlToolRegistryService", () => {
         columns: ["status", "order_count"]
       }))
     };
-    const guard = new SqlSafetyGuard();
+    const guard = new SqlSafetyGuard({
+      sqlSafetySoftWarnMaxLength: 120
+    } as any);
     const sqlTool = new SqlReadonlyTool(sqliteQuery as never, guard);
     const registry = new SqlToolRegistryService(sqlTool);
 

@@ -23,4 +23,16 @@ describe("langsmith coverage", () => {
     expect(result.pass).toBe(false);
     expect(result.reason).toContain("sample_too_small");
   });
+
+  it("should fail when coverage is below threshold even with enough samples", () => {
+    const result = computeLangsmithCoverage({
+      totalExecutableRequests: 20,
+      tracedRequests: 15,
+      threshold: 0.9,
+      minSampleSize: 10
+    });
+    expect(result.sampleReady).toBe(true);
+    expect(result.pass).toBe(false);
+    expect(result.coverage).toBeCloseTo(0.75);
+  });
 });

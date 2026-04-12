@@ -49,3 +49,9 @@
 - [ ] `migrate status` 显示数据库与迁移目录一致。
 - [ ] 已执行 `prisma:verify-empty-db`（或等效空库回放流程）。
 - [ ] 已执行 `prisma:generate` 并通过后端相关测试。
+
+## 8. R0-R1 图谱与审计基线要求
+- 基线迁移至少包含 `graph_snapshots`、`semantic_memories`、`semantic_edges`、`agent_audit_logs` 四类表。
+- 新增结构必须保持对 `sessions/messages/sql_runs` 的向后兼容，禁止通过迁移删除或重建旧核心表。
+- 图谱与语义表必须具备最小查询索引（按 datasource、type、sourceRunId）以支撑后续 R2-R5 演进。
+- 审计表必须包含 run/session 关联能力，且外键采用 `ON DELETE SET NULL`，避免清理历史会话时丢失审计记录。
