@@ -13,6 +13,7 @@ import {
 } from "./langgraph.state";
 import { LangGraphRuntimeService } from "./langgraph.runtime";
 import { LangsmithTraceService } from "../../observability/langsmith-trace.service";
+import { AppConfigService } from "../../config/app-config.service";
 
 export interface GraphRunOptions {
   streamMode?: boolean;
@@ -25,7 +26,8 @@ export interface GraphRunOptions {
 export class GraphBuilderService {
   constructor(
     private readonly langGraphRuntime: LangGraphRuntimeService,
-    private readonly langsmithTrace: LangsmithTraceService
+    private readonly langsmithTrace: LangsmithTraceService,
+    private readonly config: AppConfigService
   ) {}
 
   async run(input: GraphInput, options?: GraphRunOptions): Promise<SqlRun> {
@@ -33,6 +35,8 @@ export class GraphBuilderService {
     const initialState = createInitialLangGraphState(
       {
         ...input,
+        planningScaffoldEnabled:
+          input.planningScaffoldEnabled ?? this.config.agentPlanningScaffoldEnabled,
         traceContext
       },
       "volcengine"

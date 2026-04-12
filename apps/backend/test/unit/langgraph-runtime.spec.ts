@@ -10,6 +10,35 @@ describe("langgraph runtime", () => {
       clarifyNode: {
         run: () => undefined
       },
+      retrieveKnowledgeNode: {
+        run: () => ({
+          status: "ready",
+          snippets: ["stub"],
+          summary: "stub"
+        })
+      },
+      buildIntentPlanNode: {
+        run: () => ({
+          status: "ready",
+          intent: "aggregate",
+          constraints: [],
+          summary: "stub"
+        })
+      },
+      buildSemanticQueryNode: {
+        run: () => ({
+          status: "ready",
+          semanticHints: [],
+          summary: "stub"
+        })
+      },
+      buildPhysicalPlanNode: {
+        run: () => ({
+          status: "ready",
+          strategy: "direct_sql",
+          summary: "stub"
+        })
+      },
       generateSqlNode: {
         run: async () => ({
           provider: "mock-provider",
@@ -24,7 +53,12 @@ describe("langgraph runtime", () => {
         })
       },
       safetyNode: {
-        run: () => ({ safe: true as const })
+        run: () => ({
+          allowed: true,
+          mode: "pass" as const,
+          riskLevel: "low" as const,
+          riskTags: []
+        })
       },
       executeNode: {
         run: async () => ({
@@ -50,6 +84,10 @@ describe("langgraph runtime", () => {
     expect(output.answer).toBe("formatted");
     expect(output.trace.steps.map((step) => step.node)).toEqual([
       "clarify",
+      "retrieve-knowledge",
+      "build-intent-plan",
+      "build-semantic-query",
+      "build-physical-plan",
       "generate-sql",
       "safety-check",
       "execute-sql",
@@ -58,8 +96,8 @@ describe("langgraph runtime", () => {
     expect(output.trace.steps[0]?.sequence).toBe(1);
     expect(output.trace.steps[0]?.stepId).toBe("run-1:clarify:1");
     expect(output.trace.steps[0]?.lifecycle).toBe("skipped");
-    expect(output.trace.steps[1]?.sequence).toBe(2);
-    expect(output.trace.steps[1]?.lifecycle).toBe("completed");
+    expect(output.trace.steps[5]?.sequence).toBe(6);
+    expect(output.trace.steps[5]?.lifecycle).toBe("completed");
   });
 
   it("should normalize missing trace context", () => {
@@ -74,13 +112,47 @@ describe("langgraph runtime", () => {
       clarifyNode: {
         run: () => undefined
       },
+      retrieveKnowledgeNode: {
+        run: () => ({
+          status: "ready",
+          snippets: ["stub"],
+          summary: "stub"
+        })
+      },
+      buildIntentPlanNode: {
+        run: () => ({
+          status: "ready",
+          intent: "aggregate",
+          constraints: [],
+          summary: "stub"
+        })
+      },
+      buildSemanticQueryNode: {
+        run: () => ({
+          status: "ready",
+          semanticHints: [],
+          summary: "stub"
+        })
+      },
+      buildPhysicalPlanNode: {
+        run: () => ({
+          status: "ready",
+          strategy: "direct_sql",
+          summary: "stub"
+        })
+      },
       generateSqlNode: {
         run: async () => {
           throw new Error("llm failed");
         }
       },
       safetyNode: {
-        run: () => ({ safe: true as const })
+        run: () => ({
+          allowed: true,
+          mode: "pass" as const,
+          riskLevel: "low" as const,
+          riskTags: []
+        })
       },
       executeNode: {
         run: async () => ({
@@ -105,12 +177,16 @@ describe("langgraph runtime", () => {
     expect(output.fatalError).toBeInstanceOf(Error);
     expect(output.trace.steps.map((step) => step.node)).toEqual([
       "clarify",
+      "retrieve-knowledge",
+      "build-intent-plan",
+      "build-semantic-query",
+      "build-physical-plan",
       "generate-sql"
     ]);
-    expect(output.trace.steps[1]?.status).toBe("failed");
-    expect(output.trace.steps[1]?.sequence).toBe(2);
-    expect(output.trace.steps[1]?.stepId).toBe("run-2:generate-sql:2");
-    expect(output.trace.steps[1]?.lifecycle).toBe("failed");
-    expect(output.trace.steps[1]?.errorSummary).toContain("llm failed");
+    expect(output.trace.steps[5]?.status).toBe("failed");
+    expect(output.trace.steps[5]?.sequence).toBe(6);
+    expect(output.trace.steps[5]?.stepId).toBe("run-2:generate-sql:6");
+    expect(output.trace.steps[5]?.lifecycle).toBe("failed");
+    expect(output.trace.steps[5]?.errorSummary).toContain("llm failed");
   });
 });

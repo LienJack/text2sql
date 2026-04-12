@@ -71,6 +71,22 @@ jobs:
       - name: Backend test
         run: pnpm --filter @text2sql/backend run test
 
+      - name: Stage1 gate report
+        run: pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand
+        env:
+          STAGE1_GATE_REPORT_PATH: /tmp/stage1-gate-report.json
+          R1_GATE_MIN_PASS_RATE: "1"
+          R1_GATE_MAX_HARD_FAILURE_RATE: "0"
+          R1_GATE_MAX_POLICY_REJECTION_RATE: "0.2"
+          R1_GATE_MIN_SAMPLES: "10"
+
+      - name: Validate stage1 gate
+        run: |
+          test -f /tmp/stage1-gate-report.json
+          cat /tmp/stage1-gate-report.json
+          jq -e '.sampleReady == true' /tmp/stage1-gate-report.json
+          jq -e '.gatePass == true' /tmp/stage1-gate-report.json
+
       - name: Verify empty database migration replay
         run: pnpm --filter @text2sql/backend run prisma:verify-empty-db
 

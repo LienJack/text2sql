@@ -14,6 +14,7 @@ import { GraphBuilderService } from "../agent/graph/graph.builder";
 import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
+import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
@@ -30,6 +31,7 @@ export class ChatService {
     private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
+    private readonly datasourceRegistry: DatasourceRegistryService,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
@@ -242,8 +244,13 @@ export class ChatService {
       }
     });
 
-    await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-    return run;
+    const finalRun = this.applyRejectedFallback(run, session.datasource);
+    await this.persistAssistantAndRun(
+      sessionId,
+      finalRun,
+      userPersistResult.primaryPersisted
+    );
+    return finalRun;
   }
 
   async streamMessage(
@@ -380,21 +387,26 @@ export class ChatService {
         }
       );
 
-      run.trace.streamStatus = run.error ? "failed" : "completed";
-      run.trace.toolCalls = toolCalls;
-      if (run.error) {
+      const finalRun = this.applyRejectedFallback(run, session.datasource);
+      finalRun.trace.streamStatus = finalRun.error ? "failed" : "completed";
+      finalRun.trace.toolCalls = toolCalls;
+      if (finalRun.error) {
         await emit("error", {
-          code: run.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
-          message: run.error,
+          code: finalRun.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
+          message: finalRun.error,
           details: null
         });
       }
       await emit("finish", {
-        status: run.status,
-        rowCount: run.rows?.length ?? 0
+        status: finalRun.status,
+        rowCount: finalRun.rows?.length ?? 0
       });
-      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-      return run;
+      await this.persistAssistantAndRun(
+        sessionId,
+        finalRun,
+        userPersistResult.primaryPersisted
+      );
+      return finalRun;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       const run: SqlRun = {
@@ -498,7 +510,10 @@ export class ChatService {
     await this.redisBuffer.bufferMessage(assistantMessage);
     const assistantPersistResult = await this.repository.persistMessage(assistantMessage);
     await this.repository.persistRun(run);
-    this.traceService.record(run.trace);
+    this.traceService.record(run.trace, {
+      status: run.status,
+      error: run.error
+    });
 
     const allPrimaryPersisted =
       userPrimaryPersisted && assistantPersistResult.primaryPersisted;
@@ -517,6 +532,11 @@ export class ChatService {
     switch (node) {
       case "clarify":
         return "analysis";
+      case "retrieve-knowledge":
+      case "build-intent-plan":
+      case "build-semantic-query":
+      case "build-physical-plan":
+        return "analysis";
       case "generate-sql":
         return "generation";
       case "safety-check":
@@ -534,6 +554,14 @@ export class ChatService {
     switch (node) {
       case "clarify":
         return "理解问题";
+      case "retrieve-knowledge":
+        return "检索上下文";
+      case "build-intent-plan":
+        return "意图规划";
+      case "build-semantic-query":
+        return "语义规划";
+      case "build-physical-plan":
+        return "物理规划";
       case "generate-sql":
         return "生成 SQL";
       case "safety-check":
@@ -557,5 +585,22 @@ export class ChatService {
       return "skipped";
     }
     return "completed";
+  }
+
+  private applyRejectedFallback(run: SqlRun, datasource: string): SqlRun {
+    if (run.status !== "rejected") {
+      return run;
+    }
+    if (!this.datasourceRegistry.shouldFallbackOnReject(datasource)) {
+      return run;
+    }
+    if (run.answer) {
+      return run;
+    }
+    return {
+      ...run,
+      answer:
+        "请求触发了只读安全策略，本次未执行 SQL。你可以改为查询统计口径或时间范围，我会继续协助。"
+    };
   }
 }
