@@ -21,7 +21,7 @@ describe("session management", () => {
     }).compile();
     const chatService = moduleRef.get(ChatService);
 
-    const created = await chatService.createSession();
+    const created = await chatService.createSession("sqlite_main");
     expect(created.id).toBeTruthy();
     expect(created.syncStatus).toBe("healthy");
     expect(created.debugEnabled).toBe(false);

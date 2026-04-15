@@ -24,11 +24,32 @@ model Session {
   createdAt         DateTime  @default(now())
   messages          Message[]
   runs              SqlRun[]
+  datasourceRef     Datasource @relation(fields: [datasource], references: [id], onDelete: Restrict)
   modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt, lastMessageAt])
   @@index([modelCatalogId])
   @@map("sessions")
+}
+
+model Datasource {
+  id            String    @id
+  name          String
+  type          String
+  status        String    @default("available")
+  readonly      Boolean   @default(true)
+  shared        Boolean   @default(true)
+  config        String?
+  fileMeta      String?
+  unavailableAt DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+
+  @@index([deletedAt, status])
+  @@index([type, status])
+  @@map("datasources")
 }
 
 model Message {
@@ -125,4 +146,59 @@ model ModelCatalog {
   @@index([enabled, deletedAt])
   @@index([providerConfigId])
   @@map("model_catalogs")
+}
+
+model PlatformUser {
+  id                 String   @id
+  account            String
+  name               String
+  email              String
+  status             String   @default("active")
+  isSystemAdmin      Boolean  @default(false)
+  passwordHash       String?
+  systemVariables    String?
+  defaultWorkspaceId String?
+  deletedAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  defaultWorkspace   Workspace? @relation("workspace_default_users", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
+  workspaceMembers   WorkspaceMember[]
+
+  @@unique([account])
+  @@unique([email])
+  @@index([status, deletedAt])
+  @@index([defaultWorkspaceId])
+  @@map("platform_users")
+}
+
+model Workspace {
+  id               String   @id
+  name             String
+  status           String   @default("active")
+  isDefault        Boolean  @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  defaultUsers     PlatformUser[] @relation("workspace_default_users")
+  workspaceMembers WorkspaceMember[]
+
+  @@unique([name])
+  @@index([status, deletedAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String   @id
+  userId      String
+  workspaceId String
+  role        String   @default("member")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        PlatformUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, role])
+  @@index([userId, role])
+  @@map("workspace_members")
 }

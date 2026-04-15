@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 gh api repos/EveryInc/compound-engineering-plugin/contents/ --jq '.[].name')",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 gh api repos/EveryInc/compound-engineering-plugin/contents/README.md --jq '.content' | base64 -d 2\u003e/dev/null || echo \"Trying alternative...\")",
+      "Bash(which bun 2\u003e/dev/null \u0026\u0026 bun --version 2\u003e/dev/null; which bunx 2\u003e/dev/null || echo \"bun NOT FOUND\")",
+      "Bash(which claude 2\u003e/dev/null || echo \"NOT FOUND\")",
+      "Bash(which npx 2\u003e/dev/null \u0026\u0026 npx --version 2\u003e/dev/null || echo \"npx NOT FOUND\")",
+      "Bash(ls -la ~/.enter/ 2\u003e/dev/null || echo \"no ~/.enter\"; ls -la ~/.codex/ 2\u003e/dev/null || echo \"no ~/.codex\")",
+      "Bash(find ~/.enter -type f -name \"*.md\" 2\u003e/dev/null | head -20; echo \"---\"; ls -laR ~/.enter/skills/ 2\u003e/dev/null || echo \"no ~/.enter/skills\"; ls -laR ~/.enter/prompts/ 2\u003e/dev/null || echo \"no ~/.enter/prompts\")",
+      "Bash(ls ~/.codex/agents/ | head -30)",
+      "Bash(ls ~/.codex/skills/ | head -30)",
+      "Bash(grep -rn \"batch\\\\|bulk\" /Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/settings/ 2\u003e/dev/null || echo \"No batch endpoint found\")",
+      "Bash(find /Users/lienli/Documents/GitHub/text2sql/apps/frontend/tests -name \"*settings*\" -type f 2\u003e/dev/null)",
+      "Bash(curl -s http://localhost:3000/api/v1/health 2\u003e/dev/null | head -c 200 || echo \"Backend not reachable\")",
+      "Bash(curl -s http://localhost:3000/health 2\u003e/dev/null | head -c 200)",
+      "Bash(curl -s http://localhost:3000/api/v1/settings/models/status -H 'x-user-role: admin' -H 'x-user-id: test' | python3 -m json.tool 2\u003e/dev/null | head -40)",
+      "Bash(MODEL_ID=\"3955c338-bd20-4520-89b0-9fd4bf544071:siliconflow:deepseek-ai/DeepSeek-V3.2\" \u0026\u0026 curl -sv \"http://localhost:3000/api/v1/settings/models/${MODEL_ID}\" -X PATCH -H 'content-type: application/json' -H 'x-user-role: admin' -H 'x-user-id: test' -d '{\"enabled\":true}' 2\u003e\u00261 | tail -20)",
+      "Bash(MODEL_ID=$\\(python3 -c \"import urllib.parse; print\\(urllib.parse.quote\\('3955c338-bd20-4520-89b0-9fd4bf544071:siliconflow:deepseek-ai/DeepSeek-V3.2', safe=''\\)\\)\"\\) \u0026\u0026 curl -s \"http://localhost:3000/api/v1/settings/models/${MODEL_ID}\" -X PATCH -H 'content-type: application/json' -H 'x-user-role: admin' -H 'x-user-id: test' -d '{\"enabled\":true}' | python3 -m json.tool 2\u003e/dev/null | head -20)",
+      "Bash(MODEL_ID=$\\(python3 -c \"import urllib.parse; print\\(urllib.parse.quote\\('3955c338-bd20-4520-89b0-9fd4bf544071:siliconflow:deepseek-ai/DeepSeek-V3.2', safe=''\\)\\)\"\\) \u0026\u0026 curl -s \"http://localhost:3000/api/v1/settings/models/${MODEL_ID}\" -X PATCH -H 'content-type: application/json' -H 'x-user-role: admin' -H 'x-user-id: test' -d '{\"enabled\":false}' | python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d['data']['enabled']\\)\")",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git log main..HEAD --oneline)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main --stat)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/frontend/)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/test/)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/prisma/ apps/backend/package.json apps/backend/.env.example .gitignore README.md pnpm-lock.yaml)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/src/ packages/shared-types/)",
+      "Bash(ls -d /Users/lienli/Documents/GitHub/text2sql/docs 2\u003e/dev/null || echo \"NOT_FOUND\")"
+    ]
+  }
+}

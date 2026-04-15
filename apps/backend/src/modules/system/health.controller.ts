@@ -6,7 +6,7 @@ import { AppConfigService } from "../config/app-config.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { SqliteQueryService } from "../data/sqlite/sqlite-query.service";
-import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+import { DatasourceService } from "../datasource/datasource.service";
 
 @Controller()
 export class HealthController {
@@ -15,7 +15,7 @@ export class HealthController {
     private readonly sqlite: SqliteQueryService,
     private readonly redis: RedisBufferService,
     private readonly repository: ChatRepository,
-    private readonly datasourceRegistry: DatasourceRegistryService
+    private readonly datasourceService: DatasourceService
   ) {}
 
   @Get("/health")
@@ -23,6 +23,9 @@ export class HealthController {
     const sqliteReady = await this.sqlite.healthCheck();
     const redisReady = await this.redis.healthCheck();
     const sessionSyncStats = await this.repository.getSessionSyncStats();
+    const datasources = await this.datasourceService.listDatasources({
+      includeUnavailable: true
+    });
     const postgresEnabled = Boolean(this.config.databaseUrl);
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
@@ -70,7 +73,7 @@ export class HealthController {
       cors: {
         allowedOrigins: this.config.corsAllowedOrigins
       },
-      datasources: this.datasourceRegistry.list()
+      datasources
     });
   }
 }

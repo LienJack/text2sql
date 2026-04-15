@@ -1,4 +1,5 @@
 import type { ClarificationPrompt, ExecutionTrace } from "@text2sql/shared-types";
+import type { DatasourceType } from "@text2sql/shared-types";
 
 export interface GraphTraceContext {
   source: "chat" | "evaluation";
@@ -12,6 +13,8 @@ export interface GraphInput {
   runId: string;
   sessionId: string;
   question: string;
+  datasourceId: string;
+  datasourceType?: DatasourceType;
   modelCatalogId?: string;
   traceContext?: GraphTraceContext;
 }

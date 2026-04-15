@@ -1,27 +1,22 @@
 "use client";
 
-import { Search, Settings2, Users } from "lucide-react";
+import { Building2, Search, Settings2, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { LlmSettingsView, ModelCatalogItem } from "@text2sql/shared-types";
 import { ModelCatalogTable } from "@/components/settings/model-catalog-table";
 import { ProviderConfigSheet } from "@/components/settings/provider-config-sheet";
+import { UsersManagementPanel } from "@/components/settings/users-management-panel";
+import { WorkspaceManagementPanel } from "@/components/settings/workspace-management-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StateBlock } from "@/components/ui/state-block";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { type PlatformUser, fetchSettingsView as fetchMockSettingsView } from "@/lib/platform-mock-adapter";
-import {
+  batchSetModelsEnabled,
   checkProviderHealth,
   createProviderConfig,
   deleteProviderConfig,
+  fetchModelStatuses,
   fetchSettingsView,
   fetchSupportedProviders,
   setModelEnabled,
@@ -29,6 +24,7 @@ import {
 } from "@/lib/settings-api-client";
 
 type SettingsTab = "models" | "users";
+type ManagementTab = "users" | "workspaces";
 
 export default function SettingsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
@@ -36,8 +32,9 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState<SettingsTab>("models");
   const [query, setQuery] = useState("");
+  const [managementTab, setManagementTab] = useState<ManagementTab>("users");
+  const [managementRefreshToken, setManagementRefreshToken] = useState(0);
   const [view, setView] = useState<LlmSettingsView | null>(null);
-  const [users, setUsers] = useState<PlatformUser[]>([]);
   const [supportedProviders, setSupportedProviders] = useState<
     Array<{
       provider: LlmSettingsView["models"][number]["provider"];
@@ -55,14 +52,12 @@ export default function SettingsPage() {
     }
     setError("");
     try {
-      const [settingsView, providerOptions, mockView] = await Promise.all([
+      const [settingsView, providerOptions] = await Promise.all([
         fetchSettingsView(),
-        fetchSupportedProviders(),
-        fetchMockSettingsView()
+        fetchSupportedProviders()
       ]);
       setView(settingsView);
       setSupportedProviders(providerOptions);
-      setUsers(mockView.users);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "加载设置数据失败");
     } finally {
@@ -72,6 +67,40 @@ export default function SettingsPage() {
         setRefreshing(false);
       }
     }
+  };
+
+  const refreshModels = async () => {
+    try {
+      const statuses = await fetchModelStatuses();
+      const statusMap = new Map(statuses.map((s) => [s.id, s.enabled]));
+      setView((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          models: prev.models.map((m) => {
+            const next = statusMap.get(m.id);
+            return next !== undefined ? { ...m, enabled: next } : m;
+          })
+        };
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "刷新模型状态失败");
+    }
+  };
+
+  /** 用写接口的返回值直接 patch 单条 model，省掉一次查询请求 */
+  const patchModel = (updated: ModelCatalogItem | undefined) => {
+    if (!updated?.id) {
+      void refreshModels();
+      return;
+    }
+    setView((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        models: prev.models.map((m) => (m.id === updated.id ? updated : m))
+      };
+    });
   };
 
   useEffect(() => {
@@ -88,16 +117,6 @@ export default function SettingsPage() {
       `${row.provider} ${row.model} ${row.displayName}`.toLowerCase().includes(keyword)
     );
   }, [query, view?.models]);
-
-  const userRows = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (!keyword) {
-      return users;
-    }
-    return users.filter((row) =>
-      `${row.name} ${row.email} ${row.role} ${row.department}`.toLowerCase().includes(keyword)
-    );
-  }, [query, users]);
 
   const actorRole = view?.actor.role ?? "user";
   const busy = initialLoading || refreshing;
@@ -134,17 +153,32 @@ export default function SettingsPage() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
+
         <div className="flex w-full items-center gap-2 sm:w-auto">
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="pl-9"
-              placeholder={tab === "models" ? "搜索模型..." : "搜索用户..."}
-            />
-          </div>
-          <Button onClick={() => void load()}>
+          {tab === "models" ? (
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="pl-9"
+                placeholder="搜索模型..."
+              />
+            </div>
+          ) : (
+            <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+              用户与工作空间治理面板
+            </p>
+          )}
+          <Button
+            onClick={() => {
+              if (tab === "models") {
+                void load();
+              } else {
+                setManagementRefreshToken((previous) => previous + 1);
+              }
+            }}
+          >
             {refreshing ? "刷新中..." : "刷新"}
           </Button>
         </div>
@@ -152,8 +186,8 @@ export default function SettingsPage() {
 
       <section className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
         {initialLoading && !view ? <StateBlock variant="loading">正在加载设置数据...</StateBlock> : null}
-        {refreshing && view ? <StateBlock variant="loading">正在刷新数据...</StateBlock> : null}
         {error ? <StateBlock variant="error">{error}</StateBlock> : null}
+
         {view ? (
           tab === "models" ? (
             <div className="space-y-4">
@@ -163,37 +197,66 @@ export default function SettingsPage() {
                 models={filteredView?.models ?? []}
                 loading={busy}
                 onSyncProvider={async (providerConfigId) => {
-                  await syncProviderModels(providerConfigId);
-                  await load("refresh");
+                  try {
+                    await syncProviderModels(providerConfigId);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "同步模型失败");
+                  } finally {
+                    await load("refresh");
+                  }
                 }}
                 onCheckProvider={async (providerConfigId) => {
-                  await checkProviderHealth(providerConfigId);
-                  await load("refresh");
+                  try {
+                    await checkProviderHealth(providerConfigId);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "检测连通性失败");
+                  } finally {
+                    await load("refresh");
+                  }
                 }}
                 onDeleteProvider={async (providerConfigId) => {
-                  await deleteProviderConfig(providerConfigId);
-                  await load("refresh");
+                  try {
+                    await deleteProviderConfig(providerConfigId);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "删除厂商失败");
+                  } finally {
+                    await load("refresh");
+                  }
                 }}
                 onSetModelEnabled={async (modelId, enabled) => {
-                  await setModelEnabled(modelId, enabled);
-                  await load("refresh");
+                  try {
+                    const updated = await setModelEnabled(modelId, enabled);
+                    patchModel(updated);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "切换模型状态失败");
+                  }
                 }}
                 onBatchSetModels={async (modelIds, enabled) => {
                   if (modelIds.length === 0) {
                     return;
                   }
-                  await Promise.all(modelIds.map((modelId) => setModelEnabled(modelId, enabled)));
-                  await load("refresh");
+                  try {
+                    await batchSetModelsEnabled(modelIds, enabled);
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "批量操作失败");
+                  }
+                  await refreshModels();
                 }}
               />
+
               {actorRole === "admin" ? (
                 <ProviderConfigSheet
                   loading={busy}
                   supportedProviders={supportedProviders}
                   installedProviderCodes={(view?.providers ?? []).map((item) => item.provider)}
                   onCreateProvider={async (payload) => {
-                    await createProviderConfig(payload);
-                    await load("refresh");
+                    try {
+                      await createProviderConfig(payload);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "创建厂商配置失败");
+                    } finally {
+                      await load("refresh");
+                    }
                   }}
                 />
               ) : (
@@ -201,48 +264,28 @@ export default function SettingsPage() {
               )}
             </div>
           ) : (
-            <UsersTable rows={userRows} />
+            <Tabs value={managementTab} onValueChange={(value) => setManagementTab(value as ManagementTab)}>
+              <TabsList className="h-10">
+                <TabsTrigger value="users">
+                  <Users className="h-3.5 w-3.5" />
+                  用户管理
+                </TabsTrigger>
+                <TabsTrigger value="workspaces">
+                  <Building2 className="h-3.5 w-3.5" />
+                  工作空间
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="users" className="pt-4">
+                <UsersManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
+              </TabsContent>
+              <TabsContent value="workspaces" className="pt-4">
+                <WorkspaceManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
+              </TabsContent>
+            </Tabs>
           )
         ) : null}
       </section>
     </div>
-  );
-}
-
-function UsersTable({ rows }: { rows: PlatformUser[] }) {
-  if (rows.length === 0) {
-    return <StateBlock variant="idle">暂无可展示用户数据。</StateBlock>;
-  }
-
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="w-[260px]">用户</TableHead>
-          <TableHead className="w-[160px]">角色</TableHead>
-          <TableHead className="w-[140px]">部门</TableHead>
-          <TableHead className="w-[140px]">状态</TableHead>
-          <TableHead className="w-[180px]">最近登录</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((user) => (
-          <TableRow key={user.id}>
-            <TableCell>
-              <p className="font-medium text-[var(--text-primary)]">{user.name}</p>
-              <p className="text-xs text-[var(--text-tertiary)]">{user.email}</p>
-            </TableCell>
-            <TableCell className="text-sm text-[var(--text-secondary)]">{user.role}</TableCell>
-            <TableCell className="text-sm text-[var(--text-secondary)]">{user.department}</TableCell>
-            <TableCell>
-              <span className="text-sm font-medium text-[var(--text-secondary)]">
-                {user.status === "active" ? "正常" : "停用"}
-              </span>
-            </TableCell>
-            <TableCell className="text-sm text-[var(--text-tertiary)]">{user.lastLogin}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   );
 }

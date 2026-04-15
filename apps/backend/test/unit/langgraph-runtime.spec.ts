@@ -40,7 +40,9 @@ describe("langgraph runtime", () => {
     const state = createInitialLangGraphState({
       runId: "run-1",
       sessionId: "session-1",
-      question: "统计订单总数"
+      question: "统计订单总数",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite"
     });
     const output = await runtime.invoke(state);
 
@@ -96,7 +98,9 @@ describe("langgraph runtime", () => {
     const state = createInitialLangGraphState({
       runId: "run-2",
       sessionId: "session-2",
-      question: "统计异常"
+      question: "统计异常",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite"
     });
     const output = await runtime.invoke(state);
 

@@ -58,6 +58,14 @@ export class SettingsService {
     return this.providerCatalog.checkProviderHealth(providerConfigId);
   }
 
+  async listModelStatuses() {
+    return this.providerCatalog.listModelStatuses();
+  }
+
+  async batchSetModelsEnabled(modelIds: string[], enabled: boolean) {
+    return this.providerCatalog.batchSetModelsEnabled(modelIds, enabled);
+  }
+
   async setModelEnabled(modelId: string, enabled: boolean) {
     return this.providerCatalog.setModelEnabled(modelId, enabled);
   }

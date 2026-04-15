@@ -45,6 +45,40 @@ export class AppConfigService {
     return this.config.get<string>("REDIS_URL", "");
   }
 
+  get datasourceUploadDir(): string {
+    const raw = this.config.get<string>(
+      "DATASOURCE_UPLOAD_DIR",
+      "data/uploads/datasources"
+    );
+    if (isAbsolute(raw)) {
+      return raw;
+    }
+    const direct = resolve(process.cwd(), raw);
+    if (existsSync(direct)) {
+      return direct;
+    }
+    return resolve(process.cwd(), "../../", raw);
+  }
+
+  get datasourceUploadMaxBytes(): number {
+    return Number(this.config.get<string>("DATASOURCE_UPLOAD_MAX_BYTES", "10485760"));
+  }
+
+  get datasourceConnectTimeoutMs(): number {
+    return Number(this.config.get<string>("DATASOURCE_CONNECT_TIMEOUT_MS", "5000"));
+  }
+
+  get datasourceQueryTimeoutMs(): number {
+    return Number(this.config.get<string>("DATASOURCE_QUERY_TIMEOUT_MS", "10000"));
+  }
+
+  get datasourceSecretKey(): string {
+    return this.config.get<string>(
+      "DATASOURCE_SECRET_KEY",
+      "text2sql-dev-datasource-secret"
+    );
+  }
+
   get databaseUrl(): string {
     const explicit = this.config.get<string>("DATABASE_URL", "").trim();
     if (explicit) {
@@ -152,6 +186,14 @@ export class AppConfigService {
     if (!this.llmApiKey && !this.llmMockMode) {
       this.logger.warn(
         "LLM_API_KEY 未配置，实际调用 LLM 时会返回配置错误。"
+      );
+    }
+    if (
+      this.nodeEnv === "production" &&
+      this.datasourceSecretKey === "text2sql-dev-datasource-secret"
+    ) {
+      this.logger.warn(
+        "DATASOURCE_SECRET_KEY 使用了默认值，建议在生产环境配置自定义密钥。"
       );
     }
     if (this.langsmithTracing && !this.langsmithApiKey) {

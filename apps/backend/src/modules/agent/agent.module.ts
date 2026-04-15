@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { DataModule } from "../data/data.module";
+import { DatasourceModule } from "../datasource/datasource.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { GraphBuilderService } from "./graph/graph.builder";
@@ -17,7 +18,7 @@ import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
 
 @Module({
-  imports: [DataModule, LlmModule, ObservabilityModule],
+  imports: [DataModule, DatasourceModule, LlmModule, ObservabilityModule],
   providers: [
     GraphBuilderService,
     LangGraphRuntimeService,

@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "@/components/chat-panel";
 import {
@@ -45,22 +46,16 @@ const mockGetMessages = vi.mocked(getMessages);
 const mockGetRun = vi.mocked(getRun);
 
 describe("ChatPanel", () => {
-  let session: {
-    id: string;
-    datasource: string;
-    title: string;
-    modelCatalogId: string;
-    modelProvider: string;
-    modelName: string;
-    debugEnabled: boolean;
-    syncStatus: "healthy";
-    createdAt: string;
-  };
+  let session: Session;
 
   beforeEach(() => {
+    window.sessionStorage.setItem("text2sql.activeDatasourceId", "sqlite_main");
     session = {
       id: "session-1",
       datasource: "sqlite_main",
+      datasourceName: "SQLite 主数据源",
+      datasourceType: "sqlite",
+      datasourceStatus: "available",
       title: "新会话",
       modelCatalogId: "model-1",
       modelProvider: "openai",
@@ -157,12 +152,13 @@ describe("ChatPanel", () => {
   });
 
   afterEach(() => {
+    window.sessionStorage.clear();
     vi.clearAllMocks();
   });
 
   it("renders disabled submit button when input is empty", async () => {
     render(<ChatPanel />);
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
@@ -170,7 +166,7 @@ describe("ChatPanel", () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
 
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
@@ -194,7 +190,7 @@ describe("ChatPanel", () => {
   it("does not render debug switch control", async () => {
     render(<ChatPanel />);
 
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     expect(screen.queryByLabelText("调试详情开关")).not.toBeInTheDocument();
     expect(mockSetSessionDebugEnabled).not.toHaveBeenCalled();
   });
@@ -209,7 +205,7 @@ describe("ChatPanel", () => {
 
     render(<ChatPanel />);
 
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     await user.click(screen.getByRole("button", { name: "展开思考过程" }));
 
     await waitFor(() => {
@@ -252,7 +248,7 @@ describe("ChatPanel", () => {
     });
 
     render(<ChatPanel />);
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
 
     await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
     await user.click(screen.getByRole("button", { name: "发送" }));

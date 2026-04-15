@@ -4,6 +4,8 @@ declare namespace Express {
     actor: {
       id: string;
       role: "admin" | "user";
+      isSystemAdmin?: boolean;
+      workspaceRoles?: Record<string, "admin" | "member">;
     };
   }
 }

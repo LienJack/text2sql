@@ -201,6 +201,19 @@ export class ProviderCatalogService {
     return updated;
   }
 
+  async batchSetModelsEnabled(
+    modelIds: string[],
+    enabled: boolean
+  ): Promise<{ updated: number }> {
+    const updated = await this.repository.batchSetModelsEnabled(modelIds, enabled);
+    return { updated };
+  }
+
+  async listModelStatuses(): Promise<Array<{ id: string; enabled: boolean }>> {
+    const models = await this.repository.listModels({ includeDisabled: true });
+    return models.map((m) => ({ id: m.id, enabled: m.enabled }));
+  }
+
   async listEnabledModels(): Promise<ModelCatalogItem[]> {
     return this.repository.listModels({ enabledOnly: true });
   }

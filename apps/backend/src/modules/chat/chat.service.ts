@@ -3,6 +3,7 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
+  Datasource,
   ReasoningStage,
   Session,
   SessionSyncStatus,
@@ -17,6 +18,8 @@ import { ChatRepository } from "../data/persistence/chat.repository";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
+import { DatasourceService } from "../datasource/datasource.service";
+import type { SessionListView } from "./dto/list-sessions.dto";
 
 const MODEL_PROBE_PROMPT = {
   systemPrompt: "You are a health check assistant. Reply with exactly OK.",
@@ -30,15 +33,25 @@ export class ChatService {
     private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
+    private readonly datasourceService: DatasourceService,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
   ) {}
 
   async createSession(
-    datasource = "sqlite_main",
+    datasource: string,
     modelCatalogId?: string
   ): Promise<Session> {
+    const normalizedDatasource = datasource.trim();
+    if (!normalizedDatasource) {
+      throw new DomainError("VALIDATION_ERROR", "datasource 为必填项", 400, {
+        field: "datasource"
+      });
+    }
+    const datasourceMeta = await this.datasourceService.assertDatasourceAvailable(
+      normalizedDatasource
+    );
     let defaultModel:
       | {
           id: string;
@@ -68,7 +81,10 @@ export class ChatService {
 
     const session: Session = {
       id: uuidv4(),
-      datasource,
+      datasource: normalizedDatasource,
+      datasourceName: datasourceMeta.name,
+      datasourceType: datasourceMeta.type,
+      datasourceStatus: this.normalizeDatasourceStatus(datasourceMeta.status),
       createdAt: new Date().toISOString(),
       title: "新会话",
       modelCatalogId: defaultModel?.id ?? null,
@@ -80,13 +96,53 @@ export class ChatService {
       lastSyncFailureAt: null
     };
     await this.repository.createSession(session);
-    return session;
+    return this.mergeDatasourceMetadata(session, datasourceMeta);
   }
 
-  async listSessions(status?: SessionSyncStatus): Promise<Session[]> {
-    return this.repository.listSessions({
+  async listSessions(
+    status?: SessionSyncStatus,
+    datasource?: string,
+    view: SessionListView = "all"
+  ): Promise<Session[]> {
+    const normalizedDatasource = datasource?.trim() || undefined;
+    if (view === "current" && !normalizedDatasource) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "view=current 时 datasource 为必填项",
+        400,
+        { view, field: "datasource" }
+      );
+    }
+    if (view === "current" && normalizedDatasource) {
+      await this.datasourceService.getDatasourceOrThrow(normalizedDatasource);
+    }
+
+    const sessions = await this.repository.listSessions({
+      datasource: view === "readonly-history" ? undefined : normalizedDatasource,
       statuses: status ? [status] : undefined
     });
+    const normalized = await Promise.all(
+      sessions.map(async (session) => this.mergeDatasourceMetadata(session))
+    );
+
+    if (view === "readonly-history") {
+      return normalized.filter((session) => {
+        const datasourceStatus = this.normalizeDatasourceStatus(
+          session.datasourceStatus
+        );
+        return datasourceStatus === "unavailable" || datasourceStatus === "deleted";
+      });
+    }
+
+    if (view === "current") {
+      return normalized.filter(
+        (session) =>
+          session.datasource === normalizedDatasource &&
+          this.normalizeDatasourceStatus(session.datasourceStatus) === "available"
+      );
+    }
+
+    return normalized;
   }
 
   async renameSession(sessionId: string, title: string): Promise<Session> {
@@ -218,6 +274,9 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    const datasource = await this.datasourceService.assertDatasourceAvailable(
+      session.datasource
+    );
 
     const userMessage: ChatMessage = {
       id: uuidv4(),
@@ -234,6 +293,8 @@ export class ChatService {
       runId: uuidv4(),
       sessionId,
       question: message,
+      datasourceId: session.datasource,
+      datasourceType: datasource.type,
       modelCatalogId: session.modelCatalogId ?? undefined,
       traceContext: {
         source: "chat",
@@ -256,6 +317,9 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    const datasource = await this.datasourceService.assertDatasourceAvailable(
+      session.datasource
+    );
 
     const runId = uuidv4();
     const userMessage: ChatMessage = {
@@ -292,6 +356,8 @@ export class ChatService {
           runId,
           sessionId,
           question: message,
+          datasourceId: session.datasource,
+          datasourceType: datasource.type,
           modelCatalogId: session.modelCatalogId ?? undefined,
           traceContext: {
             source: "chat",
@@ -301,7 +367,7 @@ export class ChatService {
         },
         {
           streamMode: true,
-          tools: this.sqlToolRegistry.getTools(),
+          tools: this.sqlToolRegistry.getToolsForDatasource(datasource),
           onLlmEvent: async (event) => {
             if (event.type === "text-delta") {
               await emit("text-delta", {
@@ -461,7 +527,7 @@ export class ChatService {
     const messages = await this.listMessages(sessionId, page, pageSize);
     const latestRun = await this.repository.getLatestRunBySessionId(sessionId);
     return {
-      session,
+      session: await this.mergeDatasourceMetadata(session),
       messages,
       latestRun
     };
@@ -557,5 +623,49 @@ export class ChatService {
       return "skipped";
     }
     return "completed";
+  }
+
+  private async mergeDatasourceMetadata(
+    session: Session,
+    resolvedDatasource?: Datasource
+  ): Promise<Session> {
+    const datasource =
+      resolvedDatasource ??
+      (await this.datasourceService.getDatasourceById(
+        session.datasource,
+        {
+          includeDeleted: true
+        }
+      ));
+
+    if (!datasource) {
+      return {
+        ...session,
+        datasourceStatus: "deleted"
+      };
+    }
+
+    return {
+      ...session,
+      datasourceName: datasource.name,
+      datasourceType: datasource.type,
+      datasourceStatus: this.normalizeDatasourceStatus(datasource.status)
+    };
+  }
+
+  private normalizeDatasourceStatus(
+    status: string | undefined | null
+  ): "available" | "unavailable" | "deleted" {
+    const normalized = status?.toLowerCase();
+    if (normalized === "available") {
+      return "available";
+    }
+    if (normalized === "deleted") {
+      return "deleted";
+    }
+    if (normalized === "unavailable" || normalized === "offline" || normalized === "disconnected") {
+      return "unavailable";
+    }
+    return "unavailable";
   }
 }

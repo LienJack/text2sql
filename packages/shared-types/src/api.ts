@@ -2,6 +2,8 @@ export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 export type StreamStatus = "in_progress" | "completed" | "failed";
+export type DatasourceType = "sqlite" | "mysql" | "postgresql" | "excel" | "csv";
+export type DatasourceStatus = "available" | "unavailable" | "deleted";
 export type ReasoningStage =
   | "analysis"
   | "generation"
@@ -26,6 +28,9 @@ export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export interface Session {
   id: string;
   datasource: string;
+  datasourceName?: string;
+  datasourceType?: DatasourceType;
+  datasourceStatus?: DatasourceStatus;
   createdAt: string;
   title?: string;
   modelCatalogId?: string | null;
@@ -37,6 +42,21 @@ export interface Session {
   deletedAt?: string | null;
   syncFailedCount?: number;
   lastSyncFailureAt?: string | null;
+}
+
+export interface Datasource {
+  id: string;
+  name: string;
+  type: DatasourceType;
+  status: DatasourceStatus;
+  readonly: boolean;
+  shared: boolean;
+  config?: Record<string, unknown> | null;
+  fileMeta?: Record<string, unknown> | null;
+  unavailableAt?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChatMessage {
@@ -240,6 +260,80 @@ export interface LlmSettingsView {
   models: ModelCatalogItem[];
   defaultModelId?: string | null;
 }
+
+export type PlatformUserStatus = "active" | "disabled" | "deleted";
+export type WorkspaceStatus = "active" | "archived" | "deleted";
+export type WorkspaceMemberRole = "admin" | "member";
+
+export interface PlatformUser {
+  id: string;
+  account: string;
+  name: string;
+  email: string;
+  status: PlatformUserStatus;
+  isSystemAdmin: boolean;
+  defaultWorkspaceId?: string | null;
+  systemVariables?: Record<string, unknown> | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  status: WorkspaceStatus;
+  isDefault: boolean;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  role: WorkspaceMemberRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaginationRequest {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ListPlatformUsersRequest extends PaginationRequest {
+  keyword?: string;
+  statuses?: PlatformUserStatus[];
+  workspaceId?: string;
+  includeDeleted?: boolean;
+}
+
+export type ListPlatformUsersResponse = PaginatedResponse<PlatformUser>;
+
+export interface ListWorkspacesRequest extends PaginationRequest {
+  keyword?: string;
+  statuses?: WorkspaceStatus[];
+  includeDeleted?: boolean;
+}
+
+export type ListWorkspacesResponse = PaginatedResponse<Workspace>;
+
+export interface ListWorkspaceMembersRequest extends PaginationRequest {
+  workspaceId: string;
+  keyword?: string;
+  roles?: WorkspaceMemberRole[];
+}
+
+export type ListWorkspaceMembersResponse = PaginatedResponse<WorkspaceMember>;
 
 export interface EvaluationCase {
   id: string;

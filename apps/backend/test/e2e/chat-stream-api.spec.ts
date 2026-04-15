@@ -30,7 +30,7 @@ describe("chat stream api (e2e)", () => {
   it("should stream chat events via sse endpoint", async () => {
     const sessionRes = await request(app.getHttpServer())
       .post("/api/v1/sessions")
-      .send({});
+      .send({ datasource: "sqlite_main" });
     const sessionId = sessionRes.body.data.id as string;
 
     const streamRes = await request(app.getHttpServer())

@@ -7,6 +7,7 @@ import {
   type LangGraphRunnableConfig
 } from "@langchain/langgraph";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
+import type { DatasourceType } from "@text2sql/shared-types";
 import { ClarifyNode } from "../nodes/clarify.node";
 import { ExecuteSqlNode } from "../nodes/execute-sql.node";
 import { FormatAnswerNode } from "../nodes/format-answer.node";
@@ -22,6 +23,8 @@ const LangGraphStateAnnotation = Annotation.Root({
   runId: Annotation<string>(),
   sessionId: Annotation<string>(),
   question: Annotation<string>(),
+  datasourceId: Annotation<string>(),
+  datasourceType: Annotation<DatasourceType | undefined>(),
   modelCatalogId: Annotation<string | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
@@ -188,6 +191,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       try {
         const generated = await deps.generateSqlNode.run(
           state.question,
+          state.datasourceType,
           state.modelCatalogId,
           callbacks.streamMode
             ? {
@@ -200,6 +204,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         const endedAt = new Date().toISOString();
         const inputs = {
           question: state.question,
+          datasourceType: state.datasourceType,
           modelCatalogId: state.modelCatalogId,
           systemPrompt: generated.prompt.systemPrompt,
           userPrompt: generated.prompt.userPrompt
@@ -367,10 +372,14 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
       try {
-        const execution = await deps.executeNode.run(state.sql);
+        const execution = await deps.executeNode.run({
+          sql: state.sql,
+          datasourceId: state.datasourceId
+        });
         const endedAt = new Date().toISOString();
         const inputs = {
-          sql: state.sql
+          sql: state.sql,
+          datasourceId: state.datasourceId
         };
         const outputs = {
           rowCount: execution.rows.length,

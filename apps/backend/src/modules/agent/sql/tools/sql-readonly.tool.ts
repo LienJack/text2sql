@@ -1,8 +1,9 @@
 import { Injectable } from "@nestjs/common";
+import type { Datasource } from "@text2sql/shared-types";
 import { z } from "zod";
-import { SqliteQueryService } from "../../../data/sqlite/sqlite-query.service";
+import { QueryExecutorRouterService } from "../../../data/query/query-executor-router.service";
 import type { LlmGatewayToolDefinition } from "../../../llm/llm-gateway.interface";
-import { SqlSafetyGuard } from "./sql-safety.guard";
+import { DomainError } from "../../../../common/domain-error";
 
 const sqlReadonlyInputSchema = z.object({
   sql: z.string().min(1),
@@ -11,21 +12,30 @@ const sqlReadonlyInputSchema = z.object({
 
 @Injectable()
 export class SqlReadonlyTool {
-  constructor(
-    private readonly sqliteQuery: SqliteQueryService,
-    private readonly guard: SqlSafetyGuard
-  ) {}
+  constructor(private readonly queryExecutorRouter: QueryExecutorRouterService) {}
 
-  toDefinition(): LlmGatewayToolDefinition {
+  toDefinition(context: { datasource: Datasource }): LlmGatewayToolDefinition {
     return {
-      description: "Execute a read-only SQL query against the SQLite datasource.",
+      description: `Execute a read-only SQL query against datasource ${context.datasource.id} (${context.datasource.type}).`,
       inputSchema: sqlReadonlyInputSchema,
-      execute: async (input) => {
-        const parsed = sqlReadonlyInputSchema.parse(input);
-        this.guard.assertReadOnlySql(parsed.sql);
-        const limit = parsed.limit ?? 50;
-        const sql = this.ensureLimit(parsed.sql, limit);
-        const result = await this.sqliteQuery.query(sql);
+      execute: async (toolInput) => {
+        const parsed = sqlReadonlyInputSchema.parse(toolInput);
+        if (context.datasource.status !== "available") {
+          throw new DomainError(
+            "DATASOURCE_UNAVAILABLE",
+            "当前会话绑定的数据源不可用，请先重新选择数据源。",
+            409,
+            {
+              datasourceId: context.datasource.id,
+              status: context.datasource.status
+            }
+          );
+        }
+        const result = await this.queryExecutorRouter.execute({
+          datasource: context.datasource,
+          sql: parsed.sql,
+          limit: parsed.limit ?? 50
+        });
         return {
           rowCount: result.rows.length,
           columns: result.columns,
@@ -33,12 +43,5 @@ export class SqlReadonlyTool {
         };
       }
     };
-  }
-
-  private ensureLimit(sql: string, limit: number): string {
-    if (/\blimit\s+\d+\b/i.test(sql)) {
-      return sql;
-    }
-    return `${sql.trim().replace(/;$/, "")} LIMIT ${limit}`;
   }
 }

@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPage from "@/app/chat/page";
 import {
@@ -45,6 +46,7 @@ const mockGetRun = vi.mocked(getRun);
 
 describe("chat mobile smoke", () => {
   beforeEach(() => {
+    window.sessionStorage.setItem("text2sql.activeDatasourceId", "sqlite_main");
     Object.defineProperty(window, "innerWidth", {
       writable: true,
       configurable: true,
@@ -52,9 +54,12 @@ describe("chat mobile smoke", () => {
     });
     window.dispatchEvent(new Event("resize"));
 
-    const session = {
+    const session: Session = {
       id: "session-1",
       datasource: "sqlite_main",
+      datasourceName: "SQLite 主数据源",
+      datasourceType: "sqlite",
+      datasourceStatus: "available",
       title: "新会话",
       modelCatalogId: "model-1",
       modelProvider: "openai",
@@ -125,12 +130,13 @@ describe("chat mobile smoke", () => {
   });
 
   afterEach(() => {
+    window.sessionStorage.clear();
     vi.clearAllMocks();
   });
 
   it("renders mobile-usable chat controls and sql preview", async () => {
     render(<ChatPage />);
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
 
     expect(screen.getByLabelText("聊天输入")).toBeEnabled();
     expect(screen.getByRole("button", { name: "结果详情" })).toBeInTheDocument();

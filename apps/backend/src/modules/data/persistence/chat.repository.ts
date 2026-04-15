@@ -169,12 +169,19 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   async listSessions(options?: {
     includeDeleted?: boolean;
     statuses?: SessionSyncStatus[];
+    datasource?: string;
   }): Promise<Session[]> {
     const includeDeleted = options?.includeDeleted ?? false;
     const statusFilter = options?.statuses;
+    const datasourceFilter = options?.datasource?.trim() || undefined;
 
     const memory = Array.from(this.sessions.values());
-    const fromMemory = this.filterAndSortSessions(memory, includeDeleted, statusFilter);
+    const fromMemory = this.filterAndSortSessions(
+      memory,
+      includeDeleted,
+      statusFilter,
+      datasourceFilter
+    );
 
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
       return fromMemory;
@@ -182,7 +189,10 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
 
     const rows = (await this.tryPrismaRead(async () =>
       this.prisma?.session.findMany({
-        where: includeDeleted ? {} : { deletedAt: null }
+        where: {
+          ...(includeDeleted ? {} : { deletedAt: null }),
+          ...(datasourceFilter ? { datasource: datasourceFilter } : {})
+        }
       })
     )) as SessionRow[] | null;
 
@@ -203,7 +213,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     return this.filterAndSortSessions(
       Array.from(merged.values()),
       includeDeleted,
-      statusFilter
+      statusFilter,
+      datasourceFilter
     );
   }
 
@@ -755,10 +766,14 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   private filterAndSortSessions(
     sessions: Session[],
     includeDeleted: boolean,
-    statuses?: SessionSyncStatus[]
+    statuses?: SessionSyncStatus[],
+    datasource?: string
   ): Session[] {
     const filtered = sessions.filter((session) => {
       if (!includeDeleted && session.deletedAt) {
+        return false;
+      }
+      if (datasource && session.datasource !== datasource) {
         return false;
       }
       if (!statuses || statuses.length === 0) {
