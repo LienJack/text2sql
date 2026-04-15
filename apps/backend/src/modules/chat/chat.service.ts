@@ -13,8 +13,13 @@ import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
 import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
+import {
+  DatasourceAccessPolicyService,
+  type AccessContext
+} from "../auth/datasource-access-policy.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
+import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
@@ -34,6 +39,8 @@ export class ChatService {
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
     private readonly datasourceService: DatasourceService,
+    private readonly accessPolicyService: DatasourceAccessPolicyService,
+    private readonly workspaceDatasourcePolicyRepository: WorkspaceDatasourcePolicyRepository,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
@@ -41,14 +48,59 @@ export class ChatService {
 
   async createSession(
     datasource: string,
-    modelCatalogId?: string
+    modelCatalogId?: string,
+    options?: {
+      workspaceId?: string;
+      createdByUserId?: string;
+      actor?: {
+        id?: string;
+        role?: string;
+        isSystemAdmin?: boolean;
+        requestedWorkspaceId?: string;
+        accessContext?: {
+          actorId?: string;
+          workspaceId?: string | null;
+          roleSet?: string[];
+        };
+      };
+    }
   ): Promise<Session> {
     const normalizedDatasource = datasource.trim();
+    const normalizedWorkspaceId = options?.workspaceId?.trim() || undefined;
+    const normalizedCreatedByUserId =
+      options?.createdByUserId?.trim() || undefined;
     if (!normalizedDatasource) {
       throw new DomainError("VALIDATION_ERROR", "datasource 为必填项", 400, {
         field: "datasource"
       });
     }
+
+    if (normalizedWorkspaceId) {
+      const accessContext = await this.accessPolicyService.resolveAccessContext({
+        actor: options?.actor ?? {
+          id: normalizedCreatedByUserId,
+          role: "user",
+          requestedWorkspaceId: normalizedWorkspaceId
+        },
+        workspaceId: normalizedWorkspaceId
+      });
+      const visible = await this.accessPolicyService.listVisibleDatasources({
+        context: accessContext
+      });
+      if (!visible.ids.includes(normalizedDatasource)) {
+        throw new DomainError(
+          "DATASOURCE_ACCESS_DENIED",
+          "当前工作空间未绑定该数据源或无访问权限。",
+          403,
+          {
+            workspaceId: normalizedWorkspaceId,
+            datasourceId: normalizedDatasource,
+            actorId: accessContext.actorId
+          }
+        );
+      }
+    }
+
     const datasourceMeta = await this.datasourceService.assertDatasourceAvailable(
       normalizedDatasource
     );
@@ -82,6 +134,8 @@ export class ChatService {
     const session: Session = {
       id: uuidv4(),
       datasource: normalizedDatasource,
+      workspaceId: normalizedWorkspaceId ?? null,
+      createdByUserId: normalizedCreatedByUserId ?? null,
       datasourceName: datasourceMeta.name,
       datasourceType: datasourceMeta.type,
       datasourceStatus: this.normalizeDatasourceStatus(datasourceMeta.status),
@@ -102,9 +156,13 @@ export class ChatService {
   async listSessions(
     status?: SessionSyncStatus,
     datasource?: string,
-    view: SessionListView = "all"
+    view: SessionListView = "all",
+    options?: {
+      workspaceId?: string;
+    }
   ): Promise<Session[]> {
     const normalizedDatasource = datasource?.trim() || undefined;
+    const normalizedWorkspaceId = options?.workspaceId?.trim() || undefined;
     if (view === "current" && !normalizedDatasource) {
       throw new DomainError(
         "VALIDATION_ERROR",
@@ -119,27 +177,59 @@ export class ChatService {
 
     const sessions = await this.repository.listSessions({
       datasource: view === "readonly-history" ? undefined : normalizedDatasource,
-      statuses: status ? [status] : undefined
+      statuses: status ? [status] : undefined,
+      workspaceId: normalizedWorkspaceId
     });
     const normalized = await Promise.all(
       sessions.map(async (session) => this.mergeDatasourceMetadata(session))
     );
 
     if (view === "readonly-history") {
-      return normalized.filter((session) => {
+      const readonly: Session[] = [];
+      for (const session of normalized) {
         const datasourceStatus = this.normalizeDatasourceStatus(
           session.datasourceStatus
         );
-        return datasourceStatus === "unavailable" || datasourceStatus === "deleted";
-      });
+        if (datasourceStatus === "unavailable" || datasourceStatus === "deleted") {
+          readonly.push(session);
+          continue;
+        }
+        if (session.workspaceId) {
+          const stillBound =
+            await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+              session.workspaceId,
+              session.datasource
+            );
+          if (!stillBound) {
+            readonly.push(session);
+          }
+        }
+      }
+      return readonly;
     }
 
     if (view === "current") {
-      return normalized.filter(
-        (session) =>
-          session.datasource === normalizedDatasource &&
-          this.normalizeDatasourceStatus(session.datasourceStatus) === "available"
-      );
+      const current: Session[] = [];
+      for (const session of normalized) {
+        if (session.datasource !== normalizedDatasource) {
+          continue;
+        }
+        if (this.normalizeDatasourceStatus(session.datasourceStatus) !== "available") {
+          continue;
+        }
+        if (session.workspaceId) {
+          const stillBound =
+            await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+              session.workspaceId,
+              session.datasource
+            );
+          if (!stillBound) {
+            continue;
+          }
+        }
+        current.push(session);
+      }
+      return current;
     }
 
     return normalized;
@@ -274,9 +364,11 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    await this.assertSessionWritableByPolicy(session);
     const datasource = await this.datasourceService.assertDatasourceAvailable(
       session.datasource
     );
+    const sqlAccessContext = await this.resolveSqlAccessContext(session);
 
     const userMessage: ChatMessage = {
       id: uuidv4(),
@@ -296,6 +388,7 @@ export class ChatService {
       datasourceId: session.datasource,
       datasourceType: datasource.type,
       modelCatalogId: session.modelCatalogId ?? undefined,
+      accessContext: sqlAccessContext,
       traceContext: {
         source: "chat",
         route: "/api/v1/sessions/:sessionId/messages",
@@ -317,9 +410,11 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    await this.assertSessionWritableByPolicy(session);
     const datasource = await this.datasourceService.assertDatasourceAvailable(
       session.datasource
     );
+    const sqlAccessContext = await this.resolveSqlAccessContext(session);
 
     const runId = uuidv4();
     const userMessage: ChatMessage = {
@@ -359,6 +454,7 @@ export class ChatService {
           datasourceId: session.datasource,
           datasourceType: datasource.type,
           modelCatalogId: session.modelCatalogId ?? undefined,
+          accessContext: sqlAccessContext,
           traceContext: {
             source: "chat",
             route: "/api/v1/sessions/:sessionId/messages/stream",
@@ -367,7 +463,9 @@ export class ChatService {
         },
         {
           streamMode: true,
-          tools: this.sqlToolRegistry.getToolsForDatasource(datasource),
+          tools: this.sqlToolRegistry.getToolsForDatasource(datasource, {
+            accessContext: sqlAccessContext
+          }),
           onLlmEvent: async (event) => {
             if (event.type === "text-delta") {
               await emit("text-delta", {
@@ -543,6 +641,66 @@ export class ChatService {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
     return run;
+  }
+
+  private async assertSessionWritableByPolicy(session: Session): Promise<void> {
+    const workspaceId = session.workspaceId?.trim();
+    if (!workspaceId) {
+      return;
+    }
+    const stillBound =
+      await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+        workspaceId,
+        session.datasource
+      );
+    if (!stillBound) {
+      throw new DomainError(
+        "SESSION_READONLY_BY_POLICY",
+        "该会话已转为只读历史（数据源绑定或权限已变更），不可继续发送消息。",
+        409,
+        {
+          sessionId: session.id,
+          workspaceId,
+          datasourceId: session.datasource
+        }
+      );
+    }
+  }
+
+  private async resolveSqlAccessContext(
+    session: Session
+  ): Promise<
+    | {
+        actorId: string;
+        workspaceId: string;
+        roleSet: string[];
+        allowedTables: string[];
+      }
+    | undefined
+  > {
+    const workspaceId = session.workspaceId?.trim();
+    const actorId = session.createdByUserId?.trim();
+    if (!workspaceId || !actorId) {
+      return undefined;
+    }
+    const context: AccessContext = await this.accessPolicyService.resolveAccessContext({
+      actor: {
+        id: actorId,
+        role: "user",
+        requestedWorkspaceId: workspaceId
+      },
+      workspaceId
+    });
+    const readable = await this.accessPolicyService.resolveReadableTables({
+      context,
+      datasourceId: session.datasource
+    });
+    return {
+      actorId: context.actorId,
+      workspaceId: context.workspaceId,
+      roleSet: [...context.roleSet],
+      allowedTables: [...readable.readableTables]
+    };
   }
 
   private async persistAssistantAndRun(

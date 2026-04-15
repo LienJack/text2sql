@@ -4,29 +4,154 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   Datasource,
+  DatasourceUpsertPayload,
   LlmSettingsView,
   ModelCatalogItem,
-  Session
+  Session,
+  UpsertDatasourceWorkflowRequest,
+  UpsertDatasourceWorkflowResponse
 } from "@text2sql/shared-types";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
 
+function resolveWorkspaceIdHeader(): string | undefined {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
+    }
+    const fromStorage = window.sessionStorage
+      .getItem("text2sql.activeWorkspaceId")
+      ?.trim();
+    if (fromStorage) {
+      return fromStorage;
+    }
+  }
+  const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();
+  return fromEnv || undefined;
+}
+
 export class DatasourceApiError extends Error {
   readonly code?: string;
   readonly details?: unknown;
+  readonly stage?: string;
 
-  constructor(message: string, options?: { code?: string; details?: unknown }) {
+  constructor(
+    message: string,
+    options?: { code?: string; details?: unknown; stage?: string }
+  ) {
     super(message);
     this.name = "DatasourceApiError";
     this.code = options?.code;
     this.details = options?.details;
+    this.stage = options?.stage;
   }
+}
+
+class ApiClientRequestError extends Error {
+  readonly code?: string;
+  readonly details?: unknown;
+  readonly stage?: string;
+
+  constructor(
+    message: string,
+    options?: { code?: string; details?: unknown; stage?: string }
+  ) {
+    super(message);
+    this.name = "ApiClientRequestError";
+    this.code = options?.code;
+    this.details = options?.details;
+    this.stage = options?.stage;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function resolveWorkflowStage(details: unknown): string | undefined {
+  if (!isRecord(details)) {
+    return undefined;
+  }
+
+  const candidates = [
+    details.stage,
+    details.failedStage,
+    details.workflowStage
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeIdempotencyKey(
+  idempotencyKey: string | undefined
+): string | undefined {
+  const normalized = idempotencyKey?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function createIdempotencyKey(prefix = "datasource-workflow"): string {
+  const suffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${suffix}`;
+}
+
+function withIdempotencyHeader(
+  idempotencyKey: string | undefined
+): Record<string, string> {
+  const normalized = normalizeIdempotencyKey(idempotencyKey);
+  return normalized ? { "x-idempotency-key": normalized } : {};
+}
+
+export interface DatasourceWorkflowApiErrorPayload {
+  stage?: string;
+  code?: string;
+  details?: unknown;
+}
+
+export function resolveDatasourceWorkflowApiError(
+  error: unknown
+): DatasourceWorkflowApiErrorPayload {
+  if (error instanceof DatasourceApiError) {
+    return {
+      stage: error.stage,
+      code: error.code,
+      details: error.details
+    };
+  }
+
+  if (error instanceof ApiClientRequestError) {
+    return {
+      stage: error.stage,
+      code: error.code,
+      details: error.details
+    };
+  }
+
+  return {};
 }
 
 function toDatasourceApiError(error: unknown): DatasourceApiError {
   if (error instanceof DatasourceApiError) {
     return error;
+  }
+
+  if (error instanceof ApiClientRequestError) {
+    return new DatasourceApiError(error.message, {
+      code: error.code,
+      details: error.details,
+      stage: error.stage
+    });
   }
 
   if (error instanceof Error) {
@@ -44,6 +169,7 @@ function toDatasourceApiError(error: unknown): DatasourceApiError {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${url}`, {
@@ -52,6 +178,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
         "content-type": "application/json",
         "x-user-role": role,
         "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
         ...(init?.headers ?? {})
       }
     });
@@ -71,20 +198,25 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
   const payload = (await response.json()) as ApiResponse<T>;
   if (payload.status === "error") {
-    throw new Error(
-      `${payload.error.message}${
-        payload.error.code ? ` [${payload.error.code}]` : ""
-      }`
-    );
+    throw new ApiClientRequestError(payload.error.message, {
+      code: payload.error.code,
+      details: payload.error.details,
+      stage: resolveWorkflowStage(payload.error.details)
+    });
   }
   return payload.data;
 }
 
-export async function createSession(datasource: string): Promise<Session> {
+export async function createSession(
+  datasource: string,
+  options?: { workspaceId?: string }
+): Promise<Session> {
+  const workspaceId = options?.workspaceId?.trim() || resolveWorkspaceIdHeader();
   return request<Session>("/api/v1/sessions", {
     method: "POST",
     body: JSON.stringify({
-      datasource
+      datasource,
+      ...(workspaceId ? { workspaceId } : {})
     })
   });
 }
@@ -128,12 +260,47 @@ export async function createDatasource(input: {
   password?: string;
   filePath?: string;
   shared?: boolean;
-}): Promise<Datasource> {
+}, options?: { idempotencyKey?: string }): Promise<Datasource> {
   try {
     return await request<Datasource>("/api/v1/datasources", {
       method: "POST",
+      headers: withIdempotencyHeader(options?.idempotencyKey),
       body: JSON.stringify(input)
     });
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function updateDatasource(
+  datasourceId: string,
+  input: DatasourceUpsertPayload,
+  options?: { idempotencyKey?: string }
+): Promise<Datasource> {
+  try {
+    return await request<Datasource>(`/api/v1/datasources/${datasourceId}`, {
+      method: "PATCH",
+      headers: withIdempotencyHeader(options?.idempotencyKey),
+      body: JSON.stringify(input)
+    });
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function submitDatasourceWorkflow(
+  input: UpsertDatasourceWorkflowRequest,
+  options?: { idempotencyKey?: string }
+): Promise<UpsertDatasourceWorkflowResponse> {
+  try {
+    return await request<UpsertDatasourceWorkflowResponse>(
+      "/api/v1/datasources/workflow",
+      {
+        method: "POST",
+        headers: withIdempotencyHeader(options?.idempotencyKey),
+        body: JSON.stringify(input)
+      }
+    );
   } catch (error) {
     throw toDatasourceApiError(error);
   }
@@ -145,6 +312,7 @@ export async function uploadDatasourceFile(input: {
 }): Promise<Datasource> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
   const body = new FormData();
   body.set("file", input.file);
   if (input.name?.trim()) {
@@ -157,7 +325,8 @@ export async function uploadDatasourceFile(input: {
       method: "POST",
       headers: {
         "x-user-role": role,
-        "x-user-id": userId
+        "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
       },
       body
     });
@@ -179,7 +348,8 @@ export async function uploadDatasourceFile(input: {
   if (payload.status === "error") {
     throw new DatasourceApiError(payload.error.message, {
       code: payload.error.code,
-      details: payload.error.details
+      details: payload.error.details,
+      stage: resolveWorkflowStage(payload.error.details)
     });
   }
   return payload.data;
@@ -285,12 +455,14 @@ export async function* streamMessageEvents(
 ): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
   const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "x-user-role": role,
-      "x-user-id": userId
+      "x-user-id": userId,
+      ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
     },
     signal: abortSignal,
     body: JSON.stringify({

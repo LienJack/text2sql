@@ -208,4 +208,32 @@ describe("datasource api (e2e)", () => {
     expect(createRes.body.error.code).toBe("CONNECTION_CONFIG_INVALID");
     expect(createRes.body.error.details.suggestedAction).toBe("previous");
   });
+
+  it("keeps datasource list unchanged when create-stage validation fails", async () => {
+    const failedName = "工作流创建阶段失败-无副作用";
+    const createRes = await request(app.getHttpServer())
+      .post("/api/v1/datasources")
+      .send({
+        name: failedName,
+        type: "postgresql",
+        host: "127.0.0.1",
+        port: 5432,
+        username: "postgres",
+        password: "secret"
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.status).toBe("error");
+    expect(createRes.body.error.code).toBe("CONNECTION_CONFIG_INVALID");
+
+    const listRes = await request(app.getHttpServer())
+      .get("/api/v1/datasources")
+      .send();
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.status).toBe("success");
+    expect(
+      listRes.body.data.some((item: { name: string }) => item.name === failedName)
+    ).toBe(false);
+  });
 });

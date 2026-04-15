@@ -41,9 +41,15 @@ export class ChatController {
           field: "datasource"
         });
       }
+      const workspaceId = body.workspaceId?.trim() || this.resolveWorkspaceId(req);
       const session = await this.chatService.createSession(
         datasource,
-        body.modelCatalogId
+        body.modelCatalogId,
+        {
+          workspaceId,
+          createdByUserId: req.actor?.id,
+          actor: req.actor
+        }
       );
       return ok(req.requestId, session);
     } catch (error) {
@@ -61,7 +67,10 @@ export class ChatController {
       const sessions = await this.chatService.listSessions(
         query.status,
         query.datasource,
-        query.view
+        query.view,
+        {
+          workspaceId: query.workspaceId?.trim() || this.resolveWorkspaceId(req)
+        }
       );
       return ok(req.requestId, sessions);
     } catch (error) {
@@ -262,5 +271,29 @@ export class ChatController {
       "INTERNAL_ERROR",
       error instanceof Error ? error.message : "未知错误"
     );
+  }
+
+  private resolveWorkspaceId(req: Request): string | undefined {
+    const headerValue = req.headers["x-workspace-id"];
+    if (typeof headerValue === "string") {
+      const trimmed = headerValue.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    if (Array.isArray(headerValue)) {
+      for (const item of headerValue) {
+        const trimmed = item.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      }
+    }
+
+    const workspaceIds = Object.keys(req.actor?.workspaceRoles ?? {});
+    if (workspaceIds.length === 1) {
+      return workspaceIds[0];
+    }
+    return undefined;
   }
 }

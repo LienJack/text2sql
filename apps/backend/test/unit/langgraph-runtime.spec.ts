@@ -24,7 +24,7 @@ describe("langgraph runtime", () => {
         })
       },
       safetyNode: {
-        run: () => ({ safe: true as const })
+        run: async () => ({ safe: true as const })
       },
       executeNode: {
         run: async () => ({
@@ -82,7 +82,7 @@ describe("langgraph runtime", () => {
         }
       },
       safetyNode: {
-        run: () => ({ safe: true as const })
+        run: async () => ({ safe: true as const })
       },
       executeNode: {
         run: async () => ({

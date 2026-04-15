@@ -11,6 +11,8 @@ datasource db {
 model Session {
   id                String    @id
   datasource        String
+  workspaceId       String?
+  createdByUserId   String?
   title             String    @default("新会话")
   modelCatalogId    String?
   modelProvider     String?
@@ -24,10 +26,14 @@ model Session {
   createdAt         DateTime  @default(now())
   messages          Message[]
   runs              SqlRun[]
+  auditLogs         AgentAuditLog[]
   datasourceRef     Datasource @relation(fields: [datasource], references: [id], onDelete: Restrict)
+  workspaceRef      Workspace? @relation("workspace_sessions", fields: [workspaceId], references: [id], onDelete: SetNull)
   modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt, lastMessageAt])
+  @@index([workspaceId, deletedAt, lastMessageAt])
+  @@index([createdByUserId])
   @@index([modelCatalogId])
   @@map("sessions")
 }
@@ -46,6 +52,8 @@ model Datasource {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
+  workspaceBindings WorkspaceDatasourceBinding[]
+  tableAclRules WorkspaceDatasourceTableAcl[]
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -83,6 +91,10 @@ model SqlRun {
   llmRaw        String?
   createdAt     DateTime @default(now())
   session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  auditLogs         AgentAuditLog[]
+  graphSnapshots    GraphSnapshot[]
+  semanticEdges     SemanticEdge[]
+  semanticMemories  SemanticMemory[]
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
@@ -181,6 +193,9 @@ model Workspace {
   updatedAt        DateTime @updatedAt
   defaultUsers     PlatformUser[] @relation("workspace_default_users")
   workspaceMembers WorkspaceMember[]
+  sessions         Session[] @relation("workspace_sessions")
+  datasourceBindings WorkspaceDatasourceBinding[]
+  tableAclRules    WorkspaceDatasourceTableAcl[]
 
   @@unique([name])
   @@index([status, deletedAt])
@@ -201,4 +216,119 @@ model WorkspaceMember {
   @@index([workspaceId, role])
   @@index([userId, role])
   @@map("workspace_members")
+}
+
+model WorkspaceDatasourceBinding {
+  id              String   @id
+  workspaceId     String
+  datasourceId    String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource      Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId])
+  @@index([workspaceId, createdAt])
+  @@index([datasourceId, createdAt])
+  @@index([createdByUserId])
+  @@map("workspace_datasource_bindings")
+}
+
+model WorkspaceDatasourceTableAcl {
+  id              String   @id
+  workspaceId     String
+  datasourceId    String
+  tableName       String
+  subjectType     String
+  subjectId       String
+  effect          String   @default("allow")
+  priority        Int      @default(100)
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource      Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId, tableName, subjectType, subjectId])
+  @@index([workspaceId, datasourceId, effect])
+  @@index([workspaceId, datasourceId, subjectType, subjectId])
+  @@index([createdByUserId])
+  @@map("workspace_datasource_table_acls")
+}
+
+model AgentAuditLog {
+  id        String   @id
+  runId     String?
+  sessionId String?
+  phase     String
+  severity  String   @default("info")
+  eventType String
+  eventCode String?
+  message   String
+  metadata  String?
+  createdAt DateTime @default(now())
+  run       SqlRun?  @relation(fields: [runId], references: [runId], onDelete: SetNull)
+  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([eventType, createdAt])
+  @@index([runId, createdAt])
+  @@index([sessionId, createdAt])
+  @@map("agent_audit_logs")
+}
+
+model GraphSnapshot {
+  id           String   @id
+  datasource   String
+  graphType    String
+  graphVersion Int      @default(1)
+  status       String   @default("draft")
+  checksum     String?
+  payload      String
+  sourceRunId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@index([datasource, graphType, status])
+  @@index([sourceRunId])
+  @@map("graph_snapshots")
+}
+
+model SemanticEdge {
+  id          String   @id
+  datasource  String
+  subjectKey  String
+  predicate   String
+  objectKey   String
+  weight      Float?
+  sourceRunId String?
+  metadata    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sourceRun   SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([datasource, subjectKey, predicate, objectKey])
+  @@index([datasource, predicate])
+  @@index([sourceRunId])
+  @@map("semantic_edges")
+}
+
+model SemanticMemory {
+  id           String   @id
+  datasource   String
+  semanticType String
+  canonicalKey String
+  content      String
+  confidence   Float    @default(1.0)
+  sourceRunId  String?
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([datasource, semanticType, canonicalKey])
+  @@index([datasource, semanticType])
+  @@index([sourceRunId])
+  @@map("semantic_memories")
 }

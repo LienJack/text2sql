@@ -13,7 +13,18 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: config.corsAllowedOrigins,
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["content-type", "x-request-id", "x-user-id", "x-user-role"],
+    allowedHeaders: [
+      "content-type",
+      "x-request-id",
+      "x-user-id",
+      "x-user-role",
+      "x-workspace-id",
+      "x-workspace-role",
+      "x-workspace-admin-ids",
+      "x-workspace-member-ids",
+      "x-workspace-roles",
+      "x-idempotency-key"
+    ],
     credentials: false
   });
 

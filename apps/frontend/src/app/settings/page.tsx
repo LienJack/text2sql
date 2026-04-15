@@ -10,7 +10,7 @@ import { WorkspaceManagementPanel } from "@/components/settings/workspace-manage
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StateBlock } from "@/components/ui/state-block";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   batchSetModelsEnabled,
   checkProviderHealth,
@@ -23,8 +23,7 @@ import {
   syncProviderModels
 } from "@/lib/settings-api-client";
 
-type SettingsTab = "models" | "users";
-type ManagementTab = "users" | "workspaces";
+type SettingsTab = "models" | "workspaces" | "users";
 
 export default function SettingsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
@@ -32,7 +31,6 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [tab, setTab] = useState<SettingsTab>("models");
   const [query, setQuery] = useState("");
-  const [managementTab, setManagementTab] = useState<ManagementTab>("users");
   const [managementRefreshToken, setManagementRefreshToken] = useState(0);
   const [view, setView] = useState<LlmSettingsView | null>(null);
   const [supportedProviders, setSupportedProviders] = useState<
@@ -147,9 +145,13 @@ export default function SettingsPage() {
               <Settings2 className="h-3.5 w-3.5" />
               LLM 模型
             </TabsTrigger>
+            <TabsTrigger value="workspaces">
+              <Building2 className="h-3.5 w-3.5" />
+              工作空间
+            </TabsTrigger>
             <TabsTrigger value="users">
               <Users className="h-3.5 w-3.5" />
-              用户与权限
+              用户管理
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -167,7 +169,7 @@ export default function SettingsPage() {
             </div>
           ) : (
             <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
-              用户与工作空间治理面板
+              {tab === "workspaces" ? "工作空间治理面板" : "用户治理面板"}
             </p>
           )}
           <Button
@@ -263,26 +265,10 @@ export default function SettingsPage() {
                 <StateBlock variant="idle">当前账号仅可查看与切换模型，不可管理配置。</StateBlock>
               )}
             </div>
+          ) : tab === "workspaces" ? (
+            <WorkspaceManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
           ) : (
-            <Tabs value={managementTab} onValueChange={(value) => setManagementTab(value as ManagementTab)}>
-              <TabsList className="h-10">
-                <TabsTrigger value="users">
-                  <Users className="h-3.5 w-3.5" />
-                  用户管理
-                </TabsTrigger>
-                <TabsTrigger value="workspaces">
-                  <Building2 className="h-3.5 w-3.5" />
-                  工作空间
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="users" className="pt-4">
-                <UsersManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
-              </TabsContent>
-              <TabsContent value="workspaces" className="pt-4">
-                <WorkspaceManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
-              </TabsContent>
-            </Tabs>
+            <UsersManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
           )
         ) : null}
       </section>

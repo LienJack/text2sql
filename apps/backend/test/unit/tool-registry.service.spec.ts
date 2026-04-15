@@ -9,7 +9,19 @@ describe("SqlToolRegistryService", () => {
         columns: ["status", "order_count"]
       }))
     };
-    const sqlTool = new SqlReadonlyTool(queryExecutorRouter as never);
+    const datasourceAccessPolicyService = {
+      resolveReadableTables: jest.fn(async () => ({
+        datasourceId: "sqlite_main",
+        readableTables: ["orders"],
+        decisions: {
+          orders: "role_allow"
+        }
+      }))
+    };
+    const sqlTool = new SqlReadonlyTool(
+      queryExecutorRouter as never,
+      datasourceAccessPolicyService as never
+    );
     const registry = new SqlToolRegistryService(sqlTool);
 
     const tools = registry.getToolsForDatasource({

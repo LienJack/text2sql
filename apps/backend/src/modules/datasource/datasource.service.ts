@@ -3,6 +3,7 @@ import type { Datasource, DatasourceStatus, DatasourceType } from "@text2sql/sha
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { encryptSecret } from "../../common/secret-crypto";
+import { DatasourceAccessPolicyService, type AccessContext } from "../auth/datasource-access-policy.service";
 import { AppConfigService } from "../config/app-config.service";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
 
@@ -57,26 +58,54 @@ interface PostgresPreflightModule {
   Client: new (config: Record<string, unknown>) => PostgresPreflightClient;
 }
 
+type DatasourceMutationActor = {
+  id: string;
+  role: "admin" | "user";
+  isSystemAdmin?: boolean;
+};
+
+type DatasourceUpdateInput = {
+  name?: string;
+  type?: DatasourceType;
+  shared?: boolean;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+};
+
 @Injectable()
 export class DatasourceService {
   constructor(
     private readonly datasourceRepository: DatasourceRepository,
+    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService,
     private readonly appConfig: AppConfigService
   ) {}
 
   async listDatasources(options?: {
     includeUnavailable?: boolean;
     includeDeleted?: boolean;
+    accessContext?: AccessContext;
   }): Promise<Datasource[]> {
     const includeUnavailable = options?.includeUnavailable ?? true;
     const statuses: DatasourceStatus[] = includeUnavailable
       ? ["available", "unavailable"]
       : ["available"];
 
-    const list = await this.datasourceRepository.listDatasources({
+    let list = await this.datasourceRepository.listDatasources({
       includeDeleted: options?.includeDeleted ?? false,
       statuses
     });
+
+    if (options?.accessContext) {
+      const visible = await this.datasourceAccessPolicyService.listVisibleDatasources({
+        context: options.accessContext
+      });
+      const visibleIds = new Set(visible.ids);
+      list = list.filter((item) => visibleIds.has(item.id));
+    }
 
     return list.map((item) => this.sanitizeDatasource(item));
   }
@@ -161,6 +190,55 @@ export class DatasourceService {
     });
 
     return this.sanitizeDatasource(datasource);
+  }
+
+  async updateDatasource(
+    actor: DatasourceMutationActor | undefined,
+    datasourceId: string,
+    patch: DatasourceUpdateInput
+  ): Promise<Datasource> {
+    this.assertSystemAdmin(actor);
+    const normalizedDatasourceId = datasourceId.trim();
+    if (!normalizedDatasourceId) {
+      throw new DomainError("VALIDATION_ERROR", "datasourceId 不能为空。", 400, {
+        field: "datasourceId"
+      });
+    }
+
+    const existing = await this.getDatasourceOrThrow(normalizedDatasourceId);
+    if (patch.type !== undefined) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "数据源类型创建后不可修改。",
+        400,
+        {
+          field: "type",
+          datasourceId: normalizedDatasourceId
+        }
+      );
+    }
+
+    const normalizedName = patch.name?.trim();
+    if (patch.name !== undefined && !normalizedName) {
+      throw new DomainError("VALIDATION_ERROR", "数据源名称不能为空。", 400, {
+        field: "name"
+      });
+    }
+
+    const nextConfig = await this.buildUpdatedConfig(existing, patch);
+    const updated = await this.datasourceRepository.upsertDatasource({
+      id: existing.id,
+      name: normalizedName ?? existing.name,
+      type: existing.type,
+      status: existing.status,
+      readonly: existing.readonly,
+      shared: patch.shared ?? existing.shared,
+      config: nextConfig,
+      fileMeta: existing.fileMeta ?? null,
+      unavailableAt: existing.unavailableAt ?? null,
+      deletedAt: existing.deletedAt ?? null
+    });
+    return this.sanitizeDatasource(updated);
   }
 
   async preflightDatasourceConnection(input: RelationalConnectionInput): Promise<void> {
@@ -273,6 +351,178 @@ export class DatasourceService {
       passwordMasked: this.maskSecret(password),
       connectTimeoutMs: this.appConfig.datasourceConnectTimeoutMs
     };
+  }
+
+  private async buildUpdatedConfig(
+    existing: Datasource,
+    patch: DatasourceUpdateInput
+  ): Promise<Record<string, unknown> | null> {
+    if (existing.type === "mysql" || existing.type === "postgresql") {
+      this.assertNoFileDatasourceFields(patch, existing.type);
+      return this.buildUpdatedRelationalConfig(existing, patch);
+    }
+
+    if (existing.type === "sqlite") {
+      this.assertNoRelationalDatasourceFields(patch, existing.type);
+      const filePath = patch.filePath?.trim();
+      if (patch.filePath !== undefined && !filePath) {
+        throw new DomainError("VALIDATION_ERROR", "filePath 不能为空。", 400, {
+          field: "filePath"
+        });
+      }
+      return {
+        ...(existing.config ?? {}),
+        ...(filePath ? { path: filePath } : {})
+      };
+    }
+
+    this.assertNoRelationalDatasourceFields(patch, existing.type);
+    if (patch.filePath !== undefined) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        `${existing.type} 类型数据源不支持修改 filePath。`,
+        400,
+        {
+          field: "filePath",
+          datasourceType: existing.type
+        }
+      );
+    }
+    return existing.config ?? null;
+  }
+
+  private async buildUpdatedRelationalConfig(
+    existing: Datasource,
+    patch: DatasourceUpdateInput
+  ): Promise<Record<string, unknown>> {
+    const relationalType = existing.type as RelationalDatasourceType;
+    const existingConfig = (existing.config ?? {}) as Record<string, unknown>;
+    const hasConnectionFieldPatch =
+      patch.host !== undefined ||
+      patch.port !== undefined ||
+      patch.database !== undefined ||
+      patch.username !== undefined ||
+      patch.password !== undefined;
+    if (!hasConnectionFieldPatch) {
+      return existingConfig;
+    }
+
+    const host = patch.host?.trim() ?? this.readConfigString(existingConfig, "host");
+    const database =
+      patch.database?.trim() ?? this.readConfigString(existingConfig, "database");
+    const username =
+      patch.username?.trim() ?? this.readConfigString(existingConfig, "username");
+    const port = patch.port ?? this.readConfigPort(existingConfig, relationalType);
+    const password = patch.password?.trim();
+
+    if (!password) {
+      throw new DomainError(
+        "CONNECTION_CONFIG_INVALID",
+        "修改数据库连接字段时必须提供 password 以执行连接校验。",
+        400,
+        {
+          datasourceId: existing.id,
+          datasourceType: existing.type,
+          suggestedAction: "previous",
+          field: "password"
+        }
+      );
+    }
+
+    await this.preflightDatasourceConnection({
+      type: relationalType,
+      host,
+      port,
+      database,
+      username,
+      password
+    });
+
+    return this.buildConnectionConfig({
+      type: relationalType,
+      host,
+      port,
+      database,
+      username,
+      password
+    });
+  }
+
+  private assertNoRelationalDatasourceFields(
+    patch: DatasourceUpdateInput,
+    datasourceType: DatasourceType
+  ): void {
+    const restrictedFields = ["host", "port", "database", "username", "password"] as const;
+    for (const field of restrictedFields) {
+      if (patch[field] === undefined) {
+        continue;
+      }
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        `${datasourceType} 类型数据源不支持字段 ${field} 更新。`,
+        400,
+        {
+          field,
+          datasourceType
+        }
+      );
+    }
+  }
+
+  private assertNoFileDatasourceFields(
+    patch: DatasourceUpdateInput,
+    datasourceType: DatasourceType
+  ): void {
+    if (patch.filePath === undefined) {
+      return;
+    }
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      `${datasourceType} 类型数据源不支持字段 filePath 更新。`,
+      400,
+      {
+        field: "filePath",
+        datasourceType
+      }
+    );
+  }
+
+  private readConfigString(
+    config: Record<string, unknown>,
+    field: "host" | "database" | "username"
+  ): string {
+    const value = config[field];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    throw new DomainError(
+      "CONNECTION_CONFIG_INVALID",
+      `当前数据源缺少 ${field}，无法执行更新前连接校验。`,
+      400,
+      {
+        field,
+        suggestedAction: "previous"
+      }
+    );
+  }
+
+  private readConfigPort(
+    config: Record<string, unknown>,
+    type: RelationalDatasourceType
+  ): number {
+    const value = config.port;
+    if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535) {
+      return value;
+    }
+    if (
+      typeof value === "string" &&
+      Number.isInteger(Number(value)) &&
+      Number(value) >= 1 &&
+      Number(value) <= 65535
+    ) {
+      return Number(value);
+    }
+    return type === "mysql" ? 3306 : 5432;
   }
 
   protected async loadMysqlModule(): Promise<MysqlPreflightModule> {
@@ -515,6 +765,14 @@ export class DatasourceService {
       ...datasource,
       config: redacted
     };
+  }
+
+  private assertSystemAdmin(actor: DatasourceMutationActor | undefined): void {
+    const systemAdmin = actor?.role === "admin" || actor?.isSystemAdmin === true;
+    if (systemAdmin) {
+      return;
+    }
+    throw new DomainError("FORBIDDEN", "仅系统管理员可修改数据源。", 403);
   }
 
   private fileExtension(fileName: string): "csv" | "xls" | "xlsx" {

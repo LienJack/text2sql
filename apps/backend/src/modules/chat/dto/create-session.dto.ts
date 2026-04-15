@@ -15,4 +15,11 @@ export class CreateSessionDto {
     typeof value === "string" ? value.trim() : value
   )
   modelCatalogId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) =>
+    typeof value === "string" ? value.trim() : value
+  )
+  workspaceId?: string;
 }

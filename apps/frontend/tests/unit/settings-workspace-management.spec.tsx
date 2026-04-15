@@ -6,8 +6,12 @@ import {
   addWorkspaceMembers,
   createWorkspace,
   listUsers,
+  listWorkspaceDatasourceBindings,
+  listWorkspaceDatasourceTableAcl,
+  listWorkspaceDatasourceTables,
   listWorkspaceMembers,
   listWorkspaces,
+  replaceWorkspaceDatasourceTableAcl,
   removeWorkspaceMembersBatch,
   renameWorkspace,
   updateWorkspaceMemberRole
@@ -22,6 +26,10 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     createWorkspace: vi.fn(),
     renameWorkspace: vi.fn(),
     deleteWorkspace: vi.fn(),
+    listWorkspaceDatasourceBindings: vi.fn(),
+    listWorkspaceDatasourceTableAcl: vi.fn(),
+    listWorkspaceDatasourceTables: vi.fn(),
+    replaceWorkspaceDatasourceTableAcl: vi.fn(),
     listUsers: vi.fn(),
     addWorkspaceMembers: vi.fn(),
     updateWorkspaceMemberRole: vi.fn(),
@@ -35,6 +43,10 @@ const mockListWorkspaceMembers = vi.mocked(listWorkspaceMembers);
 const mockCreateWorkspace = vi.mocked(createWorkspace);
 const mockRenameWorkspace = vi.mocked(renameWorkspace);
 const mockListUsers = vi.mocked(listUsers);
+const mockListWorkspaceDatasourceBindings = vi.mocked(listWorkspaceDatasourceBindings);
+const mockListWorkspaceDatasourceTableAcl = vi.mocked(listWorkspaceDatasourceTableAcl);
+const mockListWorkspaceDatasourceTables = vi.mocked(listWorkspaceDatasourceTables);
+const mockReplaceWorkspaceDatasourceTableAcl = vi.mocked(replaceWorkspaceDatasourceTableAcl);
 const mockAddWorkspaceMembers = vi.mocked(addWorkspaceMembers);
 const mockUpdateWorkspaceMemberRole = vi.mocked(updateWorkspaceMemberRole);
 const mockRemoveWorkspaceMembersBatch = vi.mocked(removeWorkspaceMembersBatch);
@@ -106,6 +118,25 @@ describe("WorkspaceManagementPanel", () => {
       page: 1,
       pageSize: 100
     });
+    mockListWorkspaceDatasourceBindings.mockResolvedValue([
+      {
+        id: "binding-1",
+        workspaceId: "ws-1",
+        datasourceId: "sqlite_main",
+        datasourceName: "SQLite 主数据源",
+        datasourceType: "sqlite",
+        datasourceStatus: "available",
+        createdAt: "2026-04-15T00:00:00.000Z",
+        updatedAt: "2026-04-15T00:00:00.000Z"
+      }
+    ]);
+    mockListWorkspaceDatasourceTableAcl.mockResolvedValue([]);
+    mockListWorkspaceDatasourceTables.mockResolvedValue(["orders", "users"]);
+    mockReplaceWorkspaceDatasourceTableAcl.mockResolvedValue({
+      addedTables: [],
+      removedTables: [],
+      retainedTables: []
+    });
 
     mockAddWorkspaceMembers.mockResolvedValue({ addedCount: 1 });
     mockUpdateWorkspaceMemberRole.mockResolvedValue({ ...MEMBERS[0], role: "admin" });
@@ -173,6 +204,29 @@ describe("WorkspaceManagementPanel", () => {
 
     await waitFor(() => {
       expect(mockRemoveWorkspaceMembersBatch).toHaveBeenCalledWith("ws-1", ["m-1"]);
+    });
+  });
+
+  it("shows workspace datasource bindings list", async () => {
+    render(<WorkspaceManagementPanel actorRole="admin" />);
+    await screen.findByText("成员管理 · 默认空间");
+    await screen.findByText("工作空间 - 数据源绑定关系");
+    expect(screen.getByText("SQLite 主数据源")).toBeInTheDocument();
+    expect(mockListWorkspaceDatasourceBindings).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("reloads bindings after closing ACL editor dialog", async () => {
+    const user = userEvent.setup();
+    render(<WorkspaceManagementPanel actorRole="admin" />);
+
+    await screen.findByText("成员管理 · 默认空间");
+    await user.click(screen.getByRole("button", { name: "表权限" }));
+    await screen.findByText("表权限编辑器");
+
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+
+    await waitFor(() => {
+      expect(mockListWorkspaceDatasourceBindings.mock.calls.length).toBeGreaterThan(1);
     });
   });
 });

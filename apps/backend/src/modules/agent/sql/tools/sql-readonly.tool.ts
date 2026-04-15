@@ -2,8 +2,10 @@ import { Injectable } from "@nestjs/common";
 import type { Datasource } from "@text2sql/shared-types";
 import { z } from "zod";
 import { QueryExecutorRouterService } from "../../../data/query/query-executor-router.service";
+import type { SqlTableAccessContext } from "../../../data/query/sql-table-access-guard.service";
 import type { LlmGatewayToolDefinition } from "../../../llm/llm-gateway.interface";
 import { DomainError } from "../../../../common/domain-error";
+import { DatasourceAccessPolicyService, type AccessContext } from "../../../auth/datasource-access-policy.service";
 
 const sqlReadonlyInputSchema = z.object({
   sql: z.string().min(1),
@@ -12,9 +14,15 @@ const sqlReadonlyInputSchema = z.object({
 
 @Injectable()
 export class SqlReadonlyTool {
-  constructor(private readonly queryExecutorRouter: QueryExecutorRouterService) {}
+  constructor(
+    private readonly queryExecutorRouter: QueryExecutorRouterService,
+    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService
+  ) {}
 
-  toDefinition(context: { datasource: Datasource }): LlmGatewayToolDefinition {
+  toDefinition(context: {
+    datasource: Datasource;
+    accessContext?: SqlTableAccessContext;
+  }): LlmGatewayToolDefinition {
     return {
       description: `Execute a read-only SQL query against datasource ${context.datasource.id} (${context.datasource.type}).`,
       inputSchema: sqlReadonlyInputSchema,
@@ -34,7 +42,16 @@ export class SqlReadonlyTool {
         const result = await this.queryExecutorRouter.execute({
           datasource: context.datasource,
           sql: parsed.sql,
-          limit: parsed.limit ?? 50
+          limit: parsed.limit ?? 50,
+          acl: context.accessContext
+            ? {
+                accessContext: context.accessContext,
+                allowedTables: await this.resolveAllowedTables(
+                  context.accessContext,
+                  context.datasource.id
+                )
+              }
+            : undefined
         });
         return {
           rowCount: result.rows.length,
@@ -43,5 +60,23 @@ export class SqlReadonlyTool {
         };
       }
     };
+  }
+
+  private async resolveAllowedTables(
+    context: SqlTableAccessContext,
+    datasourceId: string
+  ): Promise<string[] | undefined> {
+    if (!context.actorId || !context.workspaceId || !context.roleSet) {
+      return context.allowedTables;
+    }
+    const readable = await this.datasourceAccessPolicyService.resolveReadableTables({
+      context: {
+        actorId: context.actorId,
+        workspaceId: context.workspaceId,
+        roleSet: context.roleSet
+      } as AccessContext,
+      datasourceId
+    });
+    return readable.readableTables;
   }
 }

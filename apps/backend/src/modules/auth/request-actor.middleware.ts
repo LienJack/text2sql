@@ -2,6 +2,12 @@ import type { NextFunction, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 
 type WorkspaceScopedRole = "admin" | "member";
+type AccessRole =
+  | "system_admin"
+  | "workspace_admin"
+  | "workspace_member"
+  | "admin"
+  | "member";
 
 const parseHeaderSegments = (value: string | string[] | undefined): string[] => {
   if (!value) {
@@ -77,13 +83,13 @@ export const requestActorMiddleware = (
     "member"
   );
 
-  const singleWorkspaceId = req.headers["x-workspace-id"]?.toString().trim();
+  const requestedWorkspaceId = req.headers["x-workspace-id"]?.toString().trim();
   const singleWorkspaceRole = req.headers["x-workspace-role"]?.toString().trim().toLowerCase();
   if (
-    singleWorkspaceId &&
+    requestedWorkspaceId &&
     (singleWorkspaceRole === "admin" || singleWorkspaceRole === "member")
   ) {
-    mergeWorkspaceRoles(workspaceRoles, [singleWorkspaceId], singleWorkspaceRole);
+    mergeWorkspaceRoles(workspaceRoles, [requestedWorkspaceId], singleWorkspaceRole);
   }
 
   const scopedRolesFromJson = parseWorkspaceRolesJson(req.headers["x-workspace-roles"]);
@@ -91,11 +97,35 @@ export const requestActorMiddleware = (
     mergeWorkspaceRoles(workspaceRoles, [workspaceId], scopedRole);
   }
 
+  const roleSet = new Set<AccessRole>();
+  if (role === "admin") {
+    roleSet.add("system_admin");
+    roleSet.add("admin");
+  }
+  if (requestedWorkspaceId) {
+    const scopedRole = workspaceRoles[requestedWorkspaceId];
+    if (scopedRole === "admin") {
+      roleSet.add("workspace_admin");
+      roleSet.add("workspace_member");
+      roleSet.add("admin");
+      roleSet.add("member");
+    } else if (scopedRole === "member") {
+      roleSet.add("workspace_member");
+      roleSet.add("member");
+    }
+  }
+
   req.actor = {
     id,
     role,
     isSystemAdmin: role === "admin",
-    workspaceRoles
+    workspaceRoles,
+    requestedWorkspaceId: requestedWorkspaceId || undefined,
+    accessContext: {
+      actorId: id,
+      workspaceId: requestedWorkspaceId || null,
+      roleSet: Array.from(roleSet)
+    }
   };
   next();
 };

@@ -2,6 +2,9 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
+  Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -17,8 +20,12 @@ import type { Request } from "express";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
+import { DatasourceAccessPolicyService } from "../auth/datasource-access-policy.service";
 import { CreateDatasourceDto } from "./dto/create-datasource.dto";
+import { UpdateDatasourceDto } from "./dto/update-datasource.dto";
+import { UpsertDatasourceWorkflowDto } from "./dto/upsert-datasource-workflow.dto";
 import { UploadFileDatasourceDto } from "./dto/upload-file-datasource.dto";
+import { DatasourceWorkflowService } from "./datasource-workflow.service";
 import { DatasourceService } from "./datasource.service";
 
 type UploadedFilePayload = {
@@ -32,18 +39,34 @@ type UploadedFilePayload = {
 export class DatasourceController {
   constructor(
     private readonly datasourceService: DatasourceService,
+    private readonly datasourceWorkflowService: DatasourceWorkflowService,
+    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService,
     private readonly appConfig: AppConfigService
   ) {}
 
   @Get("/datasources")
   async listDatasources(
     @Query("includeUnavailable") includeUnavailableRaw: string | undefined,
+    @Query("workspaceId") workspaceIdRaw: string | undefined,
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
       const includeUnavailable = includeUnavailableRaw !== "false";
+      const requestedWorkspaceId =
+        workspaceIdRaw?.trim() || req.actor?.requestedWorkspaceId;
+      const shouldResolveAccessContext = Boolean(req.actor) && (
+        Boolean(requestedWorkspaceId) || req.actor.role !== "admin"
+      );
+      const accessContext =
+        shouldResolveAccessContext
+          ? await this.datasourceAccessPolicyService.resolveAccessContext({
+              actor: req.actor,
+              workspaceId: requestedWorkspaceId
+            })
+          : undefined;
       const datasources = await this.datasourceService.listDatasources({
-        includeUnavailable
+        includeUnavailable,
+        accessContext
       });
       return ok(req.requestId, datasources);
     } catch (error) {
@@ -107,6 +130,52 @@ export class DatasourceController {
         }
       });
       return ok(req.requestId, datasource);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Patch("/datasources/:datasourceId")
+  async updateDatasource(
+    @Param("datasourceId") datasourceId: string,
+    @Body() body: UpdateDatasourceDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const datasource = await this.datasourceService.updateDatasource(
+        req.actor,
+        datasourceId,
+        {
+          name: body.name,
+          type: body.type,
+          shared: body.shared,
+          host: body.host,
+          port: body.port,
+          database: body.database,
+          username: body.username,
+          password: body.password,
+          filePath: body.filePath
+        }
+      );
+      return ok(req.requestId, datasource);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/datasources/workflow")
+  async upsertDatasourceWorkflow(
+    @Body() body: UpsertDatasourceWorkflowDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const result = await this.datasourceWorkflowService.upsertWorkflow(
+        req.actor,
+        body,
+        idempotencyKey
+      );
+      return ok(req.requestId, result);
     } catch (error) {
       return this.toError(req.requestId, error);
     }

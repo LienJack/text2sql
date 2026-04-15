@@ -29,6 +29,7 @@ import {
   addWorkspaceMembers,
   createWorkspace,
   deleteWorkspace,
+  listWorkspaceDatasourceBindings,
   listWorkspaceMembers,
   listWorkspaces,
   removeWorkspaceMember,
@@ -40,6 +41,8 @@ import {
 } from "@/lib/admin-api-client";
 import { WorkspaceEditorDialog } from "./workspace-editor-dialog";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
+import { WorkspaceDatasourceBindingDialog } from "./workspace-datasource-binding-dialog";
+import { TableAclEditorDialog } from "./table-acl-editor-dialog";
 
 interface WorkspaceManagementPanelProps {
   actorRole: "admin" | "user";
@@ -72,6 +75,7 @@ function formatDate(value?: string): string {
 export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: WorkspaceManagementPanelProps) {
   const [loadingWorkspaceList, setLoadingWorkspaceList] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
+  const [loadingBindings, setLoadingBindings] = useState(false);
   const [operating, setOperating] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -83,6 +87,13 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
   const [memberPage, setMemberPage] = useState(1);
   const [memberTotal, setMemberTotal] = useState(0);
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [workspaceBindings, setWorkspaceBindings] = useState<{
+    id: string;
+    datasourceId: string;
+    datasourceName?: string;
+    datasourceType?: string;
+    datasourceStatus?: string;
+  }[]>([]);
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
 
   const [editor, setEditor] = useState<EditorState>({
@@ -91,6 +102,8 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
     workspace: null
   });
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
+  const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
+  const [tableAclDialogOpen, setTableAclDialogOpen] = useState(false);
 
   const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<WorkspaceSummary | null>(null);
   const [removeMemberTarget, setRemoveMemberTarget] = useState<WorkspaceMember | null>(null);
@@ -160,6 +173,33 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
     }
   }, [memberKeyword, memberPage, selectedWorkspaceId]);
 
+  const loadWorkspaceBindings = useCallback(async (): Promise<void> => {
+    if (!selectedWorkspaceId) {
+      setWorkspaceBindings([]);
+      return;
+    }
+    setLoadingBindings(true);
+    try {
+      const items = await listWorkspaceDatasourceBindings(selectedWorkspaceId);
+      setWorkspaceBindings(
+        items.map((item) => ({
+          id: item.id,
+          datasourceId: item.datasourceId,
+          datasourceName: item.datasourceName,
+          datasourceType: item.datasourceType,
+          datasourceStatus: item.datasourceStatus
+        }))
+      );
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "加载工作空间数据源绑定关系失败"
+      });
+    } finally {
+      setLoadingBindings(false);
+    }
+  }, [selectedWorkspaceId]);
+
   useEffect(() => {
     void loadWorkspaceList();
   }, [loadWorkspaceList, refreshToken]);
@@ -167,6 +207,10 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
   useEffect(() => {
     void loadMembers();
   }, [loadMembers, refreshToken]);
+
+  useEffect(() => {
+    void loadWorkspaceBindings();
+  }, [loadWorkspaceBindings, refreshToken]);
 
   useEffect(() => {
     setMemberPage(1);
@@ -396,6 +440,20 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
             <Button
               variant="outline"
               disabled={!selectedWorkspace || operating}
+              onClick={() => setBindingDialogOpen(true)}
+            >
+              数据源绑定
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!selectedWorkspace || operating}
+              onClick={() => setTableAclDialogOpen(true)}
+            >
+              表权限
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!selectedWorkspace || operating}
               onClick={() => setMembersDialogOpen(true)}
             >
               <UserPlus className="h-4 w-4" />
@@ -417,6 +475,38 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
             placeholder="搜索成员（姓名 / 账号 / 邮箱）"
             className="w-full sm:w-80"
           />
+        </div>
+
+        <div className="rounded-lg border border-[var(--border-default)] p-3">
+          <p className="mb-2 text-sm font-medium text-[var(--text-primary)]">
+            工作空间 - 数据源绑定关系
+          </p>
+          {loadingBindings ? (
+            <StateBlock variant="loading">正在加载绑定关系...</StateBlock>
+          ) : workspaceBindings.length === 0 ? (
+            <StateBlock variant="idle">当前工作空间暂未绑定数据源。</StateBlock>
+          ) : (
+            <div className="space-y-2">
+              {workspaceBindings.map((binding) => (
+                <div
+                  key={binding.id}
+                  className="flex items-center justify-between rounded-md border border-[var(--border-default)] px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text-primary)]">
+                      {binding.datasourceName ?? binding.datasourceId}
+                    </p>
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      {binding.datasourceId} · {binding.datasourceType ?? "--"}
+                    </p>
+                  </div>
+                  <Badge variant={binding.datasourceStatus === "available" ? "secondary" : "outline"}>
+                    {binding.datasourceStatus ?? "unknown"}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {selectedWorkspace === null ? (
@@ -554,6 +644,30 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
         excludedUserIds={members.map((member) => member.userId)}
         onOpenChange={setMembersDialogOpen}
         onSubmit={submitAddMembers}
+      />
+
+      <WorkspaceDatasourceBindingDialog
+        open={bindingDialogOpen}
+        workspaceId={selectedWorkspace?.id ?? ""}
+        workspaceName={selectedWorkspace?.name ?? ""}
+        onOpenChange={(open) => {
+          setBindingDialogOpen(open);
+          if (!open) {
+            void loadWorkspaceBindings();
+          }
+        }}
+      />
+
+      <TableAclEditorDialog
+        open={tableAclDialogOpen}
+        workspaceId={selectedWorkspace?.id ?? ""}
+        workspaceName={selectedWorkspace?.name ?? ""}
+        onOpenChange={(open) => {
+          setTableAclDialogOpen(open);
+          if (!open) {
+            void loadWorkspaceBindings();
+          }
+        }}
       />
 
       <AlertDialog open={deleteWorkspaceTarget !== null} onOpenChange={(open) => !open && setDeleteWorkspaceTarget(null)}>

@@ -94,6 +94,14 @@ pnpm dev
 - CSV / Excel 上传会注册为团队共享可复用数据源，可在后续会话中重复选择。
 - 查询边界默认值：连接超时 `5000ms`、查询超时 `10000ms`、默认 `LIMIT 50`、最大 `LIMIT 200`、上传上限 `10MB`。
 
+## 工作空间数据源绑定与表级 ACL
+- 用户侧请求可通过 `x-workspace-id`（或单空间成员自动推断）确定工作空间语境；缺失或非法语境会触发权限错误。
+- `GET /api/v1/datasources` 与 `POST /api/v1/sessions` 已接入工作空间可见性校验，只返回/允许当前空间已绑定的数据源。
+- SQL 执行链路新增表级 ACL 默认拒绝策略，未授权或不可完整解析的读表请求会被拒绝（`ACL_FORBIDDEN` / `ACL_PARSE_REJECTED`）。
+- ACL 拒绝与治理写操作会写入治理审计事件（`workspace.datasource.*`），支持追溯绑定变更、授权变更与拒绝原因。
+- 截至 2026-04-15，`/data-sources` 新增向导已覆盖连接失败恢复（`retry/previous`）与提交中按钮锁定，且在 URL 带 `workspaceId` 时会透传到创建会话请求。
+- 截至 2026-04-15，`/data-sources` 内“工作空间选择/新建 + 表 ACL 提交 + 存量编辑”仍未闭环；相关治理操作当前仍以设置页能力为准。
+
 ## Chat 前端交互结构
 - 聊天主区已迁移到 `assistant-ui` primitives（Thread / Message / Composer）。
 - 页面采用“聊天主区优先”布局，SQL 详情改为 assistant 消息内展开，不再固定右侧详情栏。
@@ -151,6 +159,12 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `PATCH /api/v1/system/workspaces/:workspaceId/members/:memberId/role`
 - `DELETE /api/v1/system/workspaces/:workspaceId/members/:memberId`
 - `POST /api/v1/system/workspaces/:workspaceId/members/remove-batch`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/bindings`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/add`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/remove`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl/replace`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl/remove`
 - `POST /api/v1/evaluations/run`
 - `GET /api/v1/evaluations/:jobId`
 - `GET /health`

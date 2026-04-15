@@ -28,6 +28,8 @@ export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export interface Session {
   id: string;
   datasource: string;
+  workspaceId?: string | null;
+  createdByUserId?: string | null;
   datasourceName?: string;
   datasourceType?: DatasourceType;
   datasourceStatus?: DatasourceStatus;
@@ -264,6 +266,107 @@ export interface LlmSettingsView {
 export type PlatformUserStatus = "active" | "disabled" | "deleted";
 export type WorkspaceStatus = "active" | "archived" | "deleted";
 export type WorkspaceMemberRole = "admin" | "member";
+export type WorkspaceDatasourceAclSubjectType = "role" | "user";
+export type WorkspaceDatasourceAclEffect = "allow" | "deny";
+export type DatasourceWorkflowMode = "create" | "edit";
+export type DatasourceWorkflowStage =
+  | "received"
+  | "workspace_create_started"
+  | "workspace_ready"
+  | "datasource_create_started"
+  | "datasource_update_started"
+  | "datasource_ready"
+  | "binding_apply_started"
+  | "acl_apply_started"
+  | "validation_failed"
+  | "workspace_create_failed"
+  | "datasource_create_failed"
+  | "datasource_update_failed"
+  | "binding_applied"
+  | "binding_apply_failed"
+  | "acl_apply_failed"
+  | "completed"
+  | "compensation_soft_delete_failed"
+  | "compensation_mark_unavailable_failed"
+  | "unknown";
+
+export interface DatasourceUpsertPayload {
+  datasourceId?: string;
+  name?: string;
+  type?: DatasourceType;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+  shared?: boolean;
+}
+
+export interface DatasourceWorkflowWorkspaceInput {
+  workspaceId?: string;
+  create?: {
+    name: string;
+  };
+}
+
+export interface DatasourceWorkflowAclInput {
+  subjectType: WorkspaceDatasourceAclSubjectType;
+  subjectId: string;
+  effect: WorkspaceDatasourceAclEffect;
+  tableNames: string[];
+}
+
+export interface DatasourceCreateWorkflowRequest {
+  mode: "create";
+  datasource: DatasourceUpsertPayload;
+  workspaceId?: string;
+  workspaceCreate?: {
+    name: string;
+  };
+  acl: DatasourceWorkflowAclInput;
+}
+
+export interface DatasourceEditWorkflowRequest {
+  mode: "edit";
+  datasourceId: string;
+  datasource?: DatasourceUpsertPayload;
+  workspaceId?: string;
+  workspaceCreate?: {
+    name: string;
+  };
+  acl: DatasourceWorkflowAclInput;
+}
+
+export type UpsertDatasourceWorkflowRequest =
+  | DatasourceCreateWorkflowRequest
+  | DatasourceEditWorkflowRequest;
+
+export interface DatasourceWorkflowAclSummary {
+  subjectType: WorkspaceDatasourceAclSubjectType;
+  subjectId: string;
+  effect: WorkspaceDatasourceAclEffect;
+  addedTables: string[];
+  removedTables: string[];
+  retainedTables: string[];
+}
+
+export interface DatasourceWorkflowFailure {
+  stage: DatasourceWorkflowStage | string;
+  code: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface UpsertDatasourceWorkflowResponse {
+  mode: DatasourceWorkflowMode;
+  stage: DatasourceWorkflowStage | string;
+  workspaceId: string;
+  datasourceId: string;
+  appliedAclSummary?: DatasourceWorkflowAclSummary | null;
+  idempotencyKey?: string;
+  replayed?: boolean;
+  failure?: DatasourceWorkflowFailure | null;
+}
 
 export interface PlatformUser {
   id: string;
@@ -297,6 +400,71 @@ export interface WorkspaceMember {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface WorkspaceDatasourceBinding {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  createdByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDatasourceBindingListItem extends WorkspaceDatasourceBinding {
+  datasourceName?: string;
+  datasourceType?: DatasourceType;
+  datasourceStatus?: DatasourceStatus;
+}
+
+export interface WorkspaceDatasourceTableAclRule {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  tableName: string;
+  subjectType: WorkspaceDatasourceAclSubjectType;
+  subjectId: string;
+  effect: WorkspaceDatasourceAclEffect;
+  priority: number;
+  createdByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDatasourceTableAclRuleInput {
+  tableName: string;
+  subjectType: WorkspaceDatasourceAclSubjectType;
+  subjectId: string;
+  effect: WorkspaceDatasourceAclEffect;
+  priority?: number;
+}
+
+export interface WorkspaceDatasourceBindingBatchChangeResult {
+  successItems: string[];
+  failedItems: Array<{
+    item: string;
+    code: string;
+    message: string;
+  }>;
+}
+
+export interface ListWorkspaceDatasourceBindingsRequest extends PaginationRequest {
+  workspaceId: string;
+  datasourceId?: string;
+}
+
+export type ListWorkspaceDatasourceBindingsResponse =
+  PaginatedResponse<WorkspaceDatasourceBindingListItem>;
+
+export interface ListWorkspaceDatasourceTableAclRequest extends PaginationRequest {
+  workspaceId: string;
+  datasourceId: string;
+  subjectType?: WorkspaceDatasourceAclSubjectType;
+  subjectId?: string;
+  tableName?: string;
+}
+
+export type ListWorkspaceDatasourceTableAclResponse =
+  PaginatedResponse<WorkspaceDatasourceTableAclRule>;
 
 export interface PaginationRequest {
   page?: number;

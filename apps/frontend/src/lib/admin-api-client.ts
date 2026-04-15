@@ -3,6 +3,24 @@ import type { ApiResponse } from "@text2sql/shared-types";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
 
+function resolveWorkspaceIdHeader(): string | undefined {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
+    }
+    const fromStorage = window.sessionStorage
+      .getItem("text2sql.activeWorkspaceId")
+      ?.trim();
+    if (fromStorage) {
+      return fromStorage;
+    }
+  }
+  const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();
+  return fromEnv || undefined;
+}
+
 export type UserStatus = "active" | "disabled";
 export type WorkspaceMemberRole = "admin" | "member";
 
@@ -37,6 +55,29 @@ export interface WorkspaceMember {
   role: WorkspaceMemberRole;
   status: UserStatus;
   createdAt: string;
+}
+
+export interface WorkspaceDatasourceBinding {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  datasourceName?: string;
+  datasourceType?: string;
+  datasourceStatus?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDatasourceTableAclRule {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  tableName: string;
+  subjectType: "role" | "user";
+  subjectId: string;
+  effect: "allow" | "deny";
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface PaginatedResult<T> {
@@ -239,6 +280,42 @@ function normalizeWorkspaceMember(value: unknown): WorkspaceMember {
   };
 }
 
+function normalizeWorkspaceDatasourceBinding(
+  value: unknown
+): WorkspaceDatasourceBinding {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: String(record.id ?? ""),
+    workspaceId: String(record.workspaceId ?? ""),
+    datasourceId: String(record.datasourceId ?? ""),
+    datasourceName:
+      typeof record.datasourceName === "string" ? record.datasourceName : undefined,
+    datasourceType:
+      typeof record.datasourceType === "string" ? record.datasourceType : undefined,
+    datasourceStatus:
+      typeof record.datasourceStatus === "string" ? record.datasourceStatus : undefined,
+    createdAt: String(record.createdAt ?? new Date(0).toISOString()),
+    updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
+  };
+}
+
+function normalizeWorkspaceDatasourceTableAclRule(
+  value: unknown
+): WorkspaceDatasourceTableAclRule {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: String(record.id ?? ""),
+    workspaceId: String(record.workspaceId ?? ""),
+    datasourceId: String(record.datasourceId ?? ""),
+    tableName: String(record.tableName ?? ""),
+    subjectType: record.subjectType === "user" ? "user" : "role",
+    subjectId: String(record.subjectId ?? ""),
+    effect: record.effect === "deny" ? "deny" : "allow",
+    createdAt: String(record.createdAt ?? new Date(0).toISOString()),
+    updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
+  };
+}
+
 function normalizeListResult<T>(
   payload: unknown,
   listKeys: string[],
@@ -285,6 +362,7 @@ function toQuery(params: Record<string, string | number | undefined>): string {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
 
   let response: Response;
   try {
@@ -294,6 +372,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
         "content-type": "application/json",
         "x-user-role": role,
         "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
         ...(init?.headers ?? {})
       }
     });
@@ -645,6 +724,167 @@ export async function removeWorkspaceMembersBatch(
         memberIds.length
       ),
       failedCount: readNumber(record.failedCount, 0)
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listWorkspaceDatasourceBindings(
+  workspaceId: string
+): Promise<WorkspaceDatasourceBinding[]> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/bindings`
+    );
+    const record = isRecord(data) ? data : {};
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.map((item) => normalizeWorkspaceDatasourceBinding(item));
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function addWorkspaceDatasourceBindings(
+  workspaceId: string,
+  datasourceIds: string[]
+): Promise<{
+  successItems: string[];
+  failedItems: Array<{ item: string; code: string; message: string }>;
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/bindings/add`,
+      {
+        method: "POST",
+        body: JSON.stringify({ datasourceIds })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      successItems: Array.isArray(record.successItems)
+        ? record.successItems.map((item) => String(item))
+        : [],
+      failedItems: Array.isArray(record.failedItems)
+        ? record.failedItems
+            .filter((item): item is Record<string, unknown> => isRecord(item))
+            .map((item) => ({
+              item: String(item.item ?? ""),
+              code: String(item.code ?? "UNKNOWN"),
+              message: String(item.message ?? "")
+            }))
+        : []
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function removeWorkspaceDatasourceBindings(
+  workspaceId: string,
+  datasourceIds: string[]
+): Promise<{
+  successItems: string[];
+  failedItems: Array<{ item: string; code: string; message: string }>;
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/bindings/remove`,
+      {
+        method: "POST",
+        body: JSON.stringify({ datasourceIds })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      successItems: Array.isArray(record.successItems)
+        ? record.successItems.map((item) => String(item))
+        : [],
+      failedItems: Array.isArray(record.failedItems)
+        ? record.failedItems
+            .filter((item): item is Record<string, unknown> => isRecord(item))
+            .map((item) => ({
+              item: String(item.item ?? ""),
+              code: String(item.code ?? "UNKNOWN"),
+              message: String(item.message ?? "")
+            }))
+        : []
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listWorkspaceDatasourceTableAcl(
+  workspaceId: string,
+  datasourceId: string
+): Promise<WorkspaceDatasourceTableAclRule[]> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/table-acl`
+    );
+    const record = isRecord(data) ? data : {};
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items.map((item) => normalizeWorkspaceDatasourceTableAclRule(item));
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listWorkspaceDatasourceTables(
+  workspaceId: string,
+  datasourceId: string
+): Promise<string[]> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/tables`
+    );
+    const record = isRecord(data) ? data : {};
+    const items = Array.isArray(record.items) ? record.items : [];
+    return items
+      .map((item) => String(item).trim().toLowerCase())
+      .filter((item) => item.length > 0);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function replaceWorkspaceDatasourceTableAcl(input: {
+  workspaceId: string;
+  datasourceId: string;
+  subjectType: "role" | "user";
+  subjectId: string;
+  effect: "allow" | "deny";
+  tableNames: string[];
+}): Promise<{
+  addedTables: string[];
+  removedTables: string[];
+  retainedTables: string[];
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${input.workspaceId}/datasources/${input.datasourceId}/table-acl/replace`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          subjectType: input.subjectType,
+          subjectId: input.subjectId,
+          effect: input.effect,
+          tableNames: input.tableNames
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      addedTables: Array.isArray(record.addedTables)
+        ? record.addedTables.map((item) => String(item))
+        : [],
+      removedTables: Array.isArray(record.removedTables)
+        ? record.removedTables.map((item) => String(item))
+        : [],
+      retainedTables: Array.isArray(record.retainedTables)
+        ? record.retainedTables.map((item) => String(item))
+        : []
     };
   } catch (error) {
     throw toAdminApiError(error);

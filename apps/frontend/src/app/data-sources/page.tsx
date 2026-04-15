@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { Datasource, DatasourceType } from "@text2sql/shared-types";
+import { useRouter, useSearchParams } from "next/navigation";
+import type { Datasource, DatasourceType, DatasourceUpsertPayload } from "@text2sql/shared-types";
 import {
   ArrowRight,
   Database,
@@ -31,29 +31,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Steps, type StepItem } from "@/components/ui/steps";
 import { StateBlock } from "@/components/ui/state-block";
+import { DatasourceAclStep } from "@/components/data-sources/datasource-acl-step";
+import { WorkspaceSelectorInline } from "@/components/data-sources/workspace-selector-inline";
 import { cn } from "@/lib/utils";
 import {
+  createWorkspace,
+  listWorkspaces,
+  type WorkspaceSummary
+} from "@/lib/admin-api-client";
+import {
   DatasourceApiError,
-  createDatasource,
+  createIdempotencyKey,
   createSession,
   listDatasources,
+  resolveDatasourceWorkflowApiError,
+  submitDatasourceWorkflow,
   uploadDatasourceFile
 } from "@/lib/api-client";
-import { writeActiveDatasourceId } from "@/lib/datasource-session-context";
+import {
+  writeActiveDatasourceId,
+  writeActiveWorkspaceId
+} from "@/lib/datasource-session-context";
 
-type WizardType = "mysql" | "postgresql" | "csv" | "excel";
-
-type WizardState = {
-  type: WizardType | "";
-  name: string;
-  host: string;
-  port: string;
-  database: string;
-  username: string;
-  password: string;
-  file: File | null;
-  openAfterCreate: boolean;
-};
+type EditorMode = "create" | "edit";
+type WizardType = "mysql" | "postgresql" | "csv" | "excel" | "sqlite";
 
 type ConnectionFailureCode =
   | "CONNECTION_AUTH_FAILED"
@@ -63,9 +64,31 @@ type ConnectionFailureCode =
 
 type WizardFailure = {
   message: string;
-  code?: ConnectionFailureCode;
+  code?: string;
+  stage?: string;
   hint?: string;
   action?: "retry" | "previous";
+};
+
+type WizardState = {
+  mode: EditorMode;
+  datasourceId: string;
+  uploadedDatasourceId: string;
+  type: WizardType | "";
+  name: string;
+  host: string;
+  port: string;
+  database: string;
+  username: string;
+  password: string;
+  file: File | null;
+  workspaceId: string;
+  aclSubjectType: "role" | "user";
+  aclSubjectId: string;
+  aclEffect: "allow" | "deny";
+  aclTables: string[];
+  openAfterCreate: boolean;
+  submissionKey: string;
 };
 
 const WIZARD_TYPES: Array<{
@@ -98,8 +121,8 @@ const TYPE_FILTERS: Array<{ value: "all" | DatasourceType; label: string }> = [
 
 const WIZARD_STEPS: StepItem[] = [
   { step: 1, title: "选择数据源", subtitle: "挑选接入方式" },
-  { step: 2, title: "配置信息", subtitle: "填写连接参数" },
-  { step: 3, title: "接入范围确认", subtitle: "确认后创建" }
+  { step: 2, title: "配置信息", subtitle: "创建或编辑连接" },
+  { step: 3, title: "空间与 ACL", subtitle: "必经授权步骤" }
 ];
 
 const CONNECTION_FAILURE_HINTS: Record<
@@ -127,8 +150,38 @@ const CONNECTION_FAILURE_HINTS: Record<
   }
 };
 
-function createEmptyWizardState(): WizardState {
+const STAGE_HINTS: Record<string, { hint: string; action: "retry" | "previous" }> = {
+  validation_failed: {
+    hint: "请返回上一步检查输入后重新提交。",
+    action: "previous"
+  },
+  workspace_create_failed: {
+    hint: "工作空间创建失败，可直接重试当前提交。",
+    action: "retry"
+  },
+  datasource_create_failed: {
+    hint: "数据源创建失败，请检查连接参数后重试。",
+    action: "retry"
+  },
+  datasource_update_failed: {
+    hint: "数据源更新失败，请检查变更参数后重试。",
+    action: "retry"
+  },
+  binding_apply_failed: {
+    hint: "数据源绑定空间失败，请重试。",
+    action: "retry"
+  },
+  acl_apply_failed: {
+    hint: "ACL 应用失败，请检查 ACL 配置后重试。",
+    action: "retry"
+  }
+};
+
+function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
   return {
+    mode: "create",
+    datasourceId: "",
+    uploadedDatasourceId: "",
     type: "",
     name: "",
     host: "127.0.0.1",
@@ -137,44 +190,18 @@ function createEmptyWizardState(): WizardState {
     username: "",
     password: "",
     file: null,
-    openAfterCreate: true
+    workspaceId: defaultWorkspaceId,
+    aclSubjectType: "role",
+    aclSubjectId: "member",
+    aclEffect: "allow",
+    aclTables: [],
+    openAfterCreate: true,
+    submissionKey: ""
   };
 }
 
 function isConnectionFailureCode(value: string): value is ConnectionFailureCode {
   return value in CONNECTION_FAILURE_HINTS;
-}
-
-function resolveWizardFailure(error: unknown): WizardFailure {
-  let message = error instanceof Error ? error.message : "创建数据源失败";
-  let code: ConnectionFailureCode | undefined;
-
-  if (error instanceof DatasourceApiError && error.code && isConnectionFailureCode(error.code)) {
-    code = error.code;
-    message = error.message;
-  } else if (error instanceof Error) {
-    const matchedCode = error.message.match(/\[([A-Z0-9_]+)\]\s*$/)?.[1];
-    if (matchedCode && isConnectionFailureCode(matchedCode)) {
-      code = matchedCode;
-      message = error.message.replace(/\s*\[[A-Z0-9_]+\]\s*$/, "");
-    }
-  }
-
-  const hint = code ? CONNECTION_FAILURE_HINTS[code].hint : undefined;
-  const action = code ? CONNECTION_FAILURE_HINTS[code].action : undefined;
-  return {
-    message,
-    code,
-    hint,
-    action
-  };
-}
-
-function datasourceIcon(type: DatasourceType) {
-  if (type === "mysql" || type === "postgresql" || type === "sqlite") {
-    return <Database className="h-6 w-6 text-blue-600" />;
-  }
-  return <FileSpreadsheet className="h-6 w-6 text-emerald-600" />;
 }
 
 function inferDefaultPort(type: WizardType | ""): string {
@@ -187,8 +214,97 @@ function inferDefaultPort(type: WizardType | ""): string {
   return "";
 }
 
+function datasourceIcon(type: DatasourceType) {
+  if (type === "mysql" || type === "postgresql" || type === "sqlite") {
+    return <Database className="h-6 w-6 text-blue-600" />;
+  }
+  return <FileSpreadsheet className="h-6 w-6 text-emerald-600" />;
+}
+
+function readConfigString(config: Datasource["config"], key: string): string {
+  if (!config || typeof config !== "object") {
+    return "";
+  }
+  const value = (config as Record<string, unknown>)[key];
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "";
+}
+
+function resolveWizardFailure(error: unknown): WizardFailure {
+  let message = error instanceof Error ? error.message : "提交失败";
+  let code: string | undefined;
+  let stage: string | undefined;
+
+  if (error instanceof DatasourceApiError) {
+    message = error.message;
+    code = error.code;
+    stage = error.stage;
+  }
+
+  const workflowError = resolveDatasourceWorkflowApiError(error);
+  if (workflowError.code && !code) {
+    code = workflowError.code;
+  }
+  if (workflowError.stage && !stage) {
+    stage = workflowError.stage;
+  }
+
+  if (code && isConnectionFailureCode(code)) {
+    return {
+      message,
+      code,
+      stage,
+      hint: CONNECTION_FAILURE_HINTS[code].hint,
+      action: CONNECTION_FAILURE_HINTS[code].action
+    };
+  }
+
+  if (stage && STAGE_HINTS[stage]) {
+    return {
+      message,
+      code,
+      stage,
+      hint: STAGE_HINTS[stage].hint,
+      action: STAGE_HINTS[stage].action
+    };
+  }
+
+  return {
+    message,
+    code,
+    stage,
+    action: "retry"
+  };
+}
+
+function normalizeTables(values: string[]): string[] {
+  const deduped = new Set<string>();
+  for (const value of values) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized) {
+      deduped.add(normalized);
+    }
+  }
+  return Array.from(deduped);
+}
+
+function toWizardType(type: DatasourceType): WizardType {
+  if (type === "mysql" || type === "postgresql" || type === "csv" || type === "excel" || type === "sqlite") {
+    return type;
+  }
+  return "mysql";
+}
+
 export default function DataSourcesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const workspaceIdFromQuery = searchParams.get("workspaceId")?.trim() ?? "";
+
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState("");
   const [datasources, setDatasources] = useState<Datasource[]>([]);
@@ -197,11 +313,17 @@ export default function DataSourcesPage() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | DatasourceType>("all");
 
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
-  const [wizardSaving, setWizardSaving] = useState(false);
-  const [wizardFailure, setWizardFailure] = useState<WizardFailure | null>(null);
-  const [wizard, setWizard] = useState<WizardState>(createEmptyWizardState());
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorStep, setEditorStep] = useState<1 | 2 | 3>(1);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorFailure, setEditorFailure] = useState<WizardFailure | null>(null);
+  const [wizard, setWizard] = useState<WizardState>(() =>
+    createEmptyWizardState(workspaceIdFromQuery)
+  );
+
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  const [workspacesError, setWorkspacesError] = useState("");
 
   const loadDatasources = async (): Promise<void> => {
     setLoading(true);
@@ -216,9 +338,35 @@ export default function DataSourcesPage() {
     }
   };
 
+  const loadWorkspaces = async (preferredWorkspaceId?: string): Promise<void> => {
+    setWorkspacesLoading(true);
+    setWorkspacesError("");
+    try {
+      const result = await listWorkspaces({ page: 1, pageSize: 200 });
+      setWorkspaces(result.items);
+      const preferred = preferredWorkspaceId?.trim() || wizard.workspaceId || workspaceIdFromQuery;
+      const resolvedWorkspaceId =
+        (preferred && result.items.find((item) => item.id === preferred)?.id) ||
+        result.items[0]?.id ||
+        "";
+      setWizard((previous) => ({
+        ...previous,
+        workspaceId: previous.workspaceId || resolvedWorkspaceId
+      }));
+    } catch (error) {
+      setWorkspacesError(error instanceof Error ? error.message : "加载工作空间失败");
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadDatasources();
   }, []);
+
+  useEffect(() => {
+    writeActiveWorkspaceId(workspaceIdFromQuery);
+  }, [workspaceIdFromQuery]);
 
   const filteredDatasources = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -230,6 +378,7 @@ export default function DataSourcesPage() {
       return matchesKeyword && matchesType;
     });
   }, [datasources, query, typeFilter]);
+
   const hasActiveFilters = query.trim().length > 0 || typeFilter !== "all";
   const availableCount = useMemo(
     () => datasources.filter((item) => item.status === "available").length,
@@ -240,14 +389,23 @@ export default function DataSourcesPage() {
     [datasources]
   );
 
-  const onStartChat = async (datasourceId: string): Promise<void> => {
+  const onStartChat = async (
+    datasourceId: string,
+    workspaceIdOverride?: string
+  ): Promise<void> => {
+    const activeWorkspaceId = workspaceIdOverride?.trim() || workspaceIdFromQuery;
     setActiveDatasourceId(datasourceId);
     setPageError("");
     try {
-      const session = await createSession(datasourceId);
+      const session = await createSession(datasourceId, {
+        workspaceId: activeWorkspaceId || undefined
+      });
       writeActiveDatasourceId(datasourceId);
+      writeActiveWorkspaceId(activeWorkspaceId);
       router.push(
-        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}`
+        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}${
+          activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""
+        }`
       );
     } catch (startError) {
       setPageError(startError instanceof Error ? startError.message : "创建会话失败");
@@ -255,24 +413,63 @@ export default function DataSourcesPage() {
     }
   };
 
-  const resetWizard = (): void => {
-    setWizard(createEmptyWizardState());
-    setWizardStep(1);
-    setWizardSaving(false);
-    setWizardFailure(null);
+  const resetEditor = (mode: EditorMode, datasource?: Datasource): void => {
+    const defaultState = createEmptyWizardState(workspaceIdFromQuery);
+
+    if (mode === "edit" && datasource) {
+      const defaultPort =
+        readConfigString(datasource.config, "port") || inferDefaultPort(toWizardType(datasource.type));
+      const nextState: WizardState = {
+        ...defaultState,
+        mode: "edit",
+        datasourceId: datasource.id,
+        uploadedDatasourceId: datasource.id,
+        type: toWizardType(datasource.type),
+        name: datasource.name,
+        host: readConfigString(datasource.config, "host"),
+        port: defaultPort,
+        database: readConfigString(datasource.config, "database"),
+        username: readConfigString(datasource.config, "username"),
+        openAfterCreate: false
+      };
+      setWizard(nextState);
+      setEditorStep(2);
+      setEditorFailure(null);
+      return;
+    }
+
+    setWizard(defaultState);
+    setEditorStep(1);
+    setEditorFailure(null);
   };
 
-  const openWizard = (): void => {
-    resetWizard();
-    setWizardOpen(true);
+  const openCreateEditor = (): void => {
+    resetEditor("create");
+    setEditorOpen(true);
+    void loadWorkspaces(workspaceIdFromQuery);
   };
 
-  const closeWizard = (): void => {
-    setWizardOpen(false);
-    resetWizard();
+  const openEditEditor = (datasource: Datasource): void => {
+    resetEditor("edit", datasource);
+    setEditorOpen(true);
+    void loadWorkspaces(workspaceIdFromQuery);
   };
 
-  const validateWizardStep2 = (): string => {
+  const closeEditor = (): void => {
+    setEditorOpen(false);
+    resetEditor("create");
+  };
+
+  const patchWizard = (patch: Partial<WizardState>): void => {
+    setEditorFailure(null);
+    setWizard((previous) => ({
+      ...previous,
+      ...patch,
+      submissionKey: patch.submissionKey ?? ""
+    }));
+  };
+
+  const validateStep2 = (): string => {
     if (!wizard.type) {
       return "请先选择数据源类型";
     }
@@ -281,61 +478,172 @@ export default function DataSourcesPage() {
       if (!wizard.name.trim()) {
         return "请输入数据源名称";
       }
-      if (!wizard.host.trim() || !wizard.database.trim() || !wizard.username.trim() || !wizard.password.trim()) {
+      if (!wizard.host.trim() || !wizard.database.trim() || !wizard.username.trim()) {
         return "请补全连接信息后再继续";
+      }
+      if (wizard.mode === "create" && !wizard.password.trim()) {
+        return "新建数据库连接时必须填写密码";
       }
       return "";
     }
 
-    if (!wizard.file) {
+    if (wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel") && !wizard.file) {
       return "请先选择 CSV/Excel 文件";
+    }
+
+    if (!wizard.name.trim()) {
+      return "请输入数据源名称";
+    }
+
+    return "";
+  };
+
+  const validateStep3 = (): string => {
+    if (!wizard.workspaceId.trim()) {
+      return "请选择工作空间后再提交";
+    }
+    if (!wizard.aclSubjectId.trim()) {
+      return "请填写 ACL 主体标识";
+    }
+    if (wizard.aclTables.length === 0) {
+      return "请至少填写或勾选一个 ACL 数据表";
     }
     return "";
   };
 
-  const submitWizard = async (): Promise<void> => {
-    if (!wizard.type) {
-      setWizardFailure({
-        message: "请先选择数据源类型"
-      });
+  const buildDatasourcePayload = (): DatasourceUpsertPayload => {
+    const payload: DatasourceUpsertPayload = {};
+    if (wizard.name.trim()) {
+      payload.name = wizard.name.trim();
+    }
+    if (wizard.mode === "create") {
+      payload.type = wizard.type as DatasourceType;
+      payload.shared = true;
+    }
+
+    if (wizard.type === "mysql" || wizard.type === "postgresql") {
+      payload.host = wizard.host.trim();
+      payload.port = wizard.port ? Number(wizard.port) : undefined;
+      payload.database = wizard.database.trim();
+      payload.username = wizard.username.trim();
+      if (wizard.password.trim()) {
+        payload.password = wizard.password;
+      }
+    }
+
+    return payload;
+  };
+
+  const submitEditor = async (): Promise<void> => {
+    if (editorSaving) {
       return;
     }
 
-    setWizardSaving(true);
-    setWizardFailure(null);
+    const validationMessage = validateStep3();
+    if (validationMessage) {
+      setEditorFailure({ message: validationMessage, action: "previous" });
+      return;
+    }
+
+    setEditorSaving(true);
+    setEditorFailure(null);
+
+    const idempotencyKey = wizard.submissionKey || createIdempotencyKey("datasource-editor");
+    if (!wizard.submissionKey) {
+      setWizard((previous) => ({ ...previous, submissionKey: idempotencyKey }));
+    }
+
     try {
-      let created: Datasource;
-      if (wizard.type === "mysql" || wizard.type === "postgresql") {
-        created = await createDatasource({
-          name: wizard.name.trim(),
-          type: wizard.type,
-          host: wizard.host.trim(),
-          port: wizard.port ? Number(wizard.port) : undefined,
-          database: wizard.database.trim(),
-          username: wizard.username.trim(),
-          password: wizard.password,
-          shared: true
-        });
-      } else {
-        if (!wizard.file) {
-          throw new Error("请先选择文件");
+      let targetDatasourceId = wizard.datasourceId;
+      if (wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel")) {
+        let uploadedDatasourceId = wizard.uploadedDatasourceId;
+        if (!uploadedDatasourceId) {
+          if (!wizard.file) {
+            throw new Error("请先上传文件");
+          }
+          const uploaded = await uploadDatasourceFile({
+            file: wizard.file,
+            name: wizard.name.trim() || undefined
+          });
+          uploadedDatasourceId = uploaded.id;
+          targetDatasourceId = uploaded.id;
+          setWizard((previous) => ({
+            ...previous,
+            uploadedDatasourceId,
+            datasourceId: uploadedDatasourceId
+          }));
         }
-        created = await uploadDatasourceFile({
-          file: wizard.file,
-          name: wizard.name.trim() || undefined
-        });
+
+        const editPayload: DatasourceUpsertPayload = {};
+        if (wizard.name.trim()) {
+          editPayload.name = wizard.name.trim();
+        }
+
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "edit",
+            datasourceId: uploadedDatasourceId,
+            datasource: Object.keys(editPayload).length > 0 ? editPayload : undefined,
+            workspaceId: wizard.workspaceId,
+            acl: {
+              subjectType: wizard.aclSubjectType,
+              subjectId: wizard.aclSubjectId.trim(),
+              effect: wizard.aclEffect,
+              tableNames: normalizeTables(wizard.aclTables)
+            }
+          },
+          { idempotencyKey }
+        );
+
+        targetDatasourceId = workflowResult.datasourceId;
+      } else if (wizard.mode === "create") {
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "create",
+            datasource: buildDatasourcePayload(),
+            workspaceId: wizard.workspaceId,
+            acl: {
+              subjectType: wizard.aclSubjectType,
+              subjectId: wizard.aclSubjectId.trim(),
+              effect: wizard.aclEffect,
+              tableNames: normalizeTables(wizard.aclTables)
+            }
+          },
+          { idempotencyKey }
+        );
+        targetDatasourceId = workflowResult.datasourceId;
+      } else {
+        const payload = buildDatasourcePayload();
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "edit",
+            datasourceId: wizard.datasourceId,
+            datasource: Object.keys(payload).length > 0 ? payload : undefined,
+            workspaceId: wizard.workspaceId,
+            acl: {
+              subjectType: wizard.aclSubjectType,
+              subjectId: wizard.aclSubjectId.trim(),
+              effect: wizard.aclEffect,
+              tableNames: normalizeTables(wizard.aclTables)
+            }
+          },
+          { idempotencyKey }
+        );
+        targetDatasourceId = workflowResult.datasourceId;
       }
 
       await loadDatasources();
-      closeWizard();
+      const shouldOpenChat = wizard.openAfterCreate;
+      const selectedWorkspaceId = wizard.workspaceId;
+      closeEditor();
 
-      if (wizard.openAfterCreate) {
-        await onStartChat(created.id);
+      if (shouldOpenChat && targetDatasourceId) {
+        await onStartChat(targetDatasourceId, selectedWorkspaceId);
       }
-    } catch (saveError) {
-      setWizardFailure(resolveWizardFailure(saveError));
+    } catch (submitError) {
+      setEditorFailure(resolveWizardFailure(submitError));
     } finally {
-      setWizardSaving(false);
+      setEditorSaving(false);
     }
   };
 
@@ -350,7 +658,7 @@ export default function DataSourcesPage() {
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">数据源</h1>
             <p className="text-sm text-[var(--text-secondary)]">
-              统一管理数据库与文件数据源，创建后可直接进入问数会话。
+              统一管理数据库与文件数据源，创建或编辑时必须完成工作空间 ACL。
             </p>
           </div>
 
@@ -398,7 +706,7 @@ export default function DataSourcesPage() {
             ))}
           </select>
 
-          <Button onClick={openWizard} className="h-9 px-4">
+          <Button onClick={openCreateEditor} className="h-9 px-4">
             <Plus className="h-4 w-4" />
             新增
           </Button>
@@ -426,7 +734,7 @@ export default function DataSourcesPage() {
                 清除筛选
               </Button>
             ) : null}
-            <Button onClick={openWizard}>
+            <Button onClick={openCreateEditor}>
               <Plus className="h-4 w-4" />
               新增数据源
             </Button>
@@ -467,6 +775,7 @@ export default function DataSourcesPage() {
                     >
                       复制数据源 ID
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openEditEditor(item)}>编辑数据源</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
@@ -509,55 +818,58 @@ export default function DataSourcesPage() {
         })}
       </div>
 
-      <Dialog open={wizardOpen} onOpenChange={(open) => (open ? setWizardOpen(true) : closeWizard())}>
+      <Dialog open={editorOpen} onOpenChange={(open) => (open ? setEditorOpen(true) : closeEditor())}>
         <DialogContent className="max-h-[90vh] max-w-[980px] gap-0 overflow-hidden border border-[var(--border-default)] bg-[var(--surface-panel)] p-0 shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-4xl">
           <DialogHeader className="gap-4 border-b border-[var(--border-default)] bg-[linear-gradient(180deg,#ffffff_0%,#f5f9ff_100%)] px-7 pt-6 pb-5">
             <div className="space-y-1">
-              <DialogTitle className="text-xl font-semibold text-[var(--text-primary)]">新增数据源</DialogTitle>
+              <DialogTitle className="text-xl font-semibold text-[var(--text-primary)]">
+                {wizard.mode === "create" ? "新增数据源" : "编辑数据源"}
+              </DialogTitle>
               <DialogDescription className="text-[var(--text-secondary)]">
-                按步骤完成数据源接入并可直接进入问数。
+                创建和编辑都必须完成工作空间与表 ACL 步骤。
               </DialogDescription>
             </div>
-            <Steps items={WIZARD_STEPS} currentStep={wizardStep} />
+            <Steps items={WIZARD_STEPS} currentStep={editorStep} />
           </DialogHeader>
 
-          {wizardFailure ? (
+          {editorFailure ? (
             <div className="mx-7 mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-              <p className="text-sm font-medium text-red-700">{wizardFailure.message}</p>
-              {wizardFailure.hint ? <p className="mt-1 text-xs text-red-700/90">{wizardFailure.hint}</p> : null}
-              {wizardFailure.action ? (
+              <p className="text-sm font-medium text-red-700">{editorFailure.message}</p>
+              {editorFailure.hint ? <p className="mt-1 text-xs text-red-700/90">{editorFailure.hint}</p> : null}
+              {editorFailure.stage ? (
+                <p className="mt-1 text-xs text-red-700/90">失败阶段：{editorFailure.stage}</p>
+              ) : null}
+              {editorFailure.action ? (
                 <Button
                   variant="outline"
                   size="sm"
                   className="mt-3 h-9 border-red-200 bg-white px-4 text-red-700 hover:bg-red-100"
                   onClick={() => {
-                    if (wizardFailure.action === "retry") {
-                      void submitWizard();
+                    if (editorFailure.action === "retry") {
+                      void submitEditor();
                       return;
                     }
-                    setWizardStep((previous) => (previous === 3 ? 2 : 1));
+                    setEditorStep(2);
                   }}
                 >
-                  {wizardFailure.action === "retry" ? "重试" : "上一步"}
+                  {editorFailure.action === "retry" ? "重试" : "上一步"}
                 </Button>
               ) : null}
             </div>
           ) : null}
 
           <div className="max-h-[62vh] overflow-auto px-7 py-6">
-            {wizardStep === 1 ? (
+            {editorStep === 1 ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {WIZARD_TYPES.map((item) => (
                   <button
                     key={item.type}
                     type="button"
                     onClick={() => {
-                      setWizardFailure(null);
-                      setWizard((previous) => ({
-                        ...previous,
+                      patchWizard({
                         type: item.type,
                         port: inferDefaultPort(item.type)
-                      }));
+                      });
                     }}
                     className={cn(
                       "rounded-xl border p-4 text-left transition-all duration-200",
@@ -594,14 +906,14 @@ export default function DataSourcesPage() {
               </div>
             ) : null}
 
-            {wizardStep === 2 ? (
+            {editorStep === 2 ? (
               <div className="space-y-5">
-                {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                {(wizard.type === "mysql" || wizard.type === "postgresql" || wizard.type === "sqlite") && (
                   <div className="space-y-4">
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">连接参数</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        建议先使用只读账号，避免误写入业务数据。
+                        编辑模式下只会更新你填写的连接信息；密码留空则不更新。
                       </p>
                     </div>
 
@@ -610,95 +922,86 @@ export default function DataSourcesPage() {
                         <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
                         <Input
                           value={wizard.name}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, name: event.target.value }));
-                          }}
+                          onChange={(event) => patchWizard({ name: event.target.value })}
                           placeholder="数据源名称"
                         />
                       </label>
 
-                      <label className="space-y-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">Host</span>
-                        <Input
-                          value={wizard.host}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, host: event.target.value }));
-                          }}
-                          placeholder="Host"
-                        />
-                      </label>
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Host</span>
+                          <Input
+                            value={wizard.host}
+                            onChange={(event) => patchWizard({ host: event.target.value })}
+                            placeholder="Host"
+                          />
+                        </label>
+                      )}
 
-                      <label className="space-y-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">Port</span>
-                        <Input
-                          value={wizard.port}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, port: event.target.value }));
-                          }}
-                          placeholder="Port"
-                        />
-                      </label>
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Port</span>
+                          <Input
+                            value={wizard.port}
+                            onChange={(event) => patchWizard({ port: event.target.value })}
+                            placeholder="Port"
+                          />
+                        </label>
+                      )}
 
-                      <label className="space-y-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">Database</span>
-                        <Input
-                          value={wizard.database}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, database: event.target.value }));
-                          }}
-                          placeholder="Database"
-                        />
-                      </label>
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Database</span>
+                          <Input
+                            value={wizard.database}
+                            onChange={(event) => patchWizard({ database: event.target.value })}
+                            placeholder="Database"
+                          />
+                        </label>
+                      )}
 
-                      <label className="space-y-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">Username</span>
-                        <Input
-                          value={wizard.username}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, username: event.target.value }));
-                          }}
-                          placeholder="Username"
-                        />
-                      </label>
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Username</span>
+                          <Input
+                            value={wizard.username}
+                            onChange={(event) => patchWizard({ username: event.target.value })}
+                            placeholder="Username"
+                          />
+                        </label>
+                      )}
 
-                      <label className="space-y-1">
-                        <span className="text-xs text-[var(--text-tertiary)]">Password</span>
-                        <Input
-                          type="password"
-                          value={wizard.password}
-                          onChange={(event) => {
-                            setWizardFailure(null);
-                            setWizard((prev) => ({ ...prev, password: event.target.value }));
-                          }}
-                          placeholder="Password"
-                        />
-                      </label>
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">
+                            Password {wizard.mode === "edit" ? "（留空不更新）" : ""}
+                          </span>
+                          <Input
+                            type="password"
+                            value={wizard.password}
+                            onChange={(event) => patchWizard({ password: event.target.value })}
+                            placeholder="Password"
+                          />
+                        </label>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {(wizard.type === "csv" || wizard.type === "excel") && (
+                {wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel") && (
                   <div className="space-y-4">
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">文件上传</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        {wizard.type === "csv" ? "支持 UTF-8 编码 CSV 文件" : "支持 .xls / .xlsx 文件"}
+                        先上传文件创建数据源，再在同一流程完成 workspace + ACL 授权。
                       </p>
                     </div>
                     <label className="space-y-1">
-                      <span className="text-xs text-[var(--text-tertiary)]">数据源名称（可选）</span>
+                      <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
                       <Input
                         value={wizard.name}
-                        onChange={(event) => {
-                          setWizardFailure(null);
-                          setWizard((prev) => ({ ...prev, name: event.target.value }));
-                        }}
-                        placeholder="数据源名称（可选）"
+                        onChange={(event) => patchWizard({ name: event.target.value })}
+                        placeholder="数据源名称"
                       />
                     </label>
                     <label className="space-y-1">
@@ -707,10 +1010,27 @@ export default function DataSourcesPage() {
                         type="file"
                         accept={wizard.type === "csv" ? ".csv" : ".xls,.xlsx"}
                         onChange={(event) => {
-                          setWizardFailure(null);
                           const file = event.target.files?.[0] ?? null;
-                          setWizard((prev) => ({ ...prev, file }));
+                          patchWizard({
+                            file,
+                            uploadedDatasourceId: "",
+                            datasourceId: ""
+                          });
                         }}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {wizard.mode === "edit" && (wizard.type === "csv" || wizard.type === "excel") && (
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-[var(--text-primary)]">文件数据源基础信息</p>
+                    <label className="space-y-1">
+                      <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
+                      <Input
+                        value={wizard.name}
+                        onChange={(event) => patchWizard({ name: event.target.value })}
+                        placeholder="数据源名称"
                       />
                     </label>
                   </div>
@@ -718,57 +1038,58 @@ export default function DataSourcesPage() {
               </div>
             ) : null}
 
-            {wizardStep === 3 ? (
+            {editorStep === 3 ? (
               <div className="space-y-4">
-                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-subtle)] p-4">
-                  <p className="text-sm font-medium text-[var(--text-primary)]">接入摘要</p>
-                  <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                    <p className="text-[var(--text-secondary)]">
-                      类型：<span className="font-medium text-[var(--text-primary)]">
-                        {wizard.type ? WIZARD_TYPES.find((item) => item.type === wizard.type)?.title : "-"}
-                      </span>
-                    </p>
-                    <p className="text-[var(--text-secondary)]">
-                      名称：<span className="font-medium text-[var(--text-primary)]">{wizard.name.trim() || "-"}</span>
-                    </p>
-                    {(wizard.type === "mysql" || wizard.type === "postgresql") && (
-                      <p className="text-[var(--text-secondary)]">
-                        地址：
-                        <span className="font-medium text-[var(--text-primary)]">
-                          {" "}
-                          {wizard.host || "-"}:{wizard.port || "-"}
-                        </span>
-                      </p>
-                    )}
-                    {(wizard.type === "csv" || wizard.type === "excel") && (
-                      <p className="text-[var(--text-secondary)]">
-                        文件：
-                        <span className="font-medium text-[var(--text-primary)]">
-                          {" "}
-                          {wizard.file?.name || "-"}
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                </div>
+                <WorkspaceSelectorInline
+                  workspaceId={wizard.workspaceId}
+                  workspaces={workspaces}
+                  loading={workspacesLoading}
+                  error={workspacesError}
+                  disabled={editorSaving}
+                  onWorkspaceIdChange={(nextWorkspaceId) => {
+                    patchWizard({ workspaceId: nextWorkspaceId });
+                    writeActiveWorkspaceId(nextWorkspaceId);
+                  }}
+                  onWorkspaceCreated={(workspace) => {
+                    setWorkspaces((previous) => {
+                      if (previous.some((item) => item.id === workspace.id)) {
+                        return previous;
+                      }
+                      return [workspace, ...previous];
+                    });
+                    patchWizard({ workspaceId: workspace.id });
+                    writeActiveWorkspaceId(workspace.id);
+                  }}
+                  onCreateWorkspace={(name) => createWorkspace({ name })}
+                />
+
+                <DatasourceAclStep
+                  open={editorOpen && editorStep === 3}
+                  workspaceId={wizard.workspaceId}
+                  datasourceId={wizard.mode === "edit" ? wizard.datasourceId : undefined}
+                  mode={wizard.mode}
+                  subjectType={wizard.aclSubjectType}
+                  subjectId={wizard.aclSubjectId}
+                  effect={wizard.aclEffect}
+                  tableNames={wizard.aclTables}
+                  disabled={editorSaving}
+                  onSubjectTypeChange={(value) => patchWizard({ aclSubjectType: value })}
+                  onSubjectIdChange={(value) => patchWizard({ aclSubjectId: value })}
+                  onEffectChange={(value) => patchWizard({ aclEffect: value })}
+                  onTableNamesChange={(values) => patchWizard({ aclTables: normalizeTables(values) })}
+                />
 
                 <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-sidebar)] p-4">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    当前版本默认启用所选数据源的全部可查询表。后续会升级为可选表/视图范围配置能力。
+                    提交会走 workflow 接口，统一处理数据源变更、workspace 绑定与 ACL 应用。
                   </p>
                   <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
                     <input
                       type="checkbox"
                       checked={wizard.openAfterCreate}
-                      onChange={(event) => {
-                        setWizardFailure(null);
-                        setWizard((previous) => ({
-                          ...previous,
-                          openAfterCreate: event.target.checked
-                        }));
-                      }}
+                      onChange={(event) => patchWizard({ openAfterCreate: event.target.checked })}
                     />
-                    创建完成后立即开启问数
+                    {wizard.mode === "create" ? "创建完成后立即开启问数" : "保存后立即开启问数"}
                   </label>
                 </div>
               </div>
@@ -777,52 +1098,52 @@ export default function DataSourcesPage() {
 
           <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--surface-subtle)] px-7 py-4">
             <p className="hidden text-xs text-[var(--text-tertiary)] sm:block">
-              完成后将刷新数据源列表，并可按需自动跳转到会话。
+              提交中会复用同一个幂等键，并锁定按钮防止重复提交。
             </p>
             <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
               <Button
                 variant="outline"
                 size="lg"
                 className="px-5"
-                disabled={wizardSaving}
+                disabled={editorSaving}
                 onClick={() => {
-                  if (wizardStep === 1) {
-                    closeWizard();
+                  if (editorStep === 1) {
+                    closeEditor();
                     return;
                   }
-                  setWizardStep((previous) => (previous === 3 ? 2 : 1));
+                  if (editorStep === 2 && wizard.mode === "edit") {
+                    closeEditor();
+                    return;
+                  }
+                  setEditorStep((previous) => (previous === 3 ? 2 : 1));
                 }}
               >
-                {wizardStep === 1 ? "取消" : "上一步"}
+                {editorStep === 1 || (editorStep === 2 && wizard.mode === "edit") ? "取消" : "上一步"}
               </Button>
 
-              {wizardStep < 3 ? (
+              {editorStep < 3 ? (
                 <Button
                   size="lg"
                   className="px-5"
-                  disabled={wizardSaving}
+                  disabled={editorSaving}
                   onClick={() => {
-                    if (wizardStep === 1) {
+                    if (editorStep === 1) {
                       if (!wizard.type) {
-                        setWizardFailure({
-                          message: "请选择一种数据源类型后继续"
-                        });
+                        setEditorFailure({ message: "请选择一种数据源类型后继续" });
                         return;
                       }
-                      setWizardFailure(null);
-                      setWizardStep(2);
+                      setEditorFailure(null);
+                      setEditorStep(2);
                       return;
                     }
 
-                    const validationMessage = validateWizardStep2();
+                    const validationMessage = validateStep2();
                     if (validationMessage) {
-                      setWizardFailure({
-                        message: validationMessage
-                      });
+                      setEditorFailure({ message: validationMessage, action: "previous" });
                       return;
                     }
-                    setWizardFailure(null);
-                    setWizardStep(3);
+                    setEditorFailure(null);
+                    setEditorStep(3);
                   }}
                 >
                   下一步
@@ -832,13 +1153,13 @@ export default function DataSourcesPage() {
                 <Button
                   size="lg"
                   className="px-5"
-                  disabled={wizardSaving}
+                  disabled={editorSaving}
                   onClick={() => {
-                    void submitWizard();
+                    void submitEditor();
                   }}
                 >
-                  {wizardSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  完成创建
+                  {editorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  {wizard.mode === "create" ? "完成创建" : "保存并应用 ACL"}
                 </Button>
               )}
             </div>

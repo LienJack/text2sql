@@ -14,7 +14,8 @@ const mockPush = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: mockPush
-  })
+  }),
+  useSearchParams: () => new URLSearchParams()
 }));
 
 vi.mock("@/lib/api-client", async (importOriginal) => {
@@ -93,6 +94,7 @@ describe("platform pages smoke", () => {
   it("renders settings page", async () => {
     render(<SettingsPage />);
     expect(await screen.findByText("LLM 模型")).toBeInTheDocument();
-    expect(screen.getByText("用户与权限")).toBeInTheDocument();
+    expect(screen.getByText("工作空间")).toBeInTheDocument();
+    expect(screen.getByText("用户管理")).toBeInTheDocument();
   });
 });

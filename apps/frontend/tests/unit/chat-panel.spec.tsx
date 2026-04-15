@@ -224,8 +224,12 @@ describe("ChatPanel", () => {
 
   it("shows thinking indicator immediately before first stream event arrives", async () => {
     const user = userEvent.setup();
+    let releaseFirstEvent: (() => void) | undefined;
+    const firstEventGate = new Promise<void>((resolve) => {
+      releaseFirstEvent = resolve;
+    });
     mockStreamMessageEvents.mockImplementationOnce(async function* () {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await firstEventGate;
       yield {
         type: "text-delta",
         runId: "run-1",
@@ -254,5 +258,8 @@ describe("ChatPanel", () => {
     await user.click(screen.getByRole("button", { name: "发送" }));
 
     expect(await screen.findByText(/思考中/)).toBeInTheDocument();
+    if (releaseFirstEvent) {
+      releaseFirstEvent();
+    }
   });
 });

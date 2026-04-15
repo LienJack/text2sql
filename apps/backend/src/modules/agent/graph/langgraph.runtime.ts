@@ -26,6 +26,7 @@ const LangGraphStateAnnotation = Annotation.Root({
   datasourceId: Annotation<string>(),
   datasourceType: Annotation<DatasourceType | undefined>(),
   modelCatalogId: Annotation<string | undefined>(),
+  accessContext: Annotation<LangGraphState["accessContext"]>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
   model: Annotation<string | undefined>(),
@@ -305,10 +306,16 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
 
-      const safety = deps.safetyNode.run(state.sql);
+      const safety = await deps.safetyNode.run({
+        sql: state.sql,
+        datasourceId: state.datasourceId,
+        accessContext: state.accessContext
+      });
       const endedAt = new Date().toISOString();
       const inputs = {
-        sql: state.sql
+        sql: state.sql,
+        datasourceId: state.datasourceId,
+        workspaceId: state.accessContext?.workspaceId
       };
       if (!safety.safe) {
         const trace = appendStep(state, {
@@ -374,12 +381,16 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       try {
         const execution = await deps.executeNode.run({
           sql: state.sql,
-          datasourceId: state.datasourceId
+          datasourceId: state.datasourceId,
+          sessionId: state.sessionId,
+          accessContext: state.accessContext
         });
         const endedAt = new Date().toISOString();
         const inputs = {
           sql: state.sql,
-          datasourceId: state.datasourceId
+          datasourceId: state.datasourceId,
+          sessionId: state.sessionId,
+          workspaceId: state.accessContext?.workspaceId
         };
         const outputs = {
           rowCount: execution.rows.length,

@@ -24,7 +24,26 @@
       "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/test/)",
       "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/prisma/ apps/backend/package.json apps/backend/.env.example .gitignore README.md pnpm-lock.yaml)",
       "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff main -- apps/backend/src/ packages/shared-types/)",
-      "Bash(ls -d /Users/lienli/Documents/GitHub/text2sql/docs 2\u003e/dev/null || echo \"NOT_FOUND\")"
+      "Bash(ls -d /Users/lienli/Documents/GitHub/text2sql/docs 2\u003e/dev/null || echo \"NOT_FOUND\")",
+      "Bash(ls \"/Users/lienli/Documents/GitHub/text2sql/docs/\")",
+      "Bash(file \"/Users/lienli/Documents/GitHub/text2sql/docs/brainstorms/2026-04-14-text2sql-r2-rag-implementation-detail-requirements.md\" \u0026\u0026 file \"/Users/lienli/Documents/GitHub/text2sql/docs/技术落地-roadmap-v1.0.md\")",
+      "Bash(ls apps/backend/prisma/)",
+      "Bash(ls -la apps/backend/prisma/migrations/)",
+      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/brainstorms/2026-04-14-text2sql-r2-rag-implementation-detail-requirements.md\" | head -500)",
+      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/技术落地-roadmap-v1.0.md\" | head -500)",
+      "Bash(ls apps/backend/prisma/migrations/migration_lock.toml 2\u003e/dev/null \u0026\u0026 cat apps/backend/prisma/migrations/migration_lock.toml)",
+      "Bash(ls /Users/lienli/Documents/GitHub/text2sql/apps/backend/prisma/migrations/)",
+      "Bash(mkdir -p /Users/lienli/Documents/GitHub/text2sql/apps/backend/prisma/migrations/20260412065355_graph_semantic_baseline)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma migrate diff --from-migrations ./prisma/migrations --to-schema-datamodel ./prisma/schema.prisma 2\u003e\u00261)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma migrate diff --from-migrations ./prisma/migrations --to-schema ./prisma/schema.prisma 2\u003e\u00261)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma generate 2\u003e\u00261)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma validate 2\u003e\u00261)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma migrate diff --from-empty --to-schema ./prisma/schema.prisma --script 2\u003e\u00261 | grep -A 20 \"agent_audit_logs\\\\|graph_snapshots\\\\|semantic_edges\\\\|semantic_memories\" | head -80)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma migrate diff --from-empty --to-schema ./prisma/schema.prisma --script 2\u003e\u00261 | grep -E \"agent_audit|graph_snapshot|semantic_edge|semantic_memor\")",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 npx prisma migrate deploy)",
+      "Bash(ls -la /Users/lienli/Documents/GitHub/text2sql/apps/backend/.env 2\u003e/dev/null; echo \"---\"; ls -la /Users/lienli/Documents/GitHub/text2sql/apps/backend/.env.local 2\u003e/dev/null)",
+      "Bash(grep -i 'DATABASE_URL\\\\|POSTGRES' /Users/lienli/Documents/GitHub/text2sql/apps/backend/.env)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql/apps/backend \u0026\u0026 DATABASE_URL=\"postgresql://admin:admin@localhost:5432/text2sql?schema=public\" npx prisma migrate deploy)"
     ]
   }
 }

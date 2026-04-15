@@ -5,26 +5,24 @@ import type { QueryExecutionResult } from "./query-executor.interface";
 import { FileDatasourceExecutorService } from "./file-datasource-executor.service";
 import { MysqlExecutorService } from "./mysql-executor.service";
 import { PostgresExecutorService } from "./postgres-executor.service";
+import {
+  SqlTableAccessGuardService,
+  type SqlPolicyLookupResolver,
+  type SqlTableAccessContext
+} from "./sql-table-access-guard.service";
 import { SqliteExecutorService } from "./sqlite-executor.service";
 
 const MAX_QUERY_LIMIT = 200;
 const DEFAULT_QUERY_LIMIT = 50;
-const FORBIDDEN_KEYWORDS = [
-  "insert",
-  "update",
-  "delete",
-  "drop",
-  "alter",
-  "truncate",
-  "create",
-  "replace",
-  "attach",
-  "detach",
-  "pragma"
-] as const;
+export interface QueryExecutionAclOptions {
+  accessContext?: SqlTableAccessContext;
+  allowedTables?: Iterable<string>;
+  resolveAllowedTables?: SqlPolicyLookupResolver;
+}
 
 @Injectable()
 export class QueryExecutorRouterService {
+  private readonly tableAccessGuard = new SqlTableAccessGuardService();
   private readonly executors: Map<DatasourceType, {
     execute: (input: { datasource: Datasource; sql: string }) => Promise<QueryExecutionResult>;
   }>;
@@ -50,8 +48,16 @@ export class QueryExecutorRouterService {
     datasource: Datasource;
     sql: string;
     limit?: number;
+    acl?: QueryExecutionAclOptions;
   }): Promise<QueryExecutionResult> {
-    this.assertReadOnlySql(input.sql);
+    this.tableAccessGuard.assertReadOnlySql(input.sql);
+    await this.tableAccessGuard.assertTableAccess({
+      sql: input.sql,
+      datasourceId: input.datasource.id,
+      accessContext: input.acl?.accessContext,
+      allowedTables: input.acl?.allowedTables,
+      resolveAllowedTables: input.acl?.resolveAllowedTables
+    });
     const normalizedSql = this.ensureLimit(input.sql, input.limit);
     const executor = this.executors.get(input.datasource.type);
 
@@ -125,36 +131,5 @@ export class QueryExecutorRouterService {
       MAX_QUERY_LIMIT
     );
     return `${normalized} LIMIT ${finalLimit}`;
-  }
-
-  private assertReadOnlySql(sql: string): void {
-    const normalized = sql.trim();
-    const statementWithoutTailSemicolon = normalized.replace(/;+\s*$/, "");
-    if (statementWithoutTailSemicolon.includes(";")) {
-      throw new DomainError(
-        "SQL_READONLY_REJECTED",
-        "检测到多语句执行，已拒绝。",
-        400,
-        { sql }
-      );
-    }
-    if (!/^\s*(select\b|with\b)/i.test(statementWithoutTailSemicolon)) {
-      throw new DomainError(
-        "SQL_READONLY_REJECTED",
-        "只允许执行 SELECT 或 WITH ... SELECT 的只读查询。",
-        400,
-        { sql }
-      );
-    }
-    for (const keyword of FORBIDDEN_KEYWORDS) {
-      if (new RegExp(`\\b${keyword}\\b`, "i").test(statementWithoutTailSemicolon)) {
-        throw new DomainError(
-          "SQL_READONLY_REJECTED",
-          `检测到受限关键字 ${keyword.toUpperCase()}，只允许只读查询。`,
-          400,
-          { sql }
-        );
-      }
-    }
   }
 }
