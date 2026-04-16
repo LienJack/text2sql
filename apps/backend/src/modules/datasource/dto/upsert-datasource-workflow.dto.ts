@@ -1,6 +1,4 @@
 import {
-  ArrayMinSize,
-  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -12,10 +10,6 @@ import {
 } from "class-validator";
 import { Type } from "class-transformer";
 import type { DatasourceType } from "@text2sql/shared-types";
-import type {
-  DatasourcePolicyEffect,
-  DatasourcePolicySubjectType
-} from "../../data/persistence/workspace-datasource-policy.repository";
 
 const datasourceTypes: DatasourceType[] = [
   "sqlite",
@@ -25,8 +19,6 @@ const datasourceTypes: DatasourceType[] = [
   "excel"
 ];
 const workflowModes = ["create", "edit"] as const;
-const aclSubjectTypes: DatasourcePolicySubjectType[] = ["role", "user"];
-const aclEffects: DatasourcePolicyEffect[] = ["allow", "deny"];
 
 class WorkflowDatasourcePayloadDto {
   @IsOptional()
@@ -89,26 +81,6 @@ class WorkflowWorkspacePayloadDto {
   create?: WorkflowWorkspaceCreateDto;
 }
 
-class WorkflowAclPayloadDto {
-  @IsIn(aclSubjectTypes)
-  subjectType!: DatasourcePolicySubjectType;
-
-  @IsString()
-  subjectId!: string;
-
-  @IsIn(aclEffects)
-  effect!: DatasourcePolicyEffect;
-
-  @IsArray()
-  @ArrayMinSize(1)
-  @IsString({ each: true })
-  tableNames!: string[];
-
-  @IsOptional()
-  @IsString()
-  reason?: string;
-}
-
 export class UpsertDatasourceWorkflowDto {
   @IsIn(workflowModes)
   mode!: "create" | "edit";
@@ -135,8 +107,4 @@ export class UpsertDatasourceWorkflowDto {
   @ValidateNested()
   @Type(() => WorkflowWorkspacePayloadDto)
   workspace?: WorkflowWorkspacePayloadDto;
-
-  @ValidateNested()
-  @Type(() => WorkflowAclPayloadDto)
-  acl!: WorkflowAclPayloadDto;
 }

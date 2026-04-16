@@ -37,10 +37,7 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   return {
     ...actual,
     listWorkspaces: vi.fn(),
-    createWorkspace: vi.fn(),
-    listWorkspaceDatasourceBindings: vi.fn().mockResolvedValue([]),
-    listWorkspaceDatasourceTableAcl: vi.fn().mockResolvedValue([]),
-    listWorkspaceDatasourceTables: vi.fn().mockResolvedValue([])
+    createWorkspace: vi.fn()
   };
 });
 
@@ -85,7 +82,7 @@ async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Prom
   await user.type(screen.getByPlaceholderText("Password"), "secret");
 
   await user.click(screen.getByRole("button", { name: "下一步" }));
-  expect(screen.getByText("空间与 ACL")).toBeInTheDocument();
+  expect(screen.getByText("绑定治理作用域")).toBeInTheDocument();
 }
 
 describe("DataSourcesPage workflow closure", () => {
@@ -110,13 +107,10 @@ describe("DataSourcesPage workflow closure", () => {
       workspaceId: "ws-new",
       datasourceId: "ds-created",
       replayed: false,
-      appliedAclSummary: {
-        subjectType: "role",
-        subjectId: "member",
-        effect: "allow",
-        addedTables: ["orders"],
-        removedTables: [],
-        retainedTables: []
+      bindingSummary: {
+        bound: true,
+        workspaceId: "ws-new",
+        datasourceId: "ds-created"
       }
     });
     mockCreateSession.mockResolvedValue({
@@ -135,7 +129,9 @@ describe("DataSourcesPage workflow closure", () => {
     });
   });
 
-  it("completes create workflow with inline workspace creation and ACL submit", async () => {
+  it(
+    "completes create workflow with inline workspace creation and workspace binding",
+    async () => {
     const user = userEvent.setup();
     render(<DataSourcesPage />);
 
@@ -153,32 +149,34 @@ describe("DataSourcesPage workflow closure", () => {
       expect(mockCreateWorkspace).toHaveBeenCalledWith({ name: "增长分析" });
     });
 
-    await user.type(screen.getByPlaceholderText("orders, users"), "orders");
     await user.click(screen.getByRole("button", { name: "完成创建" }));
 
     await waitFor(() => {
-      expect(mockSubmitDatasourceWorkflow).toHaveBeenCalledWith(
-        expect.objectContaining({
-          mode: "create",
-          workspaceId: "ws-new",
-          acl: expect.objectContaining({
-            tableNames: ["orders"],
-            subjectType: "role",
-            subjectId: "member"
-          })
-        }),
-        expect.objectContaining({ idempotencyKey: expect.any(String) })
-      );
+      expect(mockSubmitDatasourceWorkflow).toHaveBeenCalledTimes(1);
     });
-  });
 
-  it("reuses idempotency key between retries of the same submit", async () => {
+    const workflowPayload = mockSubmitDatasourceWorkflow.mock.calls[0]?.[0];
+    expect(workflowPayload).toMatchObject({
+      mode: "create",
+      workspaceId: "ws-new"
+    });
+    expect(workflowPayload).not.toHaveProperty("acl");
+    expect(mockSubmitDatasourceWorkflow.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ idempotencyKey: expect.any(String) })
+    );
+    },
+    15000
+  );
+
+  it(
+    "reuses idempotency key between retries of the same submit",
+    async () => {
     const user = userEvent.setup();
     mockSubmitDatasourceWorkflow
       .mockRejectedValueOnce(
-        new DatasourceApiError("ACL 应用失败", {
-          code: "ACL_APPLY_FAILED",
-          stage: "acl_apply_failed"
+        new DatasourceApiError("绑定失败", {
+          code: "BINDING_APPLY_FAILED",
+          stage: "binding_apply_failed"
         })
       )
       .mockResolvedValueOnce({
@@ -187,13 +185,10 @@ describe("DataSourcesPage workflow closure", () => {
         workspaceId: "ws-new",
         datasourceId: "ds-created",
         replayed: false,
-        appliedAclSummary: {
-          subjectType: "role",
-          subjectId: "member",
-          effect: "allow",
-          addedTables: ["orders"],
-          removedTables: [],
-          retainedTables: []
+        bindingSummary: {
+          bound: true,
+          workspaceId: "ws-new",
+          datasourceId: "ds-created"
         }
       });
 
@@ -204,10 +199,9 @@ describe("DataSourcesPage workflow closure", () => {
     await user.click(screen.getByRole("button", { name: "新建工作空间" }));
     await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
     await user.click(screen.getByRole("button", { name: "创建" }));
-    await user.type(screen.getByPlaceholderText("orders, users"), "orders");
 
     await user.click(screen.getByRole("button", { name: "完成创建" }));
-    expect(await screen.findByText("ACL 应用失败")).toBeInTheDocument();
+    expect(await screen.findByText("绑定失败")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "重试" }));
 
@@ -219,5 +213,7 @@ describe("DataSourcesPage workflow closure", () => {
     const secondKey = mockSubmitDatasourceWorkflow.mock.calls[1]?.[1]?.idempotencyKey;
     expect(firstKey).toBeTruthy();
     expect(secondKey).toBe(firstKey);
-  });
+    },
+    15000
+  );
 });

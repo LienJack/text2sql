@@ -5,7 +5,8 @@ import { AuditLogRepository } from "../../data/persistence/audit-log.repository"
 import { QueryExecutorRouterService } from "../../data/query/query-executor-router.service";
 import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
 import { DatasourceService } from "../../datasource/datasource.service";
-import { DatasourceAccessPolicyService, type AccessContext } from "../../auth/datasource-access-policy.service";
+import type { AccessContext } from "../../auth/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../../auth/policy-evaluator.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -13,7 +14,7 @@ export class ExecuteSqlNode {
     private readonly datasourceService: DatasourceService,
     private readonly queryExecutorRouter: QueryExecutorRouterService,
     private readonly chatRepository: ChatRepository,
-    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService,
+    private readonly policyEvaluatorService: PolicyEvaluatorService,
     private readonly auditLogRepository: AuditLogRepository
   ) {}
 
@@ -21,6 +22,7 @@ export class ExecuteSqlNode {
     sql: string;
     datasourceId: string;
     sessionId: string;
+    requestId?: string;
     accessContext?: SqlTableAccessContext;
   }): Promise<{
     rows: Array<Record<string, unknown>>;
@@ -48,30 +50,39 @@ export class ExecuteSqlNode {
     }
 
     const accessContext = await this.resolveAccessContext(input);
-    const allowedTables =
+    const policyResult =
       accessContext && accessContext.roleSet
-        ? await this.resolveAllowedTables(accessContext, input.datasourceId)
+        ? await this.resolvePolicy(accessContext, input.datasourceId)
         : undefined;
+    const effectiveAccessContext = accessContext
+      ? {
+          ...accessContext,
+          evaluatorMode: policyResult?.mode ?? accessContext.evaluatorMode,
+          allowedColumnsByTable: policyResult?.allowedColumnsByTable ?? {},
+          rowFiltersByTable: policyResult?.rowFiltersByTable ?? {}
+        }
+      : undefined;
 
     try {
       return await this.queryExecutorRouter.execute({
         datasource,
         sql: input.sql,
-        acl: accessContext
+        acl: effectiveAccessContext
           ? {
-              accessContext,
-              allowedTables
+              accessContext: effectiveAccessContext,
+              allowedTables: policyResult?.readableTables
             }
           : undefined
       });
     } catch (error) {
-      if (this.isAclGuardError(error) && accessContext) {
+      if (this.isAclGuardError(error) && effectiveAccessContext) {
         await this.writeAclDeniedAudit({
           error,
           sql: input.sql,
           datasourceId: input.datasourceId,
           sessionId: input.sessionId,
-          accessContext
+          requestId: input.requestId,
+          accessContext: effectiveAccessContext
         });
       }
       throw error;
@@ -96,7 +107,7 @@ export class ExecuteSqlNode {
     if (!actorId || !workspaceId) {
       return undefined;
     }
-    const resolved = await this.datasourceAccessPolicyService.resolveAccessContext({
+    const resolved = await this.policyEvaluatorService.resolveAccessContext({
       actor: {
         id: actorId,
         role: "user",
@@ -104,6 +115,7 @@ export class ExecuteSqlNode {
       },
       workspaceId
     });
+
     return {
       actorId: resolved.actorId,
       workspaceId: resolved.workspaceId,
@@ -111,11 +123,16 @@ export class ExecuteSqlNode {
     };
   }
 
-  private async resolveAllowedTables(
+  private async resolvePolicy(
     context: SqlTableAccessContext,
     datasourceId: string
-  ): Promise<string[]> {
-    const readable = await this.datasourceAccessPolicyService.resolveReadableTables({
+  ): Promise<{
+    mode: "workspace_table_permissions";
+    readableTables: string[];
+    allowedColumnsByTable: Record<string, string[]>;
+    rowFiltersByTable: Record<string, string>;
+  }> {
+    const resolved = await this.policyEvaluatorService.resolveReadableTables({
       context: {
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -123,7 +140,12 @@ export class ExecuteSqlNode {
       } as AccessContext,
       datasourceId
     });
-    return readable.readableTables;
+    return {
+      mode: resolved.mode,
+      readableTables: resolved.readableTables,
+      allowedColumnsByTable: resolved.allowedColumnsByTable,
+      rowFiltersByTable: resolved.rowFiltersByTable
+    };
   }
 
   private isAclGuardError(error: unknown): error is DomainError {
@@ -138,6 +160,7 @@ export class ExecuteSqlNode {
     sql: string;
     datasourceId: string;
     sessionId: string;
+    requestId?: string;
     accessContext: SqlTableAccessContext;
   }): Promise<void> {
     try {
@@ -153,6 +176,7 @@ export class ExecuteSqlNode {
           datasourceId: input.datasourceId,
           workspaceId: input.accessContext.workspaceId,
           actorId: input.accessContext.actorId,
+          requestId: input.requestId ?? null,
           sql: input.sql,
           details: input.error.details ?? null
         }

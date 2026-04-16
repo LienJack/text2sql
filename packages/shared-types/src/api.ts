@@ -266,8 +266,6 @@ export interface LlmSettingsView {
 export type PlatformUserStatus = "active" | "disabled" | "deleted";
 export type WorkspaceStatus = "active" | "archived" | "deleted";
 export type WorkspaceMemberRole = "admin" | "member";
-export type WorkspaceDatasourceAclSubjectType = "role" | "user";
-export type WorkspaceDatasourceAclEffect = "allow" | "deny";
 export type DatasourceWorkflowMode = "create" | "edit";
 export type DatasourceWorkflowStage =
   | "received"
@@ -277,14 +275,12 @@ export type DatasourceWorkflowStage =
   | "datasource_update_started"
   | "datasource_ready"
   | "binding_apply_started"
-  | "acl_apply_started"
   | "validation_failed"
   | "workspace_create_failed"
   | "datasource_create_failed"
   | "datasource_update_failed"
   | "binding_applied"
   | "binding_apply_failed"
-  | "acl_apply_failed"
   | "completed"
   | "compensation_soft_delete_failed"
   | "compensation_mark_unavailable_failed"
@@ -310,13 +306,6 @@ export interface DatasourceWorkflowWorkspaceInput {
   };
 }
 
-export interface DatasourceWorkflowAclInput {
-  subjectType: WorkspaceDatasourceAclSubjectType;
-  subjectId: string;
-  effect: WorkspaceDatasourceAclEffect;
-  tableNames: string[];
-}
-
 export interface DatasourceCreateWorkflowRequest {
   mode: "create";
   datasource: DatasourceUpsertPayload;
@@ -324,7 +313,6 @@ export interface DatasourceCreateWorkflowRequest {
   workspaceCreate?: {
     name: string;
   };
-  acl: DatasourceWorkflowAclInput;
 }
 
 export interface DatasourceEditWorkflowRequest {
@@ -335,20 +323,37 @@ export interface DatasourceEditWorkflowRequest {
   workspaceCreate?: {
     name: string;
   };
-  acl: DatasourceWorkflowAclInput;
 }
 
 export type UpsertDatasourceWorkflowRequest =
   | DatasourceCreateWorkflowRequest
   | DatasourceEditWorkflowRequest;
 
-export interface DatasourceWorkflowAclSummary {
-  subjectType: WorkspaceDatasourceAclSubjectType;
-  subjectId: string;
-  effect: WorkspaceDatasourceAclEffect;
-  addedTables: string[];
-  removedTables: string[];
-  retainedTables: string[];
+export interface PreviewDatasourceTablesCreateRequest {
+  mode: "create";
+  datasource: DatasourceUpsertPayload;
+}
+
+export interface PreviewDatasourceTablesEditRequest {
+  mode: "edit";
+  datasourceId: string;
+  datasource?: DatasourceUpsertPayload;
+}
+
+export type PreviewDatasourceTablesRequest =
+  | PreviewDatasourceTablesCreateRequest
+  | PreviewDatasourceTablesEditRequest;
+
+export interface PreviewDatasourceTablesResponse {
+  mode: "create" | "edit";
+  datasourceId?: string;
+  items: string[];
+}
+
+export interface DatasourceWorkflowBindingSummary {
+  bound: boolean;
+  workspaceId?: string;
+  datasourceId?: string;
 }
 
 export interface DatasourceWorkflowFailure {
@@ -362,7 +367,7 @@ export interface UpsertDatasourceWorkflowResponse {
   stage: DatasourceWorkflowStage | string;
   workspaceId: string;
   datasourceId: string;
-  appliedAclSummary?: DatasourceWorkflowAclSummary | null;
+  bindingSummary?: DatasourceWorkflowBindingSummary | null;
   idempotencyKey?: string;
   replayed?: boolean;
   failure?: DatasourceWorkflowFailure | null;
@@ -416,26 +421,36 @@ export interface WorkspaceDatasourceBindingListItem extends WorkspaceDatasourceB
   datasourceStatus?: DatasourceStatus;
 }
 
-export interface WorkspaceDatasourceTableAclRule {
-  id: string;
+export interface WorkspaceDatasourceTablePermissionState {
   workspaceId: string;
   datasourceId: string;
-  tableName: string;
-  subjectType: WorkspaceDatasourceAclSubjectType;
-  subjectId: string;
-  effect: WorkspaceDatasourceAclEffect;
-  priority: number;
-  createdByUserId?: string | null;
-  createdAt: string;
-  updatedAt: string;
+  policyVersion: number;
+  tableNames: string[];
 }
 
-export interface WorkspaceDatasourceTableAclRuleInput {
-  tableName: string;
-  subjectType: WorkspaceDatasourceAclSubjectType;
-  subjectId: string;
-  effect: WorkspaceDatasourceAclEffect;
-  priority?: number;
+export interface WorkspaceDatasourceTablePermissionImpactSummary {
+  beforeCount: number;
+  afterCount: number;
+  addedCount: number;
+  removedCount: number;
+  retainedCount: number;
+  addedTables: string[];
+  removedTables: string[];
+}
+
+export interface ListWorkspaceDatasourceTablePermissionsResponse
+  extends WorkspaceDatasourceTablePermissionState {}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsRequest {
+  policyVersion: number;
+  tableNames: string[];
+}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsResponse
+  extends WorkspaceDatasourceTablePermissionState {
+  impactSummary: WorkspaceDatasourceTablePermissionImpactSummary;
+  idempotencyKey: string;
+  replayed: boolean;
 }
 
 export interface WorkspaceDatasourceBindingBatchChangeResult {
@@ -454,17 +469,6 @@ export interface ListWorkspaceDatasourceBindingsRequest extends PaginationReques
 
 export type ListWorkspaceDatasourceBindingsResponse =
   PaginatedResponse<WorkspaceDatasourceBindingListItem>;
-
-export interface ListWorkspaceDatasourceTableAclRequest extends PaginationRequest {
-  workspaceId: string;
-  datasourceId: string;
-  subjectType?: WorkspaceDatasourceAclSubjectType;
-  subjectId?: string;
-  tableName?: string;
-}
-
-export type ListWorkspaceDatasourceTableAclResponse =
-  PaginatedResponse<WorkspaceDatasourceTableAclRule>;
 
 export interface PaginationRequest {
   page?: number;

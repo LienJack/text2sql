@@ -32,6 +32,31 @@ export type WorkspaceDatasourceBindingDiff = {
   retainedDatasourceIds: string[];
 };
 
+export type WorkspaceDatasourceTablePermission = {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  tableName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkspaceDatasourceTablePermissionSet = {
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  tableNames: string[];
+};
+
+type WorkspaceDatasourceTablePermissionUpsertInput = {
+  id?: string;
+  workspaceId: string;
+  datasourceId: string;
+  tableName: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 type WorkspaceDatasourceBindingUpsertInput = {
   id?: string;
   workspaceId: string;
@@ -54,7 +79,10 @@ type TablePolicyRuleUpsertInput = {
 
 type PrismaModelLike = {
   findMany?: (args: Record<string, unknown>) => Promise<unknown[]>;
+  findFirst?: (args: Record<string, unknown>) => Promise<unknown | null>;
   upsert?: (args: Record<string, unknown>) => Promise<unknown>;
+  update?: (args: Record<string, unknown>) => Promise<unknown>;
+  create?: (args: Record<string, unknown>) => Promise<unknown>;
   deleteMany?: (args: Record<string, unknown>) => Promise<unknown>;
 };
 
@@ -66,6 +94,12 @@ type PrismaClientLike = {
   workspaceDatasourceTableAcl?: PrismaModelLike;
   workspaceDatasourceTablePolicy?: PrismaModelLike;
   workspaceTableAcl?: PrismaModelLike;
+  workspaceDatasourceTablePermissionSet?: PrismaModelLike;
+  workspaceDatasourceTablePermissionSets?: PrismaModelLike;
+  workspaceDatasourceTablePermission?: PrismaModelLike;
+  workspaceDatasourceTablePermissions?: PrismaModelLike;
+  workspaceTablePermissionSet?: PrismaModelLike;
+  workspaceTablePermission?: PrismaModelLike;
   $disconnect: () => Promise<void>;
 };
 
@@ -92,12 +126,23 @@ const toRuleKey = (
   tableName: string
 ): string => `${workspaceId}::${datasourceId}::${subjectType}::${subjectId}::${tableName}`;
 
+const toTablePermissionSetKey = (workspaceId: string, datasourceId: string): string =>
+  `${workspaceId}::${datasourceId}`;
+
+const toTablePermissionKey = (
+  workspaceId: string,
+  datasourceId: string,
+  tableName: string
+): string => `${workspaceId}::${datasourceId}::${tableName}`;
+
 @Injectable()
 export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WorkspaceDatasourcePolicyRepository.name);
   private prisma?: PrismaClientLike;
   private readonly bindings = new Map<string, WorkspaceDatasourceBinding>();
   private readonly rules = new Map<string, WorkspaceDatasourceTablePolicyRule>();
+  private readonly tablePermissions = new Map<string, WorkspaceDatasourceTablePermission>();
+  private readonly tablePermissionVersions = new Map<string, number>();
 
   constructor(private readonly appConfig: AppConfigService) {}
 
@@ -204,6 +249,274 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     }
     const bindings = await this.listWorkspaceDatasourceBindings(normalizedWorkspaceId);
     return bindings.some((item) => item.datasourceId === normalizedDatasourceId);
+  }
+
+  async listWorkspaceDatasourceTablePermissions(input: {
+    workspaceId: string;
+    datasourceId: string;
+  }): Promise<WorkspaceDatasourceTablePermission[]> {
+    const normalizedWorkspaceId = this.normalizeWorkspaceId(input.workspaceId);
+    const normalizedDatasourceId = this.normalizeDatasourceId(input.datasourceId);
+    const fromMemory = Array.from(this.tablePermissions.values()).filter((item) => {
+      return (
+        item.workspaceId === normalizedWorkspaceId &&
+        item.datasourceId === normalizedDatasourceId
+      );
+    });
+
+    const model = this.getTablePermissionModel();
+    if (!this.isPrimaryPersistenceConfigured() || !this.prisma || !model?.findMany) {
+      return this.sortTablePermissions(fromMemory);
+    }
+
+    const rows = (await this.tryPrismaRead(async () =>
+      model.findMany!({
+        where: {
+          workspaceId: normalizedWorkspaceId,
+          datasourceId: normalizedDatasourceId
+        }
+      })
+    )) as unknown[] | null;
+    if (!rows) {
+      return this.sortTablePermissions(fromMemory);
+    }
+
+    const merged = new Map<string, WorkspaceDatasourceTablePermission>();
+    for (const row of rows) {
+      const mapped = this.fromTablePermissionRow(row);
+      if (!mapped) {
+        continue;
+      }
+      const key = toTablePermissionKey(
+        mapped.workspaceId,
+        mapped.datasourceId,
+        mapped.tableName
+      );
+      merged.set(key, mapped);
+      this.tablePermissions.set(key, mapped);
+    }
+    for (const item of fromMemory) {
+      merged.set(toTablePermissionKey(item.workspaceId, item.datasourceId, item.tableName), item);
+    }
+    return this.sortTablePermissions(Array.from(merged.values()));
+  }
+
+  async getWorkspaceDatasourceTablePermissionSet(input: {
+    workspaceId: string;
+    datasourceId: string;
+  }): Promise<WorkspaceDatasourceTablePermissionSet> {
+    const normalizedWorkspaceId = this.normalizeWorkspaceId(input.workspaceId);
+    const normalizedDatasourceId = this.normalizeDatasourceId(input.datasourceId);
+    const tablePermissions = await this.listWorkspaceDatasourceTablePermissions({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId
+    });
+    const policyVersion = await this.readWorkspaceDatasourceTablePermissionVersion({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId
+    });
+    return {
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      policyVersion,
+      tableNames: tablePermissions.map((item) => item.tableName)
+    };
+  }
+
+  async replaceWorkspaceDatasourceTablePermissions(input: {
+    workspaceId: string;
+    datasourceId: string;
+    tableNames: string[];
+    expectedPolicyVersion?: number;
+  }): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    tableNames: string[];
+    beforeCount: number;
+    afterCount: number;
+    addedTables: string[];
+    removedTables: string[];
+    retainedTables: string[];
+  }> {
+    const normalizedWorkspaceId = this.normalizeWorkspaceId(input.workspaceId);
+    const normalizedDatasourceId = this.normalizeDatasourceId(input.datasourceId);
+    const normalizedTableNames = this.normalizeTableNames(input.tableNames);
+    const current = await this.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId
+    });
+    if (
+      typeof input.expectedPolicyVersion === "number" &&
+      input.expectedPolicyVersion !== current.policyVersion
+    ) {
+      throw new Error("workspace datasource table permission policy version mismatch");
+    }
+
+    const currentSet = new Set(current.tableNames);
+    const nextSet = new Set(normalizedTableNames);
+
+    const addedTables = normalizedTableNames.filter((tableName) => !currentSet.has(tableName));
+    const removedTables = current.tableNames.filter((tableName) => !nextSet.has(tableName));
+    const retainedTables = normalizedTableNames.filter((tableName) => currentSet.has(tableName));
+    const changed = addedTables.length > 0 || removedTables.length > 0;
+    const nextPolicyVersion = changed ? current.policyVersion + 1 : current.policyVersion;
+
+    if (changed) {
+      for (const key of Array.from(this.tablePermissions.keys())) {
+        const [workspaceId, datasourceId] = key.split("::");
+        if (workspaceId === normalizedWorkspaceId && datasourceId === normalizedDatasourceId) {
+          this.tablePermissions.delete(key);
+        }
+      }
+      const now = new Date().toISOString();
+      for (const tableName of normalizedTableNames) {
+        const normalized = this.normalizeTablePermissionInput({
+          workspaceId: normalizedWorkspaceId,
+          datasourceId: normalizedDatasourceId,
+          tableName,
+          createdAt: now,
+          updatedAt: now
+        });
+        this.tablePermissions.set(
+          toTablePermissionKey(
+            normalized.workspaceId,
+            normalized.datasourceId,
+            normalized.tableName
+          ),
+          normalized
+        );
+      }
+      this.tablePermissionVersions.set(
+        toTablePermissionSetKey(normalizedWorkspaceId, normalizedDatasourceId),
+        nextPolicyVersion
+      );
+    }
+
+    const tablePermissionModel = this.getTablePermissionModel();
+    const tablePermissionSetModel = this.getTablePermissionSetModel();
+    if (
+      this.isPrimaryPersistenceConfigured() &&
+      this.prisma &&
+      tablePermissionModel?.deleteMany &&
+      tablePermissionSetModel?.upsert
+    ) {
+      await this.tryPrismaWrite(async () => {
+        if (changed) {
+          await tablePermissionModel.deleteMany?.({
+            where: {
+              workspaceId: normalizedWorkspaceId,
+              datasourceId: normalizedDatasourceId
+            }
+          });
+          for (const tableName of normalizedTableNames) {
+            const now = new Date();
+            await tablePermissionModel.upsert?.({
+              where: {
+                workspaceId_datasourceId_tableName: {
+                  workspaceId: normalizedWorkspaceId,
+                  datasourceId: normalizedDatasourceId,
+                  tableName
+                }
+              },
+              update: {
+                updatedAt: now
+              },
+              create: {
+                id: uuidv4(),
+                workspaceId: normalizedWorkspaceId,
+                datasourceId: normalizedDatasourceId,
+                tableName,
+                createdAt: now,
+                updatedAt: now
+              }
+            });
+          }
+        }
+        if (changed || current.policyVersion === 0) {
+          await tablePermissionSetModel.upsert?.({
+            where: {
+              workspaceId_datasourceId: {
+                workspaceId: normalizedWorkspaceId,
+                datasourceId: normalizedDatasourceId
+              }
+            },
+            update: {
+              policyVersion: nextPolicyVersion,
+              updatedAt: new Date()
+            },
+            create: {
+              id: uuidv4(),
+              workspaceId: normalizedWorkspaceId,
+              datasourceId: normalizedDatasourceId,
+              policyVersion: nextPolicyVersion,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            }
+          });
+        }
+      });
+    }
+
+    return {
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      policyVersion: nextPolicyVersion,
+      tableNames: normalizedTableNames,
+      beforeCount: current.tableNames.length,
+      afterCount: normalizedTableNames.length,
+      addedTables,
+      removedTables,
+      retainedTables
+    };
+  }
+
+  private async readWorkspaceDatasourceTablePermissionVersion(input: {
+    workspaceId: string;
+    datasourceId: string;
+  }): Promise<number> {
+    const normalizedWorkspaceId = this.normalizeWorkspaceId(input.workspaceId);
+    const normalizedDatasourceId = this.normalizeDatasourceId(input.datasourceId);
+    const key = toTablePermissionSetKey(normalizedWorkspaceId, normalizedDatasourceId);
+    const fromMemory = this.tablePermissionVersions.get(key);
+
+    const model = this.getTablePermissionSetModel();
+    if (
+      !this.isPrimaryPersistenceConfigured() ||
+      !this.prisma ||
+      (!model?.findFirst && !model?.findMany)
+    ) {
+      return fromMemory ?? 0;
+    }
+
+    const row = await this.tryPrismaRead(async () => {
+      if (model.findFirst) {
+        return model.findFirst({
+          where: {
+            workspaceId: normalizedWorkspaceId,
+            datasourceId: normalizedDatasourceId
+          }
+        });
+      }
+      const rows = await model.findMany?.({
+        where: {
+          workspaceId: normalizedWorkspaceId,
+          datasourceId: normalizedDatasourceId
+        },
+        take: 1
+      });
+      return rows?.[0] ?? null;
+    });
+    if (!row) {
+      return fromMemory ?? 0;
+    }
+
+    const parsed = this.readPolicyVersionFromRow(row);
+    if (typeof parsed === "number") {
+      this.tablePermissionVersions.set(key, parsed);
+      return parsed;
+    }
+    return fromMemory ?? 0;
   }
 
   async upsertWorkspaceDatasourceBindings(
@@ -592,6 +905,20 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     };
   }
 
+  private normalizeTablePermissionInput(
+    input: WorkspaceDatasourceTablePermissionUpsertInput
+  ): WorkspaceDatasourceTablePermission {
+    const now = input.updatedAt ?? new Date().toISOString();
+    return {
+      id: input.id ?? uuidv4(),
+      workspaceId: this.normalizeWorkspaceId(input.workspaceId),
+      datasourceId: this.normalizeDatasourceId(input.datasourceId),
+      tableName: this.normalizeTableName(input.tableName),
+      createdAt: input.createdAt ?? now,
+      updatedAt: now
+    };
+  }
+
   private normalizeRuleInput(input: TablePolicyRuleUpsertInput): WorkspaceDatasourceTablePolicyRule {
     const now = input.updatedAt ?? new Date().toISOString();
     const subjectType = this.normalizeSubjectType(input.subjectType);
@@ -703,6 +1030,45 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     };
   }
 
+  private fromTablePermissionRow(row: unknown): WorkspaceDatasourceTablePermission | undefined {
+    if (!row || typeof row !== "object") {
+      return undefined;
+    }
+    const record = row as Record<string, unknown>;
+    const workspaceId = asNonEmptyString(record.workspaceId ?? record.workspace_id);
+    const datasourceId = asNonEmptyString(record.datasourceId ?? record.datasource_id);
+    const tableName = asNonEmptyString(record.tableName ?? record.table_name);
+    if (!workspaceId || !datasourceId || !tableName) {
+      return undefined;
+    }
+    return {
+      id: asNonEmptyString(record.id) ?? uuidv4(),
+      workspaceId,
+      datasourceId,
+      tableName: this.normalizeTableName(tableName),
+      createdAt: this.toIso(record.createdAt ?? record.created_at),
+      updatedAt: this.toIso(record.updatedAt ?? record.updated_at)
+    };
+  }
+
+  private readPolicyVersionFromRow(row: unknown): number | undefined {
+    if (!row || typeof row !== "object") {
+      return undefined;
+    }
+    const record = row as Record<string, unknown>;
+    const raw = record.policyVersion ?? record.policy_version;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+      return Math.floor(raw);
+    }
+    if (typeof raw === "string") {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return undefined;
+  }
+
   private fromRuleRow(row: unknown): WorkspaceDatasourceTablePolicyRule | undefined {
     if (!row || typeof row !== "object") {
       return undefined;
@@ -764,6 +1130,12 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     return [...items].sort((a, b) => a.datasourceId.localeCompare(b.datasourceId));
   }
 
+  private sortTablePermissions(
+    items: WorkspaceDatasourceTablePermission[]
+  ): WorkspaceDatasourceTablePermission[] {
+    return [...items].sort((a, b) => a.tableName.localeCompare(b.tableName));
+  }
+
   private sortRules(items: WorkspaceDatasourceTablePolicyRule[]): WorkspaceDatasourceTablePolicyRule[] {
     return [...items].sort((a, b) => {
       const byDatasource = a.datasourceId.localeCompare(b.datasourceId);
@@ -795,6 +1167,32 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     return candidates.find((candidate) => this.isModelLike(candidate)) as PrismaModelLike;
   }
 
+  private getTablePermissionSetModel(): PrismaModelLike | undefined {
+    if (!this.prisma) {
+      return undefined;
+    }
+    const prismaRecord = this.prisma as Record<string, unknown>;
+    const candidates = [
+      prismaRecord.workspaceDatasourceTablePermissionSet,
+      prismaRecord.workspaceDatasourceTablePermissionSets,
+      prismaRecord.workspaceTablePermissionSet
+    ];
+    return candidates.find((candidate) => this.isModelLike(candidate)) as PrismaModelLike;
+  }
+
+  private getTablePermissionModel(): PrismaModelLike | undefined {
+    if (!this.prisma) {
+      return undefined;
+    }
+    const prismaRecord = this.prisma as Record<string, unknown>;
+    const candidates = [
+      prismaRecord.workspaceDatasourceTablePermission,
+      prismaRecord.workspaceDatasourceTablePermissions,
+      prismaRecord.workspaceTablePermission
+    ];
+    return candidates.find((candidate) => this.isModelLike(candidate)) as PrismaModelLike;
+  }
+
   private getTablePolicyModel(): PrismaModelLike | undefined {
     if (!this.prisma) {
       return undefined;
@@ -816,7 +1214,10 @@ export class WorkspaceDatasourcePolicyRepository implements OnModuleInit, OnModu
     const record = value as Record<string, unknown>;
     return (
       typeof record.findMany === "function" ||
+      typeof record.findFirst === "function" ||
       typeof record.upsert === "function" ||
+      typeof record.update === "function" ||
+      typeof record.create === "function" ||
       typeof record.deleteMany === "function"
     );
   }

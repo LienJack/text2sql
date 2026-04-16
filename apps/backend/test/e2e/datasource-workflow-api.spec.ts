@@ -3,7 +3,6 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
-import { DomainError } from "../../src/common/domain-error";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
@@ -89,7 +88,7 @@ describe("datasource workflow api (e2e)", () => {
     expect(patchTypeRes.body.error.details.field).toBe("type");
   });
 
-  it("returns stage/workspaceId/datasourceId/appliedAclSummary for workflow create", async () => {
+  it("returns stage/workspaceId/datasourceId/bindingSummary for workflow create", async () => {
     const response = await request(app.getHttpServer())
       .post("/api/v1/datasources/workflow")
       .set("x-user-id", "admin-workflow-contract")
@@ -104,13 +103,6 @@ describe("datasource workflow api (e2e)", () => {
         },
         workspaceCreate: {
           name: "Workflow Contract Workspace"
-        },
-        acl: {
-          subjectType: "role",
-          subjectId: "member",
-          effect: "allow",
-          tableNames: ["orders", "users"],
-          reason: "workflow_contract_test"
         }
       });
 
@@ -121,10 +113,9 @@ describe("datasource workflow api (e2e)", () => {
     expect(response.body.data.workspaceId.length).toBeGreaterThan(0);
     expect(typeof response.body.data.datasourceId).toBe("string");
     expect(response.body.data.datasourceId.length).toBeGreaterThan(0);
-    expect(response.body.data.appliedAclSummary.subjectType).toBe("role");
-    expect(response.body.data.appliedAclSummary.subjectId).toBe("member");
-    expect(response.body.data.appliedAclSummary.effect).toBe("allow");
-    expect(response.body.data.appliedAclSummary.tableCount).toBeGreaterThanOrEqual(2);
+    expect(response.body.data.bindingSummary.bound).toBe(true);
+    expect(response.body.data.bindingSummary.workspaceId).toBe(response.body.data.workspaceId);
+    expect(response.body.data.bindingSummary.datasourceId).toBe(response.body.data.datasourceId);
   });
 
   it("deduplicates repeated create workflow by x-idempotency-key", async () => {
@@ -139,12 +130,6 @@ describe("datasource workflow api (e2e)", () => {
       },
       workspaceCreate: {
         name: `Workflow Idempotency Workspace ${Date.now()}`
-      },
-      acl: {
-        subjectType: "role" as const,
-        subjectId: "member",
-        effect: "allow" as const,
-        tableNames: ["orders"]
       }
     };
 
@@ -176,10 +161,18 @@ describe("datasource workflow api (e2e)", () => {
 
   it("soft deletes newly created datasource when workflow create fails after datasource creation", async () => {
     jest
-      .spyOn(workspaceDatasourceService, "replaceTableAcl")
-      .mockRejectedValueOnce(
-        new DomainError("ACL_REPLACE_FAILED", "acl replace failed", 500)
-      );
+      .spyOn(workspaceDatasourceService, "bindDatasources")
+      .mockResolvedValueOnce({
+        workspaceId: "workspace-failed",
+        successItems: [],
+        failedItems: [
+          {
+            item: "ds-failed",
+            code: "WORKSPACE_BINDING_FAILED",
+            message: "binding failed"
+          }
+        ]
+      });
 
     const response = await request(app.getHttpServer())
       .post("/api/v1/datasources/workflow")
@@ -194,18 +187,12 @@ describe("datasource workflow api (e2e)", () => {
         },
         workspaceCreate: {
           name: `Workflow Compensation Workspace ${Date.now()}`
-        },
-        acl: {
-          subjectType: "role",
-          subjectId: "member",
-          effect: "allow",
-          tableNames: ["orders"]
         }
       });
 
     expect(response.status).toBe(201);
     expect(response.body.status).toBe("error");
-    expect(response.body.error.details.stage).toBe("acl_apply_failed");
+    expect(response.body.error.details.stage).toBe("binding_apply_failed");
     expect(response.body.error.details.compensation.attempted).toBe(true);
     expect(response.body.error.details.compensation.strategy).toBe("soft_delete");
     expect(response.body.error.details.compensation.status).toBe("succeeded");
@@ -219,10 +206,18 @@ describe("datasource workflow api (e2e)", () => {
 
   it("falls back to unavailable + provisioning_failed when soft delete compensation fails", async () => {
     jest
-      .spyOn(workspaceDatasourceService, "replaceTableAcl")
-      .mockRejectedValueOnce(
-        new DomainError("ACL_REPLACE_FAILED", "acl replace failed", 500)
-      );
+      .spyOn(workspaceDatasourceService, "bindDatasources")
+      .mockResolvedValueOnce({
+        workspaceId: "workspace-failed",
+        successItems: [],
+        failedItems: [
+          {
+            item: "ds-failed",
+            code: "WORKSPACE_BINDING_FAILED",
+            message: "binding failed"
+          }
+        ]
+      });
     jest
       .spyOn(datasourceRepository, "softDeleteDatasource")
       .mockRejectedValueOnce(new Error("soft delete crashed"));
@@ -240,12 +235,6 @@ describe("datasource workflow api (e2e)", () => {
         },
         workspaceCreate: {
           name: `Workflow Fallback Workspace ${Date.now()}`
-        },
-        acl: {
-          subjectType: "role",
-          subjectId: "member",
-          effect: "allow",
-          tableNames: ["orders"]
         }
       });
 
@@ -266,7 +255,6 @@ describe("datasource workflow api (e2e)", () => {
   });
 
   it("records workflow governance audit events with required metadata", async () => {
-    const aclTables = ["orders", "users"];
     const requestBody = {
       mode: "create" as const,
       datasource: {
@@ -276,12 +264,6 @@ describe("datasource workflow api (e2e)", () => {
       },
       workspaceCreate: {
         name: `Workflow Audit Workspace ${Date.now()}`
-      },
-      acl: {
-        subjectType: "role" as const,
-        subjectId: "member",
-        effect: "allow" as const,
-        tableNames: aclTables
       }
     };
 
@@ -308,9 +290,7 @@ describe("datasource workflow api (e2e)", () => {
     );
     expect(succeeded).toBeDefined();
     expect(succeeded?.metadata?.actorId).toBe("admin-workflow-audit");
-    expect(
-      (succeeded?.metadata?.appliedAclSummary as Record<string, unknown>)?.requestedTables
-    ).toEqual(aclTables);
+    expect((succeeded?.metadata?.bindingSummary as Record<string, unknown>)?.bound).toBe(true);
   });
 
   it("supports PATCH relational datasource update with preflight validation", async () => {

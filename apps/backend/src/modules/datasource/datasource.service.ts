@@ -1,11 +1,19 @@
 import { Injectable } from "@nestjs/common";
-import type { Datasource, DatasourceStatus, DatasourceType } from "@text2sql/shared-types";
+import type {
+  Datasource,
+  DatasourceStatus,
+  DatasourceType,
+  DatasourceUpsertPayload,
+  PreviewDatasourceTablesResponse
+} from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { encryptSecret } from "../../common/secret-crypto";
-import { DatasourceAccessPolicyService, type AccessContext } from "../auth/datasource-access-policy.service";
+import type { AccessContext } from "../auth/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
 import { AppConfigService } from "../config/app-config.service";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
+import { QueryExecutorRouterService } from "../data/query/query-executor-router.service";
 
 type UploadedFile = {
   originalname: string;
@@ -76,12 +84,19 @@ type DatasourceUpdateInput = {
   filePath?: string;
 };
 
+type PreviewDatasourceTablesInput = {
+  mode: "create" | "edit";
+  datasourceId?: string;
+  datasource?: DatasourceUpsertPayload;
+};
+
 @Injectable()
 export class DatasourceService {
   constructor(
     private readonly datasourceRepository: DatasourceRepository,
-    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService,
-    private readonly appConfig: AppConfigService
+    private readonly policyEvaluatorService: PolicyEvaluatorService,
+    private readonly appConfig: AppConfigService,
+    private readonly queryExecutorRouter: QueryExecutorRouterService
   ) {}
 
   async listDatasources(options?: {
@@ -100,7 +115,7 @@ export class DatasourceService {
     });
 
     if (options?.accessContext) {
-      const visible = await this.datasourceAccessPolicyService.listVisibleDatasources({
+      const visible = await this.policyEvaluatorService.listVisibleDatasources({
         context: options.accessContext
       });
       const visibleIds = new Set(visible.ids);
@@ -239,6 +254,42 @@ export class DatasourceService {
       deletedAt: existing.deletedAt ?? null
     });
     return this.sanitizeDatasource(updated);
+  }
+
+  async previewDatasourceTables(
+    actor: DatasourceMutationActor | undefined,
+    input: PreviewDatasourceTablesInput
+  ): Promise<PreviewDatasourceTablesResponse> {
+    this.assertSystemAdmin(actor);
+
+    const mode = input.mode;
+    if (mode !== "create" && mode !== "edit") {
+      throw new DomainError("VALIDATION_ERROR", "mode 仅支持 create/edit。", 400, {
+        field: "mode"
+      });
+    }
+
+    const datasource = await this.resolvePreviewDatasource(input);
+    const result = await this.queryExecutorRouter.execute({
+      datasource,
+      sql: this.buildTableDiscoverySql(datasource.type),
+      limit: 500
+    });
+
+    const tableSet = new Set<string>();
+    for (const row of result.rows) {
+      const tableName = this.readTableName(row);
+      if (!tableName) {
+        continue;
+      }
+      tableSet.add(tableName.toLowerCase());
+    }
+
+    return {
+      mode,
+      datasourceId: mode === "edit" ? datasource.id : undefined,
+      items: Array.from(tableSet).sort((a, b) => a.localeCompare(b))
+    };
   }
 
   async preflightDatasourceConnection(input: RelationalConnectionInput): Promise<void> {
@@ -523,6 +574,150 @@ export class DatasourceService {
       return Number(value);
     }
     return type === "mysql" ? 3306 : 5432;
+  }
+
+  private async resolvePreviewDatasource(
+    input: PreviewDatasourceTablesInput
+  ): Promise<Datasource> {
+    if (input.mode === "edit") {
+      const datasourceId = input.datasourceId?.trim();
+      if (!datasourceId) {
+        throw new DomainError("VALIDATION_ERROR", "edit 预览必须提供 datasourceId。", 400, {
+          field: "datasourceId"
+        });
+      }
+
+      const existing = await this.getDatasourceOrThrow(datasourceId);
+      const patch = input.datasource ?? {};
+      if (patch.type !== undefined) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "预览阶段不允许修改数据源类型。",
+          400,
+          {
+            field: "type",
+            datasourceId
+          }
+        );
+      }
+
+      if (!patch || Object.keys(patch).length === 0) {
+        return existing;
+      }
+
+      const normalizedName = patch.name?.trim();
+      if (patch.name !== undefined && !normalizedName) {
+        throw new DomainError("VALIDATION_ERROR", "数据源名称不能为空。", 400, {
+          field: "name"
+        });
+      }
+
+      const nextConfig = await this.buildUpdatedConfig(existing, patch);
+      return {
+        ...existing,
+        name: normalizedName ?? existing.name,
+        shared: patch.shared ?? existing.shared,
+        config: nextConfig
+      };
+    }
+
+    const datasourcePayload = input.datasource;
+    if (!datasourcePayload?.type) {
+      throw new DomainError("VALIDATION_ERROR", "create 预览必须提供 datasource.type。", 400, {
+        field: "datasource.type"
+      });
+    }
+
+    const type = datasourcePayload.type;
+    if ((type === "csv" || type === "excel") && !input.datasourceId?.trim()) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "文件数据源预览前请先上传文件并提供 datasourceId。",
+        400,
+        {
+          field: "datasourceId"
+        }
+      );
+    }
+
+    if (input.datasourceId?.trim()) {
+      const existing = await this.getDatasourceOrThrow(input.datasourceId.trim());
+      const nextConfig = await this.buildUpdatedConfig(existing, datasourcePayload);
+      return {
+        ...existing,
+        name: datasourcePayload.name?.trim() || existing.name,
+        shared: datasourcePayload.shared ?? existing.shared,
+        config: nextConfig
+      };
+    }
+
+    const config = this.buildConnectionConfig({
+      type,
+      host: datasourcePayload.host,
+      port: datasourcePayload.port,
+      database: datasourcePayload.database,
+      username: datasourcePayload.username,
+      password: datasourcePayload.password,
+      filePath: datasourcePayload.filePath
+    });
+
+    return {
+      id: `preview-${uuidv4()}`,
+      name: datasourcePayload.name?.trim() || "预览数据源",
+      type,
+      status: "available",
+      readonly: true,
+      shared: true,
+      config,
+      fileMeta: null,
+      unavailableAt: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  private buildTableDiscoverySql(type: DatasourceType): string {
+    if (type === "mysql") {
+      return `
+SELECT table_name AS tableName
+FROM information_schema.tables
+WHERE table_schema = DATABASE()
+  AND table_type = 'BASE TABLE'
+ORDER BY table_name
+      `.trim();
+    }
+    if (type === "postgresql") {
+      return `
+SELECT table_name AS tableName
+FROM information_schema.tables
+WHERE table_schema = 'public'
+  AND table_type = 'BASE TABLE'
+ORDER BY table_name
+      `.trim();
+    }
+    return `
+SELECT name AS tableName
+FROM sqlite_master
+WHERE type = 'table'
+  AND name NOT LIKE 'sqlite_%'
+ORDER BY name
+    `.trim();
+  }
+
+  private readTableName(row: Record<string, unknown>): string | null {
+    const candidateKeys = ["tableName", "table_name", "name", "TABLE_NAME"];
+    for (const key of candidateKeys) {
+      const value = row[key];
+      if (typeof value !== "string") {
+        continue;
+      }
+      const normalized = value.trim();
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return null;
   }
 
   protected async loadMysqlModule(): Promise<MysqlPreflightModule> {

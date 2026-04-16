@@ -17,37 +17,53 @@ describe("workspace datasource acl schema baseline", () => {
     process.env.LLM_MOCK_MODE = "true";
   });
 
-  it("defines workspace datasource binding and table acl models in schema and migration", () => {
+  it("defines workspace datasource table-permission models and migrations", () => {
     const schemaPath = resolve(__dirname, "../../prisma/schema.prisma");
-    const migrationPath = resolve(
+    const baselineMigrationPath = resolve(
       __dirname,
       "../../prisma/migrations/202604150002_workspace_datasource_table_acl/migration.sql"
     );
+    const cutoverMigrationPath = resolve(
+      __dirname,
+      "../../prisma/migrations/20260416000200_rule_group_cutover_drop_acl/migration.sql"
+    );
+    const tablePermissionMigrationPath = resolve(
+      __dirname,
+      "../../prisma/migrations/20260416000400_workspace_table_permissions/migration.sql"
+    );
 
     const schema = readFileSync(schemaPath, "utf-8");
-    const migration = readFileSync(migrationPath, "utf-8");
+    const baselineMigration = readFileSync(baselineMigrationPath, "utf-8");
+    const cutoverMigration = readFileSync(cutoverMigrationPath, "utf-8");
+    const tablePermissionMigration = readFileSync(tablePermissionMigrationPath, "utf-8");
 
     expect(schema).toContain("model WorkspaceDatasourceBinding");
-    expect(schema).toContain("model WorkspaceDatasourceTableAcl");
+    expect(schema).toContain("model WorkspaceDatasourceTablePermissionSet");
+    expect(schema).toContain("model WorkspaceDatasourceTablePermission");
+    expect(schema).not.toContain("model WorkspaceDatasourceTableAcl");
     expect(schema).toMatch(/workspaceId\s+String\?/);
     expect(schema).toMatch(/createdByUserId\s+String\?/);
     expect(schema).toContain(
       '@@map("workspace_datasource_bindings")'
     );
-    expect(schema).toContain(
-      '@@map("workspace_datasource_table_acls")'
-    );
 
-    expect(migration).toContain('ALTER TABLE "sessions"');
-    expect(migration).toContain('"workspaceId" TEXT');
-    expect(migration).toContain('"createdByUserId" TEXT');
-    expect(migration).toContain('CREATE TABLE "workspace_datasource_bindings"');
-    expect(migration).toContain('CREATE TABLE "workspace_datasource_table_acls"');
-    expect(migration).toContain(
+    expect(baselineMigration).toContain('ALTER TABLE "sessions"');
+    expect(baselineMigration).toContain('"workspaceId" TEXT');
+    expect(baselineMigration).toContain('"createdByUserId" TEXT');
+    expect(baselineMigration).toContain('CREATE TABLE "workspace_datasource_bindings"');
+    expect(baselineMigration).toContain('CREATE TABLE "workspace_datasource_table_acls"');
+    expect(baselineMigration).toContain(
       "workspace_datasource_table_acls_subject_type_check"
     );
-    expect(migration).toContain(
+    expect(baselineMigration).toContain(
       "workspace_datasource_table_acls_non_empty_table_name_check"
+    );
+    expect(cutoverMigration).toContain('DROP TABLE IF EXISTS "workspace_datasource_table_acls";');
+    expect(tablePermissionMigration).toContain(
+      'CREATE TABLE "workspace_datasource_table_permission_sets"'
+    );
+    expect(tablePermissionMigration).toContain(
+      'CREATE TABLE "workspace_datasource_table_permissions"'
     );
   });
 

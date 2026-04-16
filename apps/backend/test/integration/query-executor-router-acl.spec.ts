@@ -86,6 +86,26 @@ describe("query executor router acl integration", () => {
     } satisfies Partial<DomainError>);
   });
 
+  it("keeps fail-closed behavior when row filter rewrite cannot safely handle SQL", async () => {
+    await expect(
+      router.execute({
+        datasource: datasource("sqlite"),
+        sql: "SELECT id FROM orders UNION SELECT id FROM orders",
+        acl: {
+          accessContext: {
+            ...accessContext,
+            rowFiltersByTable: {
+              orders: "1 = 1"
+            }
+          },
+          allowedTables: ["orders"]
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "ACL_PARSE_REJECTED"
+    } satisfies Partial<DomainError>);
+  });
+
   it("applies ACL gate consistently across datasource types", async () => {
     const types: Datasource["type"][] = [
       "sqlite",

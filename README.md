@@ -15,6 +15,11 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
+### 数据库结构改动铁律（必须遵守）
+- 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。
+- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>` 生成迁移。
+- 每次结构变更必须执行 `pnpm --filter @text2sql/backend run prisma:generate`。
+
 ## 目录结构
 ```text
 apps/backend             NestJS API + Agent 工作流
@@ -94,13 +99,14 @@ pnpm dev
 - CSV / Excel 上传会注册为团队共享可复用数据源，可在后续会话中重复选择。
 - 查询边界默认值：连接超时 `5000ms`、查询超时 `10000ms`、默认 `LIMIT 50`、最大 `LIMIT 200`、上传上限 `10MB`。
 
-## 工作空间数据源绑定与表级 ACL
+## 工作空间治理与表清单授权（主叙事）
 - 用户侧请求可通过 `x-workspace-id`（或单空间成员自动推断）确定工作空间语境；缺失或非法语境会触发权限错误。
 - `GET /api/v1/datasources` 与 `POST /api/v1/sessions` 已接入工作空间可见性校验，只返回/允许当前空间已绑定的数据源。
-- SQL 执行链路新增表级 ACL 默认拒绝策略，未授权或不可完整解析的读表请求会被拒绝（`ACL_FORBIDDEN` / `ACL_PARSE_REJECTED`）。
-- ACL 拒绝与治理写操作会写入治理审计事件（`workspace.datasource.*`），支持追溯绑定变更、授权变更与拒绝原因。
-- 截至 2026-04-15，`/data-sources` 新增向导已覆盖连接失败恢复（`retry/previous`）与提交中按钮锁定，且在 URL 带 `workspaceId` 时会透传到创建会话请求。
-- 截至 2026-04-15，`/data-sources` 内“工作空间选择/新建 + 表 ACL 提交 + 存量编辑”仍未闭环；相关治理操作当前仍以设置页能力为准。
+- 治理主模型为“工作空间 -> 数据源 -> 表勾选（replace）”；不再暴露规则组概念。
+- SQL 执行链路按工作空间表授权执行默认拒绝与 fail-closed，未授权或不可安全解析的读表请求会被拒绝。
+- 治理写操作与拒绝决策会写入审计事件（`workspace.datasource.*`），支持追溯变更与拒绝原因。
+- 截至 2026-04-16，`/data-sources` 向导已覆盖连接失败恢复（`retry/previous`）与提交中按钮锁定，且在 URL 带 `workspaceId` 时会透传到创建会话请求。
+- 遗留 `table-acl` 与 `rule-group` 路径已下线，治理能力统一以 `table-permissions` 接口为准。
 
 ## Chat 前端交互结构
 - 聊天主区已迁移到 `assistant-ui` primitives（Thread / Message / Composer）。
@@ -162,9 +168,9 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `GET /api/v1/system/workspaces/:workspaceId/datasources/bindings`
 - `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/add`
 - `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/remove`
-- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl/replace`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-acl/remove`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/tables`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
+- `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
 - `POST /api/v1/evaluations/run`
 - `GET /api/v1/evaluations/:jobId`
 - `GET /health`

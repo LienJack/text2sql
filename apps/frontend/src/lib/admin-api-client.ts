@@ -68,16 +68,31 @@ export interface WorkspaceDatasourceBinding {
   updatedAt: string;
 }
 
-export interface WorkspaceDatasourceTableAclRule {
-  id: string;
+export interface WorkspaceDatasourceTablePermissionsSnapshot {
   workspaceId: string;
   datasourceId: string;
-  tableName: string;
-  subjectType: "role" | "user";
-  subjectId: string;
-  effect: "allow" | "deny";
-  createdAt: string;
-  updatedAt: string;
+  tableNames: string[];
+  policyVersion: number;
+}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsInput {
+  tableNames: string[];
+  policyVersion: number;
+  idempotencyKey?: string;
+}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsResult {
+  workspaceId: string;
+  datasourceId: string;
+  tableNames: string[];
+  policyVersion: number;
+  beforeCount: number;
+  afterCount: number;
+  addedCount: number;
+  removedCount: number;
+  retainedCount: number;
+  addedTables: string[];
+  removedTables: string[];
 }
 
 export interface PaginatedResult<T> {
@@ -163,6 +178,21 @@ function readNumber(value: unknown, fallback: number): number {
     }
   }
   return fallback;
+}
+
+function normalizeTableNames(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const deduped = new Set<string>();
+  for (const item of value) {
+    const normalized = String(item ?? "").trim().toLowerCase();
+    if (!normalized) {
+      continue;
+    }
+    deduped.add(normalized);
+  }
+  return Array.from(deduped).sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeWorkspaceSummary(value: unknown): WorkspaceSummary {
@@ -294,23 +324,6 @@ function normalizeWorkspaceDatasourceBinding(
       typeof record.datasourceType === "string" ? record.datasourceType : undefined,
     datasourceStatus:
       typeof record.datasourceStatus === "string" ? record.datasourceStatus : undefined,
-    createdAt: String(record.createdAt ?? new Date(0).toISOString()),
-    updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
-  };
-}
-
-function normalizeWorkspaceDatasourceTableAclRule(
-  value: unknown
-): WorkspaceDatasourceTableAclRule {
-  const record = isRecord(value) ? value : {};
-  return {
-    id: String(record.id ?? ""),
-    workspaceId: String(record.workspaceId ?? ""),
-    datasourceId: String(record.datasourceId ?? ""),
-    tableName: String(record.tableName ?? ""),
-    subjectType: record.subjectType === "user" ? "user" : "role",
-    subjectId: String(record.subjectId ?? ""),
-    effect: record.effect === "deny" ? "deny" : "allow",
     createdAt: String(record.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
   };
@@ -815,22 +828,6 @@ export async function removeWorkspaceDatasourceBindings(
   }
 }
 
-export async function listWorkspaceDatasourceTableAcl(
-  workspaceId: string,
-  datasourceId: string
-): Promise<WorkspaceDatasourceTableAclRule[]> {
-  try {
-    const data = await request<unknown>(
-      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/table-acl`
-    );
-    const record = isRecord(data) ? data : {};
-    const items = Array.isArray(record.items) ? record.items : [];
-    return items.map((item) => normalizeWorkspaceDatasourceTableAclRule(item));
-  } catch (error) {
-    throw toAdminApiError(error);
-  }
-}
-
 export async function listWorkspaceDatasourceTables(
   workspaceId: string,
   datasourceId: string
@@ -849,42 +846,103 @@ export async function listWorkspaceDatasourceTables(
   }
 }
 
-export async function replaceWorkspaceDatasourceTableAcl(input: {
-  workspaceId: string;
-  datasourceId: string;
-  subjectType: "role" | "user";
-  subjectId: string;
-  effect: "allow" | "deny";
-  tableNames: string[];
-}): Promise<{
-  addedTables: string[];
-  removedTables: string[];
-  retainedTables: string[];
-}> {
+export async function listWorkspaceDatasourceTablePermissions(
+  workspaceId: string,
+  datasourceId: string
+): Promise<WorkspaceDatasourceTablePermissionsSnapshot> {
   try {
     const data = await request<unknown>(
-      `/api/v1/system/workspaces/${input.workspaceId}/datasources/${input.datasourceId}/table-acl/replace`,
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/table-permissions`
+    );
+    const record = isRecord(data) ? data : {};
+    const tableNames = normalizeTableNames(
+      record.tableNames ??
+        record.tables ??
+        record.selectedTables ??
+        record.items
+    );
+    const policyVersion = readNumber(record.policyVersion ?? record.version, 0);
+
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      tableNames,
+      policyVersion
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function replaceWorkspaceDatasourceTablePermissions(
+  workspaceId: string,
+  datasourceId: string,
+  input: ReplaceWorkspaceDatasourceTablePermissionsInput
+): Promise<ReplaceWorkspaceDatasourceTablePermissionsResult> {
+  try {
+    const normalizedTableNames = normalizeTableNames(input.tableNames);
+    const normalizedPolicyVersion = Math.max(0, Math.floor(input.policyVersion));
+    const normalizedIdempotencyKey = input.idempotencyKey?.trim() || undefined;
+
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/table-permissions`,
       {
-        method: "POST",
+        method: "PUT",
+        headers: normalizedIdempotencyKey
+          ? { "x-idempotency-key": normalizedIdempotencyKey }
+          : undefined,
         body: JSON.stringify({
-          subjectType: input.subjectType,
-          subjectId: input.subjectId,
-          effect: input.effect,
-          tableNames: input.tableNames
+          tableNames: normalizedTableNames,
+          policyVersion: normalizedPolicyVersion
         })
       }
     );
+
     const record = isRecord(data) ? data : {};
+    const impactSummary = isRecord(record.impactSummary) ? record.impactSummary : {};
+    const addedTables = normalizeTableNames(impactSummary.addedTables ?? record.addedTables);
+    const removedTables = normalizeTableNames(
+      impactSummary.removedTables ?? record.removedTables
+    );
+    const tableNames = normalizeTableNames(
+      record.tableNames ??
+        record.tables ??
+        record.selectedTables ??
+        normalizedTableNames
+    );
+    const policyVersion = readNumber(
+      record.policyVersion ?? record.version,
+      normalizedPolicyVersion
+    );
+
+    const addedCount = readNumber(impactSummary.addedCount ?? record.addedCount, addedTables.length);
+    const removedCount = readNumber(
+      impactSummary.removedCount ?? record.removedCount,
+      removedTables.length
+    );
+    const afterCount = readNumber(impactSummary.afterCount ?? record.afterCount, tableNames.length);
+    const inferredBeforeCount = Math.max(0, afterCount - addedCount + removedCount);
+    const beforeCount = readNumber(
+      impactSummary.beforeCount ?? record.beforeCount,
+      inferredBeforeCount
+    );
+    const retainedCount = readNumber(
+      impactSummary.retainedCount ?? record.retainedCount,
+      Math.max(0, afterCount - addedCount)
+    );
+
     return {
-      addedTables: Array.isArray(record.addedTables)
-        ? record.addedTables.map((item) => String(item))
-        : [],
-      removedTables: Array.isArray(record.removedTables)
-        ? record.removedTables.map((item) => String(item))
-        : [],
-      retainedTables: Array.isArray(record.retainedTables)
-        ? record.retainedTables.map((item) => String(item))
-        : []
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      tableNames,
+      policyVersion,
+      beforeCount,
+      afterCount,
+      addedCount,
+      removedCount,
+      retainedCount,
+      addedTables,
+      removedTables
     };
   } catch (error) {
     throw toAdminApiError(error);

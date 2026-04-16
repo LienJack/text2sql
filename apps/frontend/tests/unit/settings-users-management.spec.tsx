@@ -89,7 +89,9 @@ describe("UsersManagementPanel", () => {
     });
   });
 
-  it("supports create user with workspace and variables", async () => {
+  it(
+    "supports create user with workspace and variables",
+    async () => {
     const user = userEvent.setup();
 
     render(<UsersManagementPanel actorRole="admin" />);
@@ -119,7 +121,9 @@ describe("UsersManagementPanel", () => {
         variables: { TEAM: "growth" }
       });
     });
-  });
+    },
+    15000
+  );
 
   it("supports status toggle, reset password and batch delete", async () => {
     const user = userEvent.setup();

@@ -1,14 +1,11 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import type { Datasource, DatasourceType } from "@text2sql/shared-types";
 import { DomainError } from "../../common/domain-error";
 import { AuditLogRepository } from "../data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
 import { QueryExecutorRouterService } from "../data/query/query-executor-router.service";
-import {
-  WorkspaceDatasourcePolicyRepository,
-  type DatasourcePolicyEffect,
-  type DatasourcePolicySubjectType
-} from "../data/persistence/workspace-datasource-policy.repository";
+import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
 import { WorkspaceRepository } from "../data/persistence/workspace.repository";
 
 type Actor = {
@@ -18,8 +15,38 @@ type Actor = {
   isSystemAdmin?: boolean;
 };
 
+type ReplaceTablePermissionIdempotencyRecord = {
+  payloadHash: string;
+  response: {
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    tableNames: string[];
+    impactSummary: {
+      beforeCount: number;
+      afterCount: number;
+      addedCount: number;
+      removedCount: number;
+      retainedCount: number;
+      addedTables: string[];
+      removedTables: string[];
+    };
+    idempotencyKey: string;
+    replayed: boolean;
+  };
+  expiresAt: number;
+};
+
+const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
 export class WorkspaceDatasourceService {
+  private readonly replaceTablePermissionIdempotencyStore = new Map<
+    string,
+    ReplaceTablePermissionIdempotencyRecord
+  >();
+
   constructor(
     private readonly workspaceRepository: WorkspaceRepository,
     private readonly datasourceRepository: DatasourceRepository,
@@ -180,41 +207,6 @@ export class WorkspaceDatasourceService {
     };
   }
 
-  async listTableAcl(
-    actor: Actor,
-    workspaceId: string,
-    datasourceId: string
-  ): Promise<{
-    workspaceId: string;
-    datasourceId: string;
-    items: Array<{
-      id: string;
-      workspaceId: string;
-      datasourceId: string;
-      tableName: string;
-      subjectType: string;
-      subjectId: string;
-      effect: string;
-      createdAt: string;
-      updatedAt: string;
-    }>;
-  }> {
-    const normalizedWorkspaceId = workspaceId.trim();
-    const normalizedDatasourceId = datasourceId.trim();
-    await this.assertManagePermission(actor, normalizedWorkspaceId);
-    await this.assertDatasourceBound(normalizedWorkspaceId, normalizedDatasourceId);
-
-    const rules = await this.policyRepository.listTablePolicyRules({
-      workspaceId: normalizedWorkspaceId,
-      datasourceId: normalizedDatasourceId
-    });
-    return {
-      workspaceId: normalizedWorkspaceId,
-      datasourceId: normalizedDatasourceId,
-      items: rules
-    };
-  }
-
   async listDatasourceTables(
     actor: Actor,
     workspaceId: string,
@@ -227,7 +219,12 @@ export class WorkspaceDatasourceService {
     const normalizedWorkspaceId = workspaceId.trim();
     const normalizedDatasourceId = datasourceId.trim();
     await this.assertManagePermission(actor, normalizedWorkspaceId);
-    await this.assertDatasourceBound(normalizedWorkspaceId, normalizedDatasourceId);
+    await this.assertDatasourceBound({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      actorId: actor.id,
+      operation: "listDatasourceTables"
+    });
 
     const datasource = await this.datasourceRepository.getDatasourceById(
       normalizedDatasourceId,
@@ -262,136 +259,233 @@ export class WorkspaceDatasourceService {
     };
   }
 
-  async replaceTableAcl(
+  async listDatasourceTablePermissions(
     actor: Actor,
-    input: {
-      workspaceId: string;
-      datasourceId: string;
-      subjectType: DatasourcePolicySubjectType;
-      subjectId: string;
-      effect: DatasourcePolicyEffect;
-      tableNames: string[];
-      reason?: string;
-    }
-  ): Promise<{
-    workspaceId: string;
-    datasourceId: string;
-    subjectType: DatasourcePolicySubjectType;
-    subjectId: string;
-    effect: DatasourcePolicyEffect;
-    addedTables: string[];
-    removedTables: string[];
-    retainedTables: string[];
-  }> {
-    const workspaceId = input.workspaceId.trim();
-    const datasourceId = input.datasourceId.trim();
-    await this.assertManagePermission(actor, workspaceId);
-    await this.assertDatasourceBound(workspaceId, datasourceId);
-
-    const result = await this.policyRepository.replaceTablePolicyRules({
-      workspaceId,
-      datasourceId,
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      effect: input.effect,
-      tableNames: input.tableNames
-    });
-
-    await this.auditLogRepository.appendEvent({
-      phase: "governance",
-      eventType: "workspace.datasource.acl.updated",
-      eventCode: "ACL_REPLACE_BATCH",
-      message: "工作空间数据源表级授权变更",
-      metadata: {
-        workspaceId,
-        datasourceId,
-        subjectType: input.subjectType,
-        subjectId: input.subjectId,
-        effect: input.effect,
-        reason: input.reason,
-        ...result,
-        actorId: actor.id
-      }
-    });
-
-    return {
-      workspaceId,
-      datasourceId,
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      effect: input.effect,
-      ...result
-    };
-  }
-
-  async removeTableAcl(
-    actor: Actor,
-    input: {
-      workspaceId: string;
-      datasourceId: string;
-      subjectType: DatasourcePolicySubjectType;
-      subjectId: string;
-      tableNames: string[];
-      effect?: DatasourcePolicyEffect;
-    }
-  ): Promise<{
-    workspaceId: string;
-    datasourceId: string;
-    removedCount: number;
-  }> {
-    const workspaceId = input.workspaceId.trim();
-    const datasourceId = input.datasourceId.trim();
-    await this.assertManagePermission(actor, workspaceId);
-    await this.assertDatasourceBound(workspaceId, datasourceId);
-
-    const removedCount = await this.policyRepository.deleteTablePolicyRules({
-      workspaceId,
-      datasourceId,
-      subjectType: input.subjectType,
-      subjectId: input.subjectId,
-      tableNames: input.tableNames,
-      effect: input.effect
-    });
-
-    await this.auditLogRepository.appendEvent({
-      phase: "governance",
-      eventType: "workspace.datasource.acl.updated",
-      eventCode: "ACL_REMOVE_BATCH",
-      message: "工作空间数据源表级授权回收",
-      metadata: {
-        workspaceId,
-        datasourceId,
-        subjectType: input.subjectType,
-        subjectId: input.subjectId,
-        effect: input.effect ?? null,
-        tableNames: input.tableNames,
-        removedCount,
-        actorId: actor.id
-      }
-    });
-
-    return {
-      workspaceId,
-      datasourceId,
-      removedCount
-    };
-  }
-
-  private async assertDatasourceBound(
     workspaceId: string,
-    datasourceId: string
-  ): Promise<void> {
-    const bound = await this.policyRepository.isDatasourceBound(workspaceId, datasourceId);
+    datasourceId: string,
+    options?: {
+      keyword?: string;
+    }
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    tableNames: string[];
+  }> {
+    const normalizedWorkspaceId = workspaceId.trim();
+    const normalizedDatasourceId = datasourceId.trim();
+    await this.assertManagePermission(actor, normalizedWorkspaceId);
+    await this.assertDatasourceBound({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      actorId: actor.id,
+      operation: "listDatasourceTablePermissions"
+    });
+    await this.assertDatasourceExists(normalizedDatasourceId);
+
+    const state = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId
+    });
+
+    const keyword = options?.keyword?.trim().toLowerCase();
+    const tableNames = keyword
+      ? state.tableNames.filter((tableName) => tableName.includes(keyword))
+      : state.tableNames;
+
+    return {
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      policyVersion: state.policyVersion,
+      tableNames
+    };
+  }
+
+  async replaceDatasourceTablePermissions(
+    actor: Actor,
+    workspaceId: string,
+    datasourceId: string,
+    body: {
+      policyVersion: number;
+      tableNames: string[];
+    },
+    idempotencyKeyRaw: string | undefined,
+    requestId?: string
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    tableNames: string[];
+    impactSummary: {
+      beforeCount: number;
+      afterCount: number;
+      addedCount: number;
+      removedCount: number;
+      retainedCount: number;
+      addedTables: string[];
+      removedTables: string[];
+    };
+    idempotencyKey: string;
+    replayed: boolean;
+  }> {
+    const normalizedWorkspaceId = workspaceId.trim();
+    const normalizedDatasourceId = datasourceId.trim();
+    await this.assertManagePermission(actor, normalizedWorkspaceId);
+    await this.assertDatasourceBound({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      actorId: actor.id,
+      requestId,
+      operation: "replaceDatasourceTablePermissions"
+    });
+    await this.assertDatasourceExists(normalizedDatasourceId);
+
+    const idempotencyKey = this.normalizeRequiredIdempotencyKey(idempotencyKeyRaw);
+    const normalizedTableNames = this.normalizeTableNames(body.tableNames);
+    const payloadHash = this.hashReplacePayload({
+      policyVersion: body.policyVersion,
+      tableNames: normalizedTableNames
+    });
+    const idempotencyScope = this.buildTablePermissionIdempotencyScope({
+      actorId: actor.id,
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      method: "PUT",
+      idempotencyKey
+    });
+
+    this.pruneReplaceIdempotencyStore();
+    const replayed = this.readReplaceIdempotencyRecord({
+      scope: idempotencyScope,
+      payloadHash
+    });
+    if (replayed) {
+      return replayed;
+    }
+
+    const current = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId
+    });
+    if (body.policyVersion !== current.policyVersion) {
+      throw new DomainError(
+        "POLICY_VERSION_CONFLICT",
+        "策略版本已更新，请刷新后重试。",
+        409,
+        {
+          workspaceId: normalizedWorkspaceId,
+          datasourceId: normalizedDatasourceId,
+          expectedPolicyVersion: body.policyVersion,
+          actualPolicyVersion: current.policyVersion
+        }
+      );
+    }
+
+    const replaced =
+      await this.policyRepository.replaceWorkspaceDatasourceTablePermissions({
+        workspaceId: normalizedWorkspaceId,
+        datasourceId: normalizedDatasourceId,
+        tableNames: normalizedTableNames,
+        expectedPolicyVersion: body.policyVersion
+      });
+
+    const response = {
+      workspaceId: normalizedWorkspaceId,
+      datasourceId: normalizedDatasourceId,
+      policyVersion: replaced.policyVersion,
+      tableNames: replaced.tableNames,
+      impactSummary: {
+        beforeCount: replaced.beforeCount,
+        afterCount: replaced.afterCount,
+        addedCount: replaced.addedTables.length,
+        removedCount: replaced.removedTables.length,
+        retainedCount: replaced.retainedTables.length,
+        addedTables: replaced.addedTables,
+        removedTables: replaced.removedTables
+      },
+      idempotencyKey,
+      replayed: false
+    };
+
+    this.replaceTablePermissionIdempotencyStore.set(idempotencyScope, {
+      payloadHash,
+      response,
+      expiresAt: Date.now() + IDEMPOTENCY_TTL_MS
+    });
+
+    await this.auditLogRepository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.datasource.table-permissions.updated",
+      eventCode: "TABLE_PERMISSIONS_REPLACED",
+      message: "工作空间数据源表权限已替换",
+      metadata: {
+        workspaceId: normalizedWorkspaceId,
+        datasourceId: normalizedDatasourceId,
+        actorId: actor.id,
+        requestId: requestId ?? null,
+        idempotencyKey,
+        replayed: false,
+        beforeCount: response.impactSummary.beforeCount,
+        afterCount: response.impactSummary.afterCount,
+        addedCount: response.impactSummary.addedCount,
+        removedCount: response.impactSummary.removedCount,
+        retainedCount: response.impactSummary.retainedCount,
+        addedTables: response.impactSummary.addedTables,
+        removedTables: response.impactSummary.removedTables,
+        policyVersionBefore: body.policyVersion,
+        policyVersionAfter: response.policyVersion
+      }
+    });
+
+    return response;
+  }
+
+  private async assertDatasourceBound(input: {
+    workspaceId: string;
+    datasourceId: string;
+    actorId: string;
+    requestId?: string;
+    operation: string;
+  }): Promise<void> {
+    const bound = await this.policyRepository.isDatasourceBound(
+      input.workspaceId,
+      input.datasourceId
+    );
     if (!bound) {
+      await this.auditLogRepository.appendEvent({
+        phase: "governance",
+        eventType: "workspace.datasource.binding.rejected",
+        eventCode: "WORKSPACE_DATASOURCE_NOT_BOUND",
+        severity: "warning",
+        message: "检测到未绑定的数据源访问尝试",
+        metadata: {
+          workspaceId: input.workspaceId,
+          datasourceId: input.datasourceId,
+          actorId: input.actorId,
+          operation: input.operation,
+          requestId: input.requestId ?? null
+        }
+      });
       throw new DomainError(
         "WORKSPACE_DATASOURCE_NOT_BOUND",
         "当前工作空间未绑定该数据源。",
         400,
         {
-          workspaceId,
-          datasourceId
+          workspaceId: input.workspaceId,
+          datasourceId: input.datasourceId
         }
       );
+    }
+  }
+
+  private async assertDatasourceExists(datasourceId: string): Promise<void> {
+    const datasource = await this.datasourceRepository.getDatasourceById(datasourceId, {
+      includeDeleted: true
+    });
+    if (!datasource || datasource.status === "deleted") {
+      throw new DomainError("DATASOURCE_NOT_FOUND", "数据源不存在或已删除。", 404, {
+        datasourceId
+      });
     }
   }
 
@@ -441,6 +535,126 @@ export class WorkspaceDatasourceService {
       });
     }
     return Array.from(deduped);
+  }
+
+  private normalizeTableNames(tableNames: string[]): string[] {
+    const deduped = new Set<string>();
+    for (const tableName of tableNames) {
+      const normalized = tableName.trim().toLowerCase();
+      if (!normalized) {
+        continue;
+      }
+      deduped.add(normalized);
+    }
+    return Array.from(deduped).sort((left, right) => left.localeCompare(right));
+  }
+
+  private normalizeRequiredIdempotencyKey(value?: string): string {
+    const normalized = value?.trim();
+    if (!normalized) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "replace 表权限时必须提供 x-idempotency-key。",
+        400,
+        {
+          field: "x-idempotency-key"
+        }
+      );
+    }
+    if (normalized.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        `x-idempotency-key 长度不能超过 ${MAX_IDEMPOTENCY_KEY_LENGTH}`,
+        400,
+        {
+          field: "x-idempotency-key"
+        }
+      );
+    }
+    return normalized;
+  }
+
+  private hashReplacePayload(input: {
+    policyVersion: number;
+    tableNames: string[];
+  }): string {
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          policyVersion: input.policyVersion,
+          tableNames: input.tableNames
+        })
+      )
+      .digest("hex");
+  }
+
+  private buildTablePermissionIdempotencyScope(input: {
+    actorId: string;
+    workspaceId: string;
+    datasourceId: string;
+    method: "PUT";
+    idempotencyKey: string;
+  }): string {
+    return [
+      input.actorId.trim(),
+      input.workspaceId.trim(),
+      input.datasourceId.trim(),
+      input.method,
+      input.idempotencyKey
+    ].join("::");
+  }
+
+  private readReplaceIdempotencyRecord(input: {
+    scope: string;
+    payloadHash: string;
+  }): {
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    tableNames: string[];
+    impactSummary: {
+      beforeCount: number;
+      afterCount: number;
+      addedCount: number;
+      removedCount: number;
+      retainedCount: number;
+      addedTables: string[];
+      removedTables: string[];
+    };
+    idempotencyKey: string;
+    replayed: boolean;
+  } | null {
+    const record = this.replaceTablePermissionIdempotencyStore.get(input.scope);
+    if (!record) {
+      return null;
+    }
+    if (record.expiresAt <= Date.now()) {
+      this.replaceTablePermissionIdempotencyStore.delete(input.scope);
+      return null;
+    }
+    if (record.payloadHash !== input.payloadHash) {
+      throw new DomainError(
+        "IDEMPOTENCY_REPLAY_CONFLICT",
+        "相同 x-idempotency-key 不能提交不同内容。",
+        409,
+        {
+          scope: input.scope
+        }
+      );
+    }
+    return {
+      ...record.response,
+      replayed: true
+    };
+  }
+
+  private pruneReplaceIdempotencyStore(): void {
+    const now = Date.now();
+    for (const [scope, record] of this.replaceTablePermissionIdempotencyStore.entries()) {
+      if (record.expiresAt <= now) {
+        this.replaceTablePermissionIdempotencyStore.delete(scope);
+      }
+    }
   }
 
   private buildTableDiscoverySql(type: DatasourceType): string {

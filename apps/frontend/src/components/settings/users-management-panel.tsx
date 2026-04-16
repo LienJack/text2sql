@@ -1,6 +1,17 @@
 "use client";
 
-import { Edit3, KeyRound, Plus, RefreshCcw, Trash2 } from "lucide-react";
+import {
+  Edit3,
+  KeyRound,
+  Plus,
+  RefreshCcw,
+  Shield,
+  ShieldCheck,
+  Trash2,
+  UserCheck2,
+  UserMinus2,
+  Users2
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
@@ -26,6 +37,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import {
   createUser,
   deleteUser,
@@ -43,6 +55,8 @@ import { UserEditorSheet } from "./user-editor-sheet";
 
 interface UsersManagementPanelProps {
   actorRole: "admin" | "user";
+  workspaceScopeId?: string;
+  workspaceScopeName?: string;
   refreshToken?: number;
 }
 
@@ -68,7 +82,12 @@ function formatDate(value: string): string {
   });
 }
 
-export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManagementPanelProps) {
+export function UsersManagementPanel({
+  actorRole,
+  workspaceScopeId = "",
+  workspaceScopeName,
+  refreshToken = 0
+}: UsersManagementPanelProps) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,6 +112,9 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
   const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const scopedWorkspaceId = workspaceScopeId.trim();
+  const effectiveWorkspaceId =
+    scopedWorkspaceId || (workspaceFilter === "all" ? undefined : workspaceFilter);
 
   const loadWorkspaces = useCallback(async (): Promise<void> => {
     const result = await listWorkspaces({ page: 1, pageSize: 200 });
@@ -105,7 +127,7 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
       const result = await listUsers({
         keyword,
         status: statusFilter,
-        workspaceId: workspaceFilter === "all" ? undefined : workspaceFilter,
+        workspaceId: effectiveWorkspaceId,
         page,
         pageSize
       });
@@ -121,7 +143,7 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
     } finally {
       setLoading(false);
     }
-  }, [keyword, page, pageSize, statusFilter, workspaceFilter]);
+  }, [effectiveWorkspaceId, keyword, page, pageSize, statusFilter]);
 
   useEffect(() => {
     void loadWorkspaces();
@@ -133,9 +155,12 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
 
   useEffect(() => {
     setPage(1);
-  }, [keyword, statusFilter, workspaceFilter]);
+  }, [keyword, scopedWorkspaceId, statusFilter, workspaceFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const activeCount = users.filter((user) => user.status === "active").length;
+  const disabledCount = users.filter((user) => user.status === "disabled").length;
+  const systemAdminCount = users.filter((user) => user.isSystemAdmin).length;
 
   const selectableIds = useMemo(
     () => users.filter((user) => !user.isSystemAdmin).map((user) => user.id),
@@ -278,62 +303,120 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
 
   return (
     <section className="space-y-4">
-      <div className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="搜索账号 / 姓名 / 邮箱"
-            className="w-full sm:w-72"
-          />
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as UserStatus | "all")}
-            className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
-          >
-            <option value="all">全部状态</option>
-            <option value="active">正常</option>
-            <option value="disabled">停用</option>
-          </select>
-          <select
-            value={workspaceFilter}
-            onChange={(event) => setWorkspaceFilter(event.target.value)}
-            className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
-          >
-            <option value="all">全部工作空间</option>
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </option>
-            ))}
-          </select>
-          <Button
-            variant="outline"
-            disabled={loading || operating}
-            onClick={() => {
-              void loadUsers();
-            }}
-          >
-            <RefreshCcw className="h-4 w-4" />
-            刷新
-          </Button>
-          <Button
-            disabled={operating}
-            onClick={() =>
-              setEditor({
-                open: true,
-                mode: "create",
-                user: null
-              })
-            }
-          >
-            <Plus className="h-4 w-4" />
-            新增用户
-          </Button>
+      <div className="space-y-4 rounded-xl border border-[var(--border-default)] bg-[linear-gradient(160deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.9)_52%,rgba(239,246,255,0.56)_100%)] p-4 shadow-[0_10px_24px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1.5">
+            <p className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--action-primary)] uppercase">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              User Governance
+            </p>
+            <p className="text-base font-semibold text-[var(--text-primary)] [font-family:'Avenir_Next_Condensed','DIN_Alternate','Alibaba_PuHuiTi_3.0','PingFang_SC','Noto_Sans_SC',sans-serif]">
+              用户列表与账号策略
+            </p>
+            <p className="text-xs text-[var(--text-tertiary)]">统一管理账号状态、空间归属与安全操作。</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/90 px-3 py-2 text-xs">
+              <p className="inline-flex items-center gap-1 text-[var(--text-tertiary)]">
+                <Users2 className="h-3.5 w-3.5" />
+                总用户
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{total}</p>
+            </div>
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/90 px-3 py-2 text-xs">
+              <p className="inline-flex items-center gap-1 text-[var(--text-tertiary)]">
+                <UserCheck2 className="h-3.5 w-3.5" />
+                启用
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{activeCount}</p>
+            </div>
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/90 px-3 py-2 text-xs">
+              <p className="inline-flex items-center gap-1 text-[var(--text-tertiary)]">
+                <UserMinus2 className="h-3.5 w-3.5" />
+                停用
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{disabledCount}</p>
+            </div>
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/90 px-3 py-2 text-xs">
+              <p className="inline-flex items-center gap-1 text-[var(--text-tertiary)]">
+                <Shield className="h-3.5 w-3.5" />
+                系统管理员
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{systemAdminCount}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[rgba(148,163,184,0.4)] bg-white/82 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              placeholder="搜索账号 / 姓名 / 邮箱"
+              className="w-full border-[rgba(148,163,184,0.45)] bg-white/90 sm:w-72"
+            />
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as UserStatus | "all")}
+              className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
+            >
+              <option value="all">全部状态</option>
+              <option value="active">正常</option>
+              <option value="disabled">停用</option>
+            </select>
+            <select
+              value={scopedWorkspaceId || workspaceFilter}
+              disabled={Boolean(scopedWorkspaceId)}
+              onChange={(event) => setWorkspaceFilter(event.target.value)}
+              className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
+            >
+              <option value="all">全部工作空间</option>
+              {scopedWorkspaceId &&
+              !workspaces.some((workspace) => workspace.id === scopedWorkspaceId) ? (
+                <option value={scopedWorkspaceId}>
+                  {workspaceScopeName || scopedWorkspaceId}
+                </option>
+              ) : null}
+              {workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}
+                </option>
+              ))}
+            </select>
+            {scopedWorkspaceId ? (
+              <Badge variant="secondary">
+                当前作用域：{workspaceScopeName || scopedWorkspaceId}
+              </Badge>
+            ) : null}
+            <Button
+              variant="outline"
+              disabled={loading || operating}
+              onClick={() => {
+                void loadUsers();
+              }}
+            >
+              <RefreshCcw className="h-4 w-4" />
+              刷新
+            </Button>
+            <Button
+              className="shadow-[0_8px_18px_rgba(37,99,235,0.2)]"
+              disabled={operating}
+              onClick={() =>
+                setEditor({
+                  open: true,
+                  mode: "create",
+                  user: null
+                })
+              }
+            >
+              <Plus className="h-4 w-4" />
+              新增用户
+            </Button>
+          </div>
         </div>
 
         {selectedIds.length > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200/80 bg-amber-50/80 px-3 py-2">
             <p className="text-sm text-amber-900">已选择 {selectedIds.length} 个用户。</p>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
@@ -349,7 +432,7 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
         {feedback ? <StateBlock variant={feedback.type}>{feedback.text}</StateBlock> : null}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)]">
+      <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] shadow-[0_8px_18px_rgba(15,23,42,0.04)]">
         {loading ? <StateBlock variant="loading" className="m-4">正在加载用户列表...</StateBlock> : null}
         {!loading && users.length === 0 ? <StateBlock variant="idle" className="m-4">暂无用户数据。</StateBlock> : null}
         {!loading && users.length > 0 ? (
@@ -376,7 +459,7 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
                 {users.map((user) => {
                   const userWorkspaceNames = user.workspaces.map((workspace) => workspace.name).join("、") || "--";
                   return (
-                    <TableRow key={user.id}>
+                    <TableRow key={user.id} className="hover:bg-[var(--surface-subtle)]/70">
                       <TableCell>
                         <Checkbox
                           checked={selectedIds.includes(user.id)}
@@ -386,27 +469,39 @@ export function UsersManagementPanel({ actorRole, refreshToken = 0 }: UsersManag
                         />
                       </TableCell>
                       <TableCell>
-                        <p className="font-medium">{user.name}</p>
+                        <p className="font-semibold text-[var(--text-primary)]">{user.name}</p>
                         <p className="text-xs text-[var(--text-tertiary)]">@{user.account}</p>
                         {user.isSystemAdmin ? (
-                          <Badge variant="outline" className="mt-1 text-[10px]">
+                          <Badge variant="outline" className="mt-1 bg-[var(--surface-subtle)] text-[10px]">
                             系统管理员
                           </Badge>
                         ) : null}
                       </TableCell>
                       <TableCell>{user.email}</TableCell>
-                      <TableCell className="max-w-[280px] truncate text-sm text-[var(--text-secondary)]">
+                      <TableCell className="max-w-[280px] truncate text-sm font-medium text-[var(--text-secondary)]">
                         {userWorkspaceNames}
                       </TableCell>
                       <TableCell>
-                        <Switch
-                          checked={user.status === "active"}
-                          disabled={operating || user.isSystemAdmin}
-                          aria-label={`切换用户 ${user.name} 状态`}
-                          onCheckedChange={(checked) => {
-                            void onToggleStatus(user, checked);
-                          }}
-                        />
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={user.status === "active"}
+                            disabled={operating || user.isSystemAdmin}
+                            aria-label={`切换用户 ${user.name} 状态`}
+                            onCheckedChange={(checked) => {
+                              void onToggleStatus(user, checked);
+                            }}
+                          />
+                          <span
+                            className={cn(
+                              "text-xs font-medium",
+                              user.status === "active"
+                                ? "text-emerald-700"
+                                : "text-[var(--text-tertiary)]"
+                            )}
+                          >
+                            {user.status === "active" ? "正常" : "停用"}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell className="text-xs text-[var(--text-tertiary)]">{formatDate(user.createdAt)}</TableCell>
                       <TableCell>

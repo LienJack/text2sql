@@ -1,8 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import type {
-  DatasourcePolicyEffect,
-  DatasourcePolicySubjectType
-} from "../data/persistence/workspace-datasource-policy.repository";
 import { DomainError } from "../../common/domain-error";
 import { AuditLogRepository } from "../data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
@@ -28,27 +24,19 @@ type DatasourceWorkflowStage =
   | "datasource_ready"
   | "binding_apply_started"
   | "binding_applied"
-  | "acl_apply_started"
   | "completed"
   | "validation_failed"
   | "workspace_create_failed"
   | "datasource_create_failed"
   | "datasource_update_failed"
   | "binding_apply_failed"
-  | "acl_apply_failed"
   | "compensation_soft_delete_failed"
   | "compensation_mark_unavailable_failed";
 
-type WorkflowAclSummary = {
-  subjectType: DatasourcePolicySubjectType;
-  subjectId: string;
-  effect: DatasourcePolicyEffect;
-  requestedTables: string[];
-  addedTables: string[];
-  removedTables: string[];
-  retainedTables: string[];
-  tableCount: number;
-  reason?: string;
+type WorkflowBindingSummary = {
+  bound: boolean;
+  workspaceId?: string;
+  datasourceId?: string;
 };
 
 type WorkflowCompensationSummary = {
@@ -63,7 +51,7 @@ export type DatasourceWorkflowResult = {
   stage: DatasourceWorkflowStage;
   workspaceId: string;
   datasourceId: string;
-  appliedAclSummary: WorkflowAclSummary;
+  bindingSummary: WorkflowBindingSummary;
   idempotencyKey?: string;
   replayed: boolean;
   compensation?: WorkflowCompensationSummary;
@@ -122,7 +110,9 @@ export class DatasourceWorkflowService {
     let workspaceId = this.resolveWorkspaceId(body);
     let datasourceId = this.resolveDatasourceId(body);
     let createdDatasourceId = "";
-    let appliedAclSummary: WorkflowAclSummary = this.emptyAclSummary(body);
+    let bindingSummary: WorkflowBindingSummary = {
+      bound: false
+    };
     let compensation: WorkflowCompensationSummary = {
       attempted: false,
       status: "skipped"
@@ -242,34 +232,10 @@ export class DatasourceWorkflowService {
         );
       }
       stage = "binding_applied";
-
-      stage = "acl_apply_started";
-      const aclResult = await this.workspaceDatasourceService.replaceTableAcl(
-        normalizedActor,
-        {
-          workspaceId,
-          datasourceId,
-          subjectType: body.acl.subjectType,
-          subjectId: body.acl.subjectId,
-          effect: body.acl.effect,
-          tableNames: body.acl.tableNames,
-          reason: body.acl.reason
-        }
-      );
-
-      appliedAclSummary = {
-        subjectType: body.acl.subjectType,
-        subjectId: body.acl.subjectId,
-        effect: body.acl.effect,
-        requestedTables: body.acl.tableNames.map((item) => item.trim().toLowerCase()),
-        addedTables: aclResult.addedTables,
-        removedTables: aclResult.removedTables,
-        retainedTables: aclResult.retainedTables,
-        tableCount:
-          aclResult.addedTables.length +
-          aclResult.removedTables.length +
-          aclResult.retainedTables.length,
-        reason: body.acl.reason?.trim() || undefined
+      bindingSummary = {
+        bound: true,
+        workspaceId,
+        datasourceId
       };
 
       stage = "completed";
@@ -278,7 +244,7 @@ export class DatasourceWorkflowService {
         stage,
         workspaceId,
         datasourceId,
-        appliedAclSummary,
+        bindingSummary,
         idempotencyKey,
         replayed: false
       };
@@ -295,7 +261,7 @@ export class DatasourceWorkflowService {
           workspaceId,
           datasourceId,
           idempotencyKey: idempotencyKey ?? null,
-          appliedAclSummary
+          bindingSummary
         }
       });
 
@@ -330,7 +296,7 @@ export class DatasourceWorkflowService {
           workspaceId: workspaceId || null,
           datasourceId: datasourceId || createdDatasourceId || null,
           idempotencyKey: idempotencyKey ?? null,
-          appliedAclSummary,
+          bindingSummary,
           compensation,
           error: {
             code: normalized.code,
@@ -344,7 +310,7 @@ export class DatasourceWorkflowService {
         stage: failedStage,
         workspaceId: workspaceId || undefined,
         datasourceId: datasourceId || createdDatasourceId || undefined,
-        appliedAclSummary,
+        bindingSummary,
         compensation,
         idempotencyKey: idempotencyKey || undefined
       };
@@ -600,23 +566,6 @@ export class DatasourceWorkflowService {
     if (stage === "binding_apply_started") {
       return "binding_apply_failed";
     }
-    if (stage === "acl_apply_started") {
-      return "acl_apply_failed";
-    }
     return stage;
-  }
-
-  private emptyAclSummary(body: UpsertDatasourceWorkflowDto): WorkflowAclSummary {
-    return {
-      subjectType: body.acl.subjectType,
-      subjectId: body.acl.subjectId,
-      effect: body.acl.effect,
-      requestedTables: body.acl.tableNames.map((item) => item.trim().toLowerCase()),
-      addedTables: [],
-      removedTables: [],
-      retainedTables: [],
-      tableCount: 0,
-      reason: body.acl.reason?.trim() || undefined
-    };
   }
 }

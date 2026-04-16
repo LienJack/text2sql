@@ -39,7 +39,7 @@ export function WorkspaceSelectorInline({
         <div>
           <Label className="text-sm font-medium text-[var(--text-primary)]">工作空间</Label>
           <p className="text-xs text-[var(--text-tertiary)]">
-            ACL 授权必须绑定到一个工作空间。
+            每个数据源都需要绑定到一个工作空间。
           </p>
         </div>
         <Button
@@ -90,4 +90,3 @@ export function WorkspaceSelectorInline({
     </div>
   );
 }
-

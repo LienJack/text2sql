@@ -2,10 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { Datasource, WorkspaceMemberRole } from "@text2sql/shared-types";
 import { DomainError } from "../../common/domain-error";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
-import {
-  WorkspaceDatasourcePolicyRepository,
-  type WorkspaceDatasourceTablePolicyRule
-} from "../data/persistence/workspace-datasource-policy.repository";
+import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
 import { WorkspaceRepository } from "../data/persistence/workspace.repository";
 
 export type AccessRole =
@@ -21,17 +18,18 @@ export type AccessContext = {
   roleSet: AccessRole[];
 };
 
-export type TableAccessDecision =
-  | "explicit_user_deny"
-  | "explicit_user_allow"
-  | "role_deny"
-  | "role_allow"
-  | "default_deny";
+export type TableAccessDecision = "workspace_allow" | "default_deny";
 
 export type ReadableTableResolution = {
   datasourceId: string;
   readableTables: string[];
   decisions: Record<string, TableAccessDecision>;
+};
+
+export type LegacyReadableTableResolution = ReadableTableResolution & {
+  policySource: "workspace_table_permissions";
+  allowedColumnsByTable: Record<string, string[]>;
+  rowFiltersByTable: Record<string, string>;
 };
 
 type ActorLike = {
@@ -146,30 +144,22 @@ export class DatasourceAccessPolicyService {
     const datasourceId = this.normalizeDatasourceId(input.datasourceId);
     await this.assertDatasourceVisible(input.context, datasourceId);
 
-    const rules = await this.policyRepository.listTablePolicyRules({
+    const state = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
       workspaceId: input.context.workspaceId,
       datasourceId
     });
-
+    const allowedTableSet = new Set(this.normalizeTableNames(state.tableNames));
     const candidateTables =
       input.candidateTables && input.candidateTables.length > 0
         ? this.normalizeTableNames(input.candidateTables)
-        : this.normalizeTableNames(rules.map((item) => item.tableName));
+        : Array.from(allowedTableSet);
 
-    const decisions: Record<string, TableAccessDecision> = {};
     const readableTables: string[] = [];
-    const normalizedRoleSet = new Set(
-      input.context.roleSet.map((role) => role.trim().toLowerCase())
-    );
+    const decisions: Record<string, TableAccessDecision> = {};
     for (const tableName of candidateTables) {
-      const decision = this.resolveTableDecision({
-        actorId: input.context.actorId,
-        roleSet: normalizedRoleSet,
-        tableName,
-        rules
-      });
-      decisions[tableName] = decision;
-      if (decision === "explicit_user_allow" || decision === "role_allow") {
+      const allowed = allowedTableSet.has(tableName);
+      decisions[tableName] = allowed ? "workspace_allow" : "default_deny";
+      if (allowed) {
         readableTables.push(tableName);
       }
     }
@@ -181,54 +171,18 @@ export class DatasourceAccessPolicyService {
     };
   }
 
-  private resolveTableDecision(input: {
-    actorId: string;
-    roleSet: Set<string>;
-    tableName: string;
-    rules: WorkspaceDatasourceTablePolicyRule[];
-  }): TableAccessDecision {
-    const rulesForTable = input.rules.filter((item) => item.tableName === input.tableName);
-    const hasExplicitUserDeny = rulesForTable.some(
-      (item) =>
-        item.subjectType === "user" &&
-        item.subjectId === input.actorId &&
-        item.effect === "deny"
-    );
-    if (hasExplicitUserDeny) {
-      return "explicit_user_deny";
-    }
-
-    const hasExplicitUserAllow = rulesForTable.some(
-      (item) =>
-        item.subjectType === "user" &&
-        item.subjectId === input.actorId &&
-        item.effect === "allow"
-    );
-    if (hasExplicitUserAllow) {
-      return "explicit_user_allow";
-    }
-
-    const hasRoleDeny = rulesForTable.some(
-      (item) =>
-        item.subjectType === "role" &&
-        input.roleSet.has(item.subjectId.toLowerCase()) &&
-        item.effect === "deny"
-    );
-    if (hasRoleDeny) {
-      return "role_deny";
-    }
-
-    const hasRoleAllow = rulesForTable.some(
-      (item) =>
-        item.subjectType === "role" &&
-        input.roleSet.has(item.subjectId.toLowerCase()) &&
-        item.effect === "allow"
-    );
-    if (hasRoleAllow) {
-      return "role_allow";
-    }
-
-    return "default_deny";
+  async resolveLegacyReadableTables(input: {
+    context: AccessContext;
+    datasourceId: string;
+    candidateTables?: string[];
+  }): Promise<LegacyReadableTableResolution> {
+    const resolution = await this.resolveReadableTables(input);
+    return {
+      ...resolution,
+      policySource: "workspace_table_permissions",
+      allowedColumnsByTable: {},
+      rowFiltersByTable: {}
+    };
   }
 
   private async assertDatasourceVisible(

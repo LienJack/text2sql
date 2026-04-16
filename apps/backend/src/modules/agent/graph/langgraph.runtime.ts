@@ -383,6 +383,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           sql: state.sql,
           datasourceId: state.datasourceId,
           sessionId: state.sessionId,
+          requestId: state.traceContext?.requestId,
           accessContext: state.accessContext
         });
         const endedAt = new Date().toISOString();

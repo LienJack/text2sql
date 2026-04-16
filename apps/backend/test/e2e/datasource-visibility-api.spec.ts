@@ -90,6 +90,45 @@ describe("datasource visibility api (e2e)", () => {
         datasourceIds: ["ds-visible-only"]
       });
 
+    const listPermissionsRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-visible-only/table-permissions`
+      )
+      .set("x-user-id", "admin-ds-visible")
+      .set("x-user-role", "admin");
+    expect(listPermissionsRes.status).toBe(200);
+    const currentPolicyVersionRaw = listPermissionsRes.body.data.policyVersion;
+    const currentPolicyVersion = Number(
+      typeof currentPolicyVersionRaw === "string"
+        ? currentPolicyVersionRaw
+        : currentPolicyVersionRaw ?? 0
+    );
+
+    const replacePermissionsRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-visible-only/table-permissions`
+      )
+      .set("x-user-id", "admin-ds-visible")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", "idem-ds-visible-only")
+      .send({
+        policyVersion: Number.isFinite(currentPolicyVersion)
+          ? currentPolicyVersion
+          : 0,
+        tableNames: ["orders"]
+      });
+    expect(replacePermissionsRes.status).toBe(200);
+
+    const retiredRuleGroupRouteRes = await request(app.getHttpServer())
+      .post("/api/v1/system/rule-groups")
+      .set("x-user-id", "admin-ds-visible")
+      .set("x-user-role", "admin")
+      .send({
+        workspaceId,
+        name: "legacy-route-should-be-retired"
+      });
+    expect(retiredRuleGroupRouteRes.status).toBe(404);
+
     const scopedListRes = await request(app.getHttpServer())
       .get(`/api/v1/datasources?workspaceId=${workspaceId}`)
       .set("x-user-id", "workspace-member-visible")

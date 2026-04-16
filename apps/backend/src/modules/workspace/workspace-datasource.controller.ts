@@ -2,8 +2,11 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
+  Put,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
@@ -12,9 +15,9 @@ import type { ApiResponse } from "@text2sql/shared-types";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { WorkspaceAdminGuard } from "../auth/workspace-admin.guard";
+import { ListWorkspaceDatasourceTablePermissionsDto } from "./dto/list-workspace-datasource-table-permissions.dto";
+import { ReplaceWorkspaceDatasourceTablePermissionsDto } from "./dto/replace-workspace-datasource-table-permissions.dto";
 import { WorkspaceDatasourceBindingBatchDto } from "./dto/workspace-datasource-binding-batch.dto";
-import { WorkspaceDatasourceTableAclRemoveDto } from "./dto/workspace-datasource-table-acl-remove.dto";
-import { WorkspaceDatasourceTableAclReplaceDto } from "./dto/workspace-datasource-table-acl-replace.dto";
 import { WorkspaceDatasourceService } from "./workspace-datasource.service";
 
 @Controller("/api/v1/system/workspaces")
@@ -76,24 +79,6 @@ export class WorkspaceDatasourceController {
     }
   }
 
-  @Get(":workspaceId/datasources/:datasourceId/table-acl")
-  async listTableAcl(
-    @Param("workspaceId") workspaceId: string,
-    @Param("datasourceId") datasourceId: string,
-    @Req() req: Request
-  ): Promise<ApiResponse<unknown>> {
-    try {
-      const data = await this.workspaceDatasourceService.listTableAcl(
-        req.actor,
-        workspaceId,
-        datasourceId
-      );
-      return ok(req.requestId, data);
-    } catch (error) {
-      return this.toError(req.requestId, error);
-    }
-  }
-
   @Get(":workspaceId/datasources/:datasourceId/tables")
   async listDatasourceTables(
     @Param("workspaceId") workspaceId: string,
@@ -112,45 +97,47 @@ export class WorkspaceDatasourceController {
     }
   }
 
-  @Post(":workspaceId/datasources/:datasourceId/table-acl/replace")
-  async replaceTableAcl(
+  @Get(":workspaceId/datasources/:datasourceId/table-permissions")
+  async listDatasourceTablePermissions(
     @Param("workspaceId") workspaceId: string,
     @Param("datasourceId") datasourceId: string,
-    @Body() body: WorkspaceDatasourceTableAclReplaceDto,
+    @Query() query: ListWorkspaceDatasourceTablePermissionsDto,
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
-      const data = await this.workspaceDatasourceService.replaceTableAcl(req.actor, {
-        workspaceId,
-        datasourceId,
-        subjectType: body.subjectType,
-        subjectId: body.subjectId,
-        effect: body.effect,
-        tableNames: body.tableNames,
-        reason: body.reason
-      });
+      const data =
+        await this.workspaceDatasourceService.listDatasourceTablePermissions(
+          req.actor,
+          workspaceId,
+          datasourceId,
+          {
+            keyword: query.keyword
+          }
+        );
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);
     }
   }
 
-  @Post(":workspaceId/datasources/:datasourceId/table-acl/remove")
-  async removeTableAcl(
+  @Put(":workspaceId/datasources/:datasourceId/table-permissions")
+  async replaceDatasourceTablePermissions(
     @Param("workspaceId") workspaceId: string,
     @Param("datasourceId") datasourceId: string,
-    @Body() body: WorkspaceDatasourceTableAclRemoveDto,
+    @Body() body: ReplaceWorkspaceDatasourceTablePermissionsDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
     @Req() req: Request
   ): Promise<ApiResponse<unknown>> {
     try {
-      const data = await this.workspaceDatasourceService.removeTableAcl(req.actor, {
-        workspaceId,
-        datasourceId,
-        subjectType: body.subjectType,
-        subjectId: body.subjectId,
-        tableNames: body.tableNames,
-        effect: body.effect
-      });
+      const data =
+        await this.workspaceDatasourceService.replaceDatasourceTablePermissions(
+          req.actor,
+          workspaceId,
+          datasourceId,
+          body,
+          idempotencyKey,
+          req.requestId
+        );
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);

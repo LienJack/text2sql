@@ -12,7 +12,7 @@ async function bootstrap(): Promise<void> {
 
   app.enableCors({
     origin: config.corsAllowedOrigins,
-    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "content-type",
       "x-request-id",

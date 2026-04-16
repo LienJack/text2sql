@@ -4,6 +4,8 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   Datasource,
+  PreviewDatasourceTablesRequest,
+  PreviewDatasourceTablesResponse,
   DatasourceUpsertPayload,
   LlmSettingsView,
   ModelCatalogItem,
@@ -244,10 +246,18 @@ export async function listSessions(
 
 export async function listDatasources(options?: {
   includeUnavailable?: boolean;
+  ignoreWorkspaceScope?: boolean;
 }): Promise<Datasource[]> {
   const includeUnavailable = options?.includeUnavailable ?? true;
   const query = includeUnavailable ? "" : "?includeUnavailable=false";
-  return request<Datasource[]>(`/api/v1/datasources${query}`);
+  const headers = options?.ignoreWorkspaceScope
+    ? {
+        "x-workspace-id": ""
+      }
+    : undefined;
+  return request<Datasource[]>(`/api/v1/datasources${query}`, {
+    headers
+  });
 }
 
 export async function createDatasource(input: {
@@ -295,6 +305,24 @@ export async function submitDatasourceWorkflow(
   try {
     return await request<UpsertDatasourceWorkflowResponse>(
       "/api/v1/datasources/workflow",
+      {
+        method: "POST",
+        headers: withIdempotencyHeader(options?.idempotencyKey),
+        body: JSON.stringify(input)
+      }
+    );
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function previewDatasourceTables(
+  input: PreviewDatasourceTablesRequest,
+  options?: { idempotencyKey?: string }
+): Promise<PreviewDatasourceTablesResponse> {
+  try {
+    return await request<PreviewDatasourceTablesResponse>(
+      "/api/v1/datasources/table-preview",
       {
         method: "POST",
         headers: withIdempotencyHeader(options?.idempotencyKey),

@@ -53,7 +53,8 @@ model Datasource {
   updatedAt     DateTime  @updatedAt
   sessions      Session[]
   workspaceBindings WorkspaceDatasourceBinding[]
-  tableAclRules WorkspaceDatasourceTableAcl[]
+  workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
+  workspaceTablePermissions WorkspaceDatasourceTablePermission[]
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -195,7 +196,8 @@ model Workspace {
   workspaceMembers WorkspaceMember[]
   sessions         Session[] @relation("workspace_sessions")
   datasourceBindings WorkspaceDatasourceBinding[]
-  tableAclRules    WorkspaceDatasourceTableAcl[]
+  datasourceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
+  datasourceTablePermissions WorkspaceDatasourceTablePermission[]
 
   @@unique([name])
   @@index([status, deletedAt])
@@ -235,26 +237,34 @@ model WorkspaceDatasourceBinding {
   @@map("workspace_datasource_bindings")
 }
 
-model WorkspaceDatasourceTableAcl {
-  id              String   @id
-  workspaceId     String
-  datasourceId    String
-  tableName       String
-  subjectType     String
-  subjectId       String
-  effect          String   @default("allow")
-  priority        Int      @default(100)
-  createdByUserId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  datasource      Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+model WorkspaceDatasourceTablePermissionSet {
+  id           String   @id
+  workspaceId  String
+  datasourceId String
+  policyVersion Int     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
 
-  @@unique([workspaceId, datasourceId, tableName, subjectType, subjectId])
-  @@index([workspaceId, datasourceId, effect])
-  @@index([workspaceId, datasourceId, subjectType, subjectId])
-  @@index([createdByUserId])
-  @@map("workspace_datasource_table_acls")
+  @@unique([workspaceId, datasourceId])
+  @@index([workspaceId, datasourceId, policyVersion])
+  @@map("workspace_datasource_table_permission_sets")
+}
+
+model WorkspaceDatasourceTablePermission {
+  id           String   @id
+  workspaceId  String
+  datasourceId String
+  tableName    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId, tableName])
+  @@index([workspaceId, datasourceId, createdAt])
+  @@map("workspace_datasource_table_permissions")
 }
 
 model AgentAuditLog {

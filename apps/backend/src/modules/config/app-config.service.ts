@@ -79,6 +79,10 @@ export class AppConfigService {
     );
   }
 
+  get policyEvaluatorMode(): "workspace_table_permissions" {
+    return "workspace_table_permissions";
+  }
+
   get databaseUrl(): string {
     const explicit = this.config.get<string>("DATABASE_URL", "").trim();
     if (explicit) {

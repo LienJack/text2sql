@@ -17,7 +17,7 @@ type RequestLike = {
   rawHeaders?: string[];
 };
 
-const ID_KEYS = ["workspaceId", "workspaceID", "id"] as const;
+const ID_KEYS = ["workspaceId", "workspaceID", "workspace_id", "workspace", "id"] as const;
 
 const normalizeValue = (value: unknown): string | undefined => {
   if (typeof value === "string") {

@@ -14,9 +14,9 @@ import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
 import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
 import {
-  DatasourceAccessPolicyService,
   type AccessContext
 } from "../auth/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
@@ -39,7 +39,7 @@ export class ChatService {
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
     private readonly datasourceService: DatasourceService,
-    private readonly accessPolicyService: DatasourceAccessPolicyService,
+    private readonly policyEvaluatorService: PolicyEvaluatorService,
     private readonly workspaceDatasourcePolicyRepository: WorkspaceDatasourcePolicyRepository,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
@@ -76,7 +76,7 @@ export class ChatService {
     }
 
     if (normalizedWorkspaceId) {
-      const accessContext = await this.accessPolicyService.resolveAccessContext({
+      const accessContext = await this.policyEvaluatorService.resolveAccessContext({
         actor: options?.actor ?? {
           id: normalizedCreatedByUserId,
           role: "user",
@@ -84,7 +84,7 @@ export class ChatService {
         },
         workspaceId: normalizedWorkspaceId
       });
-      const visible = await this.accessPolicyService.listVisibleDatasources({
+      const visible = await this.policyEvaluatorService.listVisibleDatasources({
         context: accessContext
       });
       if (!visible.ids.includes(normalizedDatasource)) {
@@ -675,6 +675,9 @@ export class ChatService {
         workspaceId: string;
         roleSet: string[];
         allowedTables: string[];
+        allowedColumnsByTable: Record<string, string[]>;
+        rowFiltersByTable: Record<string, string>;
+        evaluatorMode: "workspace_table_permissions";
       }
     | undefined
   > {
@@ -683,7 +686,7 @@ export class ChatService {
     if (!workspaceId || !actorId) {
       return undefined;
     }
-    const context: AccessContext = await this.accessPolicyService.resolveAccessContext({
+    const context: AccessContext = await this.policyEvaluatorService.resolveAccessContext({
       actor: {
         id: actorId,
         role: "user",
@@ -691,7 +694,7 @@ export class ChatService {
       },
       workspaceId
     });
-    const readable = await this.accessPolicyService.resolveReadableTables({
+    const readable = await this.policyEvaluatorService.resolveReadableTables({
       context,
       datasourceId: session.datasource
     });
@@ -699,7 +702,10 @@ export class ChatService {
       actorId: context.actorId,
       workspaceId: context.workspaceId,
       roleSet: [...context.roleSet],
-      allowedTables: [...readable.readableTables]
+      allowedTables: [...readable.readableTables],
+      allowedColumnsByTable: { ...readable.allowedColumnsByTable },
+      rowFiltersByTable: { ...readable.rowFiltersByTable },
+      evaluatorMode: readable.mode
     };
   }
 

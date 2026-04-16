@@ -50,7 +50,10 @@ export function WorkspaceDatasourceBindingDialog({
       setError("");
       try {
         const [all, bindings] = await Promise.all([
-          listDatasources({ includeUnavailable: true }),
+          listDatasources({
+            includeUnavailable: true,
+            ignoreWorkspaceScope: true
+          }),
           listWorkspaceDatasourceBindings(workspaceId)
         ]);
         if (!mounted) {

@@ -8,6 +8,7 @@ export type GovernanceAuditLog = {
   id: string;
   runId?: string | null;
   sessionId?: string | null;
+  requestId?: string | null;
   phase: string;
   severity: GovernanceAuditSeverity;
   eventType: string;
@@ -21,6 +22,7 @@ export type GovernanceAuditLogInput = {
   id?: string;
   runId?: string | null;
   sessionId?: string | null;
+  requestId?: string | null;
   phase: string;
   severity?: GovernanceAuditSeverity;
   eventType: string;
@@ -42,6 +44,7 @@ type AgentAuditLogRow = {
   id: string;
   runId: string | null;
   sessionId: string | null;
+  requestId?: string | null;
   phase: string;
   severity: string;
   eventType: string;
@@ -146,17 +149,23 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
     eventType?: string;
     runId?: string;
     sessionId?: string;
+    requestId?: string;
     limit?: number;
   }): Promise<GovernanceAuditLog[]> {
     const eventType = options?.eventType?.trim() || undefined;
     const runId = options?.runId?.trim() || undefined;
     const sessionId = options?.sessionId?.trim() || undefined;
+    const requestId = options?.requestId?.trim() || undefined;
     const limit = Math.max(options?.limit ?? 50, 1);
+    const requestIdMetadataPattern = requestId
+      ? this.buildRequestIdMetadataPattern(requestId)
+      : undefined;
 
     const fromMemory = this.filterLogs(Array.from(this.logs.values()), {
       eventType,
       runId,
-      sessionId
+      sessionId,
+      requestId
     });
 
     const auditModel = this.prisma?.agentAuditLog;
@@ -173,7 +182,10 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
         where: {
           ...(eventType ? { eventType } : {}),
           ...(runId ? { runId } : {}),
-          ...(sessionId ? { sessionId } : {})
+          ...(sessionId ? { sessionId } : {}),
+          ...(requestIdMetadataPattern
+            ? { metadata: { contains: requestIdMetadataPattern } }
+            : {})
         },
         orderBy: {
           createdAt: "desc"
@@ -199,7 +211,8 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
     const sorted = this.filterLogs(Array.from(merged.values()), {
       eventType,
       runId,
-      sessionId
+      sessionId,
+      requestId
     });
     return sorted.slice(0, limit);
   }
@@ -219,17 +232,20 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
     }
     const severity = this.normalizeSeverity(input.severity ?? "info");
     const createdAt = this.toIso(input.createdAt);
+    const requestId = this.normalizeRequestId(input.requestId, input.metadata);
+    const metadata = this.withRequestIdMetadata(input.metadata, requestId);
 
     return {
       id: input.id ?? uuidv4(),
       runId: input.runId?.trim() || null,
       sessionId: input.sessionId?.trim() || null,
+      requestId,
       phase,
       severity,
       eventType,
       eventCode: input.eventCode?.trim() || null,
       message,
-      metadata: input.metadata ?? null,
+      metadata,
       createdAt
     };
   }
@@ -248,6 +264,7 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
       eventType?: string;
       runId?: string;
       sessionId?: string;
+      requestId?: string;
     }
   ): GovernanceAuditLog[] {
     return [...logs]
@@ -261,6 +278,9 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
         if (filter.sessionId && item.sessionId !== filter.sessionId) {
           return false;
         }
+        if (filter.requestId && item.requestId !== filter.requestId) {
+          return false;
+        }
         return true;
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -271,6 +291,8 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
       id: row.id,
       runId: row.runId,
       sessionId: row.sessionId,
+      requestId:
+        this.normalizeRequestId(row.requestId, this.parseMetadata(row.metadata)) ?? null,
       phase: row.phase,
       severity: this.normalizeSeverity(row.severity),
       eventType: row.eventType,
@@ -316,6 +338,37 @@ export class AuditLogRepository implements OnModuleInit, OnModuleDestroy {
       return new Date().toISOString();
     }
     return date.toISOString();
+  }
+
+  private normalizeRequestId(
+    value: string | null | undefined,
+    metadata?: Record<string, unknown> | null
+  ): string | null {
+    const direct = value?.trim();
+    if (direct) {
+      return direct;
+    }
+    const metadataRequestId = metadata?.requestId;
+    if (typeof metadataRequestId === "string" && metadataRequestId.trim()) {
+      return metadataRequestId.trim();
+    }
+    return null;
+  }
+
+  private withRequestIdMetadata(
+    metadata: Record<string, unknown> | null | undefined,
+    requestId: string | null
+  ): Record<string, unknown> | null {
+    if (!requestId) {
+      return metadata ?? null;
+    }
+    const next = { ...(metadata ?? {}) };
+    next.requestId = requestId;
+    return next;
+  }
+
+  private buildRequestIdMetadataPattern(requestId: string): string {
+    return `"requestId":${JSON.stringify(requestId)}`;
   }
 
   private isPrimaryPersistenceConfigured(): boolean {

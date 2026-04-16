@@ -2,7 +2,14 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import type { LlmProviderCode } from "@text2sql/shared-types";
-import { ChevronDown, PackagePlus } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  KeyRound,
+  PackagePlus,
+  Radar,
+  Sparkles
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -92,6 +99,19 @@ const PROVIDER_COPY: Record<
   }
 };
 
+const PROVIDER_ICON_STYLE: Record<LlmProviderCode, string> = {
+  openai: "from-slate-900 to-slate-700 text-white",
+  gemini: "from-emerald-600 to-cyan-600 text-white",
+  deepseek: "from-indigo-700 to-sky-600 text-white",
+  kimi: "from-sky-700 to-blue-500 text-white",
+  volcengine: "from-orange-600 to-rose-500 text-white",
+  siliconflow: "from-teal-600 to-emerald-500 text-white",
+  openrouter: "from-slate-700 to-indigo-600 text-white",
+  minimax: "from-fuchsia-600 to-pink-500 text-white",
+  "tencent-hunyuan": "from-sky-700 to-cyan-600 text-white",
+  tongyi: "from-amber-600 to-orange-500 text-white"
+};
+
 export function ProviderConfigSheet({
   loading,
   supportedProviders,
@@ -115,6 +135,7 @@ export function ProviderConfigSheet({
     () => installableProviders.find((item) => item.provider === provider),
     [installableProviders, provider]
   );
+  const installableCount = installableProviders.length;
 
   const chooseProvider = (nextProvider: LlmProviderCode): void => {
     setProvider(nextProvider);
@@ -151,21 +172,28 @@ export function ProviderConfigSheet({
     <Collapsible
       open={installSectionOpen}
       onOpenChange={setInstallSectionOpen}
-      className="group/install rounded-lg border border-slate-200 bg-white p-4"
+      className="group/install rounded-2xl border border-[rgba(148,163,184,0.38)] bg-[linear-gradient(165deg,rgba(255,255,255,0.96)_0%,rgba(248,250,252,0.9)_48%,rgba(239,246,255,0.62)_100%)] p-4 shadow-[0_12px_28px_rgba(15,23,42,0.06)]"
     >
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left"
+          className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-left"
         >
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <PackagePlus className="h-4 w-4 text-teal-600" />
+            <div className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
+              <PackagePlus className="h-4 w-4 text-emerald-600" />
               安装模型供应商
             </div>
-            <p className="text-xs text-slate-500">点击厂商卡片，弹出配置窗口后保存并同步模型。</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-[var(--text-tertiary)]">
+                点击厂商卡片，弹出配置窗口后保存并同步模型。
+              </p>
+              <Badge variant="outline" className="bg-white/85 text-[10px]">
+                可安装 {installableCount}
+              </Badge>
+            </div>
           </div>
-          <ChevronDown className="h-4 w-4 text-slate-500 transition-transform group-data-[state=open]/install:rotate-180" />
+          <ChevronDown className="h-4 w-4 text-[var(--text-tertiary)] transition-transform group-data-[state=open]/install:rotate-180" />
         </button>
       </CollapsibleTrigger>
 
@@ -174,44 +202,64 @@ export function ProviderConfigSheet({
           <StateBlock variant="idle">所有支持厂商都已安装，可在上方进行模型治理。</StateBlock>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {installableProviders.map((item) => {
-          const copy = PROVIDER_COPY[item.provider];
-          return (
-            <button
-              key={item.provider}
-              type="button"
-              className={cn(
-                "group rounded-xl border p-3 text-left transition-all",
-                "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-              )}
-              disabled={loading || submitting}
-              onClick={() => chooseProvider(item.provider)}
-            >
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold text-white">
-                  {item.displayName.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-semibold text-slate-900">{item.displayName}</p>
+            {installableProviders.map((item) => {
+              const copy = PROVIDER_COPY[item.provider];
+              return (
+                <button
+                  key={item.provider}
+                  type="button"
+                  className={cn(
+                    "group rounded-xl border p-3 text-left transition-all duration-200",
+                    "border-[rgba(148,163,184,0.38)] bg-white/92 hover:-translate-y-0.5 hover:border-[rgba(59,130,246,0.45)] hover:shadow-[0_12px_24px_rgba(37,99,235,0.12)]"
+                  )}
+                  disabled={loading || submitting}
+                  onClick={() => chooseProvider(item.provider)}
+                >
+                  <div className="flex items-start gap-3">
+                    <div
+                      className={cn(
+                        "mt-0.5 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br text-xs font-bold",
+                        PROVIDER_ICON_STYLE[item.provider]
+                      )}
+                    >
+                      {item.displayName.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{item.displayName}</p>
+                        <ArrowUpRight className="h-4 w-4 text-[var(--text-tertiary)] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-[var(--action-primary)]" />
+                      </div>
+                      <p className="line-clamp-2 text-xs text-[var(--text-secondary)]">{copy.summary}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {copy.tags.map((tag) => (
+                          <Badge key={`${item.provider}-${tag}`} variant="outline" className="bg-[var(--surface-subtle)] text-[10px]">
+                            {tag}
+                          </Badge>
+                        ))}
+                        {item.supportsModelListing ? (
+                          <Badge variant="outline" className="bg-[var(--surface-subtle)] text-[10px]">
+                            AUTO_SYNC
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-[var(--surface-subtle)] text-[10px]">
+                            MANUAL_SYNC
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <p className="line-clamp-2 text-xs text-slate-600">{copy.summary}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {copy.tags.map((tag) => (
-                      <Badge key={`${item.provider}-${tag}`} variant="outline" className="text-[10px]">
-                        {tag}
-                      </Badge>
-                    ))}
-                    {item.supportsModelListing ? (
-                      <Badge variant="outline" className="text-[10px]">
-                        AUTO_SYNC
-                      </Badge>
-                    ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <Badge variant="outline" className="bg-white text-[10px]">
+                      <Radar className="h-3 w-3" />
+                      目录拉取
+                    </Badge>
+                    <Badge variant="outline" className="bg-white text-[10px]">
+                      <Sparkles className="h-3 w-3" />
+                      一键接入
+                    </Badge>
                   </div>
-                </div>
-              </div>
-            </button>
-          );
+                </button>
+              );
             })}
           </div>
         )}
@@ -225,6 +273,27 @@ export function ProviderConfigSheet({
                 填写连接信息后保存，系统将自动同步该厂商可用模型。
               </DialogDescription>
             </DialogHeader>
+
+            <div className="rounded-lg border border-[rgba(148,163,184,0.35)] bg-[var(--surface-subtle)]/70 p-3">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                <Badge variant="outline" className="bg-white text-[10px]">
+                  <KeyRound className="h-3 w-3" />
+                  API Key 必填
+                </Badge>
+                <Badge variant="outline" className="bg-white text-[10px]">
+                  保存后自动同步
+                </Badge>
+                {selected?.supportsModelListing ? (
+                  <Badge variant="outline" className="bg-white text-[10px]">
+                    支持自动目录发现
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-white text-[10px]">
+                    需手动补充模型目录
+                  </Badge>
+                )}
+              </div>
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="provider-display-name">显示名称</Label>

@@ -5,7 +5,8 @@ import { QueryExecutorRouterService } from "../../../data/query/query-executor-r
 import type { SqlTableAccessContext } from "../../../data/query/sql-table-access-guard.service";
 import type { LlmGatewayToolDefinition } from "../../../llm/llm-gateway.interface";
 import { DomainError } from "../../../../common/domain-error";
-import { DatasourceAccessPolicyService, type AccessContext } from "../../../auth/datasource-access-policy.service";
+import type { AccessContext } from "../../../auth/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../../../auth/policy-evaluator.service";
 
 const sqlReadonlyInputSchema = z.object({
   sql: z.string().min(1),
@@ -16,7 +17,7 @@ const sqlReadonlyInputSchema = z.object({
 export class SqlReadonlyTool {
   constructor(
     private readonly queryExecutorRouter: QueryExecutorRouterService,
-    private readonly datasourceAccessPolicyService: DatasourceAccessPolicyService
+    private readonly policyEvaluatorService: PolicyEvaluatorService
   ) {}
 
   toDefinition(context: {
@@ -39,17 +40,26 @@ export class SqlReadonlyTool {
             }
           );
         }
+        const policyResult =
+          context.accessContext?.actorId &&
+          context.accessContext.workspaceId &&
+          context.accessContext.roleSet
+            ? await this.resolvePolicy(context.accessContext, context.datasource.id)
+            : undefined;
         const result = await this.queryExecutorRouter.execute({
           datasource: context.datasource,
           sql: parsed.sql,
           limit: parsed.limit ?? 50,
           acl: context.accessContext
             ? {
-                accessContext: context.accessContext,
-                allowedTables: await this.resolveAllowedTables(
-                  context.accessContext,
-                  context.datasource.id
-                )
+                accessContext: {
+                  ...context.accessContext,
+                  evaluatorMode:
+                    policyResult?.mode ?? context.accessContext.evaluatorMode,
+                  allowedColumnsByTable: policyResult?.allowedColumnsByTable ?? {},
+                  rowFiltersByTable: policyResult?.rowFiltersByTable ?? {}
+                },
+                allowedTables: policyResult?.readableTables
               }
             : undefined
         });
@@ -62,14 +72,19 @@ export class SqlReadonlyTool {
     };
   }
 
-  private async resolveAllowedTables(
+  private async resolvePolicy(
     context: SqlTableAccessContext,
     datasourceId: string
-  ): Promise<string[] | undefined> {
+  ): Promise<{
+    mode: "workspace_table_permissions";
+    readableTables: string[];
+    allowedColumnsByTable: Record<string, string[]>;
+    rowFiltersByTable: Record<string, string>;
+  } | undefined> {
     if (!context.actorId || !context.workspaceId || !context.roleSet) {
-      return context.allowedTables;
+      return undefined;
     }
-    const readable = await this.datasourceAccessPolicyService.resolveReadableTables({
+    const readable = await this.policyEvaluatorService.resolveReadableTables({
       context: {
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -77,6 +92,11 @@ export class SqlReadonlyTool {
       } as AccessContext,
       datasourceId
     });
-    return readable.readableTables;
+    return {
+      mode: readable.mode,
+      readableTables: readable.readableTables,
+      allowedColumnsByTable: readable.allowedColumnsByTable,
+      rowFiltersByTable: readable.rowFiltersByTable
+    };
   }
 }

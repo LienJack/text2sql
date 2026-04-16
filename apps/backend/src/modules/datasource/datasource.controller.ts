@@ -22,6 +22,7 @@ import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { DatasourceAccessPolicyService } from "../auth/datasource-access-policy.service";
 import { CreateDatasourceDto } from "./dto/create-datasource.dto";
+import { PreviewDatasourceTablesDto } from "./dto/preview-datasource-tables.dto";
 import { UpdateDatasourceDto } from "./dto/update-datasource.dto";
 import { UpsertDatasourceWorkflowDto } from "./dto/upsert-datasource-workflow.dto";
 import { UploadFileDatasourceDto } from "./dto/upload-file-datasource.dto";
@@ -175,6 +176,23 @@ export class DatasourceController {
         body,
         idempotencyKey
       );
+      return ok(req.requestId, result);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/datasources/table-preview")
+  async previewDatasourceTables(
+    @Body() body: PreviewDatasourceTablesDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const result = await this.datasourceService.previewDatasourceTables(req.actor, {
+        mode: body.mode,
+        datasourceId: body.datasourceId,
+        datasource: body.datasource
+      });
       return ok(req.requestId, result);
     } catch (error) {
       return this.toError(req.requestId, error);

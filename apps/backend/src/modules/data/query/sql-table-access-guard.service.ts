@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { DomainError } from "../../../common/domain-error";
+import { RowFilterRewriteService } from "./row-filter-rewrite.service";
 
 const FORBIDDEN_KEYWORDS = [
   "insert",
@@ -24,6 +25,9 @@ export interface SqlTableAccessContext {
   roleSet?: string[];
   enforcementMode?: "off" | "shadow" | "enforce";
   allowedTables?: string[];
+  allowedColumnsByTable?: Record<string, string[]>;
+  rowFiltersByTable?: Record<string, string>;
+  evaluatorMode?: "workspace_table_permissions";
 }
 
 export interface SqlPolicyLookupRequest {
@@ -51,8 +55,19 @@ export interface SqlTableExtractResult {
   reason?: string;
 }
 
+export interface SqlTableGuardResult {
+  sql: string;
+  referencedTables: string[];
+  rowFilterApplied: boolean;
+  columnHookTriggered: boolean;
+}
+
 @Injectable()
 export class SqlTableAccessGuardService {
+  constructor(
+    private readonly rowFilterRewriteService: RowFilterRewriteService = new RowFilterRewriteService()
+  ) {}
+
   assertReadOnlySql(sql: string): void {
     const normalized = sql.trim();
     const statementWithoutTailSemicolon = normalized.replace(/;+\s*$/, "");
@@ -133,10 +148,15 @@ export class SqlTableAccessGuardService {
     };
   }
 
-  async assertTableAccess(input: SqlTableAclCheckInput): Promise<void> {
+  async assertTableAccess(input: SqlTableAclCheckInput): Promise<SqlTableGuardResult> {
     const accessContext = input.accessContext;
     if (!accessContext || accessContext.enforcementMode === "off") {
-      return;
+      return {
+        sql: input.sql,
+        referencedTables: [],
+        rowFilterApplied: false,
+        columnHookTriggered: false
+      };
     }
 
     const extraction = this.extractReferencedTables(input.sql);
@@ -153,7 +173,12 @@ export class SqlTableAccessGuardService {
     }
 
     if (extraction.tables.length === 0) {
-      return;
+      return {
+        sql: input.sql,
+        referencedTables: [],
+        rowFilterApplied: false,
+        columnHookTriggered: false
+      };
     }
 
     const allowed = this.toNormalizedTableSet(
@@ -206,6 +231,42 @@ export class SqlTableAccessGuardService {
         }
       );
     }
+
+    const columnHookTriggered = this.hasColumnPolicyHook({
+      sql: input.sql,
+      referencedTables: extraction.tables,
+      allowedColumnsByTable: accessContext.allowedColumnsByTable
+    });
+    if (columnHookTriggered && this.containsWildcardProjection(input.sql)) {
+      throw new DomainError(
+        "ACL_PARSE_REJECTED",
+        "检测到列级权限策略与通配符查询组合，当前改写策略无法安全裁剪列集合。",
+        400,
+        {
+          datasourceId: input.datasourceId,
+          workspaceId: accessContext.workspaceId
+        }
+      );
+    }
+
+    const rowFilterRewrite = this.rowFilterRewriteService.rewrite({
+      sql: input.sql,
+      referencedTables: extraction.tables,
+      rowFiltersByTable: accessContext.rowFiltersByTable
+    });
+    if (!rowFilterRewrite.ok) {
+      throw new DomainError("ACL_PARSE_REJECTED", rowFilterRewrite.reason, 400, {
+        datasourceId: input.datasourceId,
+        workspaceId: accessContext.workspaceId
+      });
+    }
+
+    return {
+      sql: rowFilterRewrite.sql,
+      referencedTables: extraction.tables,
+      rowFilterApplied: rowFilterRewrite.rewritten,
+      columnHookTriggered
+    };
   }
 
   private toNormalizedTableSet(input?: Iterable<string>): Set<string> {
@@ -228,6 +289,29 @@ export class SqlTableAccessGuardService {
       return false;
     }
     return allowSet.has(lastSegment);
+  }
+
+  private hasColumnPolicyHook(input: {
+    sql: string;
+    referencedTables: string[];
+    allowedColumnsByTable?: Record<string, string[]>;
+  }): boolean {
+    if (!input.allowedColumnsByTable) {
+      return false;
+    }
+    return input.referencedTables.some((table) => {
+      const normalized = table.trim().toLowerCase();
+      const lastSegment = this.getLastSegment(normalized);
+      const columns =
+        input.allowedColumnsByTable?.[normalized] ??
+        (lastSegment ? input.allowedColumnsByTable?.[lastSegment] : undefined);
+      return Array.isArray(columns) && columns.length > 0;
+    });
+  }
+
+  private containsWildcardProjection(sql: string): boolean {
+    const normalized = this.stripCommentsAndStringLiterals(sql);
+    return /\bselect\s+[\s\S]*\*/i.test(normalized);
   }
 
   private getLastSegment(table: string): string | undefined {

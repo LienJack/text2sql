@@ -4,8 +4,8 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
-import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
+import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
 
 describe("workspace datasource api (e2e)", () => {
   let app: INestApplication;
@@ -42,10 +42,10 @@ describe("workspace datasource api (e2e)", () => {
     await app.close();
   });
 
-  it("supports datasource binding and table acl management", async () => {
+  it("supports workspace table-permissions list/replace with optimistic concurrency and idempotency", async () => {
     await datasourceRepository.upsertDatasource({
-      id: "ds-workspace-bind-1",
-      name: "空间绑定测试库",
+      id: "ds-workspace-permission-1",
+      name: "空间权限测试库",
       type: "sqlite",
       status: "available",
       readonly: true,
@@ -55,101 +55,107 @@ describe("workspace datasource api (e2e)", () => {
       }
     });
 
-    const createWorkspaceRes = await request(app.getHttpServer())
+    const workspaceRes = await request(app.getHttpServer())
       .post("/api/v1/system/workspaces")
-      .set("x-user-id", "admin-workspace-binding")
+      .set("x-user-id", "admin-workspace-permission")
       .set("x-user-role", "admin")
-      .send({
-        name: "空间-数据源绑定测试"
-      });
-    expect(createWorkspaceRes.body.status).toBe("success");
-    const workspaceId = createWorkspaceRes.body.data.id as string;
+      .send({ name: "空间-表权限替换测试" });
+    expect(workspaceRes.status).toBe(201);
+    const workspaceId = workspaceRes.body.data.id as string;
 
     const addBindingRes = await request(app.getHttpServer())
       .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/add`)
-      .set("x-user-id", "admin-workspace-binding")
+      .set("x-user-id", "admin-workspace-permission")
       .set("x-user-role", "admin")
       .send({
-        datasourceIds: ["ds-workspace-bind-1"]
+        datasourceIds: ["ds-workspace-permission-1"]
       });
     expect(addBindingRes.status).toBe(201);
-    expect(addBindingRes.body.status).toBe("success");
-    expect(addBindingRes.body.data.successItems).toEqual(["ds-workspace-bind-1"]);
 
-    const listBindingsRes = await request(app.getHttpServer())
-      .get(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings`)
-      .set("x-user-id", "admin-workspace-binding")
+    const initialListRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
+      )
+      .set("x-user-id", "admin-workspace-permission")
       .set("x-user-role", "admin");
-    expect(listBindingsRes.status).toBe(200);
-    expect(listBindingsRes.body.status).toBe("success");
-    expect(
-      listBindingsRes.body.data.items.some(
-        (item: { datasourceId: string }) => item.datasourceId === "ds-workspace-bind-1"
-      )
-    ).toBe(true);
+    expect(initialListRes.status).toBe(200);
+    expect(initialListRes.body.data.policyVersion).toBe(0);
+    expect(initialListRes.body.data.tableNames).toEqual([]);
 
-    const replaceAclRes = await request(app.getHttpServer())
-      .post(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-bind-1/table-acl/replace`
+    const replaceRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
       )
-      .set("x-user-id", "admin-workspace-binding")
+      .set("x-user-id", "admin-workspace-permission")
       .set("x-user-role", "admin")
+      .set("x-idempotency-key", "ws-perm-replace-1")
       .send({
-        subjectType: "role",
-        subjectId: "member",
-        effect: "allow",
+        policyVersion: 0,
         tableNames: ["orders", "users"]
       });
-    expect(replaceAclRes.status).toBe(201);
-    expect(replaceAclRes.body.status).toBe("success");
-    expect(replaceAclRes.body.data.addedTables).toEqual(["orders", "users"]);
+    expect(replaceRes.status).toBe(200);
+    expect(replaceRes.body.data.policyVersion).toBe(1);
+    expect(replaceRes.body.data.tableNames).toEqual(["orders", "users"]);
+    expect(replaceRes.body.data.impactSummary).toMatchObject({
+      beforeCount: 0,
+      afterCount: 2,
+      addedCount: 2,
+      removedCount: 0
+    });
+    expect(replaceRes.body.data.replayed).toBe(false);
 
-    const listAclRes = await request(app.getHttpServer())
-      .get(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-bind-1/table-acl`
+    const replayRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
       )
-      .set("x-user-id", "admin-workspace-binding")
-      .set("x-user-role", "admin");
-    expect(listAclRes.status).toBe(200);
-    expect(listAclRes.body.status).toBe("success");
-    expect(listAclRes.body.data.items).toHaveLength(2);
+      .set("x-user-id", "admin-workspace-permission")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", "ws-perm-replace-1")
+      .send({
+        policyVersion: 0,
+        tableNames: ["orders", "users"]
+      });
+    expect(replayRes.status).toBe(200);
+    expect(replayRes.body.data.replayed).toBe(true);
+    expect(replayRes.body.data.policyVersion).toBe(1);
 
-    const listTablesRes = await request(app.getHttpServer())
-      .get(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-bind-1/tables`
+    const staleVersionRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
       )
-      .set("x-user-id", "admin-workspace-binding")
-      .set("x-user-role", "admin");
-    expect(listTablesRes.status).toBe(200);
-    expect(listTablesRes.body.status).toBe("success");
-    expect(listTablesRes.body.data.items).toContain("orders");
-    expect(listTablesRes.body.data.items).toContain("users");
+      .set("x-user-id", "admin-workspace-permission")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", "ws-perm-replace-2")
+      .send({
+        policyVersion: 0,
+        tableNames: ["orders"]
+      });
+    expect(staleVersionRes.status).toBe(200);
+    expect(staleVersionRes.body.status).toBe("error");
+    expect(staleVersionRes.body.error.code).toBe("POLICY_VERSION_CONFLICT");
 
-    const removeAclRes = await request(app.getHttpServer())
+    const listRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
+      )
+      .set("x-user-id", "admin-workspace-permission")
+      .set("x-user-role", "admin");
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.data.policyVersion).toBe(1);
+    expect(listRes.body.data.tableNames).toEqual(["orders", "users"]);
+
+    const retiredRouteRes = await request(app.getHttpServer())
       .post(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-bind-1/table-acl/remove`
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-acl/replace`
       )
-      .set("x-user-id", "admin-workspace-binding")
+      .set("x-user-id", "admin-workspace-permission")
       .set("x-user-role", "admin")
       .send({
         subjectType: "role",
         subjectId: "member",
         effect: "allow",
-        tableNames: ["users"]
+        tableNames: ["orders"]
       });
-    expect(removeAclRes.status).toBe(201);
-    expect(removeAclRes.body.status).toBe("success");
-    expect(removeAclRes.body.data.removedCount).toBe(1);
-
-    const removeBindingRes = await request(app.getHttpServer())
-      .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/remove`)
-      .set("x-user-id", "admin-workspace-binding")
-      .set("x-user-role", "admin")
-      .send({
-        datasourceIds: ["ds-workspace-bind-1"]
-      });
-    expect(removeBindingRes.status).toBe(201);
-    expect(removeBindingRes.body.status).toBe("success");
-    expect(removeBindingRes.body.data.successItems).toEqual(["ds-workspace-bind-1"]);
+    expect(retiredRouteRes.status).toBe(404);
   });
 });

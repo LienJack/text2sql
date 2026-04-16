@@ -1,6 +1,16 @@
 "use client";
 
-import { Pencil, Plus, Trash2, UserMinus, UserPlus } from "lucide-react";
+import {
+  Network,
+  Pencil,
+  Plus,
+  Search,
+  ShieldCheck,
+  Trash2,
+  UserMinus,
+  UserPlus,
+  Users2
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
@@ -42,7 +52,7 @@ import {
 import { WorkspaceEditorDialog } from "./workspace-editor-dialog";
 import { WorkspaceMembersDialog } from "./workspace-members-dialog";
 import { WorkspaceDatasourceBindingDialog } from "./workspace-datasource-binding-dialog";
-import { TableAclEditorDialog } from "./table-acl-editor-dialog";
+import { WorkspaceDatasourceTablePermissionsDialog } from "./workspace-datasource-table-permissions-dialog";
 
 interface WorkspaceManagementPanelProps {
   actorRole: "admin" | "user";
@@ -103,7 +113,10 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
   });
   const [membersDialogOpen, setMembersDialogOpen] = useState(false);
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false);
-  const [tableAclDialogOpen, setTableAclDialogOpen] = useState(false);
+  const [tablePermissionsContext, setTablePermissionsContext] = useState<{
+    datasourceId: string;
+    datasourceName: string;
+  } | null>(null);
 
   const [deleteWorkspaceTarget, setDeleteWorkspaceTarget] = useState<WorkspaceSummary | null>(null);
   const [removeMemberTarget, setRemoveMemberTarget] = useState<WorkspaceMember | null>(null);
@@ -216,7 +229,13 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
     setMemberPage(1);
   }, [selectedWorkspaceId, memberKeyword]);
 
+  useEffect(() => {
+    setTablePermissionsContext(null);
+  }, [selectedWorkspaceId]);
+
   const totalMemberPages = Math.max(1, Math.ceil(memberTotal / MEMBER_PAGE_SIZE));
+  const activeMemberCount = members.filter((member) => member.status === "active").length;
+  const selectedWorkspaceBindingCount = workspaceBindings.length;
 
   const setSuccess = (text: string): void => {
     setFeedback({ type: "success", text });
@@ -346,96 +365,151 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
   }
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[320px_1fr]">
-      <aside className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4">
-        <div className="flex items-center gap-2">
-          <Input
-            value={workspaceKeyword}
-            onChange={(event) => setWorkspaceKeyword(event.target.value)}
-            placeholder="搜索工作空间"
-          />
-          <Button
-            size="icon-sm"
-            aria-label="新建工作空间"
-            onClick={() =>
-              setEditor({
-                open: true,
-                mode: "create",
-                workspace: null
-              })
-            }
-          >
-            <Plus className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {feedback ? <StateBlock variant={feedback.type}>{feedback.text}</StateBlock> : null}
-        {loadingWorkspaceList ? <StateBlock variant="loading">正在加载工作空间...</StateBlock> : null}
-        {!loadingWorkspaceList && workspaces.length === 0 ? (
-          <StateBlock variant="idle">暂无工作空间。</StateBlock>
-        ) : null}
-
-        <div className="space-y-1">
-          {workspaces.map((workspace) => {
-            const active = workspace.id === selectedWorkspaceId;
-            return (
-              <div
-                key={workspace.id}
-                className={`rounded-lg border px-3 py-2 transition ${
-                  active
-                    ? "border-[var(--action-primary)] bg-[var(--surface-active)]"
-                    : "border-[var(--border-default)] hover:bg-[var(--surface-page)]"
-                }`}
+    <section className="grid gap-4 xl:grid-cols-[340px_1fr]">
+      <aside className="relative overflow-hidden rounded-2xl border border-[rgba(148,163,184,0.34)] bg-[linear-gradient(160deg,rgba(241,245,249,0.74)_0%,rgba(255,255,255,0.95)_58%,rgba(239,246,255,0.72)_100%)] p-4 shadow-[0_18px_34px_rgba(15,23,42,0.08)]">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -top-20 left-8 h-44 w-44 rounded-full bg-[radial-gradient(circle,rgba(37,99,235,0.18)_0%,rgba(37,99,235,0)_72%)] blur-2xl"
+        />
+        <div className="relative z-10 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--action-primary)] uppercase">
+                Workspace Matrix
+              </p>
+              <p
+                className="text-base font-semibold text-[var(--text-primary)] [font-family:'Avenir_Next_Condensed','DIN_Alternate','Alibaba_PuHuiTi_3.0','PingFang_SC','Noto_Sans_SC',sans-serif]"
               >
-                <button
-                  type="button"
-                  className="w-full text-left"
-                  onClick={() => setSelectedWorkspaceId(workspace.id)}
+                工作空间列表
+              </p>
+            </div>
+            <span className="rounded-full border border-[rgba(148,163,184,0.45)] bg-white/80 px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+              {workspaces.length} 个
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
+              <Input
+                value={workspaceKeyword}
+                onChange={(event) => setWorkspaceKeyword(event.target.value)}
+                className="border-[rgba(148,163,184,0.48)] bg-white/85 pl-9"
+                placeholder="搜索工作空间"
+              />
+            </div>
+            <Button
+              size="icon-sm"
+              className="shadow-[0_8px_16px_rgba(37,99,235,0.24)]"
+              aria-label="新建工作空间"
+              onClick={() =>
+                setEditor({
+                  open: true,
+                  mode: "create",
+                  workspace: null
+                })
+              }
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {feedback ? <StateBlock variant={feedback.type}>{feedback.text}</StateBlock> : null}
+          {loadingWorkspaceList ? <StateBlock variant="loading">正在加载工作空间...</StateBlock> : null}
+          {!loadingWorkspaceList && workspaces.length === 0 ? (
+            <StateBlock variant="idle">暂无工作空间。</StateBlock>
+          ) : null}
+
+          <div className="space-y-2">
+            {workspaces.map((workspace) => {
+              const active = workspace.id === selectedWorkspaceId;
+              return (
+                <div
+                  key={workspace.id}
+                  className={`animate-in fade-in slide-in-from-left-3 rounded-xl border px-3 py-2.5 transition duration-300 ${
+                    active
+                      ? "border-[rgba(37,99,235,0.7)] bg-[linear-gradient(145deg,rgba(219,234,254,0.78)_0%,rgba(239,246,255,0.96)_100%)] shadow-[0_12px_20px_rgba(37,99,235,0.16)]"
+                      : "border-[rgba(148,163,184,0.45)] bg-white/84 hover:border-[rgba(59,130,246,0.38)] hover:bg-white"
+                  }`}
                 >
-                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{workspace.name}</p>
-                  <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-                    成员 {workspace.memberCount ?? "--"} · 创建于 {formatDate(workspace.createdAt)}
-                  </p>
-                </button>
-                <div className="mt-2 flex justify-end gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`重命名工作空间 ${workspace.name}`}
-                    onClick={() =>
-                      setEditor({
-                        open: true,
-                        mode: "rename",
-                        workspace
-                      })
-                    }
+                  <button
+                    type="button"
+                    className="w-full text-left"
+                    onClick={() => setSelectedWorkspaceId(workspace.id)}
                   >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    disabled={workspace.isDefault}
-                    aria-label={`删除工作空间 ${workspace.name}`}
-                    onClick={() => setDeleteWorkspaceTarget(workspace)}
-                  >
-                    <Trash2 className="h-4 w-4 text-rose-600" />
-                  </Button>
+                    <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{workspace.name}</p>
+                    <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+                      成员 {workspace.memberCount ?? "--"} · 创建于 {formatDate(workspace.createdAt)}
+                    </p>
+                  </button>
+                  <div className="mt-2.5 flex justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`重命名工作空间 ${workspace.name}`}
+                      onClick={() =>
+                        setEditor({
+                          open: true,
+                          mode: "rename",
+                          workspace
+                        })
+                      }
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={workspace.isDefault}
+                      aria-label={`删除工作空间 ${workspace.name}`}
+                      onClick={() => setDeleteWorkspaceTarget(workspace)}
+                    >
+                      <Trash2 className="h-4 w-4 text-rose-600" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </aside>
 
-      <section className="space-y-4 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-base font-semibold text-[var(--text-primary)]">
-              {selectedWorkspace ? `成员管理 · ${selectedWorkspace.name}` : "成员管理"}
+      <section className="relative overflow-hidden rounded-2xl border border-[rgba(148,163,184,0.34)] bg-[linear-gradient(145deg,rgba(255,255,255,0.96)_0%,rgba(248,250,252,0.9)_42%,rgba(239,246,255,0.58)_100%)] shadow-[0_18px_34px_rgba(15,23,42,0.08)]">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 top-0 h-52 w-52 rounded-full bg-[radial-gradient(circle,rgba(56,189,248,0.2)_0%,rgba(56,189,248,0)_72%)] blur-2xl"
+        />
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 border-b border-[rgba(148,163,184,0.35)] bg-white/60 p-4 backdrop-blur-sm">
+          <div className="space-y-1">
+            <p className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--action-primary)] uppercase">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Workspace Governance
             </p>
+              <p
+                className="text-base font-semibold text-[var(--text-primary)] [font-family:'Avenir_Next_Condensed','DIN_Alternate','Alibaba_PuHuiTi_3.0','PingFang_SC','Noto_Sans_SC',sans-serif]"
+              >
+                {selectedWorkspace ? `成员管理 · ${selectedWorkspace.name}` : "成员管理"}
+              </p>
             <p className="text-xs text-[var(--text-tertiary)]">支持搜索、角色调整、移除与批量移除。</p>
           </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/85 px-3 py-2 text-xs text-[var(--text-secondary)]">
+              <p className="inline-flex items-center gap-1 font-medium text-[var(--text-tertiary)]">
+                <Users2 className="h-3.5 w-3.5" />
+                在线成员
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{activeMemberCount}</p>
+            </div>
+            <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/85 px-3 py-2 text-xs text-[var(--text-secondary)]">
+              <p className="inline-flex items-center gap-1 font-medium text-[var(--text-tertiary)]">
+                <Network className="h-3.5 w-3.5" />
+                数据源绑定
+              </p>
+              <p className="text-base font-semibold text-[var(--text-primary)]">{selectedWorkspaceBindingCount}</p>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -443,13 +517,6 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
               onClick={() => setBindingDialogOpen(true)}
             >
               数据源绑定
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!selectedWorkspace || operating}
-              onClick={() => setTableAclDialogOpen(true)}
-            >
-              表权限
             </Button>
             <Button
               variant="outline"
@@ -468,165 +535,182 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={memberKeyword}
-            onChange={(event) => setMemberKeyword(event.target.value)}
-            placeholder="搜索成员（姓名 / 账号 / 邮箱）"
-            className="w-full sm:w-80"
-          />
-        </div>
+        <div className="relative z-10 space-y-4 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={memberKeyword}
+              onChange={(event) => setMemberKeyword(event.target.value)}
+              placeholder="搜索成员（姓名 / 账号 / 邮箱）"
+              className="w-full border-[rgba(148,163,184,0.48)] bg-white/90 sm:w-80"
+            />
+          </div>
 
-        <div className="rounded-lg border border-[var(--border-default)] p-3">
-          <p className="mb-2 text-sm font-medium text-[var(--text-primary)]">
-            工作空间 - 数据源绑定关系
-          </p>
-          {loadingBindings ? (
-            <StateBlock variant="loading">正在加载绑定关系...</StateBlock>
-          ) : workspaceBindings.length === 0 ? (
-            <StateBlock variant="idle">当前工作空间暂未绑定数据源。</StateBlock>
-          ) : (
-            <div className="space-y-2">
-              {workspaceBindings.map((binding) => (
-                <div
-                  key={binding.id}
-                  className="flex items-center justify-between rounded-md border border-[var(--border-default)] px-3 py-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-[var(--text-primary)]">
-                      {binding.datasourceName ?? binding.datasourceId}
-                    </p>
-                    <p className="text-xs text-[var(--text-tertiary)]">
-                      {binding.datasourceId} · {binding.datasourceType ?? "--"}
-                    </p>
+          <div className="rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/82 p-3">
+            <p className="mb-2 text-sm font-semibold text-[var(--text-primary)]">
+              工作空间 - 数据源绑定关系
+            </p>
+            {loadingBindings ? (
+              <StateBlock variant="loading">正在加载绑定关系...</StateBlock>
+            ) : workspaceBindings.length === 0 ? (
+              <StateBlock variant="idle">当前工作空间暂未绑定数据源。</StateBlock>
+            ) : (
+              <div className="space-y-2">
+                {workspaceBindings.map((binding) => (
+                  <div
+                    key={binding.id}
+                    className="flex items-center justify-between rounded-lg border border-[rgba(148,163,184,0.4)] bg-white/85 px-3 py-2"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">
+                        {binding.datasourceName ?? binding.datasourceId}
+                      </p>
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        {binding.datasourceId} · {binding.datasourceType ?? "--"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={binding.datasourceStatus === "available" ? "secondary" : "outline"}>
+                        {binding.datasourceStatus ?? "unknown"}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={operating}
+                        onClick={() =>
+                          setTablePermissionsContext({
+                            datasourceId: binding.datasourceId,
+                            datasourceName: binding.datasourceName ?? binding.datasourceId
+                          })
+                        }
+                      >
+                        表权限编辑
+                      </Button>
+                    </div>
                   </div>
-                  <Badge variant={binding.datasourceStatus === "available" ? "secondary" : "outline"}>
-                    {binding.datasourceStatus ?? "unknown"}
-                  </Badge>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {selectedWorkspace === null ? (
+            <StateBlock variant="idle">请选择左侧工作空间后查看成员。</StateBlock>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-[rgba(148,163,184,0.42)] bg-white/86">
+              {loadingMembers ? <StateBlock variant="loading" className="m-4">正在加载成员...</StateBlock> : null}
+              {!loadingMembers && members.length === 0 ? (
+                <StateBlock variant="idle" className="m-4">当前空间暂无成员。</StateBlock>
+              ) : null}
+
+              {!loadingMembers && members.length > 0 ? (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">
+                          <Checkbox
+                            checked={
+                              members.length > 0 && members.every((member) => selectedMemberIds.includes(member.id))
+                            }
+                            aria-label="全选成员"
+                            onCheckedChange={(checked) =>
+                              setSelectedMemberIds(checked === true ? members.map((member) => member.id) : [])
+                            }
+                          />
+                        </TableHead>
+                        <TableHead className="w-[260px]">成员</TableHead>
+                        <TableHead className="w-[180px]">角色</TableHead>
+                        <TableHead className="w-[140px]">账号状态</TableHead>
+                        <TableHead className="w-[140px]">加入时间</TableHead>
+                        <TableHead className="w-[120px] text-right">操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {members.map((member) => (
+                        <TableRow key={member.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedMemberIds.includes(member.id)}
+                              aria-label={`选择成员 ${member.name}`}
+                              onCheckedChange={(checked) =>
+                                setSelectedMemberIds((previous) => {
+                                  if (checked === true) {
+                                    return previous.includes(member.id) ? previous : [...previous, member.id];
+                                  }
+                                  return previous.filter((id) => id !== member.id);
+                                })
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <p className="font-medium">{member.name}</p>
+                            <p className="text-xs text-[var(--text-tertiary)]">@{member.account} · {member.email}</p>
+                          </TableCell>
+                          <TableCell>
+                            <select
+                              value={member.role}
+                              className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
+                              onChange={(event) =>
+                                void changeMemberRole(
+                                  member,
+                                  event.target.value === "admin" ? "admin" : "member"
+                                )
+                              }
+                            >
+                              <option value="member">普通成员</option>
+                              <option value="admin">空间管理员</option>
+                            </select>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={member.status === "active" ? "secondary" : "outline"}>
+                              {member.status === "active" ? "正常" : "停用"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-xs text-[var(--text-tertiary)]">{formatDate(member.createdAt)}</TableCell>
+                          <TableCell>
+                            <div className="flex justify-end">
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`移除成员 ${member.name}`}
+                                onClick={() => setRemoveMemberTarget(member)}
+                              >
+                                <UserMinus className="h-4 w-4 text-rose-600" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    <p>
+                      第 {memberPage} / {totalMemberPages} 页，共 {memberTotal} 名成员
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={memberPage <= 1 || loadingMembers}
+                        onClick={() => setMemberPage((previous) => Math.max(1, previous - 1))}
+                      >
+                        上一页
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={memberPage >= totalMemberPages || loadingMembers}
+                        onClick={() => setMemberPage((previous) => Math.min(totalMemberPages, previous + 1))}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
         </div>
-
-        {selectedWorkspace === null ? (
-          <StateBlock variant="idle">请选择左侧工作空间后查看成员。</StateBlock>
-        ) : (
-          <div className="overflow-hidden rounded-lg border border-[var(--border-default)]">
-            {loadingMembers ? <StateBlock variant="loading" className="m-4">正在加载成员...</StateBlock> : null}
-            {!loadingMembers && members.length === 0 ? (
-              <StateBlock variant="idle" className="m-4">当前空间暂无成员。</StateBlock>
-            ) : null}
-
-            {!loadingMembers && members.length > 0 ? (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">
-                        <Checkbox
-                          checked={
-                            members.length > 0 && members.every((member) => selectedMemberIds.includes(member.id))
-                          }
-                          aria-label="全选成员"
-                          onCheckedChange={(checked) =>
-                            setSelectedMemberIds(checked === true ? members.map((member) => member.id) : [])
-                          }
-                        />
-                      </TableHead>
-                      <TableHead className="w-[260px]">成员</TableHead>
-                      <TableHead className="w-[180px]">角色</TableHead>
-                      <TableHead className="w-[140px]">账号状态</TableHead>
-                      <TableHead className="w-[140px]">加入时间</TableHead>
-                      <TableHead className="w-[120px] text-right">操作</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {members.map((member) => (
-                      <TableRow key={member.id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedMemberIds.includes(member.id)}
-                            aria-label={`选择成员 ${member.name}`}
-                            onCheckedChange={(checked) =>
-                              setSelectedMemberIds((previous) => {
-                                if (checked === true) {
-                                  return previous.includes(member.id) ? previous : [...previous, member.id];
-                                }
-                                return previous.filter((id) => id !== member.id);
-                              })
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <p className="font-medium">{member.name}</p>
-                          <p className="text-xs text-[var(--text-tertiary)]">@{member.account} · {member.email}</p>
-                        </TableCell>
-                        <TableCell>
-                          <select
-                            value={member.role}
-                            className="h-8 rounded-md border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 text-sm"
-                            onChange={(event) =>
-                              void changeMemberRole(
-                                member,
-                                event.target.value === "admin" ? "admin" : "member"
-                              )
-                            }
-                          >
-                            <option value="member">普通成员</option>
-                            <option value="admin">空间管理员</option>
-                          </select>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={member.status === "active" ? "secondary" : "outline"}>
-                            {member.status === "active" ? "正常" : "停用"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs text-[var(--text-tertiary)]">{formatDate(member.createdAt)}</TableCell>
-                        <TableCell>
-                          <div className="flex justify-end">
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`移除成员 ${member.name}`}
-                              onClick={() => setRemoveMemberTarget(member)}
-                            >
-                              <UserMinus className="h-4 w-4 text-rose-600" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-
-                <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-                  <p>
-                    第 {memberPage} / {totalMemberPages} 页，共 {memberTotal} 名成员
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={memberPage <= 1 || loadingMembers}
-                      onClick={() => setMemberPage((previous) => Math.max(1, previous - 1))}
-                    >
-                      上一页
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={memberPage >= totalMemberPages || loadingMembers}
-                      onClick={() => setMemberPage((previous) => Math.min(totalMemberPages, previous + 1))}
-                    >
-                      下一页
-                    </Button>
-                  </div>
-                </div>
-              </>
-            ) : null}
-          </div>
-        )}
       </section>
 
       <WorkspaceEditorDialog
@@ -657,14 +741,15 @@ export function WorkspaceManagementPanel({ actorRole, refreshToken = 0 }: Worksp
           }
         }}
       />
-
-      <TableAclEditorDialog
-        open={tableAclDialogOpen}
+      <WorkspaceDatasourceTablePermissionsDialog
+        open={tablePermissionsContext !== null}
         workspaceId={selectedWorkspace?.id ?? ""}
         workspaceName={selectedWorkspace?.name ?? ""}
+        datasourceId={tablePermissionsContext?.datasourceId ?? ""}
+        datasourceName={tablePermissionsContext?.datasourceName ?? ""}
         onOpenChange={(open) => {
-          setTableAclDialogOpen(open);
           if (!open) {
+            setTablePermissionsContext(null);
             void loadWorkspaceBindings();
           }
         }}

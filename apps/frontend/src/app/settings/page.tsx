@@ -1,7 +1,7 @@
 "use client";
 
-import { Building2, Search, Settings2, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Building2, Search, Settings2, ShieldCheck, Users } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LlmSettingsView, ModelCatalogItem } from "@text2sql/shared-types";
 import { ModelCatalogTable } from "@/components/settings/model-catalog-table";
 import { ProviderConfigSheet } from "@/components/settings/provider-config-sheet";
@@ -9,8 +9,11 @@ import { UsersManagementPanel } from "@/components/settings/users-management-pan
 import { WorkspaceManagementPanel } from "@/components/settings/workspace-management-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { StateBlock } from "@/components/ui/state-block";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { listWorkspaces, type WorkspaceSummary } from "@/lib/admin-api-client";
+import { readActiveWorkspaceId, writeActiveWorkspaceId } from "@/lib/datasource-session-context";
 import {
   batchSetModelsEnabled,
   checkProviderHealth,
@@ -23,16 +26,67 @@ import {
   syncProviderModels
 } from "@/lib/settings-api-client";
 
-type SettingsTab = "models" | "workspaces" | "users";
+type SettingsTab = "users" | "workspaces" | "models";
+const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models"];
+const USER_TABS: SettingsTab[] = ["models"];
+
+function readWorkspaceIdFromQuery(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("workspaceId")?.trim() ?? "";
+}
+
+function syncWorkspaceContext(workspaceId: string): void {
+  writeActiveWorkspaceId(workspaceId);
+  if (typeof window === "undefined") {
+    return;
+  }
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const next = new URL(window.location.href);
+  if (workspaceId) {
+    next.searchParams.set("workspaceId", workspaceId);
+  } else {
+    next.searchParams.delete("workspaceId");
+  }
+  const nextPath = `${next.pathname}${next.search}${next.hash}`;
+  if (nextPath !== current) {
+    window.history.replaceState({}, "", nextPath);
+  }
+}
+
+function resolveWorkspaceId(
+  items: WorkspaceSummary[],
+  previousWorkspaceId: string
+): string {
+  if (items.length === 0) {
+    return "";
+  }
+  const fromQuery = readWorkspaceIdFromQuery();
+  const fromSession = readActiveWorkspaceId();
+  const candidate = [fromQuery, fromSession, previousWorkspaceId, items[0]?.id]
+    .map((value) => value?.trim() ?? "")
+    .find((value) => value.length > 0);
+  if (!candidate) {
+    return items[0]?.id ?? "";
+  }
+  return items.some((workspace) => workspace.id === candidate)
+    ? candidate
+    : (items[0]?.id ?? "");
+}
 
 export default function SettingsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<SettingsTab>("models");
+  const [tab, setTab] = useState<SettingsTab>("users");
   const [query, setQuery] = useState("");
   const [managementRefreshToken, setManagementRefreshToken] = useState(0);
   const [view, setView] = useState<LlmSettingsView | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState("");
   const [supportedProviders, setSupportedProviders] = useState<
     Array<{
       provider: LlmSettingsView["models"][number]["provider"];
@@ -42,30 +96,65 @@ export default function SettingsPage() {
     }>
   >([]);
 
-  const load = async (mode: "initial" | "refresh" = "refresh") => {
-    if (mode === "initial") {
-      setInitialLoading(true);
-    } else {
-      setRefreshing(true);
+  const loadWorkspaceOptions = useCallback(async (enabled: boolean): Promise<void> => {
+    if (!enabled) {
+      setWorkspaces([]);
+      setWorkspaceId("");
+      setWorkspaceError("");
+      return;
     }
-    setError("");
+
+    setWorkspaceLoading(true);
     try {
-      const [settingsView, providerOptions] = await Promise.all([
-        fetchSettingsView(),
-        fetchSupportedProviders()
-      ]);
-      setView(settingsView);
-      setSupportedProviders(providerOptions);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "加载设置数据失败");
+      const result = await listWorkspaces({ page: 1, pageSize: 200 });
+      setWorkspaces(result.items);
+      setWorkspaceError("");
+      setWorkspaceId((previous) => {
+        const nextWorkspaceId = resolveWorkspaceId(result.items, previous);
+        syncWorkspaceContext(nextWorkspaceId);
+        return nextWorkspaceId;
+      });
+    } catch (workspaceLoadError) {
+      setWorkspaceError(
+        workspaceLoadError instanceof Error
+          ? workspaceLoadError.message
+          : "加载工作空间失败"
+      );
+      setWorkspaces([]);
+      setWorkspaceId("");
     } finally {
-      if (mode === "initial") {
-        setInitialLoading(false);
-      } else {
-        setRefreshing(false);
-      }
+      setWorkspaceLoading(false);
     }
-  };
+  }, []);
+
+  const load = useCallback(
+    async (mode: "initial" | "refresh" = "refresh") => {
+      if (mode === "initial") {
+        setInitialLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      setError("");
+      try {
+        const [settingsView, providerOptions] = await Promise.all([
+          fetchSettingsView(),
+          fetchSupportedProviders()
+        ]);
+        setView(settingsView);
+        setSupportedProviders(providerOptions);
+        await loadWorkspaceOptions(settingsView.actor.role === "admin");
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "加载设置数据失败");
+      } finally {
+        if (mode === "initial") {
+          setInitialLoading(false);
+        } else {
+          setRefreshing(false);
+        }
+      }
+    },
+    [loadWorkspaceOptions]
+  );
 
   const refreshModels = async () => {
     try {
@@ -86,7 +175,6 @@ export default function SettingsPage() {
     }
   };
 
-  /** 用写接口的返回值直接 patch 单条 model，省掉一次查询请求 */
   const patchModel = (updated: ModelCatalogItem | undefined) => {
     if (!updated?.id) {
       void refreshModels();
@@ -103,7 +191,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void load("initial");
-  }, []);
+  }, [load]);
 
   const modelRows = useMemo(() => {
     const rows = view?.models ?? [];
@@ -112,11 +200,18 @@ export default function SettingsPage() {
       return rows;
     }
     return rows.filter((row) =>
-      `${row.provider} ${row.model} ${row.displayName}`.toLowerCase().includes(keyword)
+      `${row.provider} ${row.model} ${row.displayName}`
+        .toLowerCase()
+        .includes(keyword)
     );
   }, [query, view?.models]);
 
+  const selectedWorkspace = useMemo(
+    () => workspaces.find((workspace) => workspace.id === workspaceId) ?? null,
+    [workspaceId, workspaces]
+  );
   const actorRole = view?.actor.role ?? "user";
+  const availableTabs = actorRole === "admin" ? ADMIN_TABS : USER_TABS;
   const busy = initialLoading || refreshing;
 
   const filteredView = useMemo(() => {
@@ -132,63 +227,150 @@ export default function SettingsPage() {
     return {
       ...view,
       models: modelRows,
-      providers: view.providers.filter((provider) => modelsByProvider.has(provider.id) || !query.trim())
+      providers: view.providers.filter(
+        (provider) => modelsByProvider.has(provider.id) || !query.trim()
+      )
     };
   }, [modelRows, query, view]);
 
-  return (
-    <div className="mx-auto flex h-[calc(100vh-4rem)] w-full max-w-[1400px] flex-col gap-4 bg-[var(--surface-page)] p-4 sm:p-6">
-      <section className="space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)] sm:flex sm:items-center sm:justify-between sm:space-y-0">
-        <Tabs value={tab} onValueChange={(value) => setTab(value as SettingsTab)} className="w-full sm:w-auto">
-          <TabsList className="h-10">
-            <TabsTrigger value="models">
-              <Settings2 className="h-3.5 w-3.5" />
-              LLM 模型
-            </TabsTrigger>
-            <TabsTrigger value="workspaces">
-              <Building2 className="h-3.5 w-3.5" />
-              工作空间
-            </TabsTrigger>
-            <TabsTrigger value="users">
-              <Users className="h-3.5 w-3.5" />
-              用户管理
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+  useEffect(() => {
+    if (!availableTabs.includes(tab)) {
+      setTab(availableTabs[0] ?? "models");
+    }
+  }, [availableTabs, tab]);
 
-        <div className="flex w-full items-center gap-2 sm:w-auto">
-          {tab === "models" ? (
-            <div className="relative w-full sm:w-72">
-              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="pl-9"
-                placeholder="搜索模型..."
-              />
-            </div>
-          ) : (
-            <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
-              {tab === "workspaces" ? "工作空间治理面板" : "用户治理面板"}
+  const governanceTab = actorRole === "admin" && tab === "users";
+
+  return (
+    <div className="relative flex h-[calc(100vh-4rem)] w-full flex-col gap-3 bg-[var(--surface-page)] px-4 py-3 sm:px-6 sm:py-4">
+      <section className="space-y-4 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1.5">
+            <p className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--action-primary)] uppercase">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Governance Console
             </p>
-          )}
-          <Button
-            onClick={() => {
-              if (tab === "models") {
-                void load();
-              } else {
-                setManagementRefreshToken((previous) => previous + 1);
-              }
-            }}
+            <h2
+              className="text-[22px] font-semibold leading-tight text-[var(--text-primary)] [font-family:'Avenir_Next_Condensed','DIN_Alternate','Alibaba_PuHuiTi_3.0','PingFang_SC','Noto_Sans_SC',sans-serif]"
+            >
+              系统设置与权限编排
+            </h2>
+          </div>
+          <span className="rounded-full border border-[rgba(148,163,184,0.45)] bg-[rgba(248,250,252,0.7)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
+            {tab === "models" ? "模型治理视图" : "组织治理视图"}
+          </span>
+        </div>
+
+        <div className="space-y-3 sm:flex sm:items-center sm:justify-between sm:space-y-0">
+          <Tabs
+            value={tab}
+            onValueChange={(value) => setTab(value as SettingsTab)}
+            className="w-full sm:w-auto"
           >
-            {refreshing ? "刷新中..." : "刷新"}
-          </Button>
+            <TabsList className="h-11 rounded-full border border-[rgba(148,163,184,0.44)] bg-[rgba(241,245,249,0.62)] p-1">
+              {actorRole === "admin" ? (
+                <>
+                  <TabsTrigger
+                    value="users"
+                    className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    用户列表
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="workspaces"
+                    className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+                  >
+                    <Building2 className="h-3.5 w-3.5" />
+                    工作空间
+                  </TabsTrigger>
+                </>
+              ) : null}
+              <TabsTrigger
+                value="models"
+                className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                LLM 模型
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            {tab === "models" ? (
+              <div className="relative w-full sm:w-72">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="border-[rgba(148,163,184,0.5)] bg-white/80 pl-9"
+                  placeholder="搜索模型..."
+                />
+              </div>
+            ) : governanceTab ? (
+              actorRole === "admin" ? (
+                <div className="min-w-[220px]">
+                  <NativeSelect
+                    value={workspaceId}
+                    disabled={workspaceLoading || workspaces.length === 0}
+                    onChange={(event) => {
+                      const nextWorkspaceId = event.target.value;
+                      setWorkspaceId(nextWorkspaceId);
+                      syncWorkspaceContext(nextWorkspaceId);
+                      setManagementRefreshToken((previous) => previous + 1);
+                    }}
+                    className="border-[rgba(148,163,184,0.45)] bg-white/80"
+                  >
+                    <NativeSelectOption value="">请选择工作空间</NativeSelectOption>
+                    {workspaces.map((workspace) => (
+                      <NativeSelectOption key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </div>
+              ) : (
+                <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                  当前账号不可管理治理配置
+                </p>
+              )
+            ) : (
+              <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                工作空间与成员管理
+              </p>
+            )}
+            <Button
+              className="shadow-[0_8px_20px_rgba(37,99,235,0.22)]"
+              onClick={() => {
+                if (tab === "models") {
+                  void load();
+                  return;
+                }
+                if (actorRole === "admin") {
+                  void loadWorkspaceOptions(true);
+                }
+                setManagementRefreshToken((previous) => previous + 1);
+              }}
+            >
+              {refreshing || workspaceLoading ? "刷新中..." : "刷新"}
+            </Button>
+          </div>
         </div>
       </section>
 
-      <section className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-        {initialLoading && !view ? <StateBlock variant="loading">正在加载设置数据...</StateBlock> : null}
+      <section className="min-h-0 flex-1 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-4 shadow-[0_1px_3px_rgba(15,23,42,0.05)]">
+        {initialLoading && !view ? (
+          <StateBlock variant="loading">正在加载设置数据...</StateBlock>
+        ) : null}
         {error ? <StateBlock variant="error">{error}</StateBlock> : null}
+        {governanceTab && workspaceError ? (
+          <StateBlock variant="error">{workspaceError}</StateBlock>
+        ) : null}
+        {governanceTab && selectedWorkspace ? (
+          <StateBlock variant="idle">
+            当前治理作用域：{selectedWorkspace.name}
+          </StateBlock>
+        ) : null}
 
         {view ? (
           tab === "models" ? (
@@ -250,25 +432,44 @@ export default function SettingsPage() {
                 <ProviderConfigSheet
                   loading={busy}
                   supportedProviders={supportedProviders}
-                  installedProviderCodes={(view?.providers ?? []).map((item) => item.provider)}
+                  installedProviderCodes={(view?.providers ?? []).map(
+                    (item) => item.provider
+                  )}
                   onCreateProvider={async (payload) => {
                     try {
                       await createProviderConfig(payload);
                     } catch (err) {
-                      setError(err instanceof Error ? err.message : "创建厂商配置失败");
+                      setError(
+                        err instanceof Error ? err.message : "创建厂商配置失败"
+                      );
                     } finally {
                       await load("refresh");
                     }
                   }}
                 />
               ) : (
-                <StateBlock variant="idle">当前账号仅可查看与切换模型，不可管理配置。</StateBlock>
+                <StateBlock variant="idle">
+                  当前账号仅可查看与切换模型，不可管理配置。
+                </StateBlock>
               )}
             </div>
-          ) : tab === "workspaces" ? (
-            <WorkspaceManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
+          ) : tab === "users" ? (
+            <UsersManagementPanel
+              actorRole={actorRole}
+              workspaceScopeId={workspaceId}
+              workspaceScopeName={selectedWorkspace?.name}
+              refreshToken={managementRefreshToken}
+            />
           ) : (
-            <UsersManagementPanel actorRole={actorRole} refreshToken={managementRefreshToken} />
+            <div className="space-y-4">
+              <StateBlock variant="idle">
+                在此维护工作空间、成员与数据源绑定关系。
+              </StateBlock>
+              <WorkspaceManagementPanel
+                actorRole={actorRole}
+                refreshToken={managementRefreshToken}
+              />
+            </div>
           )
         ) : null}
       </section>

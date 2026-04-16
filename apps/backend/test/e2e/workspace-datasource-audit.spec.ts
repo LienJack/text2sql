@@ -48,7 +48,7 @@ describe("workspace datasource governance audit (e2e)", () => {
     await app.close();
   });
 
-  it("persists governance audit events for binding and table acl updates", async () => {
+  it("persists governance audit events for table-permissions replace", async () => {
     const workspaceRes = await request(app.getHttpServer())
       .post("/api/v1/system/workspaces")
       .set("x-user-id", "admin-audit-ops")
@@ -67,20 +67,26 @@ describe("workspace datasource governance audit (e2e)", () => {
     expect(bindRes.status).toBe(201);
     expect(bindRes.body.status).toBe("success");
 
-    const aclRes = await request(app.getHttpServer())
-      .post(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-acl/replace`
+    const initialListRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
+      )
+      .set("x-user-id", "admin-audit-ops")
+      .set("x-user-role", "admin");
+    expect(initialListRes.status).toBe(200);
+
+    const replaceRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
       )
       .set("x-user-id", "admin-audit-ops")
       .set("x-user-role", "admin")
+      .set("x-idempotency-key", "audit-table-permissions-1")
       .send({
-        subjectType: "role",
-        subjectId: "member",
-        effect: "allow",
+        policyVersion: Number(initialListRes.body.data.policyVersion ?? 0),
         tableNames: ["orders"]
       });
-    expect(aclRes.status).toBe(201);
-    expect(aclRes.body.status).toBe("success");
+    expect(replaceRes.status).toBe(200);
 
     const bindingEvents = await auditLogRepository.listEvents({
       eventType: "workspace.datasource.binding.updated",
@@ -94,17 +100,51 @@ describe("workspace datasource governance audit (e2e)", () => {
       )
     ).toBe(true);
 
-    const aclEvents = await auditLogRepository.listEvents({
-      eventType: "workspace.datasource.acl.updated",
+    const permissionEvents = await auditLogRepository.listEvents({
+      eventType: "workspace.datasource.table-permissions.updated",
       limit: 20
     });
     expect(
-      aclEvents.some(
+      permissionEvents.some(
         (event) =>
-          event.eventCode === "ACL_REPLACE_BATCH" &&
-          event.metadata?.workspaceId === workspaceId
+          event.metadata?.workspaceId === workspaceId &&
+          event.metadata?.datasourceId === "sqlite_main"
       )
     ).toBe(true);
+  });
+
+  it("records security audit when workspace and datasource binding is forged", async () => {
+    const workspaceRes = await request(app.getHttpServer())
+      .post("/api/v1/system/workspaces")
+      .set("x-user-id", "admin-audit-forged-binding")
+      .set("x-user-role", "admin")
+      .send({ name: "审计验证空间-伪造绑定" });
+    expect(workspaceRes.body.status).toBe("success");
+    const workspaceId = workspaceRes.body.data.id as string;
+
+    const forgedListRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
+      )
+      .set("x-user-id", "admin-audit-forged-binding")
+      .set("x-user-role", "admin");
+    expect(forgedListRes.status).toBe(200);
+    expect(forgedListRes.body.status).toBe("error");
+    expect(forgedListRes.body.error.code).toBe("WORKSPACE_DATASOURCE_NOT_BOUND");
+
+    const securityEvents = await auditLogRepository.listEvents({
+      eventType: "workspace.datasource.binding.rejected",
+      limit: 50
+    });
+    const event = securityEvents.find(
+      (item) =>
+        item.metadata?.workspaceId === workspaceId &&
+        item.metadata?.datasourceId === "sqlite_main" &&
+        item.metadata?.actorId === "admin-audit-forged-binding"
+    );
+    expect(event).toBeDefined();
+    expect(event?.eventCode).toBe("WORKSPACE_DATASOURCE_NOT_BOUND");
+    expect(event?.severity).toBe("warning");
   });
 
   it("records acl denied audit event before rejecting unauthorized table read", async () => {
@@ -131,6 +171,7 @@ describe("workspace datasource governance audit (e2e)", () => {
         sql: "SELECT * FROM users",
         datasourceId: "sqlite_main",
         sessionId: "session-audit-denied",
+        requestId: "req-audit-denied-1",
         accessContext: {
           actorId: "workspace-member-audit",
           workspaceId,
@@ -143,6 +184,7 @@ describe("workspace datasource governance audit (e2e)", () => {
 
     const deniedEvents = await auditLogRepository.listEvents({
       eventType: "workspace.datasource.acl.denied",
+      requestId: "req-audit-denied-1",
       limit: 20
     });
     expect(
@@ -150,7 +192,8 @@ describe("workspace datasource governance audit (e2e)", () => {
         (event) =>
           event.eventCode === "ACL_FORBIDDEN" &&
           event.metadata?.workspaceId === workspaceId &&
-          event.metadata?.datasourceId === "sqlite_main"
+          event.metadata?.datasourceId === "sqlite_main" &&
+          event.requestId === "req-audit-denied-1"
       )
     ).toBe(true);
   });
@@ -194,7 +237,7 @@ describe("workspace datasource governance audit (e2e)", () => {
     ).toBe(true);
   });
 
-  it("keeps workflow state idempotent across repeated binding and acl replace submissions", async () => {
+  it("keeps table-permissions replace idempotent on key replay", async () => {
     await datasourceRepository.upsertDatasource({
       id: "ds-audit-workflow-idempotent",
       name: "审计幂等验证库",
@@ -215,82 +258,51 @@ describe("workspace datasource governance audit (e2e)", () => {
     expect(workspaceRes.body.status).toBe("success");
     const workspaceId = workspaceRes.body.data.id as string;
 
-    for (let index = 0; index < 2; index += 1) {
-      const bindRes = await request(app.getHttpServer())
-        .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/add`)
-        .set("x-user-id", "admin-audit-idempotent")
-        .set("x-user-role", "admin")
-        .send({
-          datasourceIds: ["ds-audit-workflow-idempotent"]
-        });
-      expect(bindRes.status).toBe(201);
-      expect(bindRes.body.status).toBe("success");
-      expect(bindRes.body.data.failedItems).toEqual([]);
-    }
-
-    for (let index = 0; index < 2; index += 1) {
-      const aclRes = await request(app.getHttpServer())
-        .post(
-          `/api/v1/system/workspaces/${workspaceId}/datasources/ds-audit-workflow-idempotent/table-acl/replace`
-        )
-        .set("x-user-id", "admin-audit-idempotent")
-        .set("x-user-role", "admin")
-        .send({
-          subjectType: "role",
-          subjectId: "member",
-          effect: "allow",
-          tableNames: ["orders", "users"]
-        });
-      expect(aclRes.status).toBe(201);
-      expect(aclRes.body.status).toBe("success");
-    }
-
-    const listBindingsRes = await request(app.getHttpServer())
-      .get(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings`)
+    const bindRes = await request(app.getHttpServer())
+      .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/add`)
       .set("x-user-id", "admin-audit-idempotent")
-      .set("x-user-role", "admin");
-    expect(listBindingsRes.status).toBe(200);
-    expect(
-      listBindingsRes.body.data.items.filter(
-        (item: { datasourceId: string }) =>
-          item.datasourceId === "ds-audit-workflow-idempotent"
-      )
-    ).toHaveLength(1);
+      .set("x-user-role", "admin")
+      .send({
+        datasourceIds: ["ds-audit-workflow-idempotent"]
+      });
+    expect(bindRes.status).toBe(201);
 
-    const listAclRes = await request(app.getHttpServer())
+    const listRes = await request(app.getHttpServer())
       .get(
-        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-audit-workflow-idempotent/table-acl`
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-audit-workflow-idempotent/table-permissions`
       )
       .set("x-user-id", "admin-audit-idempotent")
       .set("x-user-role", "admin");
-    expect(listAclRes.status).toBe(200);
-    expect(listAclRes.body.status).toBe("success");
-    const aclTableNames = listAclRes.body.data.items.map(
-      (item: { tableName: string }) => item.tableName
-    ) as string[];
-    expect(aclTableNames.sort()).toEqual(["orders", "users"]);
+    expect(listRes.status).toBe(200);
+    const version = Number(listRes.body.data.policyVersion ?? 0);
 
-    const bindingEvents = await auditLogRepository.listEvents({
-      eventType: "workspace.datasource.binding.updated",
-      limit: 100
-    });
-    const currentWorkspaceBindingEvents = bindingEvents.filter(
-      (event) =>
-        event.eventCode === "BINDING_ADD_BATCH" &&
-        event.metadata?.workspaceId === workspaceId
-    );
-    expect(currentWorkspaceBindingEvents).toHaveLength(2);
+    const key = `table-permissions-idem-${Date.now()}`;
+    const firstReplace = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-audit-workflow-idempotent/table-permissions`
+      )
+      .set("x-user-id", "admin-audit-idempotent")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", key)
+      .send({
+        policyVersion: version,
+        tableNames: ["orders"]
+      });
+    expect(firstReplace.status).toBe(200);
+    expect(firstReplace.body.data.replayed).toBe(false);
 
-    const aclEvents = await auditLogRepository.listEvents({
-      eventType: "workspace.datasource.acl.updated",
-      limit: 100
-    });
-    const currentWorkspaceAclEvents = aclEvents.filter(
-      (event) =>
-        event.eventCode === "ACL_REPLACE_BATCH" &&
-        event.metadata?.workspaceId === workspaceId &&
-        event.metadata?.datasourceId === "ds-audit-workflow-idempotent"
-    );
-    expect(currentWorkspaceAclEvents).toHaveLength(2);
+    const replayedReplace = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-audit-workflow-idempotent/table-permissions`
+      )
+      .set("x-user-id", "admin-audit-idempotent")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", key)
+      .send({
+        policyVersion: version,
+        tableNames: ["orders"]
+      });
+    expect(replayedReplace.status).toBe(200);
+    expect(replayedReplace.body.data.replayed).toBe(true);
   });
 });

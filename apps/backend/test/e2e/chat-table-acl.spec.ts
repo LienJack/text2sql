@@ -64,6 +64,38 @@ describe("chat table acl / policy guard (e2e)", () => {
         datasourceIds: ["sqlite_main"]
       });
 
+    const listPermissionsRes = await request(app.getHttpServer())
+      .get(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
+      )
+      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-role", "admin");
+    expect(listPermissionsRes.status).toBe(200);
+    const policyVersion = Number(listPermissionsRes.body.data.policyVersion ?? 0);
+
+    const replacePermissionsRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
+      )
+      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", "idem-chat-table-acl")
+      .send({
+        policyVersion: Number.isFinite(policyVersion) ? policyVersion : 0,
+        tableNames: ["users"]
+      });
+    expect(replacePermissionsRes.status).toBe(200);
+
+    const retiredRuleGroupRouteRes = await request(app.getHttpServer())
+      .post("/api/v1/system/rule-groups")
+      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-role", "admin")
+      .send({
+        workspaceId,
+        name: "legacy-chat-group"
+      });
+    expect(retiredRuleGroupRouteRes.status).toBe(404);
+
     const createSessionRes = await request(app.getHttpServer())
       .post("/api/v1/sessions")
       .set("x-user-id", "chat-member-acl")

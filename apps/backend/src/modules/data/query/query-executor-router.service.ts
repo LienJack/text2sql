@@ -51,14 +51,14 @@ export class QueryExecutorRouterService {
     acl?: QueryExecutionAclOptions;
   }): Promise<QueryExecutionResult> {
     this.tableAccessGuard.assertReadOnlySql(input.sql);
-    await this.tableAccessGuard.assertTableAccess({
+    const guarded = await this.tableAccessGuard.assertTableAccess({
       sql: input.sql,
       datasourceId: input.datasource.id,
       accessContext: input.acl?.accessContext,
       allowedTables: input.acl?.allowedTables,
       resolveAllowedTables: input.acl?.resolveAllowedTables
     });
-    const normalizedSql = this.ensureLimit(input.sql, input.limit);
+    const normalizedSql = this.ensureLimit(guarded.sql, input.limit);
     const executor = this.executors.get(input.datasource.type);
 
     if (!executor) {

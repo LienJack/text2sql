@@ -236,4 +236,32 @@ describe("datasource api (e2e)", () => {
       listRes.body.data.some((item: { name: string }) => item.name === failedName)
     ).toBe(false);
   });
+
+  it("returns table preview list for ACL checked selection", async () => {
+    jest.spyOn(datasourceService, "previewDatasourceTables").mockResolvedValue({
+      mode: "create",
+      items: ["orders", "users"]
+    });
+
+    const previewRes = await request(app.getHttpServer())
+      .post("/api/v1/datasources/table-preview")
+      .set("x-user-role", "admin")
+      .set("x-user-id", "admin-preview")
+      .send({
+        mode: "create",
+        datasource: {
+          type: "mysql",
+          name: "预览数据源",
+          host: "127.0.0.1",
+          port: 3306,
+          database: "analytics",
+          username: "root",
+          password: "secret"
+        }
+      });
+
+    expect(previewRes.status).toBe(201);
+    expect(previewRes.body.status).toBe("success");
+    expect(previewRes.body.data.items).toEqual(["orders", "users"]);
+  });
 });

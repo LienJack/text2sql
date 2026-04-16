@@ -84,16 +84,59 @@ describe("SqlTableAccessGuardService", () => {
   });
 
   it("allows query when all referenced tables are authorized", async () => {
+    const result = await guard.assertTableAccess({
+      sql: "SELECT o.id, u.name FROM orders o JOIN users u ON u.id = o.user_id",
+      datasourceId: "sqlite_main",
+      accessContext: {
+        actorId: "user-1",
+        workspaceId: "ws-1",
+        allowedTables: ["orders", "users"]
+      }
+    });
+
+    expect(result.sql).toBe(
+      "SELECT o.id, u.name FROM orders o JOIN users u ON u.id = o.user_id"
+    );
+    expect(result.referencedTables).toEqual(["orders", "users"]);
+    expect(result.rowFilterApplied).toBe(false);
+  });
+
+  it("rewrites single-table query with row filter hook when available", async () => {
+    const result = await guard.assertTableAccess({
+      sql: "SELECT id FROM orders",
+      datasourceId: "sqlite_main",
+      accessContext: {
+        actorId: "user-1",
+        workspaceId: "ws-1",
+        allowedTables: ["orders"],
+        rowFiltersByTable: {
+          orders: "tenant_id = 'ws-1'"
+        }
+      }
+    });
+
+    expect(result.rowFilterApplied).toBe(true);
+    expect(result.sql).toBe(
+      "SELECT id FROM orders WHERE (tenant_id = 'ws-1')"
+    );
+  });
+
+  it("keeps fail-closed behavior for wildcard projection under column policy hook", async () => {
     await expect(
       guard.assertTableAccess({
-        sql: "SELECT o.id, u.name FROM orders o JOIN users u ON u.id = o.user_id",
+        sql: "SELECT * FROM orders",
         datasourceId: "sqlite_main",
         accessContext: {
           actorId: "user-1",
           workspaceId: "ws-1",
-          allowedTables: ["orders", "users"]
+          allowedTables: ["orders"],
+          allowedColumnsByTable: {
+            orders: ["id"]
+          }
         }
       })
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({
+      code: "ACL_PARSE_REJECTED"
+    } satisfies Partial<DomainError>);
   });
 });

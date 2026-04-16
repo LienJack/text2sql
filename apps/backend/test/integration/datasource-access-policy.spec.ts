@@ -18,7 +18,7 @@ describe("datasource access policy service", () => {
     process.env.LLM_MOCK_MODE = "true";
   });
 
-  it("resolves datasource visibility and table ACL precedence", async () => {
+  it("resolves datasource visibility and workspace table-permission decisions", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [DataModule]
     }).compile();
@@ -62,40 +62,12 @@ describe("datasource access policy service", () => {
       "ds-policy-finance"
     ]);
 
-    await policyRepository.upsertTablePolicyRules([
-      {
-        workspaceId: "workspace-policy-alpha",
-        datasourceId: "ds-policy-sales",
-        subjectType: "role",
-        subjectId: "member",
-        tableName: "orders",
-        effect: "allow"
-      },
-      {
-        workspaceId: "workspace-policy-alpha",
-        datasourceId: "ds-policy-sales",
-        subjectType: "role",
-        subjectId: "member",
-        tableName: "payroll",
-        effect: "deny"
-      },
-      {
-        workspaceId: "workspace-policy-alpha",
-        datasourceId: "ds-policy-sales",
-        subjectType: "user",
-        subjectId: "user-member-1",
-        tableName: "orders",
-        effect: "deny"
-      },
-      {
-        workspaceId: "workspace-policy-alpha",
-        datasourceId: "ds-policy-sales",
-        subjectType: "user",
-        subjectId: "user-member-1",
-        tableName: "payroll",
-        effect: "allow"
-      }
-    ]);
+    await policyRepository.replaceWorkspaceDatasourceTablePermissions({
+      workspaceId: "workspace-policy-alpha",
+      datasourceId: "ds-policy-sales",
+      tableNames: ["payroll"],
+      expectedPolicyVersion: 0
+    });
 
     const accessContext = await policyService.resolveAccessContext({
       actor: {
@@ -117,15 +89,16 @@ describe("datasource access policy service", () => {
       expect.arrayContaining(["ds-policy-sales", "ds-policy-finance"])
     );
 
-    const tableResolution = await policyService.resolveReadableTables({
+    const tableResolution = await policyService.resolveLegacyReadableTables({
       context: accessContext,
       datasourceId: "ds-policy-sales",
       candidateTables: ["orders", "payroll", "inventory"]
     });
     expect(tableResolution.readableTables).toEqual(["payroll"]);
-    expect(tableResolution.decisions.orders).toBe("explicit_user_deny");
-    expect(tableResolution.decisions.payroll).toBe("explicit_user_allow");
+    expect(tableResolution.decisions.orders).toBe("default_deny");
+    expect(tableResolution.decisions.payroll).toBe("workspace_allow");
     expect(tableResolution.decisions.inventory).toBe("default_deny");
+    expect(tableResolution.policySource).toBe("workspace_table_permissions");
   });
 
   it("rejects missing or unverified workspace context for non-admin actor", async () => {

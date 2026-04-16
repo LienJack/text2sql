@@ -63,5 +63,26 @@ describe("audit log repository", () => {
     expect(runScopedList).toHaveLength(1);
     expect(runScopedList[0]?.id).toBe(runScoped.id);
     expect(runScopedList[0]?.metadata?.tableName).toBe("payroll");
+
+    const requestScoped = await repository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.datasource.acl.denied",
+      eventCode: "ACL_DENIED",
+      message: "拒绝事件带 requestId",
+      runId: "run-audit-2",
+      sessionId: "session-audit-2",
+      requestId: "req-audit-2",
+      metadata: {
+        datasourceId: "sqlite_main"
+      }
+    });
+
+    const requestScopedList = await repository.listEvents({
+      eventType: "workspace.datasource.acl.denied",
+      requestId: "req-audit-2",
+      limit: 10
+    });
+    expect(requestScopedList.some((item) => item.id === requestScoped.id)).toBe(true);
+    expect(requestScopedList.every((item) => item.requestId === "req-audit-2")).toBe(true);
   });
 });

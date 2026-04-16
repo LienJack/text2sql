@@ -94,7 +94,7 @@ describe("platform pages smoke", () => {
   it("renders settings page", async () => {
     render(<SettingsPage />);
     expect(await screen.findByText("LLM 模型")).toBeInTheDocument();
-    expect(screen.getByText("工作空间")).toBeInTheDocument();
-    expect(screen.getByText("用户管理")).toBeInTheDocument();
+    expect(screen.queryByText("规则组")).not.toBeInTheDocument();
+    expect(screen.queryByText("兼容路径")).not.toBeInTheDocument();
   });
 });

@@ -31,7 +31,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Steps, type StepItem } from "@/components/ui/steps";
 import { StateBlock } from "@/components/ui/state-block";
-import { DatasourceAclStep } from "@/components/data-sources/datasource-acl-step";
 import { WorkspaceSelectorInline } from "@/components/data-sources/workspace-selector-inline";
 import { cn } from "@/lib/utils";
 import {
@@ -83,10 +82,6 @@ type WizardState = {
   password: string;
   file: File | null;
   workspaceId: string;
-  aclSubjectType: "role" | "user";
-  aclSubjectId: string;
-  aclEffect: "allow" | "deny";
-  aclTables: string[];
   openAfterCreate: boolean;
   submissionKey: string;
 };
@@ -122,7 +117,7 @@ const TYPE_FILTERS: Array<{ value: "all" | DatasourceType; label: string }> = [
 const WIZARD_STEPS: StepItem[] = [
   { step: 1, title: "选择数据源", subtitle: "挑选接入方式" },
   { step: 2, title: "配置信息", subtitle: "创建或编辑连接" },
-  { step: 3, title: "空间与 ACL", subtitle: "必经授权步骤" }
+  { step: 3, title: "工作空间", subtitle: "绑定治理作用域" }
 ];
 
 const CONNECTION_FAILURE_HINTS: Record<
@@ -170,10 +165,6 @@ const STAGE_HINTS: Record<string, { hint: string; action: "retry" | "previous" }
   binding_apply_failed: {
     hint: "数据源绑定空间失败，请重试。",
     action: "retry"
-  },
-  acl_apply_failed: {
-    hint: "ACL 应用失败，请检查 ACL 配置后重试。",
-    action: "retry"
   }
 };
 
@@ -191,10 +182,6 @@ function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
     password: "",
     file: null,
     workspaceId: defaultWorkspaceId,
-    aclSubjectType: "role",
-    aclSubjectId: "member",
-    aclEffect: "allow",
-    aclTables: [],
     openAfterCreate: true,
     submissionKey: ""
   };
@@ -280,17 +267,6 @@ function resolveWizardFailure(error: unknown): WizardFailure {
     stage,
     action: "retry"
   };
-}
-
-function normalizeTables(values: string[]): string[] {
-  const deduped = new Set<string>();
-  for (const value of values) {
-    const normalized = value.trim().toLowerCase();
-    if (normalized) {
-      deduped.add(normalized);
-    }
-  }
-  return Array.from(deduped);
 }
 
 function toWizardType(type: DatasourceType): WizardType {
@@ -502,12 +478,6 @@ export default function DataSourcesPage() {
     if (!wizard.workspaceId.trim()) {
       return "请选择工作空间后再提交";
     }
-    if (!wizard.aclSubjectId.trim()) {
-      return "请填写 ACL 主体标识";
-    }
-    if (wizard.aclTables.length === 0) {
-      return "请至少填写或勾选一个 ACL 数据表";
-    }
     return "";
   };
 
@@ -584,13 +554,7 @@ export default function DataSourcesPage() {
             mode: "edit",
             datasourceId: uploadedDatasourceId,
             datasource: Object.keys(editPayload).length > 0 ? editPayload : undefined,
-            workspaceId: wizard.workspaceId,
-            acl: {
-              subjectType: wizard.aclSubjectType,
-              subjectId: wizard.aclSubjectId.trim(),
-              effect: wizard.aclEffect,
-              tableNames: normalizeTables(wizard.aclTables)
-            }
+            workspaceId: wizard.workspaceId
           },
           { idempotencyKey }
         );
@@ -601,13 +565,7 @@ export default function DataSourcesPage() {
           {
             mode: "create",
             datasource: buildDatasourcePayload(),
-            workspaceId: wizard.workspaceId,
-            acl: {
-              subjectType: wizard.aclSubjectType,
-              subjectId: wizard.aclSubjectId.trim(),
-              effect: wizard.aclEffect,
-              tableNames: normalizeTables(wizard.aclTables)
-            }
+            workspaceId: wizard.workspaceId
           },
           { idempotencyKey }
         );
@@ -619,13 +577,7 @@ export default function DataSourcesPage() {
             mode: "edit",
             datasourceId: wizard.datasourceId,
             datasource: Object.keys(payload).length > 0 ? payload : undefined,
-            workspaceId: wizard.workspaceId,
-            acl: {
-              subjectType: wizard.aclSubjectType,
-              subjectId: wizard.aclSubjectId.trim(),
-              effect: wizard.aclEffect,
-              tableNames: normalizeTables(wizard.aclTables)
-            }
+            workspaceId: wizard.workspaceId
           },
           { idempotencyKey }
         );
@@ -658,7 +610,7 @@ export default function DataSourcesPage() {
             </p>
             <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">数据源</h1>
             <p className="text-sm text-[var(--text-secondary)]">
-              统一管理数据库与文件数据源，创建或编辑时必须完成工作空间 ACL。
+              统一管理数据库与文件数据源，创建或编辑时必须绑定工作空间。
             </p>
           </div>
 
@@ -826,7 +778,7 @@ export default function DataSourcesPage() {
                 {wizard.mode === "create" ? "新增数据源" : "编辑数据源"}
               </DialogTitle>
               <DialogDescription className="text-[var(--text-secondary)]">
-                创建和编辑都必须完成工作空间与表 ACL 步骤。
+                创建和编辑都必须完成工作空间绑定步骤。
               </DialogDescription>
             </div>
             <Steps items={WIZARD_STEPS} currentStep={editorStep} />
@@ -993,7 +945,7 @@ export default function DataSourcesPage() {
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">文件上传</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        先上传文件创建数据源，再在同一流程完成 workspace + ACL 授权。
+                        先上传文件创建数据源，再在同一流程绑定到目标工作空间。
                       </p>
                     </div>
                     <label className="space-y-1">
@@ -1063,25 +1015,9 @@ export default function DataSourcesPage() {
                   onCreateWorkspace={(name) => createWorkspace({ name })}
                 />
 
-                <DatasourceAclStep
-                  open={editorOpen && editorStep === 3}
-                  workspaceId={wizard.workspaceId}
-                  datasourceId={wizard.mode === "edit" ? wizard.datasourceId : undefined}
-                  mode={wizard.mode}
-                  subjectType={wizard.aclSubjectType}
-                  subjectId={wizard.aclSubjectId}
-                  effect={wizard.aclEffect}
-                  tableNames={wizard.aclTables}
-                  disabled={editorSaving}
-                  onSubjectTypeChange={(value) => patchWizard({ aclSubjectType: value })}
-                  onSubjectIdChange={(value) => patchWizard({ aclSubjectId: value })}
-                  onEffectChange={(value) => patchWizard({ aclEffect: value })}
-                  onTableNamesChange={(values) => patchWizard({ aclTables: normalizeTables(values) })}
-                />
-
                 <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-sidebar)] p-4">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    提交会走 workflow 接口，统一处理数据源变更、workspace 绑定与 ACL 应用。
+                    提交会走 workflow 接口，统一处理数据源变更与工作空间绑定。
                   </p>
                   <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
                     <input
@@ -1159,7 +1095,7 @@ export default function DataSourcesPage() {
                   }}
                 >
                   {editorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                  {wizard.mode === "create" ? "完成创建" : "保存并应用 ACL"}
+                  {wizard.mode === "create" ? "完成创建" : "保存并绑定"}
                 </Button>
               )}
             </div>

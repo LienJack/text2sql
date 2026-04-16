@@ -2,8 +2,6 @@
 /data/*
 /vibe/*
 /docs/*
-!/docs/standards/
-!/docs/standards/*.md
 # Node / monorepo artifacts
 node_modules/
 dist/
