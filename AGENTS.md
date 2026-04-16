@@ -31,6 +31,10 @@
    - `cp apps/frontend/.env.example apps/frontend/.env`
 4. 启动前后端：
    - `pnpm dev`
+5. 浏览器默认从网关入口联调：
+   - `http://localhost:3000/data-sources`
+6. 快速网关 smoke（可选但推荐）：
+   - `node tests/smoke/nginx-dev-gateway-smoke.mjs`
 
 常用后端 DB 命令：
 - 生成 Prisma Client：`pnpm --filter @text2sql/backend run prisma:generate`
@@ -61,8 +65,9 @@ CI 参考：
 
 ## 4) 联调最小检查
 
-- 健康检查：`GET /health` 应可用。
-- 会话主链路：应能创建会话并发送消息。
+- 统一入口：`http://localhost:3000` 可访问，`/data-sources -> 创建会话 -> 发送消息` 主链路可用。
+- 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
+- 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
 
 ## 5) Standards 摘要（摘要 + 链接）
@@ -113,7 +118,7 @@ CI 参考：
 - 工具调用走 allowlist，失败可追踪。
 
 必跑检查：
-- `GET /health` 中 stream/tool-calling 相关字段应符合预期。
+- `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。

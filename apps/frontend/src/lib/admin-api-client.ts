@@ -1,7 +1,21 @@
 import type { ApiResponse } from "@text2sql/shared-types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
+const API_BASE_OVERRIDE = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+const API_BASE = API_BASE_OVERRIDE ? API_BASE_OVERRIDE.replace(/\/+$/, "") : "";
+
+function composeApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!API_BASE) {
+    return normalizedPath;
+  }
+  if (
+    API_BASE.endsWith("/api") &&
+    (normalizedPath === "/api" || normalizedPath.startsWith("/api/"))
+  ) {
+    return `${API_BASE.slice(0, -4)}${normalizedPath}`;
+  }
+  return `${API_BASE}${normalizedPath}`;
+}
 
 function resolveWorkspaceIdHeader(): string | undefined {
   if (typeof window !== "undefined") {
@@ -379,7 +393,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${url}`, {
+    response = await fetch(composeApiUrl(url), {
       ...init,
       headers: {
         "content-type": "application/json",

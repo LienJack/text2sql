@@ -14,13 +14,13 @@ export class AppConfigService {
   }
 
   get port(): number {
-    return Number(this.config.get<string>("PORT", "3000"));
+    return Number(this.config.get<string>("PORT", "3002"));
   }
 
   get corsAllowedOrigins(): string[] {
     const raw = this.config.get<string>(
       "CORS_ALLOWED_ORIGINS",
-      "http://localhost:3001"
+      "http://localhost:3000"
     );
     return raw
       .split(",")

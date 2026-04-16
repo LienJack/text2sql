@@ -358,7 +358,7 @@ describe("chat api (e2e)", () => {
       .send();
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("success");
-    expect(res.body.data.cors.allowedOrigins).toContain("http://localhost:3001");
+    expect(res.body.data.cors.allowedOrigins).toContain("http://localhost:3000");
     expect(res.body.data.dependencies.sessions.sync.total).toBeGreaterThanOrEqual(0);
     expect(res.body.data.dependencies.gateMetrics.acceptance).toEqual(
       expect.objectContaining({

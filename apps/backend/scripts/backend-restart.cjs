@@ -8,7 +8,7 @@ function resolvePort() {
   if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) {
     return parsed;
   }
-  return 3000;
+  return 3002;
 }
 
 function listListeningPids(port) {
