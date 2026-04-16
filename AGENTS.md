@@ -11,6 +11,7 @@
 - `AGENTS.md`：入口导航 + 硬边界 + 执行门禁。
 - `README.md`：项目全貌、联调背景、接口与运行说明。
 - `docs/standards/*.md`：专项规范细则（权威来源）。
+- `docs/solutions/`：历史问题解决与流程经验库（按类别组织，frontmatter 包含 `module`/`tags`/`problem_type`），在相关模块实现或排障时可检索参考。
 
 ## 1) Monorepo 边界
 
