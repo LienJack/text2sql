@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Datasource, DatasourceType, DatasourceUpsertPayload } from "@text2sql/shared-types";
 import {
@@ -276,7 +276,7 @@ function toWizardType(type: DatasourceType): WizardType {
   return "mysql";
 }
 
-export default function DataSourcesPage() {
+function DataSourcesPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceIdFromQuery = searchParams.get("workspaceId")?.trim() ?? "";
@@ -1103,5 +1103,13 @@ export default function DataSourcesPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+export default function DataSourcesPage() {
+  return (
+    <Suspense fallback={<StateBlock variant="loading">正在加载数据源页面...</StateBlock>}>
+      <DataSourcesPageContent />
+    </Suspense>
   );
 }

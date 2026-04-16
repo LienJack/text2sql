@@ -9,14 +9,24 @@ describe("SafetyCheckNode", () => {
         sql: "SELECT * FROM orders",
         datasourceId: "sqlite_main"
       })
-    ).resolves.toEqual({ safe: true });
+    ).resolves.toMatchObject({
+      allowed: true,
+      mode: "pass",
+      riskLevel: "low",
+      riskTags: []
+    });
 
     await expect(
       node.run({
         sql: "WITH cte AS (SELECT * FROM orders) SELECT * FROM cte",
         datasourceId: "sqlite_main"
       })
-    ).resolves.toEqual({ safe: true });
+    ).resolves.toMatchObject({
+      allowed: true,
+      mode: "pass",
+      riskLevel: "low",
+      riskTags: []
+    });
   });
 
   it("rejects non-readonly SQL with SQL_READONLY_REJECTED", async () => {
@@ -26,8 +36,11 @@ describe("SafetyCheckNode", () => {
         datasourceId: "sqlite_main"
       })
     ).resolves.toMatchObject({
-      safe: false,
-      code: "SQL_READONLY_REJECTED"
+      allowed: false,
+      mode: "hard-block",
+      riskLevel: "high",
+      riskTags: ["readonly_violation"],
+      reason: expect.stringContaining("只允许执行 SELECT 或 WITH ... SELECT 的只读查询")
     });
   });
 
@@ -43,8 +56,11 @@ describe("SafetyCheckNode", () => {
         }
       })
     ).resolves.toMatchObject({
-      safe: false,
-      code: "ACL_FORBIDDEN"
+      allowed: false,
+      mode: "hard-block",
+      riskLevel: "high",
+      riskTags: ["table_access_denied"],
+      reason: expect.stringContaining("无权访问表")
     });
   });
 
@@ -60,8 +76,11 @@ describe("SafetyCheckNode", () => {
         }
       })
     ).resolves.toMatchObject({
-      safe: false,
-      code: "ACL_PARSE_REJECTED"
+      allowed: false,
+      mode: "hard-block",
+      riskLevel: "high",
+      riskTags: ["table_access_denied"],
+      reason: expect.stringContaining("无法穷尽引用表")
     });
   });
 });

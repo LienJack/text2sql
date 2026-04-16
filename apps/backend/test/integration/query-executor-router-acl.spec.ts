@@ -3,12 +3,17 @@ import type { Datasource } from "@text2sql/shared-types";
 import { AppModule } from "../../src/app.module";
 import { DomainError } from "../../src/common/domain-error";
 import { QueryExecutorRouterService } from "../../src/modules/data/query/query-executor-router.service";
+import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 describe("query executor router acl integration", () => {
   let router: QueryExecutorRouterService;
+  let cleanupFixture: (() => Promise<void>) | undefined;
+  let closeModuleRef: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
-    process.env.SQLITE_PATH = process.env.SQLITE_PATH ?? "./data/sqlite/text2sql.db";
+    const fixture = await createSeededSqliteFixture("query-router-acl");
+    cleanupFixture = fixture.cleanup;
+    process.env.SQLITE_PATH = fixture.dbPath;
     process.env.DATABASE_URL = "";
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
@@ -18,6 +23,16 @@ describe("query executor router acl integration", () => {
       imports: [AppModule]
     }).compile();
     router = moduleRef.get(QueryExecutorRouterService);
+    closeModuleRef = () => moduleRef.close();
+  });
+
+  afterAll(async () => {
+    if (closeModuleRef) {
+      await closeModuleRef();
+    }
+    if (cleanupFixture) {
+      await cleanupFixture();
+    }
   });
 
   const datasource = (type: Datasource["type"]): Datasource => ({
