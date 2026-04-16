@@ -11,6 +11,8 @@ datasource db {
 model Session {
   id                String    @id
   datasource        String
+  workspaceId       String?
+  createdByUserId   String?
   title             String    @default("新会话")
   modelCatalogId    String?
   modelProvider     String?
@@ -25,11 +27,38 @@ model Session {
   messages          Message[]
   runs              SqlRun[]
   auditLogs         AgentAuditLog[]
+  datasourceRef     Datasource @relation(fields: [datasource], references: [id], onDelete: Restrict)
+  workspaceRef      Workspace? @relation("workspace_sessions", fields: [workspaceId], references: [id], onDelete: SetNull)
   modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt, lastMessageAt])
+  @@index([workspaceId, deletedAt, lastMessageAt])
+  @@index([createdByUserId])
   @@index([modelCatalogId])
   @@map("sessions")
+}
+
+model Datasource {
+  id            String    @id
+  name          String
+  type          String
+  status        String    @default("available")
+  readonly      Boolean   @default(true)
+  shared        Boolean   @default(true)
+  config        String?
+  fileMeta      String?
+  unavailableAt DateTime?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  workspaceBindings WorkspaceDatasourceBinding[]
+  workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
+  workspaceTablePermissions WorkspaceDatasourceTablePermission[]
+
+  @@index([deletedAt, status])
+  @@index([type, status])
+  @@map("datasources")
 }
 
 model Message {
@@ -63,10 +92,10 @@ model SqlRun {
   llmRaw        String?
   createdAt     DateTime @default(now())
   session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  graphSnapshots GraphSnapshot[]
-  semanticMemories SemanticMemory[]
-  semanticEdges  SemanticEdge[]
-  auditLogs      AgentAuditLog[]
+  auditLogs         AgentAuditLog[]
+  graphSnapshots    GraphSnapshot[]
+  semanticEdges     SemanticEdge[]
+  semanticMemories  SemanticMemory[]
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
@@ -207,3 +236,110 @@ model ModelCatalog {
   @@index([providerConfigId])
   @@map("model_catalogs")
 }
+
+model PlatformUser {
+  id                 String   @id
+  account            String
+  name               String
+  email              String
+  status             String   @default("active")
+  isSystemAdmin      Boolean  @default(false)
+  passwordHash       String?
+  systemVariables    String?
+  defaultWorkspaceId String?
+  deletedAt          DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  defaultWorkspace   Workspace? @relation("workspace_default_users", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
+  workspaceMembers   WorkspaceMember[]
+
+  @@unique([account])
+  @@unique([email])
+  @@index([status, deletedAt])
+  @@index([defaultWorkspaceId])
+  @@map("platform_users")
+}
+
+model Workspace {
+  id               String   @id
+  name             String
+  status           String   @default("active")
+  isDefault        Boolean  @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  defaultUsers     PlatformUser[] @relation("workspace_default_users")
+  workspaceMembers WorkspaceMember[]
+  sessions         Session[] @relation("workspace_sessions")
+  datasourceBindings WorkspaceDatasourceBinding[]
+  datasourceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
+  datasourceTablePermissions WorkspaceDatasourceTablePermission[]
+
+  @@unique([name])
+  @@index([status, deletedAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String   @id
+  userId      String
+  workspaceId String
+  role        String   @default("member")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        PlatformUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, role])
+  @@index([userId, role])
+  @@map("workspace_members")
+}
+
+model WorkspaceDatasourceBinding {
+  id              String   @id
+  workspaceId     String
+  datasourceId    String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource      Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId])
+  @@index([workspaceId, createdAt])
+  @@index([datasourceId, createdAt])
+  @@index([createdByUserId])
+  @@map("workspace_datasource_bindings")
+}
+
+model WorkspaceDatasourceTablePermissionSet {
+  id           String   @id
+  workspaceId  String
+  datasourceId String
+  policyVersion Int     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId])
+  @@index([workspaceId, datasourceId, policyVersion])
+  @@map("workspace_datasource_table_permission_sets")
+}
+
+model WorkspaceDatasourceTablePermission {
+  id           String   @id
+  workspaceId  String
+  datasourceId String
+  tableName    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId, tableName])
+  @@index([workspaceId, datasourceId, createdAt])
+  @@map("workspace_datasource_table_permissions")
+}
+

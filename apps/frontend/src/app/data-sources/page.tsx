@@ -1,298 +1,1115 @@
 "use client";
 
-import { AlertTriangle, Database, Hash, KeyRound, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { StateBlock } from "@/components/ui/state-block";
-import { Switch } from "@/components/ui/switch";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import type { Datasource, DatasourceType, DatasourceUpsertPayload } from "@text2sql/shared-types";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
+  ArrowRight,
+  Database,
+  FileSpreadsheet,
+  Loader2,
+  MoreHorizontal,
+  PlayCircle,
+  Plus,
+  Search,
+  Sparkles
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Steps, type StepItem } from "@/components/ui/steps";
+import { StateBlock } from "@/components/ui/state-block";
+import { WorkspaceSelectorInline } from "@/components/data-sources/workspace-selector-inline";
 import { cn } from "@/lib/utils";
-import { type DataSourceConnection, type DataSourcesView, fetchDataSourcesView } from "@/lib/platform-mock-adapter";
+import {
+  createWorkspace,
+  listWorkspaces,
+  type WorkspaceSummary
+} from "@/lib/admin-api-client";
+import {
+  DatasourceApiError,
+  createIdempotencyKey,
+  createSession,
+  listDatasources,
+  resolveDatasourceWorkflowApiError,
+  submitDatasourceWorkflow,
+  uploadDatasourceFile
+} from "@/lib/api-client";
+import {
+  writeActiveDatasourceId,
+  writeActiveWorkspaceId
+} from "@/lib/datasource-session-context";
 
-const connectionStatusText: Record<DataSourceConnection["status"], string> = {
-  healthy: "已连接",
-  warning: "待关注",
-  error: "连接异常"
+type EditorMode = "create" | "edit";
+type WizardType = "mysql" | "postgresql" | "csv" | "excel" | "sqlite";
+
+type ConnectionFailureCode =
+  | "CONNECTION_AUTH_FAILED"
+  | "CONNECTION_NETWORK_UNREACHABLE"
+  | "CONNECTION_DATABASE_NOT_FOUND"
+  | "CONNECTION_CONFIG_INVALID";
+
+type WizardFailure = {
+  message: string;
+  code?: string;
+  stage?: string;
+  hint?: string;
+  action?: "retry" | "previous";
 };
 
-export default function DataSourcesPage() {
+type WizardState = {
+  mode: EditorMode;
+  datasourceId: string;
+  uploadedDatasourceId: string;
+  type: WizardType | "";
+  name: string;
+  host: string;
+  port: string;
+  database: string;
+  username: string;
+  password: string;
+  file: File | null;
+  workspaceId: string;
+  openAfterCreate: boolean;
+  submissionKey: string;
+};
+
+const WIZARD_TYPES: Array<{
+  type: WizardType;
+  title: string;
+  description: string;
+}> = [
+  { type: "csv", title: "本地 CSV", description: "上传 CSV 并生成可复用数据源" },
+  { type: "excel", title: "本地 Excel", description: "上传 Excel 并生成可复用数据源" },
+  { type: "mysql", title: "MySQL", description: "配置连接信息并创建连接" },
+  { type: "postgresql", title: "PostgreSQL", description: "配置连接信息并创建连接" }
+];
+
+const TYPE_LABEL: Record<DatasourceType, string> = {
+  sqlite: "SQLite",
+  mysql: "MySQL",
+  postgresql: "PostgreSQL",
+  csv: "CSV",
+  excel: "Excel"
+};
+
+const TYPE_FILTERS: Array<{ value: "all" | DatasourceType; label: string }> = [
+  { value: "all", label: "全部类型" },
+  { value: "sqlite", label: "SQLite" },
+  { value: "mysql", label: "MySQL" },
+  { value: "postgresql", label: "PostgreSQL" },
+  { value: "csv", label: "CSV" },
+  { value: "excel", label: "Excel" }
+];
+
+const WIZARD_STEPS: StepItem[] = [
+  { step: 1, title: "选择数据源", subtitle: "挑选接入方式" },
+  { step: 2, title: "配置信息", subtitle: "创建或编辑连接" },
+  { step: 3, title: "工作空间", subtitle: "绑定治理作用域" }
+];
+
+const CONNECTION_FAILURE_HINTS: Record<
+  ConnectionFailureCode,
+  {
+    hint: string;
+    action: "retry" | "previous";
+  }
+> = {
+  CONNECTION_AUTH_FAILED: {
+    hint: "请检查用户名和密码后重试当前步骤。",
+    action: "retry"
+  },
+  CONNECTION_NETWORK_UNREACHABLE: {
+    hint: "请确认主机、端口和网络连通性后重试。",
+    action: "retry"
+  },
+  CONNECTION_DATABASE_NOT_FOUND: {
+    hint: "请返回上一步确认数据库名称是否正确。",
+    action: "previous"
+  },
+  CONNECTION_CONFIG_INVALID: {
+    hint: "请返回上一步检查连接参数并重新提交。",
+    action: "previous"
+  }
+};
+
+const STAGE_HINTS: Record<string, { hint: string; action: "retry" | "previous" }> = {
+  validation_failed: {
+    hint: "请返回上一步检查输入后重新提交。",
+    action: "previous"
+  },
+  workspace_create_failed: {
+    hint: "工作空间创建失败，可直接重试当前提交。",
+    action: "retry"
+  },
+  datasource_create_failed: {
+    hint: "数据源创建失败，请检查连接参数后重试。",
+    action: "retry"
+  },
+  datasource_update_failed: {
+    hint: "数据源更新失败，请检查变更参数后重试。",
+    action: "retry"
+  },
+  binding_apply_failed: {
+    hint: "数据源绑定空间失败，请重试。",
+    action: "retry"
+  }
+};
+
+function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
+  return {
+    mode: "create",
+    datasourceId: "",
+    uploadedDatasourceId: "",
+    type: "",
+    name: "",
+    host: "127.0.0.1",
+    port: "",
+    database: "",
+    username: "",
+    password: "",
+    file: null,
+    workspaceId: defaultWorkspaceId,
+    openAfterCreate: true,
+    submissionKey: ""
+  };
+}
+
+function isConnectionFailureCode(value: string): value is ConnectionFailureCode {
+  return value in CONNECTION_FAILURE_HINTS;
+}
+
+function inferDefaultPort(type: WizardType | ""): string {
+  if (type === "mysql") {
+    return "3306";
+  }
+  if (type === "postgresql") {
+    return "5432";
+  }
+  return "";
+}
+
+function datasourceIcon(type: DatasourceType) {
+  if (type === "mysql" || type === "postgresql" || type === "sqlite") {
+    return <Database className="h-6 w-6 text-blue-600" />;
+  }
+  return <FileSpreadsheet className="h-6 w-6 text-emerald-600" />;
+}
+
+function readConfigString(config: Datasource["config"], key: string): string {
+  if (!config || typeof config !== "object") {
+    return "";
+  }
+  const value = (config as Record<string, unknown>)[key];
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "";
+}
+
+function resolveWizardFailure(error: unknown): WizardFailure {
+  let message = error instanceof Error ? error.message : "提交失败";
+  let code: string | undefined;
+  let stage: string | undefined;
+
+  if (error instanceof DatasourceApiError) {
+    message = error.message;
+    code = error.code;
+    stage = error.stage;
+  }
+
+  const workflowError = resolveDatasourceWorkflowApiError(error);
+  if (workflowError.code && !code) {
+    code = workflowError.code;
+  }
+  if (workflowError.stage && !stage) {
+    stage = workflowError.stage;
+  }
+
+  if (code && isConnectionFailureCode(code)) {
+    return {
+      message,
+      code,
+      stage,
+      hint: CONNECTION_FAILURE_HINTS[code].hint,
+      action: CONNECTION_FAILURE_HINTS[code].action
+    };
+  }
+
+  if (stage && STAGE_HINTS[stage]) {
+    return {
+      message,
+      code,
+      stage,
+      hint: STAGE_HINTS[stage].hint,
+      action: STAGE_HINTS[stage].action
+    };
+  }
+
+  return {
+    message,
+    code,
+    stage,
+    action: "retry"
+  };
+}
+
+function toWizardType(type: DatasourceType): WizardType {
+  if (type === "mysql" || type === "postgresql" || type === "csv" || type === "excel" || type === "sqlite") {
+    return type;
+  }
+  return "mysql";
+}
+
+function DataSourcesPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const workspaceIdFromQuery = searchParams.get("workspaceId")?.trim() ?? "";
+
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [view, setView] = useState<DataSourcesView | null>(null);
-  const [connectionQuery, setConnectionQuery] = useState("");
-  const [tableQuery, setTableQuery] = useState("");
-  const [activeConnectionId, setActiveConnectionId] = useState("");
-  const [activeTableId, setActiveTableId] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [datasources, setDatasources] = useState<Datasource[]>([]);
+  const [activeDatasourceId, setActiveDatasourceId] = useState("");
+
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | DatasourceType>("all");
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorStep, setEditorStep] = useState<1 | 2 | 3>(1);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorFailure, setEditorFailure] = useState<WizardFailure | null>(null);
+  const [wizard, setWizard] = useState<WizardState>(() =>
+    createEmptyWizardState(workspaceIdFromQuery)
+  );
+
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
+  const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  const [workspacesError, setWorkspacesError] = useState("");
+
+  const loadDatasources = async (): Promise<void> => {
+    setLoading(true);
+    setPageError("");
+    try {
+      const list = await listDatasources({ includeUnavailable: true });
+      setDatasources(list);
+    } catch (loadError) {
+      setPageError(loadError instanceof Error ? loadError.message : "加载数据源失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadWorkspaces = async (preferredWorkspaceId?: string): Promise<void> => {
+    setWorkspacesLoading(true);
+    setWorkspacesError("");
+    try {
+      const result = await listWorkspaces({ page: 1, pageSize: 200 });
+      setWorkspaces(result.items);
+      const preferred = preferredWorkspaceId?.trim() || wizard.workspaceId || workspaceIdFromQuery;
+      const resolvedWorkspaceId =
+        (preferred && result.items.find((item) => item.id === preferred)?.id) ||
+        result.items[0]?.id ||
+        "";
+      setWizard((previous) => ({
+        ...previous,
+        workspaceId: previous.workspaceId || resolvedWorkspaceId
+      }));
+    } catch (error) {
+      setWorkspacesError(error instanceof Error ? error.message : "加载工作空间失败");
+    } finally {
+      setWorkspacesLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const response = await fetchDataSourcesView();
-        if (!active) {
-          return;
-        }
-        setView(response);
-        setActiveConnectionId(response.connections[0]?.id ?? "");
-        setActiveTableId(response.tablesByConnection[response.connections[0]?.id ?? ""]?.[0]?.id ?? "");
-      } catch (loadError) {
-        if (!active) {
-          return;
-        }
-        setError(loadError instanceof Error ? loadError.message : "加载数据源信息失败");
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    };
-    void load();
-    return () => {
-      active = false;
-    };
+    void loadDatasources();
   }, []);
 
-  const filteredConnections = useMemo(() => {
-    if (!view) {
-      return [];
-    }
-    const keyword = connectionQuery.trim().toLowerCase();
-    if (!keyword) {
-      return view.connections;
-    }
-    return view.connections.filter((connection) =>
-      `${connection.name} ${connection.engine}`.toLowerCase().includes(keyword)
-    );
-  }, [connectionQuery, view]);
+  useEffect(() => {
+    writeActiveWorkspaceId(workspaceIdFromQuery);
+  }, [workspaceIdFromQuery]);
 
-  const activeConnection = useMemo(
-    () => filteredConnections.find((connection) => connection.id === activeConnectionId) ?? filteredConnections[0],
-    [activeConnectionId, filteredConnections]
-  );
-
-  const tables = useMemo(() => {
-    if (!view || !activeConnection) {
-      return [];
-    }
-    const rows = view.tablesByConnection[activeConnection.id] ?? [];
-    const keyword = tableQuery.trim().toLowerCase();
-    if (!keyword) {
-      return rows;
-    }
-    return rows.filter((table) =>
-      `${table.name} ${table.description}`.toLowerCase().includes(keyword)
-    );
-  }, [activeConnection, tableQuery, view]);
-
-  const activeTable = useMemo(
-    () => tables.find((table) => table.id === activeTableId) ?? tables[0],
-    [activeTableId, tables]
-  );
-
-  const toggleTableEnabled = (tableId: string, checked: boolean) => {
-    setView((previous) => {
-      if (!previous || !activeConnection) {
-        return previous;
-      }
-      const nextTables = (previous.tablesByConnection[activeConnection.id] ?? []).map((table) =>
-        table.id === tableId ? { ...table, enabled: checked } : table
-      );
-      return {
-        ...previous,
-        tablesByConnection: {
-          ...previous.tablesByConnection,
-          [activeConnection.id]: nextTables
-        }
-      };
+  const filteredDatasources = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return datasources.filter((item) => {
+      const matchesKeyword =
+        !keyword ||
+        `${item.name} ${item.id} ${item.type}`.toLowerCase().includes(keyword);
+      const matchesType = typeFilter === "all" || item.type === typeFilter;
+      return matchesKeyword && matchesType;
     });
+  }, [datasources, query, typeFilter]);
+
+  const hasActiveFilters = query.trim().length > 0 || typeFilter !== "all";
+  const availableCount = useMemo(
+    () => datasources.filter((item) => item.status === "available").length,
+    [datasources]
+  );
+  const fileDatasourceCount = useMemo(
+    () => datasources.filter((item) => item.type === "csv" || item.type === "excel").length,
+    [datasources]
+  );
+
+  const onStartChat = async (
+    datasourceId: string,
+    workspaceIdOverride?: string
+  ): Promise<void> => {
+    const activeWorkspaceId = workspaceIdOverride?.trim() || workspaceIdFromQuery;
+    setActiveDatasourceId(datasourceId);
+    setPageError("");
+    try {
+      const session = await createSession(datasourceId, {
+        workspaceId: activeWorkspaceId || undefined
+      });
+      writeActiveDatasourceId(datasourceId);
+      writeActiveWorkspaceId(activeWorkspaceId);
+      router.push(
+        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}${
+          activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""
+        }`
+      );
+    } catch (startError) {
+      setPageError(startError instanceof Error ? startError.message : "创建会话失败");
+      setActiveDatasourceId("");
+    }
+  };
+
+  const resetEditor = (mode: EditorMode, datasource?: Datasource): void => {
+    const defaultState = createEmptyWizardState(workspaceIdFromQuery);
+
+    if (mode === "edit" && datasource) {
+      const defaultPort =
+        readConfigString(datasource.config, "port") || inferDefaultPort(toWizardType(datasource.type));
+      const nextState: WizardState = {
+        ...defaultState,
+        mode: "edit",
+        datasourceId: datasource.id,
+        uploadedDatasourceId: datasource.id,
+        type: toWizardType(datasource.type),
+        name: datasource.name,
+        host: readConfigString(datasource.config, "host"),
+        port: defaultPort,
+        database: readConfigString(datasource.config, "database"),
+        username: readConfigString(datasource.config, "username"),
+        openAfterCreate: false
+      };
+      setWizard(nextState);
+      setEditorStep(2);
+      setEditorFailure(null);
+      return;
+    }
+
+    setWizard(defaultState);
+    setEditorStep(1);
+    setEditorFailure(null);
+  };
+
+  const openCreateEditor = (): void => {
+    resetEditor("create");
+    setEditorOpen(true);
+    void loadWorkspaces(workspaceIdFromQuery);
+  };
+
+  const openEditEditor = (datasource: Datasource): void => {
+    resetEditor("edit", datasource);
+    setEditorOpen(true);
+    void loadWorkspaces(workspaceIdFromQuery);
+  };
+
+  const closeEditor = (): void => {
+    setEditorOpen(false);
+    resetEditor("create");
+  };
+
+  const patchWizard = (patch: Partial<WizardState>): void => {
+    setEditorFailure(null);
+    setWizard((previous) => ({
+      ...previous,
+      ...patch,
+      submissionKey: patch.submissionKey ?? ""
+    }));
+  };
+
+  const validateStep2 = (): string => {
+    if (!wizard.type) {
+      return "请先选择数据源类型";
+    }
+
+    if (wizard.type === "mysql" || wizard.type === "postgresql") {
+      if (!wizard.name.trim()) {
+        return "请输入数据源名称";
+      }
+      if (!wizard.host.trim() || !wizard.database.trim() || !wizard.username.trim()) {
+        return "请补全连接信息后再继续";
+      }
+      if (wizard.mode === "create" && !wizard.password.trim()) {
+        return "新建数据库连接时必须填写密码";
+      }
+      return "";
+    }
+
+    if (wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel") && !wizard.file) {
+      return "请先选择 CSV/Excel 文件";
+    }
+
+    if (!wizard.name.trim()) {
+      return "请输入数据源名称";
+    }
+
+    return "";
+  };
+
+  const validateStep3 = (): string => {
+    if (!wizard.workspaceId.trim()) {
+      return "请选择工作空间后再提交";
+    }
+    return "";
+  };
+
+  const buildDatasourcePayload = (): DatasourceUpsertPayload => {
+    const payload: DatasourceUpsertPayload = {};
+    if (wizard.name.trim()) {
+      payload.name = wizard.name.trim();
+    }
+    if (wizard.mode === "create") {
+      payload.type = wizard.type as DatasourceType;
+      payload.shared = true;
+    }
+
+    if (wizard.type === "mysql" || wizard.type === "postgresql") {
+      payload.host = wizard.host.trim();
+      payload.port = wizard.port ? Number(wizard.port) : undefined;
+      payload.database = wizard.database.trim();
+      payload.username = wizard.username.trim();
+      if (wizard.password.trim()) {
+        payload.password = wizard.password;
+      }
+    }
+
+    return payload;
+  };
+
+  const submitEditor = async (): Promise<void> => {
+    if (editorSaving) {
+      return;
+    }
+
+    const validationMessage = validateStep3();
+    if (validationMessage) {
+      setEditorFailure({ message: validationMessage, action: "previous" });
+      return;
+    }
+
+    setEditorSaving(true);
+    setEditorFailure(null);
+
+    const idempotencyKey = wizard.submissionKey || createIdempotencyKey("datasource-editor");
+    if (!wizard.submissionKey) {
+      setWizard((previous) => ({ ...previous, submissionKey: idempotencyKey }));
+    }
+
+    try {
+      let targetDatasourceId = wizard.datasourceId;
+      if (wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel")) {
+        let uploadedDatasourceId = wizard.uploadedDatasourceId;
+        if (!uploadedDatasourceId) {
+          if (!wizard.file) {
+            throw new Error("请先上传文件");
+          }
+          const uploaded = await uploadDatasourceFile({
+            file: wizard.file,
+            name: wizard.name.trim() || undefined
+          });
+          uploadedDatasourceId = uploaded.id;
+          targetDatasourceId = uploaded.id;
+          setWizard((previous) => ({
+            ...previous,
+            uploadedDatasourceId,
+            datasourceId: uploadedDatasourceId
+          }));
+        }
+
+        const editPayload: DatasourceUpsertPayload = {};
+        if (wizard.name.trim()) {
+          editPayload.name = wizard.name.trim();
+        }
+
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "edit",
+            datasourceId: uploadedDatasourceId,
+            datasource: Object.keys(editPayload).length > 0 ? editPayload : undefined,
+            workspaceId: wizard.workspaceId
+          },
+          { idempotencyKey }
+        );
+
+        targetDatasourceId = workflowResult.datasourceId;
+      } else if (wizard.mode === "create") {
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "create",
+            datasource: buildDatasourcePayload(),
+            workspaceId: wizard.workspaceId
+          },
+          { idempotencyKey }
+        );
+        targetDatasourceId = workflowResult.datasourceId;
+      } else {
+        const payload = buildDatasourcePayload();
+        const workflowResult = await submitDatasourceWorkflow(
+          {
+            mode: "edit",
+            datasourceId: wizard.datasourceId,
+            datasource: Object.keys(payload).length > 0 ? payload : undefined,
+            workspaceId: wizard.workspaceId
+          },
+          { idempotencyKey }
+        );
+        targetDatasourceId = workflowResult.datasourceId;
+      }
+
+      await loadDatasources();
+      const shouldOpenChat = wizard.openAfterCreate;
+      const selectedWorkspaceId = wizard.workspaceId;
+      closeEditor();
+
+      if (shouldOpenChat && targetDatasourceId) {
+        await onStartChat(targetDatasourceId, selectedWorkspaceId);
+      }
+    } catch (submitError) {
+      setEditorFailure(resolveWizardFailure(submitError));
+    } finally {
+      setEditorSaving(false);
+    }
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-[640px] overflow-hidden bg-[var(--surface-page)]">
-      <aside className="hidden w-72 border-r border-[var(--border-default)] bg-[var(--surface-sidebar)] md:flex md:flex-col">
-        <div className="space-y-3 border-b border-[var(--border-default)] p-4">
-          <Button className="w-full justify-start">
-            <Database className="h-4 w-4" />
-            添加数据源
-          </Button>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
-            <Input
-              value={connectionQuery}
-              onChange={(event) => setConnectionQuery(event.target.value)}
-              placeholder="搜索连接..."
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <ScrollArea className="flex-1">
-          <div className="space-y-2 p-3">
-            {filteredConnections.map((connection) => {
-              const active = connection.id === activeConnection?.id;
-              return (
-                <button
-                  key={connection.id}
-                  type="button"
-                  onClick={() => {
-                    setActiveConnectionId(connection.id);
-                    setActiveTableId((view?.tablesByConnection[connection.id] ?? [])[0]?.id ?? "");
-                  }}
-                  className={cn(
-                    "w-full rounded-lg border px-3 py-3 text-left transition-colors",
-                    active
-                      ? "border-[var(--border-brand)] bg-[var(--surface-active)]"
-                      : "border-transparent bg-transparent hover:border-[var(--border-default)] hover:bg-[var(--surface-hover)]"
-                  )}
-                >
-                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">{connection.name}</p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
-                    <span>{connection.engine}</span>
-                    <span
-                      className={cn(
-                        "font-medium",
-                        connection.status === "healthy"
-                          ? "text-emerald-600"
-                          : connection.status === "warning"
-                            ? "text-amber-600"
-                            : "text-rose-600"
-                      )}
-                    >
-                      {connectionStatusText[connection.status]}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </ScrollArea>
-      </aside>
-
-      <section className="flex min-w-0 flex-1 flex-col border-r border-[var(--border-default)]">
-        <div className="space-y-3 border-b border-[var(--border-default)] bg-[var(--surface-panel)] p-4">
-          <div>
-            <h2 className="text-base font-semibold text-[var(--text-primary)]">
-              {activeConnection?.name ?? "数据源"}
-            </h2>
+    <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 p-4 sm:p-6">
+      <section className="rounded-2xl border border-[var(--border-default)] bg-[linear-gradient(135deg,#ffffff_0%,#f6f9ff_62%,#ecf4ff_100%)] p-5 shadow-[0_10px_30px_rgba(15,23,42,0.06)] sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-2">
+            <p className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
+              <Sparkles className="h-3.5 w-3.5" />
+              数据接入工作台
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">数据源</h1>
             <p className="text-sm text-[var(--text-secondary)]">
-              最近同步：{activeConnection?.lastSync ?? "-"}
+              统一管理数据库与文件数据源，创建或编辑时必须绑定工作空间。
             </p>
           </div>
-          <div className="relative max-w-sm">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
-            <Input
-              value={tableQuery}
-              onChange={(event) => setTableQuery(event.target.value)}
-              placeholder="搜索表名或注释..."
-              className="pl-9"
-            />
+
+          <div className="grid min-w-[220px] grid-cols-2 gap-3 text-sm sm:min-w-[320px]">
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2">
+              <p className="text-xs text-[var(--text-tertiary)]">总数据源</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{datasources.length}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2">
+              <p className="text-xs text-[var(--text-tertiary)]">可用数据源</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{availableCount}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2">
+              <p className="text-xs text-[var(--text-tertiary)]">文件型</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{fileDatasourceCount}</p>
+            </div>
+            <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2">
+              <p className="text-xs text-[var(--text-tertiary)]">当前筛选</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--text-primary)]">{filteredDatasources.length}</p>
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
-          {loading ? <StateBlock variant="loading">正在加载数据源信息...</StateBlock> : null}
-          {error ? <StateBlock variant="error">{error}</StateBlock> : null}
-          {!loading && !error && tables.length === 0 ? (
-            <StateBlock variant="idle">当前数据源暂无可展示数据表。</StateBlock>
-          ) : null}
+        <div className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-3">
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--text-tertiary)]" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索"
+              className="pl-9"
+            />
+          </div>
 
-          {!loading && !error && tables.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[220px]">表名</TableHead>
-                    <TableHead>说明</TableHead>
-                    <TableHead className="w-[120px] text-center">字段数</TableHead>
-                    <TableHead className="w-[120px] text-center">问数可见</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tables.map((table) => (
-                    <TableRow
-                      key={table.id}
-                      className={cn("cursor-pointer", table.id === activeTable?.id ? "bg-[var(--surface-active)]" : "")}
-                      onClick={() => setActiveTableId(table.id)}
-                    >
-                      <TableCell className="font-mono text-sm font-medium">
-                        {table.name}
-                      </TableCell>
-                      <TableCell className="text-sm text-[var(--text-secondary)]">{table.description}</TableCell>
-                      <TableCell className="text-center text-sm text-[var(--text-tertiary)]">{table.fieldCount}</TableCell>
-                      <TableCell className="text-center">
-                        <div onClick={(event) => event.stopPropagation()}>
-                          <Switch
-                            checked={table.enabled}
-                            onCheckedChange={(checked) => toggleTableEnabled(table.id, checked)}
-                            aria-label={`切换 ${table.name} 可见性`}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : null}
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value as "all" | DatasourceType)}
+            className="h-9 rounded-[10px] border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 text-sm text-[var(--text-secondary)] outline-none transition-colors hover:border-[var(--border-strong)] focus-visible:border-[var(--ring)]"
+            aria-label="类型筛选"
+          >
+            {TYPE_FILTERS.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+
+          <Button onClick={openCreateEditor} className="h-9 px-4">
+            <Plus className="h-4 w-4" />
+            新增
+          </Button>
         </div>
       </section>
 
-      <aside className="hidden w-96 flex-col bg-[var(--surface-sidebar)] lg:flex">
-        <div className="border-b border-[var(--border-default)] p-4">
-          <h3 className="font-mono text-lg font-semibold text-[var(--text-primary)]">{activeTable?.name ?? "-"}</h3>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">{activeTable?.description ?? "请选择数据表查看字段。"}</p>
+      {loading ? <StateBlock variant="loading">正在加载数据源...</StateBlock> : null}
+      {pageError ? <StateBlock variant="error">{pageError}</StateBlock> : null}
+      {!loading && !pageError && filteredDatasources.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-panel)] p-6">
+          <StateBlock variant="idle" className="border-0 bg-transparent px-0 py-0">
+            {datasources.length > 0
+              ? "暂无匹配数据源，请调整筛选或新建数据源。"
+              : "暂无数据源，请先新增一个数据源。"}
+          </StateBlock>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {hasActiveFilters ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQuery("");
+                  setTypeFilter("all");
+                }}
+              >
+                清除筛选
+              </Button>
+            ) : null}
+            <Button onClick={openCreateEditor}>
+              <Plus className="h-4 w-4" />
+              新增数据源
+            </Button>
+          </div>
         </div>
-        <ScrollArea className="flex-1">
-          <div className="space-y-3 p-4">
-            {(activeTable?.fields ?? []).map((field) => (
-              <article key={field.id} className="rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)] p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {field.mode === "metric" ? (
-                      <Hash className="h-4 w-4 text-[var(--action-primary)]" />
-                    ) : field.mode === "sensitive" ? (
-                      <AlertTriangle className="h-4 w-4 text-rose-500" />
-                    ) : (
-                      <KeyRound className="h-4 w-4 text-amber-500" />
-                    )}
-                    <span className="font-mono text-sm font-semibold text-[var(--text-primary)]">{field.name}</span>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {filteredDatasources.map((item) => {
+          const unavailable = item.status !== "available";
+          return (
+            <article
+              key={item.id}
+              className="group rounded-2xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-5 shadow-[0_1px_4px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--border-brand)] hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--surface-sidebar)] ring-1 ring-[var(--border-subtle)]">
+                    {datasourceIcon(item.type)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-semibold text-[var(--text-primary)]">{item.name}</p>
+                    <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">ID: {item.id}</p>
                   </div>
-                  <Badge variant="secondary" className="font-mono text-[11px]">
-                    {field.type}
-                  </Badge>
                 </div>
-                <p className="mt-2 text-sm text-[var(--text-secondary)]">{field.description}</p>
-                <div className="mt-3 flex items-center justify-between border-t border-[var(--border-subtle)] pt-2 text-xs">
-                  <span className="text-[var(--text-tertiary)]">
-                    {field.mode === "metric"
-                      ? "度量字段"
-                      : field.mode === "sensitive"
-                        ? "敏感字段"
-                        : "维度字段"}
-                  </span>
-                  <span className={cn("font-medium", field.enabled ? "text-[var(--action-primary-hover)]" : "text-[var(--text-tertiary)]")}>
-                    {field.enabled ? "参与问数" : "不参与问数"}
-                  </span>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon-sm" aria-label="更多操作">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-44">
+                    <DropdownMenuItem
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(item.id);
+                      }}
+                    >
+                      复制数据源 ID
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => openEditEditor(item)}>编辑数据源</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-subtle)] px-3 py-2.5">
+                <span className="inline-flex rounded-full border border-[var(--border-default)] bg-[var(--surface-panel)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                  {TYPE_LABEL[item.type]}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+                    item.status === "available"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  )}
+                >
+                  {item.status === "available" ? "可用" : "不可用"}
+                </span>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <p className="text-xs text-[var(--text-tertiary)]">创建后可直接开启问数会话</p>
+                <Button
+                  size="sm"
+                  disabled={unavailable || activeDatasourceId === item.id}
+                  onClick={() => {
+                    void onStartChat(item.id);
+                  }}
+                >
+                  {activeDatasourceId === item.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <PlayCircle className="h-4 w-4" />
+                  )}
+                  开启问数
+                </Button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+
+      <Dialog open={editorOpen} onOpenChange={(open) => (open ? setEditorOpen(true) : closeEditor())}>
+        <DialogContent className="max-h-[90vh] max-w-[980px] gap-0 overflow-hidden border border-[var(--border-default)] bg-[var(--surface-panel)] p-0 shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-4xl">
+          <DialogHeader className="gap-4 border-b border-[var(--border-default)] bg-[linear-gradient(180deg,#ffffff_0%,#f5f9ff_100%)] px-7 pt-6 pb-5">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-semibold text-[var(--text-primary)]">
+                {wizard.mode === "create" ? "新增数据源" : "编辑数据源"}
+              </DialogTitle>
+              <DialogDescription className="text-[var(--text-secondary)]">
+                创建和编辑都必须完成工作空间绑定步骤。
+              </DialogDescription>
+            </div>
+            <Steps items={WIZARD_STEPS} currentStep={editorStep} />
+          </DialogHeader>
+
+          {editorFailure ? (
+            <div className="mx-7 mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-sm font-medium text-red-700">{editorFailure.message}</p>
+              {editorFailure.hint ? <p className="mt-1 text-xs text-red-700/90">{editorFailure.hint}</p> : null}
+              {editorFailure.stage ? (
+                <p className="mt-1 text-xs text-red-700/90">失败阶段：{editorFailure.stage}</p>
+              ) : null}
+              {editorFailure.action ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 h-9 border-red-200 bg-white px-4 text-red-700 hover:bg-red-100"
+                  onClick={() => {
+                    if (editorFailure.action === "retry") {
+                      void submitEditor();
+                      return;
+                    }
+                    setEditorStep(2);
+                  }}
+                >
+                  {editorFailure.action === "retry" ? "重试" : "上一步"}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="max-h-[62vh] overflow-auto px-7 py-6">
+            {editorStep === 1 ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {WIZARD_TYPES.map((item) => (
+                  <button
+                    key={item.type}
+                    type="button"
+                    onClick={() => {
+                      patchWizard({
+                        type: item.type,
+                        port: inferDefaultPort(item.type)
+                      });
+                    }}
+                    className={cn(
+                      "rounded-xl border p-4 text-left transition-all duration-200",
+                      wizard.type === item.type
+                        ? "border-[var(--action-primary)] bg-[var(--surface-active)] ring-2 ring-[var(--border-brand)]/70 shadow-[0_10px_24px_rgba(37,99,235,0.14)]"
+                        : "border-[var(--border-default)] bg-[var(--surface-panel)] hover:-translate-y-0.5 hover:border-[var(--border-brand)] hover:bg-[var(--surface-subtle)] hover:shadow-[0_8px_20px_rgba(15,23,42,0.08)]"
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={cn(
+                          "inline-flex h-10 w-10 items-center justify-center rounded-lg",
+                          item.type === "mysql" || item.type === "postgresql"
+                            ? "bg-blue-100 text-blue-700"
+                            : "bg-emerald-100 text-emerald-700"
+                        )}
+                      >
+                        {item.type === "mysql" || item.type === "postgresql" ? (
+                          <Database className="h-5 w-5" />
+                        ) : (
+                          <FileSpreadsheet className="h-5 w-5" />
+                        )}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-base font-semibold text-[var(--text-primary)]">{item.title}</p>
+                        <p className="text-xs text-[var(--text-tertiary)]">
+                          {item.type === "mysql" || item.type === "postgresql" ? "数据库连接" : "文件上传"}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">{item.description}</p>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {editorStep === 2 ? (
+              <div className="space-y-5">
+                {(wizard.type === "mysql" || wizard.type === "postgresql" || wizard.type === "sqlite") && (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">连接参数</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        编辑模式下只会更新你填写的连接信息；密码留空则不更新。
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
+                        <Input
+                          value={wizard.name}
+                          onChange={(event) => patchWizard({ name: event.target.value })}
+                          placeholder="数据源名称"
+                        />
+                      </label>
+
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Host</span>
+                          <Input
+                            value={wizard.host}
+                            onChange={(event) => patchWizard({ host: event.target.value })}
+                            placeholder="Host"
+                          />
+                        </label>
+                      )}
+
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Port</span>
+                          <Input
+                            value={wizard.port}
+                            onChange={(event) => patchWizard({ port: event.target.value })}
+                            placeholder="Port"
+                          />
+                        </label>
+                      )}
+
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Database</span>
+                          <Input
+                            value={wizard.database}
+                            onChange={(event) => patchWizard({ database: event.target.value })}
+                            placeholder="Database"
+                          />
+                        </label>
+                      )}
+
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">Username</span>
+                          <Input
+                            value={wizard.username}
+                            onChange={(event) => patchWizard({ username: event.target.value })}
+                            placeholder="Username"
+                          />
+                        </label>
+                      )}
+
+                      {(wizard.type === "mysql" || wizard.type === "postgresql") && (
+                        <label className="space-y-1">
+                          <span className="text-xs text-[var(--text-tertiary)]">
+                            Password {wizard.mode === "edit" ? "（留空不更新）" : ""}
+                          </span>
+                          <Input
+                            type="password"
+                            value={wizard.password}
+                            onChange={(event) => patchWizard({ password: event.target.value })}
+                            placeholder="Password"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel") && (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm font-medium text-[var(--text-primary)]">文件上传</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        先上传文件创建数据源，再在同一流程绑定到目标工作空间。
+                      </p>
+                    </div>
+                    <label className="space-y-1">
+                      <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
+                      <Input
+                        value={wizard.name}
+                        onChange={(event) => patchWizard({ name: event.target.value })}
+                        placeholder="数据源名称"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-[var(--text-tertiary)]">选择文件</span>
+                      <Input
+                        type="file"
+                        accept={wizard.type === "csv" ? ".csv" : ".xls,.xlsx"}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] ?? null;
+                          patchWizard({
+                            file,
+                            uploadedDatasourceId: "",
+                            datasourceId: ""
+                          });
+                        }}
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {wizard.mode === "edit" && (wizard.type === "csv" || wizard.type === "excel") && (
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-[var(--text-primary)]">文件数据源基础信息</p>
+                    <label className="space-y-1">
+                      <span className="text-xs text-[var(--text-tertiary)]">数据源名称</span>
+                      <Input
+                        value={wizard.name}
+                        onChange={(event) => patchWizard({ name: event.target.value })}
+                        placeholder="数据源名称"
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {editorStep === 3 ? (
+              <div className="space-y-4">
+                <WorkspaceSelectorInline
+                  workspaceId={wizard.workspaceId}
+                  workspaces={workspaces}
+                  loading={workspacesLoading}
+                  error={workspacesError}
+                  disabled={editorSaving}
+                  onWorkspaceIdChange={(nextWorkspaceId) => {
+                    patchWizard({ workspaceId: nextWorkspaceId });
+                    writeActiveWorkspaceId(nextWorkspaceId);
+                  }}
+                  onWorkspaceCreated={(workspace) => {
+                    setWorkspaces((previous) => {
+                      if (previous.some((item) => item.id === workspace.id)) {
+                        return previous;
+                      }
+                      return [workspace, ...previous];
+                    });
+                    patchWizard({ workspaceId: workspace.id });
+                    writeActiveWorkspaceId(workspace.id);
+                  }}
+                  onCreateWorkspace={(name) => createWorkspace({ name })}
+                />
+
+                <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-sidebar)] p-4">
+                  <p className="text-sm text-[var(--text-secondary)]">
+                    提交会走 workflow 接口，统一处理数据源变更与工作空间绑定。
+                  </p>
+                  <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                    <input
+                      type="checkbox"
+                      checked={wizard.openAfterCreate}
+                      onChange={(event) => patchWizard({ openAfterCreate: event.target.checked })}
+                    />
+                    {wizard.mode === "create" ? "创建完成后立即开启问数" : "保存后立即开启问数"}
+                  </label>
                 </div>
-              </article>
-            ))}
-            {!activeTable ? (
-              <StateBlock variant="idle">请先从中间表格选择一个数据表。</StateBlock>
+              </div>
             ) : null}
           </div>
-        </ScrollArea>
-      </aside>
+
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--surface-subtle)] px-7 py-4">
+            <p className="hidden text-xs text-[var(--text-tertiary)] sm:block">
+              提交中会复用同一个幂等键，并锁定按钮防止重复提交。
+            </p>
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <Button
+                variant="outline"
+                size="lg"
+                className="px-5"
+                disabled={editorSaving}
+                onClick={() => {
+                  if (editorStep === 1) {
+                    closeEditor();
+                    return;
+                  }
+                  if (editorStep === 2 && wizard.mode === "edit") {
+                    closeEditor();
+                    return;
+                  }
+                  setEditorStep((previous) => (previous === 3 ? 2 : 1));
+                }}
+              >
+                {editorStep === 1 || (editorStep === 2 && wizard.mode === "edit") ? "取消" : "上一步"}
+              </Button>
+
+              {editorStep < 3 ? (
+                <Button
+                  size="lg"
+                  className="px-5"
+                  disabled={editorSaving}
+                  onClick={() => {
+                    if (editorStep === 1) {
+                      if (!wizard.type) {
+                        setEditorFailure({ message: "请选择一种数据源类型后继续" });
+                        return;
+                      }
+                      setEditorFailure(null);
+                      setEditorStep(2);
+                      return;
+                    }
+
+                    const validationMessage = validateStep2();
+                    if (validationMessage) {
+                      setEditorFailure({ message: validationMessage, action: "previous" });
+                      return;
+                    }
+                    setEditorFailure(null);
+                    setEditorStep(3);
+                  }}
+                >
+                  下一步
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  size="lg"
+                  className="px-5"
+                  disabled={editorSaving}
+                  onClick={() => {
+                    void submitEditor();
+                  }}
+                >
+                  {editorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  {wizard.mode === "create" ? "完成创建" : "保存并绑定"}
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+export default function DataSourcesPage() {
+  return (
+    <Suspense fallback={<StateBlock variant="loading">正在加载数据源页面...</StateBlock>}>
+      <DataSourcesPageContent />
+    </Suspense>
   );
 }

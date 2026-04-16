@@ -21,6 +21,7 @@ type PrismaClientLike = {
     findMany: (args: Record<string, unknown>) => Promise<unknown[]>;
     findUnique: (args: Record<string, unknown>) => Promise<unknown>;
     update: (args: Record<string, unknown>) => Promise<unknown>;
+    updateMany: (args: Record<string, unknown>) => Promise<{ count: number }>;
   };
   $disconnect: () => Promise<void>;
 };
@@ -633,6 +634,38 @@ export class LlmConfigRepository implements OnModuleInit, OnModuleDestroy {
     });
 
     return next;
+  }
+
+  async batchSetModelsEnabled(
+    modelIds: string[],
+    enabled: boolean
+  ): Promise<number> {
+    if (modelIds.length === 0) {
+      return 0;
+    }
+    const now = new Date().toISOString();
+    let updated = 0;
+
+    for (const modelId of modelIds) {
+      const current = this.models.get(modelId);
+      if (current) {
+        this.models.set(modelId, { ...current, enabled, updatedAt: now });
+        updated++;
+      }
+    }
+
+    if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
+      return updated;
+    }
+
+    await this.tryPrismaWrite(async () => {
+      await this.prisma?.modelCatalog.updateMany({
+        where: { id: { in: modelIds }, deletedAt: null },
+        data: { enabled, updatedAt: new Date(now) }
+      });
+    });
+
+    return updated;
   }
 
   async resolveDefaultModel(): Promise<ModelCatalogItem | undefined> {

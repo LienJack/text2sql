@@ -75,4 +75,32 @@ describe("settings api (e2e)", () => {
       )
     ).toBe(true);
   });
+
+  it("should allow non-admin to read settings view but deny provider write", async () => {
+    const viewRes = await request(app.getHttpServer())
+      .get("/api/v1/settings/models")
+      .set("x-user-role", "user")
+      .set("x-user-id", "user-e2e")
+      .send();
+
+    expect(viewRes.status).toBe(200);
+    expect(viewRes.body.status).toBe("success");
+    expect(viewRes.body.data.actor.role).toBe("user");
+
+    const writeRes = await request(app.getHttpServer())
+      .post("/api/v1/settings/providers")
+      .set("x-user-role", "user")
+      .set("x-user-id", "user-e2e")
+      .send({
+        provider: "openai",
+        displayName: "OpenAI Denied",
+        baseUrl: "https://api.openai.com/v1"
+      });
+
+    expect(writeRes.status).toBe(403);
+    expect(
+      (writeRes.body.error?.message as string | undefined) ??
+        (writeRes.body.message as string | undefined)
+    ).toContain("仅管理员可执行该操作");
+  });
 });

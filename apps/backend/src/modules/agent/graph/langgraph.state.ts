@@ -5,6 +5,7 @@ import type {
   SqlRun
 } from "@text2sql/shared-types";
 import type { GraphInput, GraphTraceContext } from "./agent.types";
+import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { IntentPlan } from "../nodes/build-intent-plan.node";
 import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";
@@ -54,14 +55,37 @@ export const normalizeTraceContext = (context?: GraphTraceContext): GraphTraceCo
   };
 };
 
+export const normalizeAccessContext = (
+  context?: SqlTableAccessContext
+): SqlTableAccessContext | undefined => {
+  if (!context) {
+    return undefined;
+  }
+  const actorId = context.actorId?.trim();
+  const workspaceId = context.workspaceId?.trim();
+  if (!actorId || !workspaceId) {
+    return undefined;
+  }
+  return {
+    ...context,
+    actorId,
+    workspaceId,
+    roleSet: context.roleSet?.map((item) => item.trim()).filter(Boolean) ?? [],
+    allowedTables:
+      context.allowedTables?.map((item) => item.trim()).filter(Boolean) ?? []
+  };
+};
+
 export const createInitialLangGraphState = (
   input: GraphInput,
   fallbackProvider = "volcengine"
 ): LangGraphState => {
   const traceContext = normalizeTraceContext(input.traceContext);
+  const accessContext = normalizeAccessContext(input.accessContext);
   return {
     ...input,
     traceContext,
+    accessContext,
     provider: fallbackProvider,
     model: undefined,
     llmRaw: undefined,

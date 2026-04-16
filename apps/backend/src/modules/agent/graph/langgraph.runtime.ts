@@ -7,6 +7,7 @@ import {
   type LangGraphRunnableConfig
 } from "@langchain/langgraph";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
+import type { DatasourceType } from "@text2sql/shared-types";
 import { BuildIntentPlanNode } from "../nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "../nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "../nodes/build-semantic-query.node";
@@ -26,7 +27,10 @@ const LangGraphStateAnnotation = Annotation.Root({
   runId: Annotation<string>(),
   sessionId: Annotation<string>(),
   question: Annotation<string>(),
+  datasourceId: Annotation<string>(),
+  datasourceType: Annotation<DatasourceType | undefined>(),
   modelCatalogId: Annotation<string | undefined>(),
+  accessContext: Annotation<LangGraphState["accessContext"]>(),
   planningScaffoldEnabled: Annotation<boolean | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
@@ -564,6 +568,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       try {
         const generated = await deps.generateSqlNode.run(
           state.question,
+          state.datasourceType,
           state.modelCatalogId,
           callbacks.streamMode
             ? {
@@ -576,6 +581,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         const endedAt = new Date().toISOString();
         const inputs = {
           question: state.question,
+          datasourceType: state.datasourceType,
           modelCatalogId: state.modelCatalogId,
           planningScaffoldEnabled: state.planningScaffoldEnabled,
           planningStatus: state.planningStatus,
@@ -683,10 +689,16 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
 
-      const safety = deps.safetyNode.run(state.sql);
+      const safety = await deps.safetyNode.run({
+        sql: state.sql,
+        datasourceId: state.datasourceId,
+        accessContext: state.accessContext
+      });
       const endedAt = new Date().toISOString();
       const inputs = {
-        sql: state.sql
+        sql: state.sql,
+        datasourceId: state.datasourceId,
+        workspaceId: state.accessContext?.workspaceId
       };
       if (!safety.allowed) {
         const trace = appendStep(state, {
@@ -773,10 +785,19 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         };
       }
       try {
-        const execution = await deps.executeNode.run(state.sql);
+        const execution = await deps.executeNode.run({
+          sql: state.sql,
+          datasourceId: state.datasourceId,
+          sessionId: state.sessionId,
+          requestId: state.traceContext?.requestId,
+          accessContext: state.accessContext
+        });
         const endedAt = new Date().toISOString();
         const inputs = {
-          sql: state.sql
+          sql: state.sql,
+          datasourceId: state.datasourceId,
+          sessionId: state.sessionId,
+          workspaceId: state.accessContext?.workspaceId
         };
         const outputs = {
           rowCount: execution.rows.length,

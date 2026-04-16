@@ -21,7 +21,9 @@ describe("agent main flow", () => {
     const run = await graph.run({
       runId: "run-1",
       sessionId: "session-1",
-      question: "统计商家交易额"
+      question: "统计商家交易额",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite"
     });
     expect(["executionResult", "failed"]).toContain(run.status);
     expect(run.trace.steps.length).toBeGreaterThan(0);
@@ -40,7 +42,9 @@ describe("agent main flow", () => {
     const run = await graph.run({
       runId: "run-2",
       sessionId: "session-2",
-      question: "DELETE orders where id = 1"
+      question: "DELETE orders where id = 1",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite"
     });
     expect(run.status).toBe("rejected");
   });

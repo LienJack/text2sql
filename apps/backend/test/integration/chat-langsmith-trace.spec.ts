@@ -28,7 +28,7 @@ describe("chat langsmith trace", () => {
     const spanSpy = jest.spyOn(langsmith, "recordSpan");
     const endSpy = jest.spyOn(langsmith, "endRoot");
 
-    const session = await chatService.createSession();
+    const session = await chatService.createSession("sqlite_main");
     await chatService.sendMessage(session.id, "统计订单状态分布", "req-chat-1");
 
     expect(startSpy).toHaveBeenCalledWith(

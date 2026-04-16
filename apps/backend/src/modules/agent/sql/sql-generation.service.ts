@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { DatasourceType } from "@text2sql/shared-types";
 import type {
   LlmGatewayPrompt,
   LlmGatewayStreamEvent,
@@ -29,10 +30,11 @@ export class SqlGenerationService {
   async generate(
     question: string,
     selection?: {
+      datasourceType?: DatasourceType;
       modelCatalogId?: string;
     }
   ): Promise<SqlDraft> {
-    const prompt = this.promptBuilder.build(question);
+    const prompt = this.promptBuilder.build(question, selection?.datasourceType);
     const completion = await this.providerRouter.generate(prompt, selection);
     const extracted = this.extractor.extract(completion.rawText);
     return {
@@ -49,6 +51,7 @@ export class SqlGenerationService {
   async stream(
     question: string,
     selection?: {
+      datasourceType?: DatasourceType;
       modelCatalogId?: string;
     },
     options?: {
@@ -56,7 +59,7 @@ export class SqlGenerationService {
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }
   ): Promise<SqlDraft> {
-    const prompt = this.promptBuilder.build(question);
+    const prompt = this.promptBuilder.build(question, selection?.datasourceType);
     const completion = await this.providerRouter.stream(prompt, selection, options);
     const extracted = this.extractor.extract(completion.rawText);
     return {

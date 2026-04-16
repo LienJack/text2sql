@@ -120,10 +120,29 @@ export async function setModelEnabled(
   modelId: string,
   enabled: boolean
 ): Promise<ModelCatalogItem> {
-  return request<ModelCatalogItem>(`/api/v1/settings/models/${modelId}`, {
+  return request<ModelCatalogItem>(
+    `/api/v1/settings/models/${encodeURIComponent(modelId)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ enabled })
+    }
+  );
+}
+
+export async function batchSetModelsEnabled(
+  modelIds: string[],
+  enabled: boolean
+): Promise<{ updated: number }> {
+  return request<{ updated: number }>("/api/v1/settings/models/batch", {
     method: "PATCH",
-    body: JSON.stringify({
-      enabled
-    })
+    body: JSON.stringify({ modelIds, enabled })
   });
+}
+
+export async function fetchModelStatuses(): Promise<
+  Array<{ id: string; enabled: boolean }>
+> {
+  return request<Array<{ id: string; enabled: boolean }>>(
+    "/api/v1/settings/models/status"
+  );
 }

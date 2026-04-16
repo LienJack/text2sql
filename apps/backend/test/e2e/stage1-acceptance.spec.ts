@@ -72,7 +72,9 @@ describe("stage1 acceptance", () => {
       const run = await graph.run({
         runId: `stage1-${item.id}`,
         sessionId: "stage1",
-        question: item.question
+        question: item.question,
+        datasourceId: "sqlite_main",
+        datasourceType: "sqlite"
       });
       if (
         run.status === "executionResult" ||

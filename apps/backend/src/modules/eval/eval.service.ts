@@ -35,6 +35,8 @@ export class EvalService {
         runId: uuidv4(),
         sessionId: evalSessionId,
         question: item.question,
+        datasourceId: "sqlite_main",
+        datasourceType: "sqlite",
         traceContext: {
           source: "evaluation",
           route: "/api/v1/evaluations/run",

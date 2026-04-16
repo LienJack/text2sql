@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "@/components/chat-panel";
 import {
@@ -46,9 +47,13 @@ const mockGetRun = vi.mocked(getRun);
 
 describe("chat to sql preview integration", () => {
   beforeEach(() => {
-    const session = {
+    window.sessionStorage.setItem("text2sql.activeDatasourceId", "sqlite_main");
+    const session: Session = {
       id: "session-1",
       datasource: "sqlite_main",
+      datasourceName: "SQLite 主数据源",
+      datasourceType: "sqlite",
+      datasourceStatus: "available",
       title: "新会话",
       modelCatalogId: "model-1",
       modelProvider: "openai",
@@ -139,6 +144,7 @@ describe("chat to sql preview integration", () => {
   });
 
   afterEach(() => {
+    window.sessionStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -146,7 +152,7 @@ describe("chat to sql preview integration", () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
 
-    await screen.findByText(/Session: session-1/i);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     await user.type(screen.getByLabelText("聊天输入"), "给我最近订单");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
