@@ -109,7 +109,8 @@ jobs:
 
           session_json=$(curl -sS -X POST http://127.0.0.1:3100/api/v1/sessions \
             -H "content-type: application/json" \
-            -d '{}')
+            -d '{"datasource":"sqlite_main"}')
+          echo "$session_json"
           echo "$session_json" | jq -e '.status == "success"'
 
           session_id=$(echo "$session_json" | jq -r '.data.id')
