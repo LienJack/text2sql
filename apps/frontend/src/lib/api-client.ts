@@ -3,25 +3,198 @@ import type {
   ApiResponse,
   ChatStreamEvent,
   ChatSessionView,
+  Datasource,
+  PreviewDatasourceTablesRequest,
+  PreviewDatasourceTablesResponse,
+  DatasourceUpsertPayload,
   LlmSettingsView,
   ModelCatalogItem,
-  Session
+  Session,
+  UpsertDatasourceWorkflowRequest,
+  UpsertDatasourceWorkflowResponse
 } from "@text2sql/shared-types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
+const API_BASE_OVERRIDE = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+const API_BASE = API_BASE_OVERRIDE ? API_BASE_OVERRIDE.replace(/\/+$/, "") : "";
+
+function composeApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!API_BASE) {
+    return normalizedPath;
+  }
+  if (
+    API_BASE.endsWith("/api") &&
+    (normalizedPath === "/api" || normalizedPath.startsWith("/api/"))
+  ) {
+    return `${API_BASE.slice(0, -4)}${normalizedPath}`;
+  }
+  return `${API_BASE}${normalizedPath}`;
+}
+
+function resolveWorkspaceIdHeader(): string | undefined {
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
+    }
+    const fromStorage = window.sessionStorage
+      .getItem("text2sql.activeWorkspaceId")
+      ?.trim();
+    if (fromStorage) {
+      return fromStorage;
+    }
+  }
+  const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();
+  return fromEnv || undefined;
+}
+
+export class DatasourceApiError extends Error {
+  readonly code?: string;
+  readonly details?: unknown;
+  readonly stage?: string;
+
+  constructor(
+    message: string,
+    options?: { code?: string; details?: unknown; stage?: string }
+  ) {
+    super(message);
+    this.name = "DatasourceApiError";
+    this.code = options?.code;
+    this.details = options?.details;
+    this.stage = options?.stage;
+  }
+}
+
+class ApiClientRequestError extends Error {
+  readonly code?: string;
+  readonly details?: unknown;
+  readonly stage?: string;
+
+  constructor(
+    message: string,
+    options?: { code?: string; details?: unknown; stage?: string }
+  ) {
+    super(message);
+    this.name = "ApiClientRequestError";
+    this.code = options?.code;
+    this.details = options?.details;
+    this.stage = options?.stage;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function resolveWorkflowStage(details: unknown): string | undefined {
+  if (!isRecord(details)) {
+    return undefined;
+  }
+
+  const candidates = [
+    details.stage,
+    details.failedStage,
+    details.workflowStage
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeIdempotencyKey(
+  idempotencyKey: string | undefined
+): string | undefined {
+  const normalized = idempotencyKey?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function createIdempotencyKey(prefix = "datasource-workflow"): string {
+  const suffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${suffix}`;
+}
+
+function withIdempotencyHeader(
+  idempotencyKey: string | undefined
+): Record<string, string> {
+  const normalized = normalizeIdempotencyKey(idempotencyKey);
+  return normalized ? { "x-idempotency-key": normalized } : {};
+}
+
+export interface DatasourceWorkflowApiErrorPayload {
+  stage?: string;
+  code?: string;
+  details?: unknown;
+}
+
+export function resolveDatasourceWorkflowApiError(
+  error: unknown
+): DatasourceWorkflowApiErrorPayload {
+  if (error instanceof DatasourceApiError) {
+    return {
+      stage: error.stage,
+      code: error.code,
+      details: error.details
+    };
+  }
+
+  if (error instanceof ApiClientRequestError) {
+    return {
+      stage: error.stage,
+      code: error.code,
+      details: error.details
+    };
+  }
+
+  return {};
+}
+
+function toDatasourceApiError(error: unknown): DatasourceApiError {
+  if (error instanceof DatasourceApiError) {
+    return error;
+  }
+
+  if (error instanceof ApiClientRequestError) {
+    return new DatasourceApiError(error.message, {
+      code: error.code,
+      details: error.details,
+      stage: error.stage
+    });
+  }
+
+  if (error instanceof Error) {
+    const codeMatch = error.message.match(/\[([A-Z0-9_]+)\]\s*$/);
+    const code = codeMatch?.[1];
+    const message = code
+      ? error.message.replace(/\s*\[[A-Z0-9_]+\]\s*$/, "")
+      : error.message;
+    return new DatasourceApiError(message, { code });
+  }
+
+  return new DatasourceApiError(String(error));
+}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${url}`, {
+    response = await fetch(composeApiUrl(url), {
       ...init,
       headers: {
         "content-type": "application/json",
         "x-user-role": role,
         "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
         ...(init?.headers ?? {})
       }
     });
@@ -41,29 +214,187 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
   const payload = (await response.json()) as ApiResponse<T>;
   if (payload.status === "error") {
-    throw new Error(
-      `${payload.error.message}${
-        payload.error.code ? ` [${payload.error.code}]` : ""
-      }`
-    );
+    throw new ApiClientRequestError(payload.error.message, {
+      code: payload.error.code,
+      details: payload.error.details,
+      stage: resolveWorkflowStage(payload.error.details)
+    });
   }
   return payload.data;
 }
 
-export async function createSession(): Promise<Session> {
+export async function createSession(
+  datasource: string,
+  options?: { workspaceId?: string }
+): Promise<Session> {
+  const workspaceId = options?.workspaceId?.trim() || resolveWorkspaceIdHeader();
   return request<Session>("/api/v1/sessions", {
     method: "POST",
     body: JSON.stringify({
-      datasource: "sqlite_main"
+      datasource,
+      ...(workspaceId ? { workspaceId } : {})
     })
   });
 }
 
 export async function listSessions(
-  status?: "healthy" | "pending" | "degraded"
+  options?: {
+    status?: "healthy" | "pending" | "degraded";
+    datasource?: string;
+    view?: "current" | "readonly-history" | "all";
+  }
 ): Promise<Session[]> {
-  const query = status ? `?status=${status}` : "";
+  const params = new URLSearchParams();
+  if (options?.status) {
+    params.set("status", options.status);
+  }
+  if (options?.datasource) {
+    params.set("datasource", options.datasource);
+  }
+  if (options?.view) {
+    params.set("view", options.view);
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : "";
   return request<Session[]>(`/api/v1/sessions${query}`);
+}
+
+export async function listDatasources(options?: {
+  includeUnavailable?: boolean;
+  ignoreWorkspaceScope?: boolean;
+}): Promise<Datasource[]> {
+  const includeUnavailable = options?.includeUnavailable ?? true;
+  const query = includeUnavailable ? "" : "?includeUnavailable=false";
+  const headers = options?.ignoreWorkspaceScope
+    ? {
+        "x-workspace-id": ""
+      }
+    : undefined;
+  return request<Datasource[]>(`/api/v1/datasources${query}`, {
+    headers
+  });
+}
+
+export async function createDatasource(input: {
+  name: string;
+  type: "sqlite" | "mysql" | "postgresql";
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+  shared?: boolean;
+}, options?: { idempotencyKey?: string }): Promise<Datasource> {
+  try {
+    return await request<Datasource>("/api/v1/datasources", {
+      method: "POST",
+      headers: withIdempotencyHeader(options?.idempotencyKey),
+      body: JSON.stringify(input)
+    });
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function updateDatasource(
+  datasourceId: string,
+  input: DatasourceUpsertPayload,
+  options?: { idempotencyKey?: string }
+): Promise<Datasource> {
+  try {
+    return await request<Datasource>(`/api/v1/datasources/${datasourceId}`, {
+      method: "PATCH",
+      headers: withIdempotencyHeader(options?.idempotencyKey),
+      body: JSON.stringify(input)
+    });
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function submitDatasourceWorkflow(
+  input: UpsertDatasourceWorkflowRequest,
+  options?: { idempotencyKey?: string }
+): Promise<UpsertDatasourceWorkflowResponse> {
+  try {
+    return await request<UpsertDatasourceWorkflowResponse>(
+      "/api/v1/datasources/workflow",
+      {
+        method: "POST",
+        headers: withIdempotencyHeader(options?.idempotencyKey),
+        body: JSON.stringify(input)
+      }
+    );
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function previewDatasourceTables(
+  input: PreviewDatasourceTablesRequest,
+  options?: { idempotencyKey?: string }
+): Promise<PreviewDatasourceTablesResponse> {
+  try {
+    return await request<PreviewDatasourceTablesResponse>(
+      "/api/v1/datasources/table-preview",
+      {
+        method: "POST",
+        headers: withIdempotencyHeader(options?.idempotencyKey),
+        body: JSON.stringify(input)
+      }
+    );
+  } catch (error) {
+    throw toDatasourceApiError(error);
+  }
+}
+
+export async function uploadDatasourceFile(input: {
+  file: File;
+  name?: string;
+}): Promise<Datasource> {
+  const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
+  const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
+  const workspaceId = resolveWorkspaceIdHeader();
+  const body = new FormData();
+  body.set("file", input.file);
+  if (input.name?.trim()) {
+    body.set("name", input.name.trim());
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(composeApiUrl("/api/v1/datasources/upload"), {
+      method: "POST",
+      headers: {
+        "x-user-role": role,
+        "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
+      },
+      body
+    });
+  } catch (error) {
+    throw new DatasourceApiError(
+      `网络请求失败，请检查后端地址与跨域配置。(${error instanceof Error ? error.message : String(error)})`
+    );
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    const payload = await response.text();
+    throw new DatasourceApiError(
+      `后端返回了非 JSON 响应（HTTP ${response.status}）。${payload.slice(0, 200)}`
+    );
+  }
+
+  const payload = (await response.json()) as ApiResponse<Datasource>;
+  if (payload.status === "error") {
+    throw new DatasourceApiError(payload.error.message, {
+      code: payload.error.code,
+      details: payload.error.details,
+      stage: resolveWorkflowStage(payload.error.details)
+    });
+  }
+  return payload.data;
 }
 
 export async function renameSession(
@@ -166,18 +497,23 @@ export async function* streamMessageEvents(
 ): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
-  const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-user-role": role,
-      "x-user-id": userId
-    },
-    signal: abortSignal,
-    body: JSON.stringify({
-      message
-    })
-  });
+  const workspaceId = resolveWorkspaceIdHeader();
+  const response = await fetch(
+    composeApiUrl(`/api/v1/sessions/${sessionId}/messages/stream`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-user-role": role,
+        "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
+      },
+      signal: abortSignal,
+      body: JSON.stringify({
+        message
+      })
+    }
+  );
   if (!response.ok) {
     throw new Error(`流式请求失败（HTTP ${response.status}）`);
   }

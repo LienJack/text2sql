@@ -2,8 +2,6 @@
 /data/*
 /vibe/*
 /docs/*
-!/docs/standards/
-!/docs/standards/*.md
 # Node / monorepo artifacts
 node_modules/
 dist/
@@ -20,3 +18,5 @@ __pycache__/
 .env
 .env.local
 .env.*.local
+.omx/
+.enter/*

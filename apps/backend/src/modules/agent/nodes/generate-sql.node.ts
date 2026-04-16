@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { DatasourceType } from "@text2sql/shared-types";
 import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
@@ -11,6 +12,7 @@ export class GenerateSqlNode {
 
   async run(
     question: string,
+    datasourceType?: DatasourceType,
     modelCatalogId?: string,
     options?: {
       stream?: boolean;
@@ -33,6 +35,7 @@ export class GenerateSqlNode {
       return this.sqlGeneration.stream(
         question,
         {
+          datasourceType,
           modelCatalogId
         },
         {
@@ -42,6 +45,7 @@ export class GenerateSqlNode {
       );
     }
     return this.sqlGeneration.generate(question, {
+      datasourceType,
       modelCatalogId
     });
   }

@@ -19,7 +19,7 @@ describe("data flow", () => {
     }).compile();
     const chatService = moduleRef.get(ChatService);
 
-    const session = await chatService.createSession();
+    const session = await chatService.createSession("sqlite_main");
     await chatService.sendMessage(session.id, "请统计订单状态分布");
 
     const messages = await chatService.listMessages(session.id);

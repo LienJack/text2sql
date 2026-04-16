@@ -3,6 +3,7 @@ import type {
   ChatStreamEvent,
   ChatSessionView,
   ChatMessage,
+  Datasource,
   ReasoningStage,
   Session,
   SessionSyncStatus,
@@ -12,11 +13,19 @@ import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
 import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
+import {
+  type AccessContext
+} from "../auth/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
+import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
+import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
+import { DatasourceService } from "../datasource/datasource.service";
+import type { SessionListView } from "./dto/list-sessions.dto";
 
 const MODEL_PROBE_PROMPT = {
   systemPrompt: "You are a health check assistant. Reply with exactly OK.",
@@ -30,15 +39,73 @@ export class ChatService {
     private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
+    private readonly datasourceService: DatasourceService,
+    private readonly policyEvaluatorService: PolicyEvaluatorService,
+    private readonly workspaceDatasourcePolicyRepository: WorkspaceDatasourcePolicyRepository,
+    private readonly datasourceRegistry: DatasourceRegistryService,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
     private readonly traceService: TraceService
   ) {}
 
   async createSession(
-    datasource = "sqlite_main",
-    modelCatalogId?: string
+    datasource: string,
+    modelCatalogId?: string,
+    options?: {
+      workspaceId?: string;
+      createdByUserId?: string;
+      actor?: {
+        id?: string;
+        role?: string;
+        isSystemAdmin?: boolean;
+        requestedWorkspaceId?: string;
+        accessContext?: {
+          actorId?: string;
+          workspaceId?: string | null;
+          roleSet?: string[];
+        };
+      };
+    }
   ): Promise<Session> {
+    const normalizedDatasource = datasource.trim();
+    const normalizedWorkspaceId = options?.workspaceId?.trim() || undefined;
+    const normalizedCreatedByUserId =
+      options?.createdByUserId?.trim() || undefined;
+    if (!normalizedDatasource) {
+      throw new DomainError("VALIDATION_ERROR", "datasource 为必填项", 400, {
+        field: "datasource"
+      });
+    }
+
+    if (normalizedWorkspaceId) {
+      const accessContext = await this.policyEvaluatorService.resolveAccessContext({
+        actor: options?.actor ?? {
+          id: normalizedCreatedByUserId,
+          role: "user",
+          requestedWorkspaceId: normalizedWorkspaceId
+        },
+        workspaceId: normalizedWorkspaceId
+      });
+      const visible = await this.policyEvaluatorService.listVisibleDatasources({
+        context: accessContext
+      });
+      if (!visible.ids.includes(normalizedDatasource)) {
+        throw new DomainError(
+          "DATASOURCE_ACCESS_DENIED",
+          "当前工作空间未绑定该数据源或无访问权限。",
+          403,
+          {
+            workspaceId: normalizedWorkspaceId,
+            datasourceId: normalizedDatasource,
+            actorId: accessContext.actorId
+          }
+        );
+      }
+    }
+
+    const datasourceMeta = await this.datasourceService.assertDatasourceAvailable(
+      normalizedDatasource
+    );
     let defaultModel:
       | {
           id: string;
@@ -68,7 +135,12 @@ export class ChatService {
 
     const session: Session = {
       id: uuidv4(),
-      datasource,
+      datasource: normalizedDatasource,
+      workspaceId: normalizedWorkspaceId ?? null,
+      createdByUserId: normalizedCreatedByUserId ?? null,
+      datasourceName: datasourceMeta.name,
+      datasourceType: datasourceMeta.type,
+      datasourceStatus: this.normalizeDatasourceStatus(datasourceMeta.status),
       createdAt: new Date().toISOString(),
       title: "新会话",
       modelCatalogId: defaultModel?.id ?? null,
@@ -80,13 +152,89 @@ export class ChatService {
       lastSyncFailureAt: null
     };
     await this.repository.createSession(session);
-    return session;
+    return this.mergeDatasourceMetadata(session, datasourceMeta);
   }
 
-  async listSessions(status?: SessionSyncStatus): Promise<Session[]> {
-    return this.repository.listSessions({
-      statuses: status ? [status] : undefined
+  async listSessions(
+    status?: SessionSyncStatus,
+    datasource?: string,
+    view: SessionListView = "all",
+    options?: {
+      workspaceId?: string;
+    }
+  ): Promise<Session[]> {
+    const normalizedDatasource = datasource?.trim() || undefined;
+    const normalizedWorkspaceId = options?.workspaceId?.trim() || undefined;
+    if (view === "current" && !normalizedDatasource) {
+      throw new DomainError(
+        "VALIDATION_ERROR",
+        "view=current 时 datasource 为必填项",
+        400,
+        { view, field: "datasource" }
+      );
+    }
+    if (view === "current" && normalizedDatasource) {
+      await this.datasourceService.getDatasourceOrThrow(normalizedDatasource);
+    }
+
+    const sessions = await this.repository.listSessions({
+      datasource: view === "readonly-history" ? undefined : normalizedDatasource,
+      statuses: status ? [status] : undefined,
+      workspaceId: normalizedWorkspaceId
     });
+    const normalized = await Promise.all(
+      sessions.map(async (session) => this.mergeDatasourceMetadata(session))
+    );
+
+    if (view === "readonly-history") {
+      const readonly: Session[] = [];
+      for (const session of normalized) {
+        const datasourceStatus = this.normalizeDatasourceStatus(
+          session.datasourceStatus
+        );
+        if (datasourceStatus === "unavailable" || datasourceStatus === "deleted") {
+          readonly.push(session);
+          continue;
+        }
+        if (session.workspaceId) {
+          const stillBound =
+            await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+              session.workspaceId,
+              session.datasource
+            );
+          if (!stillBound) {
+            readonly.push(session);
+          }
+        }
+      }
+      return readonly;
+    }
+
+    if (view === "current") {
+      const current: Session[] = [];
+      for (const session of normalized) {
+        if (session.datasource !== normalizedDatasource) {
+          continue;
+        }
+        if (this.normalizeDatasourceStatus(session.datasourceStatus) !== "available") {
+          continue;
+        }
+        if (session.workspaceId) {
+          const stillBound =
+            await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+              session.workspaceId,
+              session.datasource
+            );
+          if (!stillBound) {
+            continue;
+          }
+        }
+        current.push(session);
+      }
+      return current;
+    }
+
+    return normalized;
   }
 
   async renameSession(sessionId: string, title: string): Promise<Session> {
@@ -218,6 +366,11 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    await this.assertSessionWritableByPolicy(session);
+    const datasource = await this.datasourceService.assertDatasourceAvailable(
+      session.datasource
+    );
+    const sqlAccessContext = await this.resolveSqlAccessContext(session);
 
     const userMessage: ChatMessage = {
       id: uuidv4(),
@@ -234,7 +387,10 @@ export class ChatService {
       runId: uuidv4(),
       sessionId,
       question: message,
+      datasourceId: session.datasource,
+      datasourceType: datasource.type,
       modelCatalogId: session.modelCatalogId ?? undefined,
+      accessContext: sqlAccessContext,
       traceContext: {
         source: "chat",
         route: "/api/v1/sessions/:sessionId/messages",
@@ -242,8 +398,13 @@ export class ChatService {
       }
     });
 
-    await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-    return run;
+    const finalRun = this.applyRejectedFallback(run, session.datasource);
+    await this.persistAssistantAndRun(
+      sessionId,
+      finalRun,
+      userPersistResult.primaryPersisted
+    );
+    return finalRun;
   }
 
   async streamMessage(
@@ -256,6 +417,11 @@ export class ChatService {
     if (!session) {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
+    await this.assertSessionWritableByPolicy(session);
+    const datasource = await this.datasourceService.assertDatasourceAvailable(
+      session.datasource
+    );
+    const sqlAccessContext = await this.resolveSqlAccessContext(session);
 
     const runId = uuidv4();
     const userMessage: ChatMessage = {
@@ -292,7 +458,10 @@ export class ChatService {
           runId,
           sessionId,
           question: message,
+          datasourceId: session.datasource,
+          datasourceType: datasource.type,
           modelCatalogId: session.modelCatalogId ?? undefined,
+          accessContext: sqlAccessContext,
           traceContext: {
             source: "chat",
             route: "/api/v1/sessions/:sessionId/messages/stream",
@@ -301,7 +470,9 @@ export class ChatService {
         },
         {
           streamMode: true,
-          tools: this.sqlToolRegistry.getTools(),
+          tools: this.sqlToolRegistry.getToolsForDatasource(datasource, {
+            accessContext: sqlAccessContext
+          }),
           onLlmEvent: async (event) => {
             if (event.type === "text-delta") {
               await emit("text-delta", {
@@ -380,21 +551,26 @@ export class ChatService {
         }
       );
 
-      run.trace.streamStatus = run.error ? "failed" : "completed";
-      run.trace.toolCalls = toolCalls;
-      if (run.error) {
+      const finalRun = this.applyRejectedFallback(run, session.datasource);
+      finalRun.trace.streamStatus = finalRun.error ? "failed" : "completed";
+      finalRun.trace.toolCalls = toolCalls;
+      if (finalRun.error) {
         await emit("error", {
-          code: run.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
-          message: run.error,
+          code: finalRun.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
+          message: finalRun.error,
           details: null
         });
       }
       await emit("finish", {
-        status: run.status,
-        rowCount: run.rows?.length ?? 0
+        status: finalRun.status,
+        rowCount: finalRun.rows?.length ?? 0
       });
-      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-      return run;
+      await this.persistAssistantAndRun(
+        sessionId,
+        finalRun,
+        userPersistResult.primaryPersisted
+      );
+      return finalRun;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       const run: SqlRun = {
@@ -461,7 +637,7 @@ export class ChatService {
     const messages = await this.listMessages(sessionId, page, pageSize);
     const latestRun = await this.repository.getLatestRunBySessionId(sessionId);
     return {
-      session,
+      session: await this.mergeDatasourceMetadata(session),
       messages,
       latestRun
     };
@@ -477,6 +653,72 @@ export class ChatService {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
     return run;
+  }
+
+  private async assertSessionWritableByPolicy(session: Session): Promise<void> {
+    const workspaceId = session.workspaceId?.trim();
+    if (!workspaceId) {
+      return;
+    }
+    const stillBound =
+      await this.workspaceDatasourcePolicyRepository.isDatasourceBound(
+        workspaceId,
+        session.datasource
+      );
+    if (!stillBound) {
+      throw new DomainError(
+        "SESSION_READONLY_BY_POLICY",
+        "该会话已转为只读历史（数据源绑定或权限已变更），不可继续发送消息。",
+        409,
+        {
+          sessionId: session.id,
+          workspaceId,
+          datasourceId: session.datasource
+        }
+      );
+    }
+  }
+
+  private async resolveSqlAccessContext(
+    session: Session
+  ): Promise<
+    | {
+        actorId: string;
+        workspaceId: string;
+        roleSet: string[];
+        allowedTables: string[];
+        allowedColumnsByTable: Record<string, string[]>;
+        rowFiltersByTable: Record<string, string>;
+        evaluatorMode: "workspace_table_permissions";
+      }
+    | undefined
+  > {
+    const workspaceId = session.workspaceId?.trim();
+    const actorId = session.createdByUserId?.trim();
+    if (!workspaceId || !actorId) {
+      return undefined;
+    }
+    const context: AccessContext = await this.policyEvaluatorService.resolveAccessContext({
+      actor: {
+        id: actorId,
+        role: "user",
+        requestedWorkspaceId: workspaceId
+      },
+      workspaceId
+    });
+    const readable = await this.policyEvaluatorService.resolveReadableTables({
+      context,
+      datasourceId: session.datasource
+    });
+    return {
+      actorId: context.actorId,
+      workspaceId: context.workspaceId,
+      roleSet: [...context.roleSet],
+      allowedTables: [...readable.readableTables],
+      allowedColumnsByTable: { ...readable.allowedColumnsByTable },
+      rowFiltersByTable: { ...readable.rowFiltersByTable },
+      evaluatorMode: readable.mode
+    };
   }
 
   private async persistAssistantAndRun(
@@ -498,7 +740,10 @@ export class ChatService {
     await this.redisBuffer.bufferMessage(assistantMessage);
     const assistantPersistResult = await this.repository.persistMessage(assistantMessage);
     await this.repository.persistRun(run);
-    this.traceService.record(run.trace);
+    this.traceService.record(run.trace, {
+      status: run.status,
+      error: run.error
+    });
 
     const allPrimaryPersisted =
       userPrimaryPersisted && assistantPersistResult.primaryPersisted;
@@ -517,6 +762,11 @@ export class ChatService {
     switch (node) {
       case "clarify":
         return "analysis";
+      case "retrieve-knowledge":
+      case "build-intent-plan":
+      case "build-semantic-query":
+      case "build-physical-plan":
+        return "analysis";
       case "generate-sql":
         return "generation";
       case "safety-check":
@@ -534,6 +784,14 @@ export class ChatService {
     switch (node) {
       case "clarify":
         return "理解问题";
+      case "retrieve-knowledge":
+        return "检索上下文";
+      case "build-intent-plan":
+        return "意图规划";
+      case "build-semantic-query":
+        return "语义规划";
+      case "build-physical-plan":
+        return "物理规划";
       case "generate-sql":
         return "生成 SQL";
       case "safety-check":
@@ -557,5 +815,66 @@ export class ChatService {
       return "skipped";
     }
     return "completed";
+  }
+
+  private async mergeDatasourceMetadata(
+    session: Session,
+    resolvedDatasource?: Datasource
+  ): Promise<Session> {
+    const datasource =
+      resolvedDatasource ??
+      (await this.datasourceService.getDatasourceById(
+        session.datasource,
+        {
+          includeDeleted: true
+        }
+      ));
+
+    if (!datasource) {
+      return {
+        ...session,
+        datasourceStatus: "deleted"
+      };
+    }
+
+    return {
+      ...session,
+      datasourceName: datasource.name,
+      datasourceType: datasource.type,
+      datasourceStatus: this.normalizeDatasourceStatus(datasource.status)
+    };
+  }
+
+  private normalizeDatasourceStatus(
+    status: string | undefined | null
+  ): "available" | "unavailable" | "deleted" {
+    const normalized = status?.toLowerCase();
+    if (normalized === "available") {
+      return "available";
+    }
+    if (normalized === "deleted") {
+      return "deleted";
+    }
+    if (normalized === "unavailable" || normalized === "offline" || normalized === "disconnected") {
+      return "unavailable";
+    }
+    return "unavailable";
+  }
+
+  private applyRejectedFallback(run: SqlRun, datasource: string): SqlRun {
+    if (run.status !== "rejected") {
+      return run;
+    }
+    if (!this.datasourceRegistry.shouldFallbackOnReject(datasource)) {
+      return run;
+    }
+    if (run.answer) {
+      return run;
+    }
+    return {
+      ...run,
+      answer:
+        "请求触发了只读安全策略，本次未执行 SQL。你可以改为查询统计口径或时间范围，我会继续协助。"
+    };
   }
 }

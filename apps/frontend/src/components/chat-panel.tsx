@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type {
+  ChatSessionView,
   ChatMessage,
   ChatStreamEvent,
   ExecutionTraceStep,
@@ -28,6 +29,12 @@ import {
   renameSession as renameSessionRequest,
   setSessionModel
 } from "@/lib/api-client";
+import {
+  readActiveDatasourceId,
+  readChatRouteContext,
+  replaceChatRouteContext,
+  writeActiveDatasourceId
+} from "@/lib/datasource-session-context";
 
 interface ThinkingStateEventData {
   node: string;
@@ -51,6 +58,53 @@ type ThinkingStep = ExecutionTraceStep & {
   stage?: ReasoningStage;
   title?: string;
 };
+
+const DATASOURCE_READONLY_STATUSES = new Set(["unavailable", "deleted"]);
+const SESSION_ERROR_CODES = new Set(["SESSION_NOT_FOUND", "VALIDATION_ERROR"]);
+const DATASOURCE_ERROR_CODES = new Set([
+  "DATASOURCE_NOT_FOUND",
+  "DATASOURCE_UNAVAILABLE"
+]);
+
+function extractErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return "";
+  }
+  const matched = error.message.match(/\[([A-Z_]+)\]/);
+  return matched?.[1] ?? "";
+}
+
+function isReadonlySession(session: Session): boolean {
+  return Boolean(
+    session.datasourceStatus &&
+      DATASOURCE_READONLY_STATUSES.has(session.datasourceStatus)
+  );
+}
+
+function dedupeSessions(candidates: Session[]): Session[] {
+  const seen = new Set<string>();
+  const next: Session[] = [];
+  for (const session of candidates) {
+    if (!session.id || seen.has(session.id)) {
+      continue;
+    }
+    seen.add(session.id);
+    next.push(session);
+  }
+  return next;
+}
+
+function moveSessionToFront(
+  sessions: Session[],
+  target: Session,
+  include: boolean
+): Session[] {
+  const next = sessions.filter((session) => session.id !== target.id);
+  if (!include) {
+    return next;
+  }
+  return [target, ...next];
+}
 
 function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
   if (event.type !== "state") {
@@ -143,7 +197,9 @@ function mergeSessionMessages(
 }
 
 export function ChatPanel() {
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [writableSessions, setWritableSessions] = useState<Session[]>([]);
+  const [readonlySessions, setReadonlySessions] = useState<Session[]>([]);
+  const [datasourceId, setDatasourceId] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionLoading, setSessionLoading] = useState(false);
@@ -161,12 +217,43 @@ export function ChatPanel() {
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [threadVersion, setThreadVersion] = useState(0);
 
-  const activeSession = sessions.find((session) => session.id === sessionId);
+  const allSessions = dedupeSessions([...writableSessions, ...readonlySessions]);
+  const activeSession = allSessions.find((session) => session.id === sessionId);
 
-  const refreshSessions = async (): Promise<Session[]> => {
-    const latest = await listSessions();
-    setSessions(latest);
-    return latest;
+  const refreshSessionBuckets = async (
+    targetDatasourceId = datasourceId
+  ): Promise<{ writable: Session[]; readonly: Session[] }> => {
+    if (!targetDatasourceId) {
+      setWritableSessions([]);
+      setReadonlySessions([]);
+      return {
+        writable: [],
+        readonly: []
+      };
+    }
+    const [currentCandidates, readonlyCandidates] = await Promise.all([
+      listSessions({
+        datasource: targetDatasourceId,
+        view: "current"
+      }),
+      listSessions({
+        view: "readonly-history"
+      })
+    ]);
+
+    const candidates = dedupeSessions([...currentCandidates, ...readonlyCandidates]);
+    const writable = candidates.filter(
+      (session) =>
+        session.datasource === targetDatasourceId && !isReadonlySession(session)
+    );
+    const readonly = candidates.filter((session) => isReadonlySession(session));
+
+    setWritableSessions(writable);
+    setReadonlySessions(readonly);
+    return {
+      writable,
+      readonly
+    };
   };
 
   const refreshModels = async (): Promise<ModelCatalogItem[]> => {
@@ -175,13 +262,25 @@ export function ChatPanel() {
     return models;
   };
 
-  const loadMessages = async (targetSessionId: string): Promise<void> => {
-    const sessionView = await getMessages(targetSessionId);
+  const resetThreadState = (nextMessages: ChatMessage[] = []) => {
+    setMessages(nextMessages);
+    setRunsById({});
+    setStreamThinkingByRunId({});
+    setRunLoadingById({});
+    setActiveStreamRunId(null);
+    setThinkingRequestPending(false);
+    setThreadVersion((previous) => previous + 1);
+  };
+
+  const applySessionView = (
+    sessionView: ChatSessionView,
+    contextDatasourceId: string
+  ): void => {
     setMessages((previous) =>
-      mergeSessionMessages(previous, sessionView.messages, targetSessionId)
+      mergeSessionMessages(previous, sessionView.messages, sessionView.session.id)
     );
-    const latestRun = sessionView.latestRun;
-    if (latestRun) {
+    if (sessionView.latestRun) {
+      const latestRun = sessionView.latestRun;
       setRunsById((previous) => ({
         ...previous,
         [latestRun.runId]: latestRun
@@ -192,15 +291,25 @@ export function ChatPanel() {
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
     setThreadVersion((previous) => previous + 1);
-    setSessions((previous) => {
-      const index = previous.findIndex((session) => session.id === sessionView.session.id);
-      if (index < 0) {
-        return [sessionView.session, ...previous];
-      }
-      const next = [...previous];
-      next[index] = { ...next[index], ...sessionView.session };
-      return next;
+    setWritableSessions((previous) => {
+      const include =
+        sessionView.session.datasource === contextDatasourceId &&
+        !isReadonlySession(sessionView.session);
+      return moveSessionToFront(previous, sessionView.session, include);
     });
+    setReadonlySessions((previous) => {
+      const include = isReadonlySession(sessionView.session);
+      return moveSessionToFront(previous, sessionView.session, include);
+    });
+  };
+
+  const loadMessages = async (
+    targetSessionId: string,
+    contextDatasourceId = datasourceId
+  ): Promise<ChatSessionView> => {
+    const sessionView = await getMessages(targetSessionId);
+    applySessionView(sessionView, contextDatasourceId);
+    return sessionView;
   };
 
   useEffect(() => {
@@ -208,25 +317,97 @@ export function ChatPanel() {
       setSessionLoading(true);
       setSessionError("");
       try {
+        const { datasourceId: queryDatasourceId, sessionId: querySessionId } =
+          readChatRouteContext();
+        const storedDatasourceId = readActiveDatasourceId();
+        let resolvedDatasourceId = queryDatasourceId || storedDatasourceId;
+
+        const redirectToDatasourcePage = () => {
+          writeActiveDatasourceId("");
+          window.location.replace("/data-sources");
+        };
+
         await refreshModels();
-        let latestSessions = await refreshSessions();
-        if (latestSessions.length === 0) {
-          const created = await createSession();
-          latestSessions = [created];
-          setSessions(latestSessions);
+
+        if (querySessionId) {
+          try {
+            const sessionView = await getMessages(querySessionId);
+            const boundDatasourceId = sessionView.session.datasource.trim();
+            if (!boundDatasourceId) {
+              redirectToDatasourcePage();
+              return;
+            }
+
+            resolvedDatasourceId = boundDatasourceId;
+            writeActiveDatasourceId(boundDatasourceId);
+            setDatasourceId(boundDatasourceId);
+            replaceChatRouteContext({
+              datasourceId: boundDatasourceId,
+              sessionId: sessionView.session.id
+            });
+
+            await refreshSessionBuckets(boundDatasourceId);
+            setSessionId(sessionView.session.id);
+            applySessionView(sessionView, boundDatasourceId);
+            return;
+          } catch (error) {
+            const code = extractErrorCode(error);
+            if (!SESSION_ERROR_CODES.has(code)) {
+              throw error;
+            }
+            if (queryDatasourceId) {
+              resolvedDatasourceId = queryDatasourceId;
+              replaceChatRouteContext({
+                datasourceId: queryDatasourceId
+              });
+            } else {
+              redirectToDatasourcePage();
+              return;
+            }
+          }
         }
-        const initialSessionId = latestSessions[0]?.id ?? "";
-        if (initialSessionId) {
-          setSessionId(initialSessionId);
-          await loadMessages(initialSessionId);
+
+        if (!resolvedDatasourceId) {
+          setSessionError("请先选择数据源后再进入聊天。");
+          redirectToDatasourcePage();
+          return;
         }
+
+        writeActiveDatasourceId(resolvedDatasourceId);
+        setDatasourceId(resolvedDatasourceId);
+        replaceChatRouteContext({
+          datasourceId: resolvedDatasourceId
+        });
+
+        const latest = await refreshSessionBuckets(resolvedDatasourceId);
+        const initialSessionId = latest.writable[0]?.id ?? "";
+        if (!initialSessionId) {
+          setSessionId("");
+          resetThreadState([]);
+          return;
+        }
+        setSessionId(initialSessionId);
+        replaceChatRouteContext({
+          datasourceId: resolvedDatasourceId,
+          sessionId: initialSessionId
+        });
+        await loadMessages(initialSessionId, resolvedDatasourceId);
       } catch (initError) {
+        const code = extractErrorCode(initError);
+        if (DATASOURCE_ERROR_CODES.has(code)) {
+          writeActiveDatasourceId("");
+          setSessionError("会话上下文对应的数据源不可用，请重新选择。");
+          window.location.replace("/data-sources");
+          return;
+        }
         setSessionError(initError instanceof Error ? initError.message : "初始化会话失败");
       } finally {
         setSessionLoading(false);
       }
     };
     void init();
+    // We intentionally initialize once on mount; callbacks use latest state updates internally.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onSelectSession = async (targetSessionId: string) => {
@@ -234,7 +415,17 @@ export function ChatPanel() {
     setSessionError("");
     try {
       setSessionId(targetSessionId);
-      await loadMessages(targetSessionId);
+      const sessionView = await loadMessages(targetSessionId, datasourceId);
+      const boundDatasourceId = sessionView.session.datasource.trim();
+      if (boundDatasourceId && boundDatasourceId !== datasourceId) {
+        writeActiveDatasourceId(boundDatasourceId);
+        setDatasourceId(boundDatasourceId);
+        await refreshSessionBuckets(boundDatasourceId);
+      }
+      replaceChatRouteContext({
+        datasourceId: boundDatasourceId || datasourceId,
+        sessionId: targetSessionId
+      });
       setMobileSessionsOpen(false);
     } catch (sessionSelectError) {
       setSessionError(sessionSelectError instanceof Error ? sessionSelectError.message : "加载会话失败");
@@ -244,21 +435,23 @@ export function ChatPanel() {
   };
 
   const onCreateSession = async () => {
+    if (!datasourceId) {
+      setSessionError("请先选择数据源。");
+      return;
+    }
     setSessionLoading(true);
     setSessionError("");
     try {
-      const created = await createSession();
-      const latest = await refreshSessions();
+      const created = await createSession(datasourceId);
+      const latest = await refreshSessionBuckets(datasourceId);
       setSessionId(created.id);
-      setMessages([]);
-      setRunsById({});
-      setStreamThinkingByRunId({});
-      setRunLoadingById({});
-      setActiveStreamRunId(null);
-      setThinkingRequestPending(false);
-      setThreadVersion((previous) => previous + 1);
-      if (!latest.some((session) => session.id === created.id)) {
-        setSessions([created, ...latest]);
+      replaceChatRouteContext({
+        datasourceId,
+        sessionId: created.id
+      });
+      resetThreadState([]);
+      if (!latest.writable.some((session) => session.id === created.id)) {
+        setWritableSessions((previous) => [created, ...previous]);
       }
       setMobileSessionsOpen(false);
     } catch (createError) {
@@ -270,33 +463,36 @@ export function ChatPanel() {
 
   const onRenameSession = async (targetSessionId: string, title: string) => {
     await renameSessionRequest(targetSessionId, title);
-    await refreshSessions();
+    await refreshSessionBuckets();
   };
 
   const onDeleteSession = async (targetSessionId: string) => {
+    if (!datasourceId) {
+      setSessionError("请先选择数据源。");
+      return;
+    }
     setSessionLoading(true);
     setSessionError("");
     try {
       await deleteSessionRequest(targetSessionId);
-      const latest = await refreshSessions();
+      const latest = await refreshSessionBuckets(datasourceId);
       if (targetSessionId !== sessionId) {
         return;
       }
-      const nextSessionId = latest[0]?.id;
+      const nextSessionId = latest.writable[0]?.id;
       if (nextSessionId) {
         setSessionId(nextSessionId);
-        await loadMessages(nextSessionId);
+        replaceChatRouteContext({
+          datasourceId,
+          sessionId: nextSessionId
+        });
+        await loadMessages(nextSessionId, datasourceId);
       } else {
-        const created = await createSession();
-        setSessions([created]);
-        setSessionId(created.id);
-        setMessages([]);
-        setRunsById({});
-        setStreamThinkingByRunId({});
-        setRunLoadingById({});
-        setActiveStreamRunId(null);
-        setThinkingRequestPending(false);
-        setThreadVersion((previous) => previous + 1);
+        setSessionId("");
+        resetThreadState([]);
+        replaceChatRouteContext({
+          datasourceId
+        });
       }
     } catch (deleteError) {
       setSessionError(deleteError instanceof Error ? deleteError.message : "删除会话失败");
@@ -317,7 +513,10 @@ export function ChatPanel() {
     try {
       await probeModelConnectivity(modelCatalogId);
       const updated = await setSessionModel(sessionId, modelCatalogId);
-      setSessions((previous) =>
+      setWritableSessions((previous) =>
+        previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
+      );
+      setReadonlySessions((previous) =>
         previous.map((session) => (session.id === updated.id ? { ...session, ...updated } : session))
       );
       await refreshModels();
@@ -357,7 +556,8 @@ export function ChatPanel() {
     <div className="relative flex h-full w-full overflow-hidden bg-[var(--surface-page)] text-[var(--text-primary)]">
       <aside className="hidden h-full w-80 border-r border-[var(--border-default)] bg-[var(--surface-sidebar)] md:block">
         <SessionSidebar
-          sessions={sessions}
+          sessions={writableSessions}
+          readonlySessions={readonlySessions}
           activeSessionId={sessionId}
           loading={sessionLoading}
           error={sessionError}
@@ -372,7 +572,8 @@ export function ChatPanel() {
         <SheetContent side="left" className="w-80 border-[var(--border-default)] bg-[var(--surface-sidebar)] p-0">
           <SheetTitle className="sr-only">会话列表</SheetTitle>
           <SessionSidebar
-            sessions={sessions}
+            sessions={writableSessions}
+            readonlySessions={readonlySessions}
             activeSessionId={sessionId}
             loading={sessionLoading}
             error={sessionError}
@@ -390,7 +591,11 @@ export function ChatPanel() {
             <div className="min-w-0">
               <h2 className="truncate text-base font-semibold text-[var(--text-primary)]">Text2SQL Assistant</h2>
               <p className="truncate text-xs text-[var(--text-tertiary)]">
-                {sessionId ? `Session: ${sessionId}` : "Session 初始化中..."}
+                {sessionId
+                  ? `Datasource: ${datasourceId || "-"} · Session: ${sessionId}`
+                  : datasourceId
+                    ? `Datasource: ${datasourceId} · 暂无会话，请先新建会话`
+                    : "Session 初始化中..."}
               </p>
             </div>
             <div className="hidden md:block">
@@ -431,6 +636,11 @@ export function ChatPanel() {
           {activeSession?.syncStatus === "degraded" ? (
             <StateBlock variant="error">当前会话存在待同步异常，请稍后重试。</StateBlock>
           ) : null}
+          {activeSession?.datasourceStatus && activeSession.datasourceStatus !== "available" ? (
+            <StateBlock variant="error">
+              当前会话绑定的数据源不可用，历史消息可读，但请先返回数据源页重新选择后再发送。
+            </StateBlock>
+          ) : null}
         </header>
 
         <AssistantThread
@@ -443,7 +653,12 @@ export function ChatPanel() {
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
-          disabled={sessionLoading || !sessionId}
+          disabled={
+            sessionLoading ||
+            !sessionId ||
+            activeSession?.datasourceStatus === "unavailable" ||
+            activeSession?.datasourceStatus === "deleted"
+          }
           onRequestRun={ensureRunLoaded}
           onRunStart={() => {
             setActiveStreamRunId(null);
@@ -479,17 +694,17 @@ export function ChatPanel() {
             if (!sessionId) {
               return;
             }
-            await loadMessages(sessionId);
+            await loadMessages(sessionId, datasourceId);
             if (runId) {
               await ensureRunLoaded(runId);
             }
-            await refreshSessions();
+            await refreshSessionBuckets();
           }}
           onRunError={async () => {
             setActiveStreamRunId(null);
             setThinkingRequestPending(false);
             if (sessionId) {
-              await loadMessages(sessionId).catch(() => undefined);
+              await loadMessages(sessionId, datasourceId).catch(() => undefined);
             }
           }}
         />

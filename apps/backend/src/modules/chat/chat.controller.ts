@@ -31,29 +31,50 @@ export class ChatController {
   @Post("/sessions")
   async createSession(
     @Body() body: CreateSessionDto,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
+      const datasource = body.datasource?.trim();
+      if (!datasource) {
+        throw new DomainError("VALIDATION_ERROR", "datasource 为必填项", 400, {
+          field: "datasource"
+        });
+      }
+      const workspaceId = body.workspaceId?.trim() || this.resolveWorkspaceId(req);
       const session = await this.chatService.createSession(
-        body.datasource ?? "sqlite_main",
-        body.modelCatalogId
+        datasource,
+        body.modelCatalogId,
+        {
+          workspaceId,
+          createdByUserId: req.actor?.id,
+          actor: req.actor
+        }
       );
       return ok(req.requestId, session);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
   @Get("/sessions")
   async listSessions(
     @Query() query: ListSessionsDto,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
-      const sessions = await this.chatService.listSessions(query.status);
+      const sessions = await this.chatService.listSessions(
+        query.status,
+        query.datasource,
+        query.view,
+        {
+          workspaceId: query.workspaceId?.trim() || this.resolveWorkspaceId(req)
+        }
+      );
       return ok(req.requestId, sessions);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
@@ -61,7 +82,8 @@ export class ChatController {
   async renameSession(
     @Param("sessionId") sessionId: string,
     @Body() body: RenameSessionDto,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
       if (
@@ -82,20 +104,21 @@ export class ChatController {
       });
       return ok(req.requestId, session);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
   @Delete("/sessions/:sessionId")
   async deleteSession(
     @Param("sessionId") sessionId: string,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
       await this.chatService.deleteSession(sessionId);
       return ok(req.requestId, { deleted: true, sessionId });
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
@@ -103,7 +126,8 @@ export class ChatController {
   async sendMessage(
     @Param("sessionId") sessionId: string,
     @Body() body: SendMessageDto,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<AgentRunResponse>> {
     try {
       const run = await this.chatService.sendMessage(
@@ -124,20 +148,21 @@ export class ChatController {
         }
       });
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
   @Post("/models/:modelCatalogId/probe")
   async probeModel(
     @Param("modelCatalogId") modelCatalogId: string,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
       const result = await this.chatService.probeModelConnectivity(modelCatalogId);
       return ok(req.requestId, result);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
@@ -203,7 +228,8 @@ export class ChatController {
     @Param("sessionId") sessionId: string,
     @Query("page") pageRaw = "1",
     @Query("pageSize") pageSizeRaw = "0",
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
       const page = Number.parseInt(pageRaw, 10) || 1;
@@ -212,31 +238,62 @@ export class ChatController {
       const data = await this.chatService.getSessionView(sessionId, page, pageSize);
       return ok(req.requestId, data);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
   @Get("/runs/:runId")
   async getRun(
     @Param("runId") runId: string,
-    @Req() req: Request
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
   ): Promise<ApiResponse<unknown>> {
     try {
       const run = await this.chatService.getRunById(runId);
       return ok(req.requestId, run);
     } catch (error) {
-      return this.toError(req.requestId, error);
+      return this.toError(req.requestId, error, res);
     }
   }
 
-  private toError(requestId: string, error: unknown): ApiResponse<never> {
+  private toError(
+    requestId: string,
+    error: unknown,
+    res: Response
+  ): ApiResponse<never> {
     if (error instanceof DomainError) {
+      res.status(error.statusCode);
       return fail(requestId, error.code, error.message, error.details);
     }
+    res.status(500);
     return fail(
       requestId,
       "INTERNAL_ERROR",
       error instanceof Error ? error.message : "未知错误"
     );
+  }
+
+  private resolveWorkspaceId(req: Request): string | undefined {
+    const headerValue = req.headers["x-workspace-id"];
+    if (typeof headerValue === "string") {
+      const trimmed = headerValue.trim();
+      if (trimmed) {
+        return trimmed;
+      }
+    }
+    if (Array.isArray(headerValue)) {
+      for (const item of headerValue) {
+        const trimmed = item.trim();
+        if (trimmed) {
+          return trimmed;
+        }
+      }
+    }
+
+    const workspaceIds = Object.keys(req.actor?.workspaceRoles ?? {});
+    if (workspaceIds.length === 1) {
+      return workspaceIds[0];
+    }
+    return undefined;
   }
 }

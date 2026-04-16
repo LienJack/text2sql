@@ -14,13 +14,13 @@ export class AppConfigService {
   }
 
   get port(): number {
-    return Number(this.config.get<string>("PORT", "3000"));
+    return Number(this.config.get<string>("PORT", "3002"));
   }
 
   get corsAllowedOrigins(): string[] {
     const raw = this.config.get<string>(
       "CORS_ALLOWED_ORIGINS",
-      "http://localhost:3001"
+      "http://localhost:3000"
     );
     return raw
       .split(",")
@@ -43,6 +43,44 @@ export class AppConfigService {
 
   get redisUrl(): string {
     return this.config.get<string>("REDIS_URL", "");
+  }
+
+  get datasourceUploadDir(): string {
+    const raw = this.config.get<string>(
+      "DATASOURCE_UPLOAD_DIR",
+      "data/uploads/datasources"
+    );
+    if (isAbsolute(raw)) {
+      return raw;
+    }
+    const direct = resolve(process.cwd(), raw);
+    if (existsSync(direct)) {
+      return direct;
+    }
+    return resolve(process.cwd(), "../../", raw);
+  }
+
+  get datasourceUploadMaxBytes(): number {
+    return Number(this.config.get<string>("DATASOURCE_UPLOAD_MAX_BYTES", "10485760"));
+  }
+
+  get datasourceConnectTimeoutMs(): number {
+    return Number(this.config.get<string>("DATASOURCE_CONNECT_TIMEOUT_MS", "5000"));
+  }
+
+  get datasourceQueryTimeoutMs(): number {
+    return Number(this.config.get<string>("DATASOURCE_QUERY_TIMEOUT_MS", "10000"));
+  }
+
+  get datasourceSecretKey(): string {
+    return this.config.get<string>(
+      "DATASOURCE_SECRET_KEY",
+      "text2sql-dev-datasource-secret"
+    );
+  }
+
+  get policyEvaluatorMode(): "workspace_table_permissions" {
+    return "workspace_table_permissions";
   }
 
   get databaseUrl(): string {
@@ -89,6 +127,34 @@ export class AppConfigService {
 
   get llmMockMode(): boolean {
     return this.config.get<string>("LLM_MOCK_MODE", "false") === "true";
+  }
+
+  get agentPlanningScaffoldEnabled(): boolean {
+    return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
+  }
+
+  get sqlSafetySoftWarnMaxLength(): number {
+    return this.readNumber("SQL_SAFETY_SOFT_WARN_MAX_LENGTH", 600);
+  }
+
+  get r1GateWindowMinutes(): number {
+    return this.readNumber("R1_GATE_WINDOW_MINUTES", 60);
+  }
+
+  get r1GateMinSamples(): number {
+    return this.readNumber("R1_GATE_MIN_SAMPLES", 10);
+  }
+
+  get r1GateMinSuccessRate(): number {
+    return this.readNumber("R1_GATE_MIN_SUCCESS_RATE", 0.95);
+  }
+
+  get r1GateMaxRejectionRate(): number {
+    return this.readNumber("R1_GATE_MAX_REJECTION_RATE", 0.2);
+  }
+
+  get r1GateMaxHardFailureRate(): number {
+    return this.readNumber("R1_GATE_MAX_HARD_FAILURE_RATE", 0.05);
   }
 
   get fallbackProviders(): string[] {
@@ -154,6 +220,14 @@ export class AppConfigService {
         "LLM_API_KEY 未配置，实际调用 LLM 时会返回配置错误。"
       );
     }
+    if (
+      this.nodeEnv === "production" &&
+      this.datasourceSecretKey === "text2sql-dev-datasource-secret"
+    ) {
+      this.logger.warn(
+        "DATASOURCE_SECRET_KEY 使用了默认值，建议在生产环境配置自定义密钥。"
+      );
+    }
     if (this.langsmithTracing && !this.langsmithApiKey) {
       this.logger.warn(
         "LANGSMITH_TRACING 已启用但 LANGSMITH_API_KEY 未配置，系统将降级为本地可观测模式。"
@@ -162,5 +236,15 @@ export class AppConfigService {
     if (missing.length > 0) {
       throw new Error(`缺少必要配置: ${missing.join(", ")}`);
     }
+  }
+
+  private readNumber(key: string, defaultValue: number): number {
+    const raw = this.config.get<string>(key, String(defaultValue));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+    this.logger.warn(`${key} 配置无效（${raw}），已回退默认值 ${defaultValue}。`);
+    return defaultValue;
   }
 }

@@ -14,6 +14,7 @@ import type { ApiResponse } from "@text2sql/shared-types";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { AdminOnlyGuard } from "../auth/admin-only.guard";
+import { BatchUpdateModelStatusDto } from "./dto/batch-update-model-status.dto";
 import { CreateProviderDto } from "./dto/create-provider.dto";
 import { RefreshProviderModelsDto } from "./dto/refresh-provider-models.dto";
 import { UpdateModelStatusDto } from "./dto/update-model-status.dto";
@@ -113,6 +114,33 @@ export class SettingsController {
   ): Promise<ApiResponse<unknown>> {
     try {
       const data = await this.settingsService.checkProviderHealth(providerConfigId);
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Get("/models/status")
+  async listModelStatuses(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.listModelStatuses();
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Patch("/models/batch")
+  @UseGuards(AdminOnlyGuard)
+  async batchSetModelsEnabled(
+    @Body() body: BatchUpdateModelStatusDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.batchSetModelsEnabled(
+        body.modelIds,
+        body.enabled
+      );
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);

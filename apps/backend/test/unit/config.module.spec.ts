@@ -19,6 +19,12 @@ describe("AppConfigService", () => {
     delete process.env.POSTGRES_USER;
     delete process.env.POSTGRES_PASSWORD;
     delete process.env.POSTGRES_SCHEMA;
+    delete process.env.SQL_SAFETY_SOFT_WARN_MAX_LENGTH;
+    delete process.env.R1_GATE_WINDOW_MINUTES;
+    delete process.env.R1_GATE_MIN_SAMPLES;
+    delete process.env.R1_GATE_MIN_SUCCESS_RATE;
+    delete process.env.R1_GATE_MAX_REJECTION_RATE;
+    delete process.env.R1_GATE_MAX_HARD_FAILURE_RATE;
   };
 
   beforeEach(() => {
@@ -31,7 +37,7 @@ describe("AppConfigService", () => {
     }).compile();
 
     const config = moduleRef.get(AppConfigService);
-    expect(config.port).toBe(3000);
+    expect(config.port).toBe(3002);
     expect(config.llmProvider).toBe("volcengine");
     expect(config.sqlitePath).toContain("data/sqlite/text2sql.db");
   });
@@ -53,5 +59,26 @@ describe("AppConfigService", () => {
     expect(config.databaseUrl).toBe(
       "postgresql://admin:admin@localhost:5432/text2sql?schema=public"
     );
+  });
+
+  it("should fallback to defaults when r1 numeric env values are invalid", async () => {
+    process.env.R1_GATE_WINDOW_MINUTES = "invalid";
+    process.env.R1_GATE_MIN_SAMPLES = "invalid";
+    process.env.R1_GATE_MIN_SUCCESS_RATE = "invalid";
+    process.env.R1_GATE_MAX_REJECTION_RATE = "invalid";
+    process.env.R1_GATE_MAX_HARD_FAILURE_RATE = "invalid";
+    process.env.SQL_SAFETY_SOFT_WARN_MAX_LENGTH = "invalid";
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppConfigModule]
+    }).compile();
+
+    const config = moduleRef.get(AppConfigService);
+    expect(config.r1GateWindowMinutes).toBe(60);
+    expect(config.r1GateMinSamples).toBe(10);
+    expect(config.r1GateMinSuccessRate).toBe(0.95);
+    expect(config.r1GateMaxRejectionRate).toBe(0.2);
+    expect(config.r1GateMaxHardFailureRate).toBe(0.05);
+    expect(config.sqlSafetySoftWarnMaxLength).toBe(600);
   });
 });

@@ -1,37 +1,85 @@
 import { Injectable } from "@nestjs/common";
+import { DomainError } from "../../../common/domain-error";
+import {
+  SqlTableAccessGuardService,
+  type SqlTableAccessContext
+} from "../../data/query/sql-table-access-guard.service";
+import {
+  SqlSafetyGuard,
+  type SqlSafetyDecision
+} from "../sql/tools/sql-safety.guard";
 
 @Injectable()
 export class SafetyCheckNode {
-  private readonly forbiddenKeywords = [
-    "insert",
-    "update",
-    "delete",
-    "drop",
-    "alter",
-    "truncate",
-    "create",
-    "replace",
-    "attach",
-    "pragma"
-  ];
+  constructor(
+    private readonly tableAccessGuard: SqlTableAccessGuardService = new SqlTableAccessGuardService(),
+    private readonly safetyGuard?: SqlSafetyGuard
+  ) {}
 
-  run(sql: string): { safe: true } | { safe: false; reason: string } {
-    const normalized = sql.trim().toLowerCase();
-    if (!normalized.startsWith("select")) {
-      return {
-        safe: false,
-        reason: "只允许 SELECT 查询，禁止写入或结构变更语句。"
-      };
+  async run(input: {
+    sql: string;
+    datasourceId: string;
+    accessContext?: SqlTableAccessContext;
+  }): Promise<SqlSafetyDecision> {
+    const readonlyDecision = this.evaluateReadonly(input.sql);
+    if (!readonlyDecision.allowed) {
+      return readonlyDecision;
     }
-    for (const keyword of this.forbiddenKeywords) {
-      if (new RegExp(`\\b${keyword}\\b`, "i").test(normalized)) {
+
+    if (input.accessContext?.allowedTables?.length) {
+      try {
+        await this.tableAccessGuard.assertTableAccess({
+          sql: input.sql,
+          datasourceId: input.datasourceId,
+          accessContext: input.accessContext,
+          allowedTables: input.accessContext.allowedTables
+        });
+      } catch (error) {
         return {
-          safe: false,
-          reason: `检测到受限关键字 ${keyword.toUpperCase()}，已拒绝执行。`
+          allowed: false,
+          mode: "hard-block",
+          riskLevel: "high",
+          riskTags: ["table_access_denied"],
+          reason:
+            error instanceof DomainError
+              ? error.message
+              : error instanceof Error
+                ? error.message
+                : "表级权限校验失败。"
         };
       }
     }
-    return { safe: true };
+
+    return readonlyDecision;
+  }
+
+  private evaluateReadonly(sql: string): SqlSafetyDecision {
+    if (this.safetyGuard) {
+      return this.safetyGuard.evaluate(sql);
+    }
+
+    try {
+      this.tableAccessGuard.assertReadOnlySql(sql);
+    } catch (error) {
+      return {
+        allowed: false,
+        mode: "hard-block",
+        riskLevel: "high",
+        riskTags: ["readonly_violation"],
+        reason:
+          error instanceof DomainError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : "安全校验失败。"
+      };
+    }
+
+    return {
+      allowed: true,
+      mode: "pass",
+      riskLevel: "low",
+      riskTags: []
+    };
   }
 }
-

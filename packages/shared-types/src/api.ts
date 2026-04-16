@@ -2,6 +2,8 @@ export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 export type StreamStatus = "in_progress" | "completed" | "failed";
+export type DatasourceType = "sqlite" | "mysql" | "postgresql" | "excel" | "csv";
+export type DatasourceStatus = "available" | "unavailable" | "deleted";
 export type ReasoningStage =
   | "analysis"
   | "generation"
@@ -26,6 +28,11 @@ export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export interface Session {
   id: string;
   datasource: string;
+  workspaceId?: string | null;
+  createdByUserId?: string | null;
+  datasourceName?: string;
+  datasourceType?: DatasourceType;
+  datasourceStatus?: DatasourceStatus;
   createdAt: string;
   title?: string;
   modelCatalogId?: string | null;
@@ -37,6 +44,21 @@ export interface Session {
   deletedAt?: string | null;
   syncFailedCount?: number;
   lastSyncFailureAt?: string | null;
+}
+
+export interface Datasource {
+  id: string;
+  name: string;
+  type: DatasourceType;
+  status: DatasourceStatus;
+  readonly: boolean;
+  shared: boolean;
+  config?: Record<string, unknown> | null;
+  fileMeta?: Record<string, unknown> | null;
+  unavailableAt?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ChatMessage {
@@ -240,6 +262,250 @@ export interface LlmSettingsView {
   models: ModelCatalogItem[];
   defaultModelId?: string | null;
 }
+
+export type PlatformUserStatus = "active" | "disabled" | "deleted";
+export type WorkspaceStatus = "active" | "archived" | "deleted";
+export type WorkspaceMemberRole = "admin" | "member";
+export type DatasourceWorkflowMode = "create" | "edit";
+export type DatasourceWorkflowStage =
+  | "received"
+  | "workspace_create_started"
+  | "workspace_ready"
+  | "datasource_create_started"
+  | "datasource_update_started"
+  | "datasource_ready"
+  | "binding_apply_started"
+  | "validation_failed"
+  | "workspace_create_failed"
+  | "datasource_create_failed"
+  | "datasource_update_failed"
+  | "binding_applied"
+  | "binding_apply_failed"
+  | "completed"
+  | "compensation_soft_delete_failed"
+  | "compensation_mark_unavailable_failed"
+  | "unknown";
+
+export interface DatasourceUpsertPayload {
+  datasourceId?: string;
+  name?: string;
+  type?: DatasourceType;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+  shared?: boolean;
+}
+
+export interface DatasourceWorkflowWorkspaceInput {
+  workspaceId?: string;
+  create?: {
+    name: string;
+  };
+}
+
+export interface DatasourceCreateWorkflowRequest {
+  mode: "create";
+  datasource: DatasourceUpsertPayload;
+  workspaceId?: string;
+  workspaceCreate?: {
+    name: string;
+  };
+}
+
+export interface DatasourceEditWorkflowRequest {
+  mode: "edit";
+  datasourceId: string;
+  datasource?: DatasourceUpsertPayload;
+  workspaceId?: string;
+  workspaceCreate?: {
+    name: string;
+  };
+}
+
+export type UpsertDatasourceWorkflowRequest =
+  | DatasourceCreateWorkflowRequest
+  | DatasourceEditWorkflowRequest;
+
+export interface PreviewDatasourceTablesCreateRequest {
+  mode: "create";
+  datasource: DatasourceUpsertPayload;
+}
+
+export interface PreviewDatasourceTablesEditRequest {
+  mode: "edit";
+  datasourceId: string;
+  datasource?: DatasourceUpsertPayload;
+}
+
+export type PreviewDatasourceTablesRequest =
+  | PreviewDatasourceTablesCreateRequest
+  | PreviewDatasourceTablesEditRequest;
+
+export interface PreviewDatasourceTablesResponse {
+  mode: "create" | "edit";
+  datasourceId?: string;
+  items: string[];
+}
+
+export interface DatasourceWorkflowBindingSummary {
+  bound: boolean;
+  workspaceId?: string;
+  datasourceId?: string;
+}
+
+export interface DatasourceWorkflowFailure {
+  stage: DatasourceWorkflowStage | string;
+  code: string;
+  details?: Record<string, unknown> | null;
+}
+
+export interface UpsertDatasourceWorkflowResponse {
+  mode: DatasourceWorkflowMode;
+  stage: DatasourceWorkflowStage | string;
+  workspaceId: string;
+  datasourceId: string;
+  bindingSummary?: DatasourceWorkflowBindingSummary | null;
+  idempotencyKey?: string;
+  replayed?: boolean;
+  failure?: DatasourceWorkflowFailure | null;
+}
+
+export interface PlatformUser {
+  id: string;
+  account: string;
+  name: string;
+  email: string;
+  status: PlatformUserStatus;
+  isSystemAdmin: boolean;
+  defaultWorkspaceId?: string | null;
+  systemVariables?: Record<string, unknown> | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  status: WorkspaceStatus;
+  isDefault: boolean;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  userId: string;
+  workspaceId: string;
+  role: WorkspaceMemberRole;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDatasourceBinding {
+  id: string;
+  workspaceId: string;
+  datasourceId: string;
+  createdByUserId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceDatasourceBindingListItem extends WorkspaceDatasourceBinding {
+  datasourceName?: string;
+  datasourceType?: DatasourceType;
+  datasourceStatus?: DatasourceStatus;
+}
+
+export interface WorkspaceDatasourceTablePermissionState {
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  tableNames: string[];
+}
+
+export interface WorkspaceDatasourceTablePermissionImpactSummary {
+  beforeCount: number;
+  afterCount: number;
+  addedCount: number;
+  removedCount: number;
+  retainedCount: number;
+  addedTables: string[];
+  removedTables: string[];
+}
+
+export interface ListWorkspaceDatasourceTablePermissionsResponse
+  extends WorkspaceDatasourceTablePermissionState {}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsRequest {
+  policyVersion: number;
+  tableNames: string[];
+}
+
+export interface ReplaceWorkspaceDatasourceTablePermissionsResponse
+  extends WorkspaceDatasourceTablePermissionState {
+  impactSummary: WorkspaceDatasourceTablePermissionImpactSummary;
+  idempotencyKey: string;
+  replayed: boolean;
+}
+
+export interface WorkspaceDatasourceBindingBatchChangeResult {
+  successItems: string[];
+  failedItems: Array<{
+    item: string;
+    code: string;
+    message: string;
+  }>;
+}
+
+export interface ListWorkspaceDatasourceBindingsRequest extends PaginationRequest {
+  workspaceId: string;
+  datasourceId?: string;
+}
+
+export type ListWorkspaceDatasourceBindingsResponse =
+  PaginatedResponse<WorkspaceDatasourceBindingListItem>;
+
+export interface PaginationRequest {
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface ListPlatformUsersRequest extends PaginationRequest {
+  keyword?: string;
+  statuses?: PlatformUserStatus[];
+  workspaceId?: string;
+  includeDeleted?: boolean;
+}
+
+export type ListPlatformUsersResponse = PaginatedResponse<PlatformUser>;
+
+export interface ListWorkspacesRequest extends PaginationRequest {
+  keyword?: string;
+  statuses?: WorkspaceStatus[];
+  includeDeleted?: boolean;
+}
+
+export type ListWorkspacesResponse = PaginatedResponse<Workspace>;
+
+export interface ListWorkspaceMembersRequest extends PaginationRequest {
+  workspaceId: string;
+  keyword?: string;
+  roles?: WorkspaceMemberRole[];
+}
+
+export type ListWorkspaceMembersResponse = PaginatedResponse<WorkspaceMember>;
 
 export interface EvaluationCase {
   id: string;

@@ -54,9 +54,20 @@ log "Preparing environment files..."
 copy_if_missing "apps/backend/.env.example" "apps/backend/.env"
 copy_if_missing "apps/frontend/.env.example" "apps/frontend/.env"
 
+if grep -q "^PORT=" "apps/backend/.env"; then
+  current_backend_port=$(grep "^PORT=" "apps/backend/.env" | tail -n 1 | cut -d "=" -f2- | tr -d '[:space:]')
+  if [ "$current_backend_port" = "3000" ]; then
+    log "Updating backend PORT from 3000 to 3002 for unified gateway mode"
+    perl -i -pe 's/^PORT=3000$/PORT=3002/' "apps/backend/.env"
+  fi
+else
+  log "Appending default PORT=3002"
+  printf '\nPORT=3002\n' >> "apps/backend/.env"
+fi
+
 if ! grep -q "^CORS_ALLOWED_ORIGINS=" "apps/backend/.env"; then
-  log "Appending default CORS_ALLOWED_ORIGINS=http://localhost:3001"
-  printf '\nCORS_ALLOWED_ORIGINS=http://localhost:3001\n' >> "apps/backend/.env"
+  log "Appending default CORS_ALLOWED_ORIGINS=http://localhost:3000"
+  printf '\nCORS_ALLOWED_ORIGINS=http://localhost:3000\n' >> "apps/backend/.env"
 fi
 
 if grep -q "^LLM_MOCK_MODE=true" "apps/backend/.env"; then
