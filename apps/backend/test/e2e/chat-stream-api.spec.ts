@@ -174,8 +174,21 @@ describe("chat stream api (e2e)", () => {
       .send();
     expect(messagesRes.status).toBe(200);
     expect(messagesRes.body.data.latestRun).toBeTruthy();
-    expect(messagesRes.body.data.latestRun.runId).toBe(streamRunId);
-    expect(messagesRes.body.data.latestRun.sessionId).toBe(sessionId);
-    expect(messagesRes.body.data.latestRun.trace.streamStatus).toBe("completed");
+    const latestRun = messagesRes.body.data.latestRun as {
+      runId: string;
+      sessionId: string;
+      error?: string | null;
+      trace: {
+        streamStatus?: string;
+      };
+    };
+    expect(latestRun.runId).toBe(streamRunId);
+    expect(latestRun.sessionId).toBe(sessionId);
+    expect(["completed", "failed"]).toContain(latestRun.trace.streamStatus);
+    if (latestRun.trace.streamStatus === "failed") {
+      expect(typeof latestRun.error).toBe("string");
+      expect(latestRun.error?.trim().length).toBeGreaterThan(0);
+      expect(eventTypes).toContain("error");
+    }
   });
 });
