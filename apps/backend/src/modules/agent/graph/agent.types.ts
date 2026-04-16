@@ -17,6 +17,7 @@ export interface GraphInput {
   datasourceId: string;
   datasourceType?: DatasourceType;
   modelCatalogId?: string;
+  planningScaffoldEnabled?: boolean;
   traceContext?: GraphTraceContext;
   accessContext?: SqlTableAccessContext;
 }

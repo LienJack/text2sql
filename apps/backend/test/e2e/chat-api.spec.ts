@@ -360,5 +360,12 @@ describe("chat api (e2e)", () => {
     expect(res.body.status).toBe("success");
     expect(res.body.data.cors.allowedOrigins).toContain("http://localhost:3001");
     expect(res.body.data.dependencies.sessions.sync.total).toBeGreaterThanOrEqual(0);
+    expect(res.body.data.dependencies.gateMetrics.acceptance).toEqual(
+      expect.objectContaining({
+        observedRuns: expect.any(Number),
+        sampleReady: expect.any(Boolean),
+        gatePass: expect.any(Boolean)
+      })
+    );
   });
 });

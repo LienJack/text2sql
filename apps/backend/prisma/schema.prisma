@@ -101,6 +101,82 @@ model SqlRun {
   @@map("sql_runs")
 }
 
+model GraphSnapshot {
+  id          String   @id
+  datasource  String
+  graphType   String
+  graphVersion Int     @default(1)
+  status      String   @default("active")
+  checksum    String?
+  payload     String
+  sourceRunId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sourceRun   SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@index([datasource, graphType, status])
+  @@index([sourceRunId])
+  @@map("graph_snapshots")
+}
+
+model SemanticMemory {
+  id           String   @id
+  datasource   String
+  semanticType String
+  canonicalKey String
+  content      String
+  confidence   Float    @default(1)
+  sourceRunId  String?
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([datasource, semanticType, canonicalKey])
+  @@index([datasource, semanticType])
+  @@index([sourceRunId])
+  @@map("semantic_memories")
+}
+
+model SemanticEdge {
+  id          String   @id
+  datasource  String
+  subjectKey  String
+  predicate   String
+  objectKey   String
+  weight      Float?
+  sourceRunId String?
+  metadata    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  sourceRun   SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([datasource, subjectKey, predicate, objectKey])
+  @@index([datasource, predicate])
+  @@index([sourceRunId])
+  @@map("semantic_edges")
+}
+
+model AgentAuditLog {
+  id         String   @id
+  runId      String?
+  sessionId  String?
+  phase      String
+  severity   String   @default("info")
+  eventType  String
+  eventCode  String?
+  message    String
+  metadata   String?
+  createdAt  DateTime @default(now())
+  run        SqlRun?  @relation(fields: [runId], references: [runId], onDelete: SetNull)
+  session    Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([runId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("agent_audit_logs")
+}
+
 model EvaluationReport {
   jobId     String   @id
   provider  String
@@ -267,78 +343,3 @@ model WorkspaceDatasourceTablePermission {
   @@map("workspace_datasource_table_permissions")
 }
 
-model AgentAuditLog {
-  id        String   @id
-  runId     String?
-  sessionId String?
-  phase     String
-  severity  String   @default("info")
-  eventType String
-  eventCode String?
-  message   String
-  metadata  String?
-  createdAt DateTime @default(now())
-  run       SqlRun?  @relation(fields: [runId], references: [runId], onDelete: SetNull)
-  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-
-  @@index([eventType, createdAt])
-  @@index([runId, createdAt])
-  @@index([sessionId, createdAt])
-  @@map("agent_audit_logs")
-}
-
-model GraphSnapshot {
-  id           String   @id
-  datasource   String
-  graphType    String
-  graphVersion Int      @default(1)
-  status       String   @default("draft")
-  checksum     String?
-  payload      String
-  sourceRunId  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
-
-  @@index([datasource, graphType, status])
-  @@index([sourceRunId])
-  @@map("graph_snapshots")
-}
-
-model SemanticEdge {
-  id          String   @id
-  datasource  String
-  subjectKey  String
-  predicate   String
-  objectKey   String
-  weight      Float?
-  sourceRunId String?
-  metadata    String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  sourceRun   SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
-
-  @@unique([datasource, subjectKey, predicate, objectKey])
-  @@index([datasource, predicate])
-  @@index([sourceRunId])
-  @@map("semantic_edges")
-}
-
-model SemanticMemory {
-  id           String   @id
-  datasource   String
-  semanticType String
-  canonicalKey String
-  content      String
-  confidence   Float    @default(1.0)
-  sourceRunId  String?
-  metadata     String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
-
-  @@unique([datasource, semanticType, canonicalKey])
-  @@index([datasource, semanticType])
-  @@index([sourceRunId])
-  @@map("semantic_memories")
-}

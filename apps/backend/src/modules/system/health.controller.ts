@@ -7,6 +7,8 @@ import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { SqliteQueryService } from "../data/sqlite/sqlite-query.service";
 import { DatasourceService } from "../datasource/datasource.service";
+import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+import { GateMetricsService } from "../observability/gate-metrics.service";
 
 @Controller()
 export class HealthController {
@@ -15,7 +17,9 @@ export class HealthController {
     private readonly sqlite: SqliteQueryService,
     private readonly redis: RedisBufferService,
     private readonly repository: ChatRepository,
-    private readonly datasourceService: DatasourceService
+    private readonly datasourceService: DatasourceService,
+    private readonly datasourceRegistry: DatasourceRegistryService,
+    private readonly gateMetrics: GateMetricsService
   ) {}
 
   @Get("/health")
@@ -68,6 +72,9 @@ export class HealthController {
         },
         sessions: {
           sync: sessionSyncStats
+        },
+        gateMetrics: {
+          acceptance: this.gateMetrics.snapshot()
         }
       },
       cors: {

@@ -129,6 +129,34 @@ export class AppConfigService {
     return this.config.get<string>("LLM_MOCK_MODE", "false") === "true";
   }
 
+  get agentPlanningScaffoldEnabled(): boolean {
+    return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
+  }
+
+  get sqlSafetySoftWarnMaxLength(): number {
+    return this.readNumber("SQL_SAFETY_SOFT_WARN_MAX_LENGTH", 600);
+  }
+
+  get r1GateWindowMinutes(): number {
+    return this.readNumber("R1_GATE_WINDOW_MINUTES", 60);
+  }
+
+  get r1GateMinSamples(): number {
+    return this.readNumber("R1_GATE_MIN_SAMPLES", 10);
+  }
+
+  get r1GateMinSuccessRate(): number {
+    return this.readNumber("R1_GATE_MIN_SUCCESS_RATE", 0.95);
+  }
+
+  get r1GateMaxRejectionRate(): number {
+    return this.readNumber("R1_GATE_MAX_REJECTION_RATE", 0.2);
+  }
+
+  get r1GateMaxHardFailureRate(): number {
+    return this.readNumber("R1_GATE_MAX_HARD_FAILURE_RATE", 0.05);
+  }
+
   get fallbackProviders(): string[] {
     const raw = this.config.get<string>("LLM_FALLBACK_PROVIDERS", "siliconflow,minimax");
     return raw
@@ -208,5 +236,15 @@ export class AppConfigService {
     if (missing.length > 0) {
       throw new Error(`缺少必要配置: ${missing.join(", ")}`);
     }
+  }
+
+  private readNumber(key: string, defaultValue: number): number {
+    const raw = this.config.get<string>(key, String(defaultValue));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+    this.logger.warn(`${key} 配置无效（${raw}），已回退默认值 ${defaultValue}。`);
+    return defaultValue;
   }
 }

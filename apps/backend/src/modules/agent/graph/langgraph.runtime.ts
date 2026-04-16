@@ -8,10 +8,14 @@ import {
 } from "@langchain/langgraph";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
 import type { DatasourceType } from "@text2sql/shared-types";
+import { BuildIntentPlanNode } from "../nodes/build-intent-plan.node";
+import { BuildPhysicalPlanNode } from "../nodes/build-physical-plan.node";
+import { BuildSemanticQueryNode } from "../nodes/build-semantic-query.node";
 import { ClarifyNode } from "../nodes/clarify.node";
 import { ExecuteSqlNode } from "../nodes/execute-sql.node";
 import { FormatAnswerNode } from "../nodes/format-answer.node";
 import { GenerateSqlNode } from "../nodes/generate-sql.node";
+import { RetrieveKnowledgeNode } from "../nodes/retrieve-knowledge.node";
 import { SafetyCheckNode } from "../nodes/safety-check.node";
 import type {
   LlmGatewayStreamEvent,
@@ -27,10 +31,18 @@ const LangGraphStateAnnotation = Annotation.Root({
   datasourceType: Annotation<DatasourceType | undefined>(),
   modelCatalogId: Annotation<string | undefined>(),
   accessContext: Annotation<LangGraphState["accessContext"]>(),
+  planningScaffoldEnabled: Annotation<boolean | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
   provider: Annotation<string>(),
   model: Annotation<string | undefined>(),
   llmRaw: Annotation<LangGraphState["llmRaw"]>(),
+  retrievedKnowledge: Annotation<LangGraphState["retrievedKnowledge"]>(),
+  intentPlan: Annotation<LangGraphState["intentPlan"]>(),
+  semanticQueryPlan: Annotation<LangGraphState["semanticQueryPlan"]>(),
+  physicalPlan: Annotation<LangGraphState["physicalPlan"]>(),
+  planningStatus: Annotation<LangGraphState["planningStatus"]>(),
+  planningWarnings: Annotation<string[] | undefined>(),
+  safetyDecision: Annotation<LangGraphState["safetyDecision"]>(),
   sql: Annotation<string | undefined>(),
   explanation: Annotation<string | undefined>(),
   rows: Annotation<Array<Record<string, unknown>> | undefined>(),
@@ -130,8 +142,19 @@ const buildRunningStep = (
   };
 };
 
+const appendPlanningWarning = (
+  state: LangGraphState,
+  warning: string
+): string[] => {
+  return [...(state.planningWarnings ?? []), warning];
+};
+
 export interface LangGraphNodeDependencies {
   clarifyNode: Pick<ClarifyNode, "run">;
+  retrieveKnowledgeNode: Pick<RetrieveKnowledgeNode, "run">;
+  buildIntentPlanNode: Pick<BuildIntentPlanNode, "run">;
+  buildSemanticQueryNode: Pick<BuildSemanticQueryNode, "run">;
+  buildPhysicalPlanNode: Pick<BuildPhysicalPlanNode, "run">;
   generateSqlNode: Pick<GenerateSqlNode, "run">;
   safetyNode: Pick<SafetyCheckNode, "run">;
   executeNode: Pick<ExecuteSqlNode, "run">;
@@ -182,6 +205,359 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       await emitStep(config, latestStep(trace));
       return trace;
     })
+    .addNode("retrieve-knowledge", async (state, config) => {
+      const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "retrieve-knowledge", startedAt, "正在检索知识上下文")
+      );
+      if (!state.planningScaffoldEnabled) {
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "retrieve-knowledge",
+            status: "skipped",
+            detail: "规划骨架未启用，跳过检索节点。",
+            ...withTiming(startedAt, endedAt)
+          }
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "legacy"
+        };
+      }
+
+      try {
+        const knowledge = deps.retrieveKnowledgeNode.run(state.question);
+        const endedAt = new Date().toISOString();
+        const outputs = {
+          status: knowledge.status,
+          snippets: knowledge.snippets
+        };
+        const trace = appendStep(state, {
+          step: {
+            node: "retrieve-knowledge",
+            status: "success",
+            detail: knowledge.summary,
+            ...withTiming(startedAt, endedAt),
+            outputSummary: summarize(outputs)
+          },
+          outputs
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          retrievedKnowledge: knowledge,
+          planningStatus: knowledge.status === "ready" ? "ready" : "degraded",
+          planningWarnings:
+            knowledge.status === "ready"
+              ? state.planningWarnings
+              : appendPlanningWarning(state, knowledge.summary)
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "retrieve-knowledge",
+            status: "failed",
+            detail: message,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(message)
+          },
+          error: message
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, message)
+        };
+      }
+    })
+    .addNode("build-intent-plan", async (state, config) => {
+      const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(state, "build-intent-plan", startedAt, "正在构建意图规划")
+      );
+      if (!state.planningScaffoldEnabled) {
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-intent-plan",
+            status: "skipped",
+            detail: "规划骨架未启用，跳过意图规划节点。",
+            ...withTiming(startedAt, endedAt)
+          }
+        });
+        await emitStep(config, latestStep(trace));
+        return trace;
+      }
+
+      if (!state.retrievedKnowledge) {
+        const reason = "缺少检索上下文，意图规划降级。";
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-intent-plan",
+            status: "failed",
+            detail: reason,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(reason)
+          },
+          error: reason
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, reason)
+        };
+      }
+
+      try {
+        const intentPlan = deps.buildIntentPlanNode.run(
+          state.question,
+          state.retrievedKnowledge
+        );
+        const endedAt = new Date().toISOString();
+        const outputs = {
+          status: intentPlan.status,
+          intent: intentPlan.intent,
+          constraints: intentPlan.constraints
+        };
+        const trace = appendStep(state, {
+          step: {
+            node: "build-intent-plan",
+            status: "success",
+            detail: intentPlan.summary,
+            ...withTiming(startedAt, endedAt),
+            outputSummary: summarize(outputs)
+          },
+          outputs
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          intentPlan,
+          planningStatus: intentPlan.status === "ready" ? state.planningStatus : "degraded",
+          planningWarnings:
+            intentPlan.status === "ready"
+              ? state.planningWarnings
+              : appendPlanningWarning(state, intentPlan.summary)
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-intent-plan",
+            status: "failed",
+            detail: message,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(message)
+          },
+          error: message
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, message)
+        };
+      }
+    })
+    .addNode("build-semantic-query", async (state, config) => {
+      const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(
+          state,
+          "build-semantic-query",
+          startedAt,
+          "正在构建语义检索计划"
+        )
+      );
+      if (!state.planningScaffoldEnabled) {
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-semantic-query",
+            status: "skipped",
+            detail: "规划骨架未启用，跳过语义检索节点。",
+            ...withTiming(startedAt, endedAt)
+          }
+        });
+        await emitStep(config, latestStep(trace));
+        return trace;
+      }
+
+      if (!state.intentPlan) {
+        const reason = "缺少意图规划，语义检索降级。";
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-semantic-query",
+            status: "failed",
+            detail: reason,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(reason)
+          },
+          error: reason
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, reason)
+        };
+      }
+
+      try {
+        const semanticQueryPlan = deps.buildSemanticQueryNode.run(state.intentPlan);
+        const endedAt = new Date().toISOString();
+        const outputs = {
+          status: semanticQueryPlan.status,
+          semanticHints: semanticQueryPlan.semanticHints
+        };
+        const trace = appendStep(state, {
+          step: {
+            node: "build-semantic-query",
+            status: "success",
+            detail: semanticQueryPlan.summary,
+            ...withTiming(startedAt, endedAt),
+            outputSummary: summarize(outputs)
+          },
+          outputs
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          semanticQueryPlan,
+          planningStatus:
+            semanticQueryPlan.status === "ready" ? state.planningStatus : "degraded",
+          planningWarnings:
+            semanticQueryPlan.status === "ready"
+              ? state.planningWarnings
+              : appendPlanningWarning(state, semanticQueryPlan.summary)
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-semantic-query",
+            status: "failed",
+            detail: message,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(message)
+          },
+          error: message
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, message)
+        };
+      }
+    })
+    .addNode("build-physical-plan", async (state, config) => {
+      const startedAt = new Date().toISOString();
+      await emitStep(
+        config,
+        buildRunningStep(
+          state,
+          "build-physical-plan",
+          startedAt,
+          "正在构建物理执行计划"
+        )
+      );
+      if (!state.planningScaffoldEnabled) {
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-physical-plan",
+            status: "skipped",
+            detail: "规划骨架未启用，跳过物理规划节点。",
+            ...withTiming(startedAt, endedAt)
+          }
+        });
+        await emitStep(config, latestStep(trace));
+        return trace;
+      }
+
+      if (!state.semanticQueryPlan) {
+        const reason = "缺少语义规划，物理计划降级。";
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-physical-plan",
+            status: "failed",
+            detail: reason,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(reason)
+          },
+          error: reason
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, reason)
+        };
+      }
+
+      try {
+        const physicalPlan = deps.buildPhysicalPlanNode.run(state.semanticQueryPlan);
+        const endedAt = new Date().toISOString();
+        const outputs = {
+          status: physicalPlan.status,
+          strategy: physicalPlan.strategy
+        };
+        const trace = appendStep(state, {
+          step: {
+            node: "build-physical-plan",
+            status: "success",
+            detail: physicalPlan.summary,
+            ...withTiming(startedAt, endedAt),
+            outputSummary: summarize(outputs)
+          },
+          outputs
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          physicalPlan,
+          planningStatus: physicalPlan.status === "ready" ? state.planningStatus : "degraded",
+          planningWarnings:
+            physicalPlan.status === "ready"
+              ? state.planningWarnings
+              : appendPlanningWarning(state, physicalPlan.summary)
+        };
+      } catch (error) {
+        const message = toErrorMessage(error);
+        const endedAt = new Date().toISOString();
+        const trace = appendStep(state, {
+          step: {
+            node: "build-physical-plan",
+            status: "failed",
+            detail: message,
+            ...withTiming(startedAt, endedAt),
+            errorSummary: summarize(message)
+          },
+          error: message
+        });
+        await emitStep(config, latestStep(trace));
+        return {
+          ...trace,
+          planningStatus: "degraded",
+          planningWarnings: appendPlanningWarning(state, message)
+        };
+      }
+    })
     .addNode("generate-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
       await emitStep(
@@ -207,6 +583,13 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           question: state.question,
           datasourceType: state.datasourceType,
           modelCatalogId: state.modelCatalogId,
+          planningScaffoldEnabled: state.planningScaffoldEnabled,
+          planningStatus: state.planningStatus,
+          planningWarnings: state.planningWarnings,
+          retrieveSummary: state.retrievedKnowledge?.summary,
+          intent: state.intentPlan?.intent,
+          semanticHints: state.semanticQueryPlan?.semanticHints,
+          physicalStrategy: state.physicalPlan?.strategy,
           systemPrompt: generated.prompt.systemPrompt,
           userPrompt: generated.prompt.userPrompt
         };
@@ -317,39 +700,62 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         datasourceId: state.datasourceId,
         workspaceId: state.accessContext?.workspaceId
       };
-      if (!safety.safe) {
+      if (!safety.allowed) {
         const trace = appendStep(state, {
           step: {
             node: "safety-check",
             status: "failed",
-            detail: safety.reason,
+            detail: safety.reason ?? "SQL 未通过安全策略校验。",
             ...withTiming(startedAt, endedAt),
             inputSummary: summarize(inputs),
             errorSummary: summarize(safety.reason)
           },
           runType: "tool",
           inputs,
+          metadata: {
+            mode: safety.mode,
+            riskLevel: safety.riskLevel,
+            riskTags: safety.riskTags
+          },
           error: safety.reason
         });
         await emitStep(config, latestStep(trace));
         return {
           ...trace,
           error: safety.reason,
+          safetyDecision: safety,
           terminalStatus: "rejected"
         };
       }
 
+      const detail =
+        safety.mode === "soft-warn"
+          ? `SQL 通过只读校验（软告警：${safety.riskTags.join(", ") || "none"}）。`
+          : "SQL 通过只读校验。";
       const trace = appendStep(state, {
         step: {
           node: "safety-check",
           status: "success",
-          detail: "SQL 通过只读校验。",
+          detail,
           ...withTiming(startedAt, endedAt),
-          inputSummary: summarize(inputs)
+          inputSummary: summarize(inputs),
+          outputSummary: summarize({
+            mode: safety.mode,
+            riskLevel: safety.riskLevel,
+            riskTags: safety.riskTags
+          })
+        },
+        metadata: {
+          mode: safety.mode,
+          riskLevel: safety.riskLevel,
+          riskTags: safety.riskTags
         }
       });
       await emitStep(config, latestStep(trace));
-      return trace;
+      return {
+        ...trace,
+        safetyDecision: safety
+      };
     })
     .addNode("execute-sql", async (state, config) => {
       const startedAt = new Date().toISOString();
@@ -478,9 +884,13 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       (state) => (state.terminalStatus === "clarification" ? "done" : "continue"),
       {
         done: END,
-        continue: "generate-sql"
+        continue: "retrieve-knowledge"
       }
     )
+    .addEdge("retrieve-knowledge", "build-intent-plan")
+    .addEdge("build-intent-plan", "build-semantic-query")
+    .addEdge("build-semantic-query", "build-physical-plan")
+    .addEdge("build-physical-plan", "generate-sql")
     .addConditionalEdges(
       "generate-sql",
       (state) => (state.fatalError ? "fatal" : "continue"),
@@ -519,6 +929,10 @@ export class LangGraphRuntimeService {
 
   constructor(
     private readonly clarifyNode: ClarifyNode,
+    private readonly retrieveKnowledgeNode: RetrieveKnowledgeNode,
+    private readonly buildIntentPlanNode: BuildIntentPlanNode,
+    private readonly buildSemanticQueryNode: BuildSemanticQueryNode,
+    private readonly buildPhysicalPlanNode: BuildPhysicalPlanNode,
     private readonly generateSqlNode: GenerateSqlNode,
     private readonly safetyNode: SafetyCheckNode,
     private readonly executeNode: ExecuteSqlNode,
@@ -526,6 +940,10 @@ export class LangGraphRuntimeService {
   ) {
     this.graph = createLangGraphRuntime({
       clarifyNode: this.clarifyNode,
+      retrieveKnowledgeNode: this.retrieveKnowledgeNode,
+      buildIntentPlanNode: this.buildIntentPlanNode,
+      buildSemanticQueryNode: this.buildSemanticQueryNode,
+      buildPhysicalPlanNode: this.buildPhysicalPlanNode,
       generateSqlNode: this.generateSqlNode,
       safetyNode: this.safetyNode,
       executeNode: this.executeNode,

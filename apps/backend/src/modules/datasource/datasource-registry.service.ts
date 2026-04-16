@@ -6,6 +6,8 @@ export interface DatasourceDefinition {
   readonly: boolean;
   location: string;
   enabled: boolean;
+  safetyPolicy?: "strict" | "standard";
+  fallbackOnReject?: boolean;
 }
 
 @Injectable()
@@ -23,5 +25,23 @@ export class DatasourceRegistryService {
   getById(id: string): DatasourceDefinition | undefined {
     return this.sources.get(id);
   }
-}
 
+  resolveSafetyPolicy(id: string): "strict" | "standard" {
+    const source = this.sources.get(id);
+    if (!source) {
+      return "strict";
+    }
+    if (source.readonly) {
+      return source.safetyPolicy ?? "strict";
+    }
+    return "strict";
+  }
+
+  shouldFallbackOnReject(id: string): boolean {
+    const source = this.sources.get(id);
+    if (!source) {
+      return true;
+    }
+    return source.fallbackOnReject ?? true;
+  }
+}

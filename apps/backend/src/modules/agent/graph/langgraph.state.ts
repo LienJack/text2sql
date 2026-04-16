@@ -6,6 +6,11 @@ import type {
 } from "@text2sql/shared-types";
 import type { GraphInput, GraphTraceContext } from "./agent.types";
 import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
+import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
+import type { IntentPlan } from "../nodes/build-intent-plan.node";
+import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";
+import type { PhysicalPlan } from "../nodes/build-physical-plan.node";
+import type { SqlSafetyDecision } from "../sql/tools/sql-safety.guard";
 
 export interface LangGraphSpanEvent {
   step: ExecutionTraceStep;
@@ -20,6 +25,13 @@ export interface LangGraphState extends GraphInput {
   provider: string;
   model?: string;
   llmRaw?: SqlRun["llmRaw"];
+  retrievedKnowledge?: RetrievedKnowledge;
+  intentPlan?: IntentPlan;
+  semanticQueryPlan?: SemanticQueryPlan;
+  physicalPlan?: PhysicalPlan;
+  planningStatus?: "legacy" | "ready" | "degraded";
+  planningWarnings?: string[];
+  safetyDecision?: SqlSafetyDecision;
   sql?: string;
   explanation?: string;
   rows?: Array<Record<string, unknown>>;
@@ -77,6 +89,9 @@ export const createInitialLangGraphState = (
     provider: fallbackProvider,
     model: undefined,
     llmRaw: undefined,
+    planningScaffoldEnabled: input.planningScaffoldEnabled ?? false,
+    planningStatus: input.planningScaffoldEnabled ? "ready" : "legacy",
+    planningWarnings: [],
     trace: {
       runId: input.runId,
       provider: fallbackProvider,
