@@ -37,7 +37,7 @@ describe("AppConfigService", () => {
     }).compile();
 
     const config = moduleRef.get(AppConfigService);
-    expect(config.port).toBe(3000);
+    expect(config.port).toBe(3002);
     expect(config.llmProvider).toBe("volcengine");
     expect(config.sqlitePath).toContain("data/sqlite/text2sql.db");
   });

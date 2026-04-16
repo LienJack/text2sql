@@ -14,8 +14,22 @@ import type {
   UpsertDatasourceWorkflowResponse
 } from "@text2sql/shared-types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
+const API_BASE_OVERRIDE = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+const API_BASE = API_BASE_OVERRIDE ? API_BASE_OVERRIDE.replace(/\/+$/, "") : "";
+
+function composeApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (!API_BASE) {
+    return normalizedPath;
+  }
+  if (
+    API_BASE.endsWith("/api") &&
+    (normalizedPath === "/api" || normalizedPath.startsWith("/api/"))
+  ) {
+    return `${API_BASE.slice(0, -4)}${normalizedPath}`;
+  }
+  return `${API_BASE}${normalizedPath}`;
+}
 
 function resolveWorkspaceIdHeader(): string | undefined {
   if (typeof window !== "undefined") {
@@ -174,7 +188,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const workspaceId = resolveWorkspaceIdHeader();
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${url}`, {
+    response = await fetch(composeApiUrl(url), {
       ...init,
       headers: {
         "content-type": "application/json",
@@ -349,7 +363,7 @@ export async function uploadDatasourceFile(input: {
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api/v1/datasources/upload`, {
+    response = await fetch(composeApiUrl("/api/v1/datasources/upload"), {
       method: "POST",
       headers: {
         "x-user-role": role,
@@ -484,19 +498,22 @@ export async function* streamMessageEvents(
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
   const workspaceId = resolveWorkspaceIdHeader();
-  const response = await fetch(`${API_BASE}/api/v1/sessions/${sessionId}/messages/stream`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-user-role": role,
-      "x-user-id": userId,
-      ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
-    },
-    signal: abortSignal,
-    body: JSON.stringify({
-      message
-    })
-  });
+  const response = await fetch(
+    composeApiUrl(`/api/v1/sessions/${sessionId}/messages/stream`),
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-user-role": role,
+        "x-user-id": userId,
+        ...(workspaceId ? { "x-workspace-id": workspaceId } : {})
+      },
+      signal: abortSignal,
+      body: JSON.stringify({
+        message
+      })
+    }
+  );
   if (!response.ok) {
     throw new Error(`流式请求失败（HTTP ${response.status}）`);
   }

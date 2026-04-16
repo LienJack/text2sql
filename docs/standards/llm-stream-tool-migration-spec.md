@@ -5,6 +5,8 @@
 - Backend LLM gateway migrates to Vercel AI SDK core (`ai` + `@ai-sdk/openai-compatible`).
 - Chat primary request path supports SSE streaming endpoint.
 - Tool Calling baseline is enabled with allowlisted server-side tools.
+- 开发联调入口拓扑统一为 `http://localhost:3000`（Nginx）；`/` 转前端内部 `3001`，`/api/*` 转后端内部 `3002`。
+- 上述入口拓扑调整不改变 `/api/v1/*` 路由合同、SSE 事件字段或 Tool Calling 语义。
 
 ## API Changes
 
@@ -12,6 +14,7 @@
 
 - `POST /api/v1/sessions/:sessionId/messages`
 - `POST /api/v1/sessions/:sessionId/messages/stream`
+- Endpoint paths and response/event contracts remain unchanged; only default local access path converges to gateway entry (`http://localhost:3000/api/...`).
 
 ### Synchronous Contract (`/messages`)
 
@@ -61,9 +64,11 @@
 ## Monitoring Checklist
 
 - `GET /health` confirms:
+  - local dev can verify health at backend internal port `http://localhost:3002/health`
   - `dependencies.llm.streamingEnabled === true`
   - `dependencies.llm.toolCallingEnabled === true`
   - stream endpoint and tool registry metadata are present
+- Stream checks should run through unified gateway entry (`http://localhost:3000/api/v1/sessions/:sessionId/messages/stream`) when validating developer workflow.
 - 同步/流式的错误分类在相同故障输入下保持一致。
 - Compare stream endpoint success rate against legacy endpoint baseline.
 - Verify trace persistence includes tool events when tools are called.

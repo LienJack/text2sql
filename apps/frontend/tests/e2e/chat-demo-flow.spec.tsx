@@ -142,15 +142,84 @@ describe("chat demo flow", () => {
 
   it("completes send and preview flow", async () => {
     const user = userEvent.setup();
+    const emittedEventTypes: string[] = [];
+    let releaseFirstEvent: (() => void) | undefined;
+    const firstEventGate = new Promise<void>((resolve) => {
+      releaseFirstEvent = resolve;
+    });
+    mockStreamMessageEvents.mockImplementationOnce(async function* () {
+      await firstEventGate;
+      emittedEventTypes.push("start");
+      yield {
+        type: "start",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          requestId: null
+        }
+      };
+      emittedEventTypes.push("state");
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "generate_sql",
+          status: "success",
+          detail: "生成 SQL",
+          stepId: "run-1:generate_sql:1",
+          sequence: 1,
+          lifecycle: "completed",
+          stage: "generation",
+          title: "生成 SQL"
+        }
+      };
+      emittedEventTypes.push("text-delta");
+      yield {
+        type: "text-delta",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          text: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method"
+        }
+      };
+      emittedEventTypes.push("finish");
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1
+        }
+      };
+    });
+
     render(<ChatPage />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    const initialGetMessagesCalls = mockGetMessages.mock.calls.length;
     await user.type(screen.getByLabelText("聊天输入"), "统计订单支付方式");
     await user.click(screen.getByRole("button", { name: "发送" }));
+    expect(await screen.findByText(/思考中/)).toBeInTheDocument();
+    releaseFirstEvent?.();
 
     await waitFor(() => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
+    await waitFor(() => {
+      expect(screen.queryByText(/思考中/)).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(mockGetMessages.mock.calls.length).toBeGreaterThan(
+        initialGetMessagesCalls
+      );
+    });
+    expect(emittedEventTypes).toEqual(["start", "state", "text-delta", "finish"]);
 
     await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
     expect(screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")).toBeInTheDocument();

@@ -36,7 +36,7 @@ vibe/plain               需求、计划、评测与运维文档
 pnpm install
 ```
 
-2. 启动基础依赖（Redis/PostgreSQL）
+2. 启动基础依赖（Redis/PostgreSQL + Nginx 统一入口网关）
 ```bash
 docker compose -f infra/docker-compose.yml up -d
 ```
@@ -48,7 +48,8 @@ cp apps/frontend/.env.example apps/frontend/.env
 ```
 
 关键配置（`apps/backend/.env`）：
-- `CORS_ALLOWED_ORIGINS=http://localhost:3001`
+- `PORT=3002`（后端内部开发端口）
+- `CORS_ALLOWED_ORIGINS=http://localhost:3000`（默认统一入口 origin）
 - `POSTGRES_HOST=localhost`
 - `POSTGRES_PORT=5432`
 - `POSTGRES_DB=text2sql`
@@ -91,8 +92,9 @@ pnpm dev
 ```
 
 默认地址：
-- 后端：`http://localhost:3000`
-- 前端：`http://localhost:3001/data-sources`
+- 浏览器默认入口（网关）：`http://localhost:3000/data-sources`
+- 前端内部开发端口（非默认直连调试）：`http://localhost:3001`
+- 后端内部开发端口（非默认直连调试）：`http://localhost:3002`
 
 ## 多数据源问数主线
 - 入口强制“先选数据源，再进入聊天”：`/data-sources -> 创建会话 -> /chat?datasource=...&sessionId=...`
@@ -118,12 +120,14 @@ pnpm dev
 - 移动端保留“会话”与“结果详情”入口，其中“结果详情”用于快速展开最新 SQL 详情块。
 
 ## 联调检查清单（真实 LLM）
-- 后端健康检查 `GET /health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
-- `GET /health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。
-- 如开启 LangSmith，`GET /health` 中 `dependencies.langsmith.ready` 为 `true`。
-- `GET /health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
-- `GET /health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
-- 前端能成功创建会话并发送消息，无跨域报错。
+- 网关入口可访问：`http://localhost:3000/data-sources`。
+- 快速网关 smoke 可通过：`node tests/smoke/nginx-dev-gateway-smoke.mjs`。
+- 后端健康检查 `GET http://localhost:3002/health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
+- `GET http://localhost:3002/health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。
+- 如开启 LangSmith，`GET http://localhost:3002/health` 中 `dependencies.langsmith.ready` 为 `true`。
+- `GET http://localhost:3002/health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
+- `GET http://localhost:3002/health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
+- 前端能经 `http://localhost:3000` 成功创建会话并发送消息，无跨域报错。
 - 前端从 `/data-sources` 选择任一可用数据源后，可自动创建绑定会话并跳转 `/chat`。
 - `GET /api/v1/sessions?datasource=<id>` 返回的会话均属于指定数据源。
 - `POST /api/v1/sessions/:sessionId/messages` 响应中包含 `run.sql` 与 `run.explanation`。
@@ -187,6 +191,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - 当前策略为永久保留调试数据，不做自动清理任务。
 
 ## Stream & Tool Calling 说明
+- 开发态统一入口为 `http://localhost:3000`（网关转发到内部 `3001/3002`）；以下 API 路径与字段契约不变。
 - 流式主路径：`POST /api/v1/sessions/:sessionId/messages/stream`。
 - 同步消息接口 `POST /api/v1/sessions/:sessionId/messages` 返回 `AgentRunResponse`：
   - `kind`：固定为 `agent-run`
@@ -209,7 +214,9 @@ pnpm test:frontend
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
-- 启动 smoke：至少验证 `GET /health`；关键接口建议覆盖：
+- 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
+  - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
+  - 后端健康检查：`GET http://localhost:3002/health`
   - `POST /api/v1/sessions`
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
