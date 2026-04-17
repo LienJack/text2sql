@@ -96,7 +96,9 @@ export class GraphBuilderService {
         provider: finalizedRun.provider,
         outputs: this.compact({
           rowCount: finalizedRun.rows?.length,
-          hasError: Boolean(finalizedRun.error)
+          hasError: Boolean(finalizedRun.error),
+          retrievalStatus: runtimeState.retrievalBundle?.status,
+          selectedContextCount: runtimeState.retrievalBundle?.selected_context?.length ?? 0
         }),
         metadata: this.compact({
           requestId: traceContext.requestId,

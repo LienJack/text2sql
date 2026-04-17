@@ -9,6 +9,8 @@ import { SqliteQueryService } from "../data/sqlite/sqlite-query.service";
 import { DatasourceService } from "../datasource/datasource.service";
 import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
 import { GateMetricsService } from "../observability/gate-metrics.service";
+import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
+import { RagQualityService } from "../rag/quality/rag-quality.service";
 
 @Controller()
 export class HealthController {
@@ -19,7 +21,9 @@ export class HealthController {
     private readonly repository: ChatRepository,
     private readonly datasourceService: DatasourceService,
     private readonly datasourceRegistry: DatasourceRegistryService,
-    private readonly gateMetrics: GateMetricsService
+    private readonly gateMetrics: GateMetricsService,
+    private readonly ragIngestionMetrics: RagIngestionMetricsService,
+    private readonly ragQuality: RagQualityService
   ) {}
 
   @Get("/health")
@@ -75,6 +79,12 @@ export class HealthController {
         },
         gateMetrics: {
           acceptance: this.gateMetrics.snapshot()
+        },
+        ragIngestionMetrics: {
+          foundation: this.ragIngestionMetrics.snapshot()
+        },
+        ragQuality: {
+          gate: this.ragQuality.snapshot()
         }
       },
       cors: {

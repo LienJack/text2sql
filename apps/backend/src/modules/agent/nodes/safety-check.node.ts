@@ -20,8 +20,9 @@ export class SafetyCheckNode {
     sql: string;
     datasourceId: string;
     accessContext?: SqlTableAccessContext;
+    riskTags?: string[];
   }): Promise<SqlSafetyDecision> {
-    const readonlyDecision = this.evaluateReadonly(input.sql);
+    const readonlyDecision = this.evaluateReadonly(input.sql, input.riskTags);
     if (!readonlyDecision.allowed) {
       return readonlyDecision;
     }
@@ -53,9 +54,9 @@ export class SafetyCheckNode {
     return readonlyDecision;
   }
 
-  private evaluateReadonly(sql: string): SqlSafetyDecision {
+  private evaluateReadonly(sql: string, riskTags?: string[]): SqlSafetyDecision {
     if (this.safetyGuard) {
-      return this.safetyGuard.evaluate(sql);
+      return this.safetyGuard.evaluate(sql, riskTags);
     }
 
     try {

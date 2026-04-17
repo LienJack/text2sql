@@ -5,6 +5,7 @@ import type {
   LlmGatewayToolDefinition
 } from "../../llm/llm-gateway.interface";
 import { SqlGenerationService } from "../sql/sql-generation.service";
+import type { RagRetrievalChunkPayload } from "../../rag/retrieval/rag-retrieval.types";
 
 @Injectable()
 export class GenerateSqlNode {
@@ -18,6 +19,7 @@ export class GenerateSqlNode {
       stream?: boolean;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
+      selectedContext?: RagRetrievalChunkPayload[];
     }
   ): Promise<{
     provider: string;
@@ -36,7 +38,8 @@ export class GenerateSqlNode {
         question,
         {
           datasourceType,
-          modelCatalogId
+          modelCatalogId,
+          selectedContext: options.selectedContext
         },
         {
           tools: options.tools,
@@ -46,7 +49,8 @@ export class GenerateSqlNode {
     }
     return this.sqlGeneration.generate(question, {
       datasourceType,
-      modelCatalogId
+      modelCatalogId,
+      selectedContext: options?.selectedContext
     });
   }
 }

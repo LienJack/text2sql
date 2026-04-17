@@ -55,6 +55,11 @@ model Datasource {
   workspaceBindings WorkspaceDatasourceBinding[]
   workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   workspaceTablePermissions WorkspaceDatasourceTablePermission[]
+  ragDocuments       RagDocument[]        @relation("datasource_rag_documents")
+  ragChunks          RagChunk[]           @relation("datasource_rag_chunks")
+  ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
+  ragChunkIndexes    RagChunkIndexEntry[] @relation("datasource_rag_chunk_index_entries")
+  ragRunReplays      RagRunReplay[]       @relation("datasource_rag_run_replays")
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -96,6 +101,9 @@ model SqlRun {
   graphSnapshots    GraphSnapshot[]
   semanticEdges     SemanticEdge[]
   semanticMemories  SemanticMemory[]
+  ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
+  ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
+  ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
@@ -343,3 +351,123 @@ model WorkspaceDatasourceTablePermission {
   @@map("workspace_datasource_table_permissions")
 }
 
+model RagDocument {
+  id              String   @id
+  datasourceId    String
+  domain          String
+  sourceType      String
+  sourceRef       String?
+  sourceVersion   String
+  contentChecksum String
+  title           String?
+  content         String
+  tableNames      String[]
+  columnNames     String[]
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  datasource      Datasource @relation("datasource_rag_documents", fields: [datasourceId], references: [id], onDelete: Restrict)
+  chunks          RagChunk[]
+  replayLogs      RagRunReplay[]
+
+  @@unique([datasourceId, sourceVersion, contentChecksum])
+  @@index([datasourceId, domain])
+  @@index([sourceType, sourceVersion])
+  @@index([tableNames])
+  @@index([columnNames])
+  @@map("rag_documents")
+}
+
+model RagChunk {
+  id              String   @id
+  documentId      String
+  datasourceId    String
+  domain          String
+  chunkProfile    String
+  chunkOrder      Int
+  content         String
+  contentChecksum String
+  tableNames      String[]
+  columnNames     String[]
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  document        RagDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  datasource      Datasource  @relation("datasource_rag_chunks", fields: [datasourceId], references: [id], onDelete: Restrict)
+  indexEntries    RagChunkIndexEntry[]
+  replayLogs      RagRunReplay[]
+
+  @@unique([documentId, chunkProfile, chunkOrder])
+  @@index([datasourceId, domain, chunkProfile])
+  @@index([tableNames])
+  @@index([columnNames])
+  @@map("rag_chunks")
+}
+
+model RagIndexVersion {
+  id               String   @id
+  datasourceId     String
+  status           String
+  buildReason      String?
+  sourceVersion    String
+  createdByRunId   String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  datasource       Datasource @relation("datasource_rag_index_versions", fields: [datasourceId], references: [id], onDelete: Restrict)
+  createdByRun     SqlRun?    @relation("rag_index_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?    @relation("rag_index_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  chunkEntries     RagChunkIndexEntry[]
+  replayLogs       RagRunReplay[]
+
+  @@index([datasourceId, status, createdAt])
+  @@index([createdByRunId])
+  @@index([activatedByRunId])
+  @@map("rag_index_versions")
+}
+
+model RagChunkIndexEntry {
+  id             String   @id
+  indexVersionId String
+  chunkId        String
+  datasourceId   String
+  domain         String
+  lexicalContent String
+  denseVector    String?
+  metadata       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  indexVersion   RagIndexVersion @relation(fields: [indexVersionId], references: [id], onDelete: Cascade)
+  chunk          RagChunk        @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  datasource     Datasource      @relation("datasource_rag_chunk_index_entries", fields: [datasourceId], references: [id], onDelete: Restrict)
+
+  @@unique([indexVersionId, chunkId])
+  @@index([datasourceId, domain])
+  @@index([chunkId])
+  @@map("rag_chunk_index_entries")
+}
+
+model RagRunReplay {
+  runId          String
+  replayKey      String
+  datasourceId   String
+  stage          String
+  indexVersionId String?
+  documentId     String?
+  chunkId        String?
+  payload        String
+  createdAt      DateTime @default(now())
+  run            SqlRun           @relation("rag_run_replays", fields: [runId], references: [runId], onDelete: Cascade)
+  datasource     Datasource       @relation("datasource_rag_run_replays", fields: [datasourceId], references: [id], onDelete: Restrict)
+  indexVersion   RagIndexVersion? @relation(fields: [indexVersionId], references: [id], onDelete: SetNull)
+  document       RagDocument?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  chunk          RagChunk?        @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+
+  @@id([runId, replayKey])
+  @@index([datasourceId, stage, createdAt])
+  @@index([indexVersionId])
+  @@index([documentId])
+  @@index([chunkId])
+  @@map("rag_run_replays")
+}

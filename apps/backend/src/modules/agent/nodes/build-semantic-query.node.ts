@@ -24,6 +24,9 @@ export class BuildSemanticQueryNode {
         : intentPlan.intent === "compare"
           ? ["normalize_time_window", "keep_metric_consistency"]
           : ["prefer_direct_lookup"];
+    if (intentPlan.constraints.includes("must_use_selected_context")) {
+      semanticHints.push("must_consume_selected_context");
+    }
 
     return {
       status: "ready",

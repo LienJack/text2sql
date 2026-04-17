@@ -11,7 +11,7 @@ describe("langgraph runtime", () => {
         run: () => undefined
       },
       retrieveKnowledgeNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           snippets: ["stub"],
           summary: "stub"
@@ -114,7 +114,7 @@ describe("langgraph runtime", () => {
         run: () => undefined
       },
       retrieveKnowledgeNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           snippets: ["stub"],
           summary: "stub"
