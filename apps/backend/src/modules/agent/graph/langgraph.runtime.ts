@@ -427,11 +427,20 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       }
 
       try {
-        const semanticQueryPlan = deps.buildSemanticQueryNode.run(state.intentPlan);
+        const semanticQueryPlan = await deps.buildSemanticQueryNode.run({
+          intentPlan: state.intentPlan,
+          question: state.question,
+          retrievalBundle: state.retrievalBundle
+        });
         const endedAt = new Date().toISOString();
         const outputs = {
           status: semanticQueryPlan.status,
-          semanticHints: semanticQueryPlan.semanticHints
+          semanticHints: semanticQueryPlan.semanticHints,
+          semanticVersion: semanticQueryPlan.semanticVersion,
+          lockStatus: semanticQueryPlan.lockStatus,
+          fallbackApplied: semanticQueryPlan.fallbackApplied,
+          degradeReason: semanticQueryPlan.degradeReason,
+          riskTags: semanticQueryPlan.riskTags
         };
         const trace = appendStep(state, {
           step: {
@@ -522,11 +531,21 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       }
 
       try {
-        const physicalPlan = deps.buildPhysicalPlanNode.run(state.semanticQueryPlan);
+        const physicalPlan = await deps.buildPhysicalPlanNode.run({
+          semanticPlan: state.semanticQueryPlan,
+          question: state.question,
+          datasourceId: state.datasourceId
+        });
         const endedAt = new Date().toISOString();
         const outputs = {
           status: physicalPlan.status,
-          strategy: physicalPlan.strategy
+          strategy: physicalPlan.strategy,
+          semanticVersion: physicalPlan.semanticVersion,
+          lockStatus: physicalPlan.lockStatus,
+          fallbackApplied: physicalPlan.fallbackApplied,
+          cacheStatus: physicalPlan.cacheStatus,
+          cacheKey: physicalPlan.cacheKey,
+          cacheReason: physicalPlan.cacheReason
         };
         const trace = appendStep(state, {
           step: {

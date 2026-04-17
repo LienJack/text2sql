@@ -5,6 +5,7 @@ import { DatasourceModule } from "../datasource/datasource.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../rag/rag.module";
+import { SemanticRegistryModule } from "../semantic-registry/semantic-registry.module";
 import { BuildIntentPlanNode } from "./nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
@@ -22,6 +23,8 @@ import { SqlPromptBuilder } from "./sql/sql-prompt.builder";
 import { SqlReadonlyTool } from "./sql/tools/sql-readonly.tool";
 import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
+import { PlannerVersionLockService } from "./planner/planner-version-lock.service";
+import { PlannerCacheService } from "./planner/planner-cache.service";
 
 @Module({
   imports: [
@@ -30,7 +33,8 @@ import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
     DatasourceModule,
     LlmModule,
     ObservabilityModule,
-    RagModule
+    RagModule,
+    SemanticRegistryModule
   ],
   providers: [
     GraphBuilderService,
@@ -38,6 +42,8 @@ import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
     ClarifyNode,
     RetrieveKnowledgeNode,
     BuildIntentPlanNode,
+    PlannerVersionLockService,
+    PlannerCacheService,
     BuildSemanticQueryNode,
     BuildPhysicalPlanNode,
     GenerateSqlNode,

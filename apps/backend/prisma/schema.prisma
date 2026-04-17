@@ -101,6 +101,8 @@ model SqlRun {
   graphSnapshots    GraphSnapshot[]
   semanticEdges     SemanticEdge[]
   semanticMemories  SemanticMemory[]
+  semanticRegistryVersionsPublished SemanticRegistryVersion[] @relation("semantic_registry_published_by_run")
+  semanticRegistryVersionsActivated SemanticRegistryVersion[] @relation("semantic_registry_activated_by_run")
   ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
   ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
   ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
@@ -163,6 +165,49 @@ model SemanticEdge {
   @@index([datasource, predicate])
   @@index([sourceRunId])
   @@map("semantic_edges")
+}
+
+model SemanticRegistryVersion {
+  id               String   @id
+  domain           String
+  semanticVersion  Int
+  status           String   @default("active")
+  releaseSummary   String
+  auditSummary     String
+  publishedByRunId String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  riskTags         String[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  publishedByRun   SqlRun?  @relation("semantic_registry_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?  @relation("semantic_registry_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  terms            SemanticRegistryTerm[]
+
+  @@unique([domain, semanticVersion])
+  @@index([domain, status, semanticVersion])
+  @@index([publishedByRunId])
+  @@index([activatedByRunId])
+  @@map("semantic_registry_versions")
+}
+
+model SemanticRegistryTerm {
+  id           String   @id
+  versionId    String
+  domain       String
+  term         String
+  canonicalKey String
+  definition   String
+  binding      String
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      SemanticRegistryVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, term])
+  @@index([domain, term, versionId])
+  @@index([canonicalKey])
+  @@map("semantic_registry_terms")
 }
 
 model AgentAuditLog {

@@ -744,6 +744,10 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     runId: string,
     provider: string
   ): SqlRun["trace"] {
+    const traceWithPlannerMetadata = trace as SqlRun["trace"] & {
+      plannerCache?: Record<string, unknown>;
+      plannerReplay?: Record<string, unknown>;
+    };
     const normalizedSteps = (trace.steps ?? []).map((step, index) => {
       const sequence = step.sequence ?? index + 1;
       return {
@@ -761,7 +765,7 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     });
 
     return {
-      ...trace,
+      ...traceWithPlannerMetadata,
       runId: trace.runId ?? runId,
       provider: trace.provider ?? provider,
       retryCount: trace.retryCount ?? 0,

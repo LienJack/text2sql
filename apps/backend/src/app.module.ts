@@ -10,6 +10,7 @@ import { ObservabilityModule } from "./modules/observability/observability.modul
 import { RagModule } from "./modules/rag/rag.module";
 import { DatasourceModule } from "./modules/datasource/datasource.module";
 import { SettingsModule } from "./modules/settings/settings.module";
+import { SemanticRegistryModule } from "./modules/semantic-registry/semantic-registry.module";
 import { UserModule } from "./modules/user/user.module";
 import { WorkspaceModule } from "./modules/workspace/workspace.module";
 
@@ -22,6 +23,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     DataModule,
     LlmModule,
     SettingsModule,
+    SemanticRegistryModule,
     UserModule,
     WorkspaceModule,
     AgentModule,

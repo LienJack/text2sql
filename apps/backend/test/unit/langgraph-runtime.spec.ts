@@ -26,16 +26,24 @@ describe("langgraph runtime", () => {
         })
       },
       buildSemanticQueryNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           semanticHints: [],
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          riskTags: [],
           summary: "stub"
         })
       },
       buildPhysicalPlanNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           strategy: "direct_sql",
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          cacheStatus: "miss" as const,
           summary: "stub"
         })
       },
@@ -129,16 +137,24 @@ describe("langgraph runtime", () => {
         })
       },
       buildSemanticQueryNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           semanticHints: [],
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          riskTags: [],
           summary: "stub"
         })
       },
       buildPhysicalPlanNode: {
-        run: () => ({
+        run: async () => ({
           status: "ready",
           strategy: "direct_sql",
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          cacheStatus: "miss" as const,
           summary: "stub"
         })
       },

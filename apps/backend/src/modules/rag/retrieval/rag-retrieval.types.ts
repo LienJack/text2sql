@@ -67,6 +67,22 @@ export interface RagRerankedCandidate extends RagRetrievalCandidate {
   rank_reason: string[];
 }
 
+export interface RagSkillContextEntry {
+  source: "skill_registry";
+  domain: string;
+  term: string;
+  matched_by: "term" | "context";
+}
+
+export interface RagSkillContext {
+  skills: Array<{
+    key: string;
+    name: string;
+  }>;
+  context: RagSkillContextEntry[];
+  degrade_reason?: string;
+}
+
 export interface RagRetrievalBundle {
   query: string;
   run_id: string;
@@ -79,6 +95,7 @@ export interface RagRetrievalBundle {
   reranked?: RagRerankedCandidate[];
   selected_context?: RagRetrievalChunkPayload[];
   risk_tags?: string[];
+  skill_context?: RagSkillContext;
 }
 
 export interface RagRetrievalResponse {

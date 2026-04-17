@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import {
+  SKILL_REGISTRY_UNAVAILABLE_REASON,
+  SkillRegistryService
+} from "../../skill-registry/skill-registry.service";
 import { RagIndexRepository } from "../index/rag-index.repository";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
 import { fuseWithRrf } from "./fusion/rrf-fusion";
@@ -13,7 +17,8 @@ import {
   type RagRetrievalLaneHit,
   type RagRetrievalLaneResult,
   type RagRetrievalRequest,
-  type RagRetrievalResponse
+  type RagRetrievalResponse,
+  type RagSkillContext
 } from "./rag-retrieval.types";
 
 const DEFAULT_PER_LANE_LIMIT = 20;
@@ -35,7 +40,8 @@ class LaneTimeoutError extends Error {
 export class RagRetrievalService {
   constructor(
     private readonly indexRepository: RagIndexRepository,
-    private readonly replayRepository: RagReplayRepository
+    private readonly replayRepository: RagReplayRepository,
+    private readonly skillRegistry: SkillRegistryService
   ) {}
 
   async retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse> {
@@ -106,8 +112,12 @@ export class RagRetrievalService {
       finalCandidateLimit,
       REQUIRED_DOMAIN_COVERAGE
     );
+    const skillContext = await this.resolveSkillContext(query, candidates);
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
+    if (skillContext.degrade_reason) {
+      degradeReasons.push(skillContext.degrade_reason);
+    }
     if (candidates.length === 0) {
       degradeReasons.push("zero_recall");
     }
@@ -122,7 +132,8 @@ export class RagRetrievalService {
         status: uniqueDegradeReasons.length > 0 ? "degraded" : "ready",
         degrade_reasons: uniqueDegradeReasons,
         lane_results: laneResults,
-        candidates
+        candidates,
+        skill_context: skillContext
       }
     };
 
@@ -662,6 +673,7 @@ export class RagRetrievalService {
         status: bundle.status,
         degradeReasons: bundle.degrade_reasons,
         candidateCount: bundle.candidates.length,
+        skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
           chunkId: candidate.chunk_id,
           sourceLane: candidate.source_lane,
@@ -670,5 +682,46 @@ export class RagRetrievalService {
         }))
       }
     });
+  }
+
+  private async resolveSkillContext(
+    query: string,
+    candidates: RagRetrievalCandidate[]
+  ): Promise<RagSkillContext> {
+    if (candidates.length === 0) {
+      return {
+        skills: [],
+        context: []
+      };
+    }
+    const firstCandidate = candidates.find(
+      (candidate) => candidate.chunk.metadata.domain === "semantic_term"
+    ) ?? candidates[0];
+    const domain = firstCandidate?.chunk.metadata.domain ?? "semantic_term";
+    const tableNames = this.unique(
+      candidates.flatMap((candidate) => candidate.chunk.metadata.tableNames).slice(0, 30)
+    );
+    const columnNames = this.unique(
+      candidates.flatMap((candidate) => candidate.chunk.metadata.columnNames).slice(0, 30)
+    );
+
+    try {
+      return await this.skillRegistry.resolveSkills({
+        domain,
+        term: query,
+        context: {
+          query,
+          tableNames,
+          columnNames,
+          candidateCount: candidates.length
+        }
+      });
+    } catch {
+      return {
+        skills: [],
+        context: [],
+        degrade_reason: SKILL_REGISTRY_UNAVAILABLE_REASON
+      };
+    }
   }
 }
