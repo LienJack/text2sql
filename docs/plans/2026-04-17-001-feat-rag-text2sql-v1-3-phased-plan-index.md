@@ -24,6 +24,13 @@ deepened: 2026-04-17
 - 阶段 Gate 口径不一致（同名证据字段在不同阶段语义漂移）。
 - 风险与回滚策略碎片化（出现问题时无法按阶段快速止损）。
 
+## Requirements Trace
+
+- R1-R5: 由索引计划直接承载（阶段治理、依赖链、证据合同与路径规范）。
+- R6-R24: 通过 Phase A/B 子计划落地，并在本索引中统一 Gate 与证据字段。
+- R25-R32: 通过 Phase C/D 子计划落地，并在本索引中约束交接产物与门禁延续。
+- R33-R36: 通过 Phase E 子计划落地，并在本索引中约束“不降级安全与可观测”红线。
+
 ## Scope Boundaries
 
 - 本索引文件不承载实现代码与实现细节，具体改造由 002-006 子计划执行。
@@ -108,14 +115,14 @@ flowchart LR
 | R7 | `RagDocument` + 版本与 checksum | Phase A | `GATE-R2A` | `docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md` | T,X |
 | R8 | profile 化 chunking | Phase A | `GATE-R2A` | `docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md` | T |
 | R9 | chunk 可检索元数据 | Phase A | `GATE-R2A` | `docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md` | T,M |
-| R10 | lexical+dense+graph 召回进入融合 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,M,DG |
+| R10 | lexical+dense+graph 召回进入融合 | Phase A 构建 + Phase B 融合 | `GATE-R2A`(构建), `GATE-R2B`(融合) | 002(索引构建) + 003(检索融合) | T,M,DG |
 | R11 | dense 无 pgvector 可运行 | Phase A | `GATE-R2A` | `docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md` | T,M |
 | R12 | 索引版本化快照与原子激活 | Phase A | `GATE-R2A` | `docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md` | T,RB,AU |
 | R13 | 结构化 `retrieval_bundle` | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,X |
 | R14 | 确定性融合 + 入选理由 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,X |
 | R15 | 双级重排 + 可超时降级 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,DG,M |
 | R16 | 主链新增三节点序列 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,X |
-| R17 | 检索/重排失败可降级不中断 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,DG |
+| R17 | 检索/重排失败可降级不中断 | Phase A 基础 + Phase B 完整 | `GATE-R2A`(索引隔离), `GATE-R2B`(检索降级) | 002(构建隔离) + 003(链路降级) | T,DG |
 | R18 | `selected_context` 必须被 SQL 消费 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | T,X |
 | R19 | RAG 指标体系 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | M,T |
 | R20 | R2 默认阈值门禁 | Phase B | `GATE-R2B` | `docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-plan.md` | M,T |
@@ -161,9 +168,9 @@ flowchart LR
 
 | Gate | 决策规则 | 强制证据 |
 |---|---|---|
-| `GATE-R2A` | R6-R12 全通过，且 `active` 索引可回滚到上一版本 | `T + RB + AU`（可选 `M`） |
+| `GATE-R2A` | R6-R12 全通过，且 `active` 索引可回滚到上一版本 | `M + T + RB + AU` |
 | `GATE-R2B` | R13-R24 通过；且满足 R20：Recall@20 >= 0.80、MRR@10 >= 0.65、检索+重排 P95 <= 800ms、降级率 <= 5% | `M + T + X + DG + RB` |
-| `GATE-R3` | R25-R27 通过；语义版本锁与回退演练通过 | `T + X + RB + AU` |
+| `GATE-R3` | R25-R27 通过；语义版本锁与回退演练通过 | `T + X + RB + AU + DG` |
 | `GATE-R4R5` | R28-R32 通过；沙箱 fail-closed 验证通过；记忆晋升可审计 | `T + AU + X + RB` |
 | `GATE-R6` | R33-R36 通过；并证明前序安全/可观测门禁未退化 | `M + T + X + AU + RB` |
 
@@ -211,6 +218,39 @@ flowchart LR
 **Verification:**
 - 任一阶段失败时可在 1 个矩阵内找到最小回滚路径与证据要求。
 
+## System-Wide Boundary Conditions (跨阶段边界约束)
+
+以下边界条件影响多个阶段，各子计划实施时必须遵守：
+
+### B1: 零结果传播链路
+
+任一阶段的"检索/规划/交付"环节产出空结果时，必须产出结构化降级响应（包含 `degrade_reason`），禁止静默传播空值或中断主链。各阶段的具体降级策略：
+- Phase A: 空文档/空 chunk 拒绝入库并记录原因。
+- Phase B: 零召回时产出空 bundle + `degrade_reason=zero_recall`。
+- Phase C: 语义查询无匹配时回退上一稳定版本。
+- Phase D: evidence 为空时 answer 仍可返回、附降级标记。
+- Phase E: 缓存未命中时回退实时检索、不产出过期数据。
+
+### B2: 并发安全边界
+
+各阶段涉及的并发场景必须有显式保护：
+- 并发 ingestion 同一数据源 → 分布式锁或乐观锁 + 幂等。
+- 并发语义版本发布 → 版本号冲突检测 + 拒绝。
+- 并发记忆晋升 → 状态机 + 幂等键。
+- 并发索引构建 → 按 datasource 隔离 + 全局并发上限。
+
+### B3: 资源耗尽与体积上限
+
+各阶段必须对输入/中间产物设置合理上限：
+- 单文档 chunk 数上限（建议 ≤ 5000，超过拒绝并告警）。
+- selected_context 注入 SQL 生成时的 token 上限（必须裁剪到模型窗口安全范围内）。
+- 事件 DLQ 积压阈值告警（建议 ≥ 100 条未消费时告警）。
+- 沙箱执行时间与内存硬限制（超限强制终止、记录审计）。
+
+### B4: 版本一致性传播
+
+跨阶段使用的版本标识（`index_version`、`semantic_version`、`retrieval_bundle` 契约版本）必须在 trace/replay 中完整记录，且版本回退时下游缓存必须同步失效。
+
 ## System-Wide Impact
 
 - **Interaction graph:** 执行入口由单计划改为索引编排，减少跨阶段隐式耦合。
@@ -225,7 +265,7 @@ flowchart LR
 | 风险 | 触发信号 | 最小回滚动作 | 证据留存 |
 |------|------------|--------------|----------|
 | R2 索引激活异常导致线上读取不一致 | `active` 切换后查询错误率突增 | 回滚到上一个 `active` 索引版本并冻结新构建 | `RB + AU + T` |
-| 检索/重排延迟超阈值 | `retrieval+rereank P95 > 800ms` 持续超窗 | 关闭二级重排并降级为一级规则 | `M + DG + X` |
+| 检索/重排延迟超阈值 | `retrieval+rerank P95 > 800ms` 持续超窗 | 关闭二级重排并降级为一级规则 | `M + DG + X` |
 | 主链接入导致 SQL 质量回退 | Gate 样本集通过率下降 | 恢复无 RAG 路径开关并保留 `selected_context` 日志用于复盘 | `M + X + RB` |
 | 语义版本漂移破坏 planner 稳定性 | 同输入不同版本结果分歧异常 | 锁回前一稳定语义版本，暂停新版本发布 | `T + X + RB + AU` |
 | 沙箱策略失效（安全风险） | 出现越权执行或策略绕过样本 | 立即 fail-closed，禁用后处理扩展路径 | `T + AU + RB` |
@@ -241,6 +281,17 @@ flowchart LR
 - 是否继续单文件计划：否，改为多文件阶段计划。
 - 是否把 R3-R6 推迟到未来再规划：否，当前直接规划但按门禁分批执行。
 
+### Cross-Phase Blocking Items (阶段入场阻塞追踪)
+
+以下阻塞项由子计划声明，索引层统一追踪，阶段切换时必须逐条核验：
+
+| 阻塞项 | 声明来源 | 影响 Gate | 消费阶段 | 状态 |
+|---|---|---|---|---|
+| R2 需冻结 `retrieval_bundle` 与 run replay 载荷字段版本 | 004 (R3) | `GATE-R3` 入场 | Phase C | 待 Phase B 退出时固化 |
+| 语义版本号规则（单调递增 + 域内唯一）需确认并写入标准文档 | 004 (R3) | `GATE-R3` 入场 | Phase C | 待 Phase B 退出前确认 |
+| R3 退出产物中 `semantic_version` 与技能证据字段需在 sync/stream 合同中冻结 | 005 (R4/R5) | `GATE-R4R5` 入场 | Phase D | 待 Phase C 退出时固化 |
+| 安全团队确认沙箱策略白名单最小集合 | 005 (R4/R5) | `GATE-R4R5` 入场 | Phase D | 待 Phase C 退出前确认 |
+
 ### Deferred to Implementation
 
 - [Affects R11,R34] dense 相似度路径在不同数据规模下的预算切换阈值。
@@ -252,6 +303,7 @@ flowchart LR
 - 旧单文件 R2 计划保留为历史记录，并标记为 superseded。
 - 后续每次阶段完成应先更新对应子计划状态，再更新索引计划摘要。
 - 子计划若新增 Gate 字段，必须先回写本索引的 `Gate & Evidence Field Contract`，再进入实施。
+- 执行过程统一记录在 `docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`，作为跨阶段进度与证据唯一入口。
 
 ## Sources & References
 

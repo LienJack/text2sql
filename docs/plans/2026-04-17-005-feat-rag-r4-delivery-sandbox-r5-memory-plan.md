@@ -13,6 +13,12 @@ deepened: 2026-04-17
 
 本阶段合并推进 R4 与 R5：先把回答协议升级为 Answer/Evidence/Artifact 三层，再接通记忆晋升与增量刷新闭环，确保“可解释输出”和“可持续学习”同时成立。该阶段承接 R3 语义稳定产物，并为 R6 的规模化优化提供可审计、可回放的数据基础。
 
+## Execution Tracking
+
+- 专用执行日志：[`docs/plans/2026-04-17-005-feat-rag-r4-delivery-sandbox-r5-memory-execution-log.md`](docs/plans/2026-04-17-005-feat-rag-r4-delivery-sandbox-r5-memory-execution-log.md)
+- 主执行日志（跨阶段）：[`docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`](docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md)
+- 当前状态：`GATE-R4R5=ready_for_decision`，`Unit 1-4=complete`，`证据包=ready`
+
 ## Problem Frame
 
 R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调用方，并把有效反馈沉淀为长期记忆。没有这一步，RAG 的价值无法持续复利，且 R6 的优化将缺乏可信数据闭环。
@@ -38,7 +44,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 
 - 会话与响应合同基线：`apps/backend/src/modules/chat/chat.service.ts`、`packages/shared-types/src/api.ts`
 - 安全守卫与 fail-closed 参考：`apps/backend/src/modules/agent/sql/tools/sql-safety.guard.ts`
-- 事件与反馈模式参考：`apps/backend/src/modules/graph/events/*`、`apps/backend/src/modules/graph/feedback/*`
+- 事件与反馈模式参考：`apps/backend/src/modules/observability/*`、`apps/backend/src/modules/data/persistence/audit-log.repository.ts`（注：`graph/events` 和 `graph/feedback` 目录需在本阶段新建）
 - 健康检查与门禁摘要：`apps/backend/src/modules/system/health.controller.ts`
 
 ### Institutional Learnings
@@ -79,9 +85,22 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 - [Affects R30][Technical] Candidate->Verified 的门槛参数（样本数、成功率、风险分）在灰度数据到齐后微调。
 - [Affects R31][Technical] 事件重试窗口与 DLQ 保留时长按真实吞吐与运维成本联合优化。
 
+## Boundary & Edge Case Catalog
+
+| ID | 场景 | 归属 Unit | 处理策略 |
+|---|---|---|---|
+| B-005-1 | Evidence 引用的 selected_context 对应索引版本已 deprecated/清理 | Unit 1 | evidence 中保留索引版本快照摘要（非引用），回放时若原始数据不可用则标记 `evidence_stale=true` |
+| B-005-2 | 同一 candidate 被多个事件同时触发晋升 | Unit 3 | 状态机 + 幂等键保证仅一次状态迁移，重复触发返回当前状态而非重复执行 |
+| B-005-3 | 沙箱任务内存/CPU 耗尽但未超时（僵死状态） | Unit 2 | 除时间超时外增加资源水位监控，达到硬限制时强制 kill 并记录 `sandbox_oom_killed` 审计事件 |
+| B-005-4 | 增量刷新与全量构建同时运行（索引版本冲突） | Unit 4 | 增量刷新检测到正在进行全量构建时主动让步（skip + 记录），全量构建完成后增量自动重试 |
+| B-005-5 | DLQ 积压超过阈值 | Unit 4 | 设置 DLQ 深度告警阈值（建议 ≥ 100 条），超阈值触发运维告警并暂停非关键事件消费 |
+| B-005-6 | 记忆晋升写入失败后的补偿 | Unit 3 | 写入失败时状态回滚到迁移前，生成补偿事件进入重试队列，连续失败 N 次后进入人工审核 |
+| B-005-7 | 交付映射层收到格式异常的 retrieval_bundle | Unit 1 | 对输入进行 schema 校验，不合规时走降级路径（仅返回 answer），记录 `delivery_input_invalid` |
+| B-005-8 | 沙箱策略白名单更新后的版本一致性 | Unit 2 | 策略变更需版本化并重启生效，运行中的沙箱实例使用启动时的策略版本，不热加载 |
+
 ## Implementation Units
 
-- [ ] **Unit 1: 落地 Answer/Evidence/Artifact 三层协议**
+- [x] **Unit 1: 落地 Answer/Evidence/Artifact 三层协议**
 
 **Goal:** 统一响应协议，支持可解释结果与后续扩展。
 
@@ -113,7 +132,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 **Verification:**
 - 同步与流式响应均可提供可解释证据结构。
 
-- [ ] **Unit 2: 上线受限后处理沙箱**
+- [x] **Unit 2: 上线受限后处理沙箱**
 
 **Goal:** 在可控安全边界内支持后处理能力。
 
@@ -144,7 +163,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 **Verification:**
 - 攻击样例集阻断率达到 100%。
 
-- [ ] **Unit 3: 建立 Candidate->Verified->Production 晋升流**
+- [x] **Unit 3: 建立 Candidate->Verified->Production 晋升流**
 
 **Goal:** 让成功经验形成可治理的长期记忆。
 
@@ -164,7 +183,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 - 每次晋升产生日志与可追溯变更记录。
 
 **Patterns to follow:**
-- `apps/backend/src/modules/graph/feedback/*`
+- `apps/backend/src/modules/data/persistence/audit-log.repository.ts`（事件/反馈模式参考）
 
 **Test scenarios:**
 - Happy path: 满足门槛的候选可自动晋升，状态迁移与审计记录一致。
@@ -175,7 +194,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 **Verification:**
 - 记忆状态迁移可观测且可回放。
 
-- [ ] **Unit 4: 事件驱动增量刷新与审计回放链路**
+- [x] **Unit 4: 事件驱动增量刷新与审计回放链路**
 
 **Goal:** 打通 DDL/术语/成功 SQL 事件到索引更新与审计回放。
 
@@ -196,7 +215,7 @@ R3 解决语义稳定后，系统仍需要把可解释证据稳定交付给调�
 - 阶段退出前完成一次 rollback rehearsal 并归档证据。
 
 **Patterns to follow:**
-- `apps/backend/src/modules/graph/events/*`
+- `apps/backend/src/modules/observability/*`（事件消费/审计模式参考）
 
 **Test scenarios:**
 - Happy path: 事件触发索引增量刷新并可查询结果变化，链路延迟在门禁阈值内。

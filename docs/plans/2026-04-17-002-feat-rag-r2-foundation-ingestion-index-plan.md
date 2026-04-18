@@ -13,6 +13,11 @@ deepened: 2026-04-17
 
 本阶段聚焦 R2 数据底座建设：统一文档接入、profile 切块、双路索引构建与版本化激活，为后续检索/重排/主链接入提供稳定输入与可回放证据。
 
+## Execution Tracking
+
+- 专用执行日志：`docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-execution-log.md`
+- 主执行日志（跨阶段）：`docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`
+
 ## Problem Frame
 
 当前系统缺乏可持续 ingestion 与索引生命周期能力，RAG 相关数据无法标准化沉淀，也无法保证“构建中”与“在线可读”隔离。若不先完成底座，后续检索和主链接入将缺少稳定前提。
@@ -86,13 +91,33 @@ deepened: 2026-04-17
 - 是否在本阶段引入外部向量库：否。
 - 是否在本阶段完成增量刷新：仅保留接口，完整事件化在 R5 落地。
 
+### Resolve Before Phase Entry
+
+- [Affects Unit 1][Blocking] 确认现有 Prisma 基线迁移链路通过（`prisma:verify-empty-db` 无漂移）。
+- [Affects Unit 1][Blocking] 确认既有测试套件全绿（`pnpm --filter @text2sql/backend run test`）。
+- [Affects Unit 2][Non-blocking] 确认三类 ingestion 来源的样本数据可获取（schema/sql_example/semantic_term）。
+
 ### Deferred to Implementation
 
 - dense 字段最终采用 `float4[]` 或 `jsonb` 的实现细节，需结合查询性能验证。
 
+## Boundary & Edge Case Catalog
+
+以下边界场景必须在对应 Unit 中覆盖：
+
+| ID | 场景 | 归属 Unit | 处理策略 |
+|---|---|---|---|
+| B-002-1 | 空文档/空 DDL 解析后无有效 chunk 产出 | Unit 2 | 拒绝入库，记录 `reject_reason=empty_content`，不产出空 chunk 集合 |
+| B-002-2 | 超大单文档产出 chunk 数 > 5000 | Unit 2 | 触发保护熔断，拒绝入库并告警，记录文档 ID 与实际 chunk 数 |
+| B-002-3 | 并发 ingestion 同一 datasource | Unit 2 | 通过 datasource 级锁或乐观并发控制保证幂等，后到任务等待或快速失败 |
+| B-002-4 | dense 向量维度不一致（模型切换/配置错误） | Unit 3 | 构建时校验维度一致性，不一致时拒绝构建并记录错误，不混入已有索引 |
+| B-002-5 | active 切换事务超时（大数据量下） | Unit 3 | 设置事务超时上限，超时后事务回滚、保留旧 active 不变，记录失败原因 |
+| B-002-6 | 构建过程中旧 active 版本被意外删除 | Unit 3 | 激活前校验旧版本存在性，若缺失则保持 degraded 状态并告警 |
+| B-002-7 | content_checksum 碰撞（不同内容同 hash） | Unit 1 | 采用强 hash 算法（SHA-256+），碰撞概率可忽略但约束层面仍保留 content 级去重断言 |
+
 ## Implementation Units
 
-- [ ] **Unit 1: 扩展 Prisma RAG 基础模型**
+- [x] **Unit 1: 扩展 Prisma RAG 基础模型**
 
 **Goal:** 落地 RAG 文档、切块、索引版本与 replay 主键基础模型/约束。
 
@@ -124,7 +149,11 @@ deepened: 2026-04-17
 **Verification:**
 - Prisma migrate/generate/verify-empty-db 链路稳定通过；关键约束均有断言。
 
-- [ ] **Unit 2: 实现 RagDocument 标准化与 profile 切块**
+**Execution status (2026-04-17):**
+- 代码与定向测试已完成（schema/migration + 2 个 integration spec + prisma:generate）。
+- 已完成 `prisma:verify-empty-db`（空库回放 + migrate deploy/status 通过），Unit 1 验证闭环完成。
+
+- [x] **Unit 2: 实现 RagDocument 标准化与 profile 切块**
 
 **Goal:** 建立统一 ingestion 契约与可重算 chunk 生成过程。
 
@@ -157,7 +186,11 @@ deepened: 2026-04-17
 **Verification:**
 - 同输入重复执行可得到可复现 chunk 结果，并可被 Unit 3 索引器消费。
 
-- [ ] **Unit 3: 实现全量构建任务与版本化激活**
+**Execution status (2026-04-17):**
+- Unit 2 已完成：新增 source adapter、document factory、chunking service、chunk profiles 及对应 unit/integration 测试。
+- 已通过定向测试与 backend lint，详见执行日志 `docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`。
+
+- [x] **Unit 3: 实现全量构建任务与版本化激活**
 
 **Goal:** 建立索引构建、状态管理与 active 原子切换能力。
 
@@ -191,7 +224,11 @@ deepened: 2026-04-17
 **Verification:**
 - 任意失败场景下线上读取仍指向旧 active 版本，不出现空读窗口。
 
-- [ ] **Unit 4: 建立底座可观测与基础回放记录**
+**Execution status (2026-04-17):**
+- Unit 3 已完成：新增 index repository / builder / job，并在 `app.module.ts` 完成注入。
+- 已通过 `rag-index-builder.spec.ts`、`rag-index-activation.spec.ts`、backend lint 与 backend 全量测试复验。
+
+- [x] **Unit 4: 建立底座可观测与基础回放记录**
 
 **Goal:** 为 003 阶段 R2 Gate 提供指标底稿、回放键与回滚演练证据。
 
@@ -224,6 +261,12 @@ deepened: 2026-04-17
 
 **Verification:**
 - 运维可从 health + rehearsal 文档判断索引可用性与可回滚性。
+
+**Execution status (2026-04-17):**
+- Unit 4 已完成：新增 `rag-ingestion-metrics.service` 与 `rag-replay.repository`，并将 foundation 摘要接入 `/health`。
+- 已补齐 build job 与 observability/replay 链路的集成写入，确保非测试路径可观测与可回放。
+- 已新增并通过 `rag-foundation-observability.spec.ts`、`rag-foundation-replay.spec.ts`。
+- 已补充 `docs/ops/r2-foundation-rollback-rehearsal.md` 并完成 backend lint/test/build + prisma 空库回放验证。
 
 ## System-Wide Impact
 

@@ -1,7 +1,7 @@
 ---
 title: feat: R3 语义稳定化与注册中心计划
 type: feat
-status: active
+status: ready_for_decision
 date: 2026-04-17
 origin: docs/brainstorms/2026-04-14-text2sql-r2-rag-implementation-detail-requirements.md
 deepened: 2026-04-17
@@ -12,6 +12,12 @@ deepened: 2026-04-17
 ## Overview
 
 本阶段聚焦 R3：稳定三段式规划链路、建设语义层注册中心与技能注册中心，并将 semantic version 锁与 planner cache 纳入统一治理。该阶段是 R2 检索闭环与 R4/R5 交付-记忆闭环之间的唯一稳定性桥梁。
+
+## Execution Tracking
+
+- 专用执行日志：[`docs/plans/2026-04-17-004-feat-rag-r3-semantic-registry-execution-log.md`](docs/plans/2026-04-17-004-feat-rag-r3-semantic-registry-execution-log.md)
+- 主执行日志（跨阶段）：[`docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`](docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md)
+- 当前状态：`GATE-R3=ready_for_decision`，`Unit 1-4=complete`
 
 ## Problem Frame
 
@@ -76,9 +82,21 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 - [Affects R27][Technical] planner cache TTL 与淘汰策略按真实流量压测结果微调。
 - [Affects R26][Technical] Skill Registry 候选解释字段的压缩策略（日志体积与可读性的平衡）。
 
+## Boundary & Edge Case Catalog
+
+| ID | 场景 | 归属 Unit | 处理策略 |
+|---|---|---|---|
+| B-004-1 | 语义版本回退后 planner cache 中残留新版本缓存 | Unit 4 | 回退语义版本时触发 cache 全量失效（key 含 semantic_version 保证不命中），并记录失效事件 |
+| B-004-2 | 语义实体间存在循环绑定关系 | Unit 1 | registry 写入时执行有向图环检测，发现环时拒绝写入并返回循环路径详情 |
+| B-004-3 | Skill Registry 与 Semantic Registry 版本不同步 | Unit 2 | planner 执行时原子读取两个 registry 的版本快照，不允许跨快照混合使用，不一致时降级并记录 |
+| B-004-4 | 并发语义版本发布（多管理员同时操作） | Unit 1 | 版本号生成采用数据库序列或乐观锁，冲突时拒绝后提交并返回冲突版本详情 |
+| B-004-5 | 语义版本数爆炸（历史版本堆积） | Unit 1 | 引入版本生命周期策略：deprecated 版本保留窗口（如 30 天），过期后归档或清理 |
+| B-004-6 | planner cache 命中但底层语义实体已被删除 | Unit 4 | 缓存命中后二次校验语义版本有效性，失效时清除缓存条目并重新规划 |
+| B-004-7 | registry 服务不可用时的规划链路 | Unit 3 | fail-open 到最近一次本地缓存的稳定版本，附 `degrade_reason=registry_unavailable`，禁止 fail-closed 中断用户请求 |
+
 ## Implementation Units
 
-- [ ] **Unit 1: 建立 Semantic Layer Registry 数据模型与服务**
+- [x] **Unit 1: 建立 Semantic Layer Registry 数据模型与服务**
 
 **Goal:** 提供统一语义实体、定义、绑定查询入口。
 
@@ -88,28 +106,33 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 
 **Files:**
 - Modify: `apps/backend/prisma/schema.prisma`
+- Create: `apps/backend/prisma/migrations/<timestamp>_r3_semantic_registry/migration.sql`
 - Create: `apps/backend/src/modules/semantic-registry/semantic-registry.module.ts`
 - Create: `apps/backend/src/modules/semantic-registry/semantic-registry.service.ts`
 - Test: `apps/backend/test/unit/semantic-registry.service.spec.ts`
 - Test: `apps/backend/test/integration/semantic-registry.spec.ts`
+- Test: `apps/backend/test/integration/r3-semantic-registry-migration.spec.ts`
 
 **Approach:**
 - 语义实体与绑定关系进入专门 registry 模块。
 - 每次发布生成语义版本号并记录变更摘要。
+- Schema 变更通过 Prisma 迁移链路落地，并同步保留 client 生成与空库回放校验证据。
 
 **Patterns to follow:**
-- `apps/backend/src/modules/graph/*`
+- `apps/backend/src/modules/agent/graph/*`（注：planner 子目录需在本阶段新建，参考 agent/graph 模式）
 
 **Test scenarios:**
 - Happy path: 按 `domain + term + semantic_version` 查询返回唯一绑定，且包含可审计摘要字段。
 - Edge case: 同一术语多版本并存时，默认返回 active 版本；指定旧版本可稳定回读。
 - Error path: 请求不存在版本时返回受控降级结果，并打出结构化错误码与 `risk_tags`。
 - Integration: registry 发布后可被 planner 在同一 run 内读取，trace 中记录 `semantic_version`。
+- Integration: 从空库回放 R2->R3 迁移链路后，registry 表结构、唯一约束和关联关系保持一致。
 
 **Verification:**
 - registry 数据可稳定支撑 planner 语义查询，且具备可回放版本证据。
+- R3 数据层改动具备完整门禁证据：迁移产物、client 生成记录、空库回放报告。
 
-- [ ] **Unit 2: 落地 Skill Registry 与语义检索协同**
+- [x] **Unit 2: 落地 Skill Registry 与语义检索协同**
 
 **Goal:** 将技能依赖纳入检索与规划上下文。
 
@@ -140,7 +163,7 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 **Verification:**
 - 技能上下文可在不破坏 R2 兼容性的前提下注入主链，并保持跨接口字段一致。
 
-- [ ] **Unit 3: 实现 planner 版本锁与语义回退链路**
+- [x] **Unit 3: 实现 planner 版本锁与语义回退链路**
 
 **Goal:** 保证语义变更不会破坏在线稳定性。
 
@@ -160,7 +183,7 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 - 对关键语义字段建立兼容性检查器。
 
 **Patterns to follow:**
-- `apps/backend/src/modules/agent/planner/*`
+- `apps/backend/src/modules/agent/nodes/*`（注：planner 子目录需在本阶段新建于 `agent/` 下）
 
 **Test scenarios:**
 - Happy path: 新版本语义可正常驱动 physical plan，输出包含版本锁信息。
@@ -171,7 +194,7 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 **Verification:**
 - planner 在语义变更期间仍可稳定运行，并可提供回退演练证据。
 
-- [ ] **Unit 4: 引入 planner cache 与一致性回放测试**
+- [x] **Unit 4: 引入 planner cache 与一致性回放测试**
 
 **Goal:** 降低规划开销并验证语义一致性门禁。
 
@@ -226,6 +249,7 @@ R2 解决了“检索得到上下文”，但尚未完全解决“语义定义�
 - 更新 `docs/standards/llm-stream-tool-migration-spec.md` 中 R3 新增字段口径（语义版本、技能证据、降级原因）并保持 sync/stream 对齐。
 - 产出 R3 gate 证据包（建议目录：`docs/reports/rag/r3/`），最少包含：指标快照、关键测试结果、回滚演练记录、回放样本。
 - 将 R3 阶段退出判定写入 R4/R5 计划的入场检查清单，防止跨阶段隐式假设。
+- 同步维护 `docs/standards/backend-prisma-migration-spec.md` 一致性，避免 R3 与 R2 的 Prisma 门禁口径漂移。
 
 ## Sources & References
 

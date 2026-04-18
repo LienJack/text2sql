@@ -13,6 +13,15 @@ deepened: 2026-04-17
 
 R6 阶段目标是让 R2-R5 能力在多数据源和高并发环境下可持续运行：在不破坏前序合同的前提下，建立规模化门禁、缓存与预算策略、可选图加速回退机制，以及可发布/可回滚的运维证据链。
 
+## Execution Tracking
+
+- 专用执行日志：[`docs/plans/2026-04-17-006-feat-rag-r6-scale-optimization-execution-log.md`](docs/plans/2026-04-17-006-feat-rag-r6-scale-optimization-execution-log.md)
+- Ralph-Team 看板：[`docs/plans/2026-04-18-r6-ralph-team-progress.md`](docs/plans/2026-04-18-r6-ralph-team-progress.md)
+- 主执行日志（跨阶段）：[`docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`](docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md)
+- R6 门禁规范：[`docs/standards/r6-scale-gate-spec.md`](docs/standards/r6-scale-gate-spec.md)
+- R6 运行手册：[`docs/operations/r6-scale-runbook.md`](docs/operations/r6-scale-runbook.md)
+- 当前状态：`GATE-R6=ready_for_decision`，`Unit 1-5=complete`
+
 ## Problem Frame
 
 R2-R5 已具备可运行主链，但在多数据源扩张后会放大三个风险：
@@ -74,7 +83,7 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 
 ## Implementation Units
 
-- [ ] **Unit 1: 多数据源索引编排与隔离治理**
+- [x] **Unit 1: 多数据源索引编排与隔离治理**
 
 **Goal:** 支持多数据源并发构建、按源隔离与规模化门禁采集。
 
@@ -109,7 +118,7 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 **Verification:**
 - 多数据源场景下索引生命周期可预测、可恢复、可量化判定。
 
-- [ ] **Unit 2: 检索性能与缓存分层优化**
+- [x] **Unit 2: 检索性能与缓存分层优化**
 
 **Goal:** 在不破坏正确性的前提下稳定降低延迟并控制查询预算。
 
@@ -146,7 +155,7 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 **Verification:**
 - 延迟、预算与正确性三项指标均满足 R6 默认门禁阈值。
 
-- [ ] **Unit 3: 可选图加速适配层（保留回退）**
+- [x] **Unit 3: 可选图加速适配层（保留回退）**
 
 **Goal:** 在必要时支持图加速扩展，同时确保任何异常都可自动回退到 Postgres 主线。
 
@@ -181,7 +190,7 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 **Verification:**
 - 图加速保持“可选、可退、可审计”，不破坏回放与主线稳定性。
 
-- [ ] **Unit 4: R6 门禁规范与运行手册固化**
+- [x] **Unit 4: R6 门禁规范与运行手册固化**
 
 **Goal:** 确保规模化优化后仍满足安全与可观测要求。
 
@@ -195,6 +204,10 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 - Modify: `apps/backend/src/modules/system/health.controller.ts`
 - Modify: `apps/backend/src/modules/rag/quality/rag-quality.controller.ts`
 - Test: `apps/backend/test/integration/r6-gate-readiness.spec.ts`
+
+**Execution status note (2026-04-18):**
+- doc-track complete: `docs/standards/r6-scale-gate-spec.md`、`docs/operations/r6-scale-runbook.md` 已创建并与 R6 Gate Contract 对齐。
+- code/test track complete: `health.controller` 已接入 R6 gate 摘要，`rag-quality.service` 已产出 R6 门禁字段，`r6-gate-readiness.spec.ts` 已覆盖 sample_not_ready 与 freeze 判定。
 
 **Approach:**
 - 规范化 R6 gate 报告结构：指标值、阈值、窗口、样本量、发布结论、阻断原因。
@@ -214,7 +227,7 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 **Verification:**
 - R6 发布/冻结/回滚决策可依据统一证据链自动化判定。
 
-- [ ] **Unit 5: R6 测试场景打包与发布证据自动归档**
+- [x] **Unit 5: R6 测试场景打包与发布证据自动归档**
 
 **Goal:** 补齐测试场景完整性并让发布/回滚证据可重复产出。
 
@@ -281,6 +294,15 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 | 门禁摘要与运行手册一致性 | ✅ | ✅ | ✅ | - |
 | 发布证据归档与回滚流程 | ✅ | ✅ | ✅ | ✅ |
 
+## System-Wide Impact
+
+- **Interaction graph:** R6 同时影响编排器、检索链路、图查询适配层与 health/gate 汇总面，需确保跨模块变更按阶段发布。
+- **Error propagation:** 调度异常、缓存异常、图加速异常必须在各自边界降级吸收，避免扩散到 SQL 主链不可用。
+- **State lifecycle risks:** 多数据源并发下需防止索引版本错切、缓存跨版本脏读、回滚状态不一致。
+- **API surface parity:** `health`、gate 报告与 runbook 检查项字段必须保持一致，避免发布判定口径漂移。
+- **Integration coverage:** 仅单元测试不足以证明 R6 可发布，必须覆盖多源压测、故障注入、回滚演练和证据归档流水线。
+- **Unchanged invariants:** R2-R5 的安全红线、审计追踪与 fail-closed 行为在 R6 优化后必须保持不变。
+
 ## Risks & Dependencies
 
 | Risk | Mitigation |
@@ -290,6 +312,25 @@ R6 需要把这些风险转化为量化门禁和标准化运行手册，确保�
 | 图加速引入运维复杂度 | 默认关闭 + 适配层回退 |
 | 门禁阈值不适配真实业务分布 | 首轮灰度按域分桶观测并版本化调参 |
 | 发布证据链不完整导致误发布 | 证据缺失即阻断，CI 强制归档 |
+
+## Documentation / Operational Notes
+
+- 将 R6 默认阈值与调参流程写入 `docs/standards/r6-scale-gate-spec.md`，后续阈值变更需保留依据与生效日期。
+- 运行手册 `docs/operations/r6-scale-runbook.md` 需包含灰度策略、告警路由、回滚剧本和复盘模板。
+- 发布评审时必须附 `data/reports/r6/` 证据包；证据不完整时禁止放行。
+
+## Boundary & Edge Case Catalog
+
+| ID | 场景 | 归属 Unit | 处理策略 |
+|---|---|---|---|
+| B-006-1 | 用户查询涉及多个数据源（跨源检索） | Unit 1 | 首版仅支持单源检索路由（按会话绑定的 datasource），跨源查询返回不支持提示并记录需求信号 |
+| B-006-2 | 大量缓存同时过期（缓存雪崩） | Unit 2 | TTL 增加随机 jitter（±10%），热点 key 预热策略，缓存层不可用时回退实时检索并限流 |
+| B-006-3 | 图查询返回部分结果（部分算子成功、部分失败） | Unit 3 | 整体回退到 Postgres 主线（不接受部分图结果），记录失败算子详情供后续优化 |
+| B-006-4 | workspace 配额已满时新增数据源 | Unit 1 | 新增数据源进入 pending 队列并通知管理员，不静默丢弃，待配额释放后自动恢复 |
+| B-006-5 | 门禁阈值灰度调参后发现误放行 | Unit 4 | 阈值变更需版本化并记录变更依据，误放行后可回退到旧阈值版本，并追溯受影响的发布记录 |
+| B-006-6 | 编排器节点重启导致任务状态不一致 | Unit 1 | 任务状态持久化到数据库，重启后从持久化状态恢复，设置最大重试次数防止无限重试 |
+| B-006-7 | 多数据源并发构建导致数据库连接池耗尽 | Unit 1 | 全局构建并发上限 + 每源连接预算，连接不足时排队等待而非失败 |
+| B-006-8 | 预算策略降级阶梯全部触发（极端负载） | Unit 2 | 最终降级到仅 lexical 单路 + 无重排，保证有结果返回，附 `degrade_level=maximum` 标记 |
 
 ## Open Questions
 

@@ -13,6 +13,12 @@ deepened: 2026-04-17
 
 本阶段在 R2 底座之上完成多路召回、融合重排、LangGraph 主链接入和 R2 Gate 指标闭环，是 R2 的最终放行阶段。
 
+## Execution Tracking
+
+- 专用执行日志：[`docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-execution-log.md`](docs/plans/2026-04-17-003-feat-rag-r2-retrieval-agent-gate-execution-log.md)
+- 主执行日志（跨阶段）：[`docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md`](docs/plans/2026-04-17-001-feat-rag-text2sql-v1-3-phased-execution-log.md)
+- 当前状态：`GATE-R2B=active`，`Unit 1=in_progress`，`Unit 2-4=pending`
+
 ## Problem Frame
 
 即使底座完成，如果没有把检索结果稳定注入主链，SQL 生成仍会退回纯模型猜测。此阶段必须打通“召回 -> 重排 -> selected_context -> SQL 生成 -> 质量门禁”的端到端闭环。
@@ -86,9 +92,22 @@ deepened: 2026-04-17
 - graph lane 的候选上限参数需结合压测调优。
 - R20 指标在首轮灰度是否按业务域分桶评估（see origin 的 deferred question）。
 
+## Boundary & Edge Case Catalog
+
+| ID | 场景 | 归属 Unit | 处理策略 |
+|---|---|---|---|
+| B-003-1 | 三路 lane 全部返回空结果（零召回） | Unit 1 | 产出带 `degrade_reason=zero_recall` 的空 bundle，不中断主链，SQL 生成走无 RAG 降级路径 |
+| B-003-2 | RRF 融合分数全部相同（排序不确定性） | Unit 1 | 引入确定性 tie-breaker（如 chunk_id 字典序），保证同输入同版本排序可复现 |
+| B-003-3 | 二级重排模型返回 NaN/负数/超范围分数 | Unit 2 | 丢弃异常评分候选，记录 `rerank_anomaly` 事件，回退一级排序结果 |
+| B-003-4 | selected_context token 数超过模型上下文窗口 | Unit 3 | 按重排优先级截断到安全 token 上限（预留 prompt 开销），记录 `context_truncated=true` |
+| B-003-5 | Gate 评估时样本量不满足最小要求 | Unit 4 | 返回 `sampleReady=false`，禁止发布，不以不足样本计算阈值判定 |
+| B-003-6 | risk_tags 与 SQL safety guard 策略字段不匹配 | Unit 3 | 增加契约测试断言 risk_tags 枚举值与 safety guard 的 allowlist 一致，不一致时构建失败 |
+| B-003-7 | 单 lane 延迟远超其他 lane（拖慢整体 P95） | Unit 1 | 每 lane 独立超时（建议 ≤ 300ms），超时 lane 视为降级、不等待其结果 |
+| B-003-8 | query rewrite 产出的改写查询与原始查询语义严重偏离 | Unit 3 | 保留原始查询作为兜底检索输入，改写查询仅作为额外 lane 输入 |
+
 ## Implementation Units
 
-- [ ] **Unit 1: 落地多路召回与确定性融合**
+- [x] **Unit 1: 落地多路召回与确定性融合**
 
 **Goal:** 输出结构化候选并完成融合、去重、多样性裁剪。
 
@@ -122,7 +141,7 @@ deepened: 2026-04-17
 **Verification:**
 - 同输入同索引版本下融合顺序可复现，且 replay 可还原 lane 原始得分。
 
-- [ ] **Unit 2: 实现双级重排与预算降级**
+- [x] **Unit 2: 实现双级重排与预算降级**
 
 **Goal:** 一级规则保障稳定性，二级模型在预算内提升精度。
 
@@ -154,7 +173,7 @@ deepened: 2026-04-17
 **Verification:**
 - 所有重排失败场景都有可消费输出、降级证据与 trace/span 事件。
 
-- [ ] **Unit 3: 新增主链节点并接入 selected_context**
+- [x] **Unit 3: 新增主链节点并接入 selected_context**
 
 **Goal:** 将检索结果真正注入 SQL 生成链路。
 
@@ -191,7 +210,7 @@ deepened: 2026-04-17
 **Verification:**
 - 命中与降级两路径均可用、可追溯，并可触发安全护栏额外校验。
 
-- [ ] **Unit 4: 建立 R2 Gate 报告与回放能力**
+- [x] **Unit 4: 建立 R2 Gate 报告与回放能力**
 
 **Goal:** 用量化指标作为阶段发布门槛。
 
