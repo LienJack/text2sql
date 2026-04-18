@@ -16,6 +16,12 @@ export class RagQualityController {
     return ok(req.requestId, this.ragQualityService.snapshot());
   }
 
+  @Get("/report/glossary-selected-context")
+  reportGlossarySelectedContext(@Req() req: Request): ApiResponse<unknown> {
+    const report = this.ragQualityService.snapshot();
+    return ok(req.requestId, report.glossarySelectedContext);
+  }
+
   @Post("/report")
   record(
     @Body() body: RagQualityEvaluationInput,

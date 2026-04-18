@@ -60,6 +60,8 @@ model Datasource {
   ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
   ragChunkIndexes    RagChunkIndexEntry[] @relation("datasource_rag_chunk_index_entries")
   ragRunReplays      RagRunReplay[]       @relation("datasource_rag_run_replays")
+  glossaryTerms      GlossaryTerm[]       @relation("datasource_glossary_terms")
+  glossaryAnchors    GlossaryAnchor[]     @relation("datasource_glossary_anchors")
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -106,6 +108,7 @@ model SqlRun {
   ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
   ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
   ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
+  glossaryAnchorsCreated    GlossaryAnchor[]  @relation("glossary_anchor_created_by_run")
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
@@ -208,6 +211,108 @@ model SemanticRegistryTerm {
   @@index([domain, term, versionId])
   @@index([canonicalKey])
   @@map("semantic_registry_terms")
+}
+
+enum PromptTemplateScene {
+  sql
+  analysis
+}
+
+enum PromptTemplateScope {
+  global
+  workspace
+  datasource
+}
+
+enum PromptTemplateStatus {
+  draft
+  active
+  archived
+}
+
+model PromptTemplate {
+  id              String               @id
+  name            String
+  scene           PromptTemplateScene
+  scope           PromptTemplateScope
+  scopeKey        String
+  content         String
+  status          PromptTemplateStatus @default(active)
+  version         Int                  @default(1)
+  createdByUserId String?
+  updatedByUserId String?
+  deletedAt       DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([scene, scope, scopeKey, name])
+  @@index([scene, status, updatedAt])
+  @@index([scope, scopeKey, status, updatedAt])
+  @@index([deletedAt, updatedAt])
+  @@map("prompt_templates")
+}
+
+model GlossaryAnchor {
+  id                   String   @id
+  scope                String   @default("global")
+  scopeKey             String
+  datasourceId         String?
+  version              Int
+  anchorType           String   @default("release")
+  status               String   @default("active")
+  summary              String?
+  rollbackFromAnchorId String?
+  rollbackReason       String?
+  metadata             String?
+  createdByUserId      String?
+  createdByRunId       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  datasource           Datasource?   @relation("datasource_glossary_anchors", fields: [datasourceId], references: [id], onDelete: SetNull)
+  createdByRun         SqlRun?       @relation("glossary_anchor_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  rollbackFromAnchor   GlossaryAnchor? @relation("glossary_anchor_rollbacks", fields: [rollbackFromAnchorId], references: [id], onDelete: SetNull)
+  rollbackTargets      GlossaryAnchor[] @relation("glossary_anchor_rollbacks")
+  versionTerms         GlossaryTerm[]   @relation("glossary_terms_version_anchor")
+  rollbackTerms        GlossaryTerm[]   @relation("glossary_terms_rollback_anchor")
+
+  @@unique([scopeKey, version])
+  @@index([scope, scopeKey, status, createdAt])
+  @@index([datasourceId, createdAt])
+  @@index([createdByRunId])
+  @@index([rollbackFromAnchorId])
+  @@map("glossary_anchors")
+}
+
+model GlossaryTerm {
+  id                 String   @id
+  term               String
+  normalizedTerm     String
+  definition         String
+  synonyms           String[]
+  scope              String   @default("global")
+  scopeKey           String
+  datasourceId       String?
+  priority           Int      @default(50)
+  conflictResolution String   @default("priority_then_updated_at")
+  status             String   @default("active")
+  version            Int      @default(1)
+  versionAnchorId    String?
+  rollbackAnchorId   String?
+  metadata           String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  datasource         Datasource?    @relation("datasource_glossary_terms", fields: [datasourceId], references: [id], onDelete: SetNull)
+  versionAnchor      GlossaryAnchor? @relation("glossary_terms_version_anchor", fields: [versionAnchorId], references: [id], onDelete: SetNull)
+  rollbackAnchor     GlossaryAnchor? @relation("glossary_terms_rollback_anchor", fields: [rollbackAnchorId], references: [id], onDelete: SetNull)
+
+  @@unique([version, scopeKey, normalizedTerm])
+  @@index([scope, scopeKey, status, priority])
+  @@index([datasourceId, updatedAt])
+  @@index([versionAnchorId])
+  @@index([rollbackAnchorId])
+  @@map("glossary_terms")
 }
 
 model AgentAuditLog {

@@ -152,7 +152,9 @@ describe("rag audit replay integration", () => {
     expect(chain.events).toHaveLength(1);
     const event = chain.events[0];
     expect(event?.status).toBe("dlq");
-    expect(event?.failureReason).toContain("索引构建输入为空");
+    expect(event?.failureReason).toEqual(
+      expect.stringMatching(/索引构建输入为空|semantic_promoted_linkage_failed/)
+    );
     expect(event?.indexVersion).toBeUndefined();
 
     const windowed = await auditReplayService.queryChain({

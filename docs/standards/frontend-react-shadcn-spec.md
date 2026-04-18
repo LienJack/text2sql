@@ -25,12 +25,16 @@
 - 用户可见交互必须覆盖至少四类状态：`loading`、`empty`、`error`、`success`。
 - 表单与提交动作必须具备禁用态和错误反馈，不允许静默失败。
 - 关键视图必须在移动端宽度（至少 375px）可用，不允许核心操作不可点击或内容溢出不可读。
+- 涉及聊天 RAG 可见化改造时，必须满足以下验收：sync `AgentRunResponse` 与 stream `ChatStreamEvent` 同 `runId` 可追踪；`selected_context` 四态（`happy/nil/empty/error`）可见；duplicate/out-of-order 事件下终态不回退到 loading；折叠区支持 `Enter/Space` 键盘触发并保持 `aria-expanded` 与可视状态一致。
+- 涉及术语治理联动时，`/settings` 必须提供锚点状态可见化（当前锚点/最近回滚）与管理员操作反馈（成功/403/业务错误可读）。
 
 ## 6. 评审清单（PR Checklist）
 - [ ] 本次改动仅使用 React + shadcn-ui 体系，不引入未批准 UI 框架。
 - [ ] 业务组件未使用常规内联样式对象。
 - [ ] 关键状态（loading/empty/error/success）可见且可验证。
 - [ ] 核心链路（会话创建、消息发送、SQL 预览）无回归。
+- [ ] 若涉及 RAG 展示，已覆盖 runId 同步一致性、四态矩阵、终态单调性与 375px/键盘可达性断言。
+- [ ] 若涉及术语治理，已覆盖 `/settings` 锚点状态可见化、创建/回滚交互与 403 错误提示断言。
 - [ ] 已补充或更新必要测试（单测/集成测试）。
 
 ## 7. 质量门禁（CI Gate）

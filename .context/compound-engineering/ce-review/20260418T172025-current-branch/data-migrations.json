@@ -1,0 +1,158 @@
+{
+  "reviewer": "data-migrations",
+  "timestamp": "2026-04-18T08:39:45Z",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "tracked_files_only": true,
+    "focus": [
+      "Prisma schema/migration safety",
+      "data integrity",
+      "rollback compatibility",
+      "migration-vs-schema drift"
+    ]
+  },
+  "files_reviewed": [
+    "apps/backend/prisma/schema.prisma",
+    "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql",
+    "apps/backend/prisma/migrations/20260417154612_r3_semantic_registry/migration.sql",
+    "apps/backend/test/integration/rag-foundation-schema.spec.ts",
+    "apps/backend/test/integration/r3-semantic-registry-migration.spec.ts",
+    ".github/workflows/backend-prisma-quality.yml",
+    "apps/backend/src/modules/rag/index/rag-index.repository.ts",
+    "apps/backend/src/modules/semantic-registry/semantic-registry.service.ts"
+  ],
+  "risk_level": "HIGH",
+  "summary": {
+    "critical": 0,
+    "high": 1,
+    "medium": 1,
+    "low": 0,
+    "total": 2
+  },
+  "stage1_spec_compliance": {
+    "status": "PASS_WITH_GAPS",
+    "checks": [
+      {
+        "item": "Schema-first then migration artifacts present",
+        "result": "PASS",
+        "evidence": [
+          "apps/backend/prisma/schema.prisma",
+          "apps/backend/prisma/migrations/20260417154612_r3_semantic_registry/migration.sql",
+          "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql"
+        ]
+      },
+      {
+        "item": "Empty DB replay + migration status gate",
+        "result": "PASS",
+        "evidence": [
+          "pnpm --filter @text2sql/backend run prisma:verify-empty-db passed; 14 migrations applied and status up to date"
+        ]
+      },
+      {
+        "item": "Prisma client generation",
+        "result": "PASS",
+        "evidence": [
+          "pnpm --filter @text2sql/backend run prisma:generate passed"
+        ]
+      },
+      {
+        "item": "Data-integrity constraints for denormalized tenant keys",
+        "result": "FAIL",
+        "evidence": [
+          "Missing composite FK/unique constraints tying datasourceId to referenced document/chunk/index entities"
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "DMIG-001",
+      "severity": "HIGH",
+      "title": "Cross-datasource integrity is not enforced for denormalized datasourceId in RAG tables",
+      "category": "Data integrity / tenant isolation",
+      "locations": [
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:22",
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:57",
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:73",
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:148",
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:163",
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:178",
+        "apps/backend/prisma/schema.prisma:531",
+        "apps/backend/prisma/schema.prisma:580",
+        "apps/backend/prisma/schema.prisma:601"
+      ],
+      "issue": "`rag_chunks`, `rag_chunk_index_entries`, and `rag_run_replays` each store `datasourceId` plus foreign keys to parent entities, but constraints validate these keys independently. The schema allows inconsistent tuples (e.g., `chunkId` from datasource A with `datasourceId` B), which can corrupt replay/index state and break datasource isolation guarantees.",
+      "impact": "Potential cross-datasource data contamination and nondeterministic retrieval/replay behavior under bugs, retries, or manual data repair operations.",
+      "fix": "Add DB-level consistency constraints: either remove redundant datasourceId columns and derive via parent joins, or enforce composite integrity with `(id, datasourceId)` unique keys on parent tables and composite foreign keys on child tables (e.g., `(documentId, datasourceId)`, `(chunkId, datasourceId)`, `(indexVersionId, datasourceId)`)."
+    },
+    {
+      "id": "DMIG-002",
+      "severity": "MEDIUM",
+      "title": "Single-active version invariants are enforced only in application logic, not by database constraints",
+      "category": "Concurrency / correctness",
+      "locations": [
+        "apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:115",
+        "apps/backend/prisma/migrations/20260417154612_r3_semantic_registry/migration.sql:39",
+        "apps/backend/src/modules/rag/index/rag-index.repository.ts:350",
+        "apps/backend/src/modules/semantic-registry/semantic-registry.service.ts:623"
+      ],
+      "issue": "`rag_index_versions` and `semantic_registry_versions` lack partial unique constraints for active rows. Code reads assume one active row (`take: 1` / first sorted active), so concurrent writers across processes can leave multiple active versions.",
+      "impact": "Ambiguous active-version selection, inconsistent retrieval behavior, and hard-to-debug production drift during concurrent activation paths.",
+      "fix": "Add partial unique indexes in migrations and schema: `UNIQUE (datasourceId) WHERE status='active'` for `rag_index_versions`; `UNIQUE (domain) WHERE status='active'` for `semantic_registry_versions`. Keep transactional downgrade/upgrade logic as defense-in-depth, and add race-focused integration coverage."
+    }
+  ],
+  "tooling": {
+    "diff_source": "git diff d34d48ff786160c3fc30ec09ba1135803eb9e0e1...HEAD",
+    "lsp_diagnostics": {
+      "status": "UNAVAILABLE",
+      "details": "omx_code_intel transport closed in this session; used backend TypeScript compile lint as fallback."
+    },
+    "fallback_checks": [
+      {
+        "command": "pnpm --filter @text2sql/backend run lint",
+        "result": "PASS"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend run test -- test/integration/rag-foundation-schema.spec.ts test/integration/r3-semantic-registry-migration.spec.ts --runInBand",
+        "result": "PASS"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend run prisma:generate",
+        "result": "PASS"
+      },
+      {
+        "command": "(apps/backend) set -a; source .env; set +a; pnpm run prisma:verify-empty-db",
+        "result": "PASS"
+      }
+    ],
+    "pattern_scan": {
+      "status": "PASS",
+      "checks": [
+        "console.log($$$ARGS)",
+        "catch ($E) { }",
+        "apiKey = \"$VALUE\""
+      ],
+      "result": "No matches in migration-scope reviewed files."
+    }
+  },
+  "post_hook_verification": {
+    "verified_at": "2026-04-18T08:41:35Z",
+    "artifact_sha256": "34fa015368f26f2f5c09e850a8b991efc0f46e2ef4d5a7247f9b80789391ca91",
+    "checks": [
+      {
+        "command": "jq -c . .context/compound-engineering/ce-review/20260418T172025-current-branch/data-migrations.json",
+        "result": "PASS"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend run test -- test/integration/rag-foundation-schema.spec.ts test/integration/r3-semantic-registry-migration.spec.ts --runInBand",
+        "result": "PASS"
+      },
+      {
+        "command": "(apps/backend) set -a; source .env; set +a; pnpm run prisma:verify-empty-db",
+        "result": "PASS"
+      }
+    ]
+  },
+  "verdict": "REQUEST_CHANGES"
+}

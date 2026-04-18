@@ -1,0 +1,144 @@
+{
+  "reviewer": "julik-frontend-races",
+  "mode": "ce:review",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "trackedFilesOnly": true,
+    "focus": [
+      "async UI race conditions",
+      "lifecycle timing",
+      "chat/RAG delivery surfaces",
+      "settings pages"
+    ]
+  },
+  "stage1_spec_compliance": {
+    "status": "pass",
+    "summary": "RAG delivery and settings governance surfaces are implemented and tested, but async/lifecycle robustness has gaps under concurrent refresh and long-lived sessions.",
+    "checks": [
+      {
+        "name": "chat RAG delivery UI wiring",
+        "status": "pass"
+      },
+      {
+        "name": "settings RAG governance surfaces",
+        "status": "pass"
+      }
+    ]
+  },
+  "stage2_code_quality": {
+    "diagnostics": {
+      "lsp_diagnostics": {
+        "status": "unavailable",
+        "details": "omx_code_intel transport closed"
+      },
+      "fallback": [
+        {
+          "command": "pnpm --filter @text2sql/frontend run lint",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/frontend run test -- tests/unit/chat-rag-sync-stream-consistency.spec.tsx tests/unit/chat-panel.spec.tsx tests/unit/rag-delivery-panel.spec.tsx tests/unit/rag-delivery-section.spec.tsx tests/unit/settings-page-governance-visibility.spec.tsx",
+          "status": "pass"
+        }
+      ]
+    },
+    "pattern_scans": {
+      "ast_grep": "unavailable (omx_code_intel transport closed)",
+      "fallback_rg": {
+        "console_log": "no matches in reviewed files",
+        "empty_catch": "no matches in reviewed files",
+        "hardcoded_api_key_assignment": "no matches in reviewed files"
+      }
+    }
+  },
+  "findings": [
+    {
+      "id": "JFR-001",
+      "severity": "HIGH",
+      "title": "`loadRagView` allows out-of-order async completions to overwrite newer settings/RAG state",
+      "file": "apps/frontend/src/app/settings/page.tsx",
+      "line": 209,
+      "confidence": 0.94,
+      "pre_existing": false,
+      "requires_verification": true,
+      "evidence": [
+        {
+          "file": "apps/frontend/src/app/settings/page.tsx",
+          "line": 209,
+          "detail": "`loadRagView` performs multiple async requests and commits state without any request token or cancellation guard."
+        },
+        {
+          "file": "apps/frontend/src/app/settings/page.tsx",
+          "line": 294,
+          "detail": "Second async phase (`getRun` + `fetchRagReplayCompleteness`) can resolve after a newer invocation and still call `setRagRun`, `setRagReplay`, `setRagError`, `setRagLoading`."
+        },
+        {
+          "file": "apps/frontend/src/app/settings/page.tsx",
+          "line": 683,
+          "detail": "Refresh button can trigger repeated overlapping invocations (`loadRagView`) while previous one is in flight."
+        }
+      ],
+      "impact": "Rapid refreshes or overlapping post-mutation reloads can render stale run/quality/foundation data, creating operator-visible state rollback in governance views.",
+      "suggested_fix": "Introduce a monotonic request version (`useRef<number>`) or AbortController per `loadRagView` call; before each state commit, bail out if the call is stale. Also disable refresh-triggering actions while `ragLoading` is true to avoid request storms."
+    },
+    {
+      "id": "JFR-002",
+      "severity": "LOW",
+      "title": "Module-scoped section state map is unbounded and collides for runs without IDs",
+      "file": "apps/frontend/src/components/chat/rag-delivery-panel.tsx",
+      "line": 18,
+      "confidence": 0.87,
+      "pre_existing": false,
+      "requires_verification": false,
+      "evidence": [
+        {
+          "file": "apps/frontend/src/components/chat/rag-delivery-panel.tsx",
+          "line": 18,
+          "detail": "`sectionManualStateByRun` is module-global and never pruned."
+        },
+        {
+          "file": "apps/frontend/src/components/chat/rag-delivery-panel.tsx",
+          "line": 207,
+          "detail": "Fallback key `__unknown-run__` causes multiple unknown-run messages to share one persisted expand/collapse state bucket."
+        }
+      ],
+      "impact": "Long-lived sessions can accumulate stale UI state, and unknown-run messages can leak collapse state between unrelated message cards.",
+      "suggested_fix": "Scope manual section state to component instance (or a bounded LRU keyed by stable message/run identity), and avoid a shared sentinel key for unknown runs."
+    }
+  ],
+  "severity_counts": {
+    "CRITICAL": 0,
+    "HIGH": 1,
+    "MEDIUM": 0,
+    "LOW": 1
+  },
+  "residual_risks": [
+    "No dedicated concurrency test currently asserts stale-request suppression for overlapping `loadRagView` invocations."
+  ],
+  "testing_gaps": [
+    "Add a unit test that simulates two overlapping `loadRagView` calls with reversed completion order and asserts only the latest response mutates state.",
+    "Add a lifecycle test for `RagDeliveryPanel` ensuring manual section state does not leak between messages lacking runId."
+  ],
+  "recommendation": "REQUEST_CHANGES",
+  "verified_at_utc": "2026-04-18T08:42:19Z",
+  "head_commit": "105684cf7a23ec4b6e6f3ee7a08c1a73ef100fa2",
+  "fresh_verification": {
+    "verified_at_utc": "2026-04-18T08:42:19Z",
+    "head_commit": "105684cf7a23ec4b6e6f3ee7a08c1a73ef100fa2",
+    "commands": [
+      {
+        "command": "pnpm --filter @text2sql/frontend run lint",
+        "result": "pass"
+      },
+      {
+        "command": "pnpm --filter @text2sql/frontend run test -- tests/unit/chat-rag-sync-stream-consistency.spec.tsx tests/unit/chat-panel.spec.tsx tests/unit/rag-delivery-panel.spec.tsx tests/unit/settings-page-governance-visibility.spec.tsx tests/e2e/chat-demo-flow.spec.tsx tests/e2e/chat-mobile-smoke.spec.tsx tests/e2e/settings-mobile-smoke.spec.tsx",
+        "result": "pass",
+        "tests_passed": "87/87"
+      }
+    ],
+    "notes": [
+      "Vitest run emits pre-existing React ref warnings from dialog/sheet primitives in unrelated suites; no new failures."
+    ]
+  }
+}

@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Injectable } from "@nestjs/common";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
 
@@ -103,6 +105,7 @@ export interface RagQualityGateReport {
   thresholds: RagQualityThresholds;
   sampleSize: number;
   sampleReady: boolean;
+  glossarySelectedContext: GlossarySelectedContextGateReport;
   datasourceOrchestration: RagDatasourceOrchestrationReport;
   cacheBudget: RagCacheBudgetReport;
   latest?: {
@@ -122,6 +125,45 @@ export interface RagQualityGateReport {
   generatedAt: string;
 }
 
+interface GlossarySelectedContextSampleRow {
+  sampleId: string;
+  query: string;
+  term: string;
+  baselineSelectedContextHit?: boolean;
+  glossarySelectedContextHit?: boolean;
+}
+
+interface GlossarySelectedContextFixture {
+  version?: string;
+  generatedAt?: string;
+  baselineRunId?: string;
+  candidateRunId?: string;
+  samples?: GlossarySelectedContextSampleRow[];
+}
+
+type GlossarySelectedContextGateStatus =
+  | "pass"
+  | "fail"
+  | "sample_not_ready"
+  | "error";
+
+export interface GlossarySelectedContextGateReport {
+  status: GlossarySelectedContextGateStatus;
+  pass: boolean;
+  sampleVersion: string;
+  sampleSize: number;
+  minSamples: number;
+  targetRelativeLift: number;
+  baselineHitRate: number;
+  glossaryHitRate: number;
+  relativeLift: number;
+  baselineRunId?: string;
+  candidateRunId?: string;
+  runId?: string;
+  generatedAt: string;
+  reasons: string[];
+}
+
 const DEFAULT_THRESHOLDS: RagQualityThresholds = {
   recallAt20Min: 0.8,
   mrrAt10Min: 0.65,
@@ -137,6 +179,11 @@ const REQUIRED_REPLAY_STAGES = [
   "rerank_secondary",
   "rerank_finalized"
 ];
+
+const GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT = 0.2;
+const GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES = 100;
+const GLOSSARY_SELECTED_CONTEXT_DEFAULT_FIXTURE_VERSION =
+  "glossary-selected-context-v1";
 
 interface RagR6MetricSpec {
   name: string;
@@ -298,6 +345,9 @@ export class RagQualityService {
     const reasons: string[] = [];
     const sampleSize = latest?.sampleSize ?? 0;
     const sampleReady = sampleSize >= thresholds.minSamples;
+    const glossarySelectedContext = this.snapshotGlossarySelectedContext(
+      latest?.runId
+    );
 
     if (!latest) {
       reasons.push("no_evaluation_data");
@@ -325,6 +375,7 @@ export class RagQualityService {
       thresholds,
       sampleSize,
       sampleReady,
+      glossarySelectedContext,
       datasourceOrchestration: this.snapshotDatasourceOrchestration(),
       cacheBudget: this.snapshotCacheBudget(),
       latest: latest
@@ -377,6 +428,154 @@ export class RagQualityService {
       completeness: Number(completeness.toFixed(6)),
       ready: missingStages.length === 0
     };
+  }
+
+  private snapshotGlossarySelectedContext(
+    latestRunId: string | undefined
+  ): GlossarySelectedContextGateReport {
+    const generatedAt = new Date().toISOString();
+    const fixturePath = this.getGlossarySelectedContextFixturePath();
+    if (!existsSync(fixturePath)) {
+      return {
+        status: "sample_not_ready",
+        pass: false,
+        sampleVersion: GLOSSARY_SELECTED_CONTEXT_DEFAULT_FIXTURE_VERSION,
+        sampleSize: 0,
+        minSamples: GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES,
+        targetRelativeLift: GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT,
+        baselineHitRate: 0,
+        glossaryHitRate: 0,
+        relativeLift: 0,
+        runId: latestRunId,
+        generatedAt,
+        reasons: ["fixture_not_found"]
+      };
+    }
+
+    let fixture: GlossarySelectedContextFixture;
+    try {
+      const raw = readFileSync(fixturePath, "utf-8");
+      fixture = JSON.parse(raw) as GlossarySelectedContextFixture;
+    } catch (_error) {
+      return {
+        status: "error",
+        pass: false,
+        sampleVersion: GLOSSARY_SELECTED_CONTEXT_DEFAULT_FIXTURE_VERSION,
+        sampleSize: 0,
+        minSamples: GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES,
+        targetRelativeLift: GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT,
+        baselineHitRate: 0,
+        glossaryHitRate: 0,
+        relativeLift: 0,
+        runId: latestRunId,
+        generatedAt,
+        reasons: ["fixture_parse_failed"]
+      };
+    }
+
+    const samples = Array.isArray(fixture.samples) ? fixture.samples : [];
+    const sampleVersion =
+      typeof fixture.version === "string" && fixture.version.trim().length > 0
+        ? fixture.version.trim()
+        : GLOSSARY_SELECTED_CONTEXT_DEFAULT_FIXTURE_VERSION;
+    const baselineRunId =
+      typeof fixture.baselineRunId === "string" && fixture.baselineRunId.trim().length > 0
+        ? fixture.baselineRunId.trim()
+        : undefined;
+    const candidateRunId =
+      typeof fixture.candidateRunId === "string" && fixture.candidateRunId.trim().length > 0
+        ? fixture.candidateRunId.trim()
+        : undefined;
+    const reasons: string[] = [];
+
+    if (samples.length < GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES) {
+      reasons.push("sample_count_below_minimum");
+    }
+
+    const baselineSampleSize = samples.filter(
+      (sample) => typeof sample.baselineSelectedContextHit === "boolean"
+    ).length;
+    const glossarySampleSize = samples.filter(
+      (sample) => typeof sample.glossarySelectedContextHit === "boolean"
+    ).length;
+    if (baselineSampleSize === 0) {
+      reasons.push("baseline_not_ready");
+    }
+    if (glossarySampleSize === 0) {
+      reasons.push("candidate_not_ready");
+    }
+
+    const baselineHitRate = this.computeGlossaryHitRate(samples, "baseline");
+    const glossaryHitRate = this.computeGlossaryHitRate(samples, "candidate");
+    const relativeLift =
+      baselineHitRate <= 0
+        ? 0
+        : Number(((glossaryHitRate - baselineHitRate) / baselineHitRate).toFixed(6));
+
+    if (baselineHitRate <= 0) {
+      reasons.push("baseline_zero_hit_rate");
+    }
+
+    const sampleNotReady = reasons.length > 0;
+    if (sampleNotReady) {
+      return {
+        status: "sample_not_ready",
+        pass: false,
+        sampleVersion,
+        sampleSize: samples.length,
+        minSamples: GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES,
+        targetRelativeLift: GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT,
+        baselineHitRate,
+        glossaryHitRate,
+        relativeLift,
+        baselineRunId,
+        candidateRunId,
+        runId: latestRunId ?? candidateRunId ?? baselineRunId,
+        generatedAt,
+        reasons
+      };
+    }
+
+    const pass =
+      relativeLift >= GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT;
+    return {
+      status: pass ? "pass" : "fail",
+      pass,
+      sampleVersion,
+      sampleSize: samples.length,
+      minSamples: GLOSSARY_SELECTED_CONTEXT_MIN_SAMPLES,
+      targetRelativeLift: GLOSSARY_SELECTED_CONTEXT_TARGET_RELATIVE_LIFT,
+      baselineHitRate,
+      glossaryHitRate,
+      relativeLift,
+      baselineRunId,
+      candidateRunId,
+      runId: latestRunId ?? candidateRunId ?? baselineRunId,
+      generatedAt,
+      reasons: pass ? [] : ["relative_lift_below_target"]
+    };
+  }
+
+  private computeGlossaryHitRate(
+    samples: GlossarySelectedContextSampleRow[],
+    lane: "baseline" | "candidate"
+  ): number {
+    const key =
+      lane === "baseline" ? "baselineSelectedContextHit" : "glossarySelectedContextHit";
+    const eligible = samples.filter((sample) => typeof sample[key] === "boolean");
+    if (eligible.length === 0) {
+      return 0;
+    }
+    const hits = eligible.filter((sample) => sample[key] === true).length;
+    return Number((hits / eligible.length).toFixed(6));
+  }
+
+  private getGlossarySelectedContextFixturePath(): string {
+    const fromEnv = process.env.GLOSSARY_SELECTED_CONTEXT_FIXTURE_PATH?.trim();
+    if (fromEnv) {
+      return resolve(process.cwd(), fromEnv);
+    }
+    return resolve(process.cwd(), "test/fixtures/glossary-selected-context-samples.json");
   }
 
   private normalizeIsoTimestamp(input?: string): string {

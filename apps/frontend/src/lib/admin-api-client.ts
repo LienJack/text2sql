@@ -1,4 +1,19 @@
-import type { ApiResponse } from "@text2sql/shared-types";
+import type {
+  ApiResponse,
+  CreateGlossaryAnchorRequest,
+  CreateGlossaryTermRequest,
+  GlossaryAnchor,
+  GlossaryAnchorType,
+  GlossaryConflictDecision,
+  GlossaryLinkageStatus,
+  GlossaryScope,
+  GlossaryTerm,
+  GlossaryTermStatus,
+  RollbackGlossaryAnchorRequest,
+  RollbackGlossaryAnchorResponse,
+  UpdateGlossaryTermRequest,
+  UpsertGlossaryTermResponse
+} from "@text2sql/shared-types";
 
 const API_BASE_OVERRIDE = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 const API_BASE = API_BASE_OVERRIDE ? API_BASE_OVERRIDE.replace(/\/+$/, "") : "";
@@ -137,6 +152,66 @@ export interface UserUpsertInput {
   status: UserStatus;
   workspaceIds: string[];
   variables: Record<string, string>;
+}
+
+export interface GlossaryListParams {
+  scope?: GlossaryScope | "all";
+  datasourceId?: string;
+  status?: GlossaryTermStatus | "all";
+  query?: string;
+  version?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface GlossaryAnchorListParams {
+  scope?: GlossaryScope | "all";
+  datasourceId?: string;
+  anchorType?: GlossaryAnchorType | "all";
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CreateGlossaryAnchorResult {
+  anchor: GlossaryAnchor;
+  previousAnchorId: string | null;
+  replayed: boolean;
+  idempotencyKey: string;
+}
+
+export type PromptTemplateScene = "sql" | "analysis";
+export type PromptTemplateStatus = "active" | "draft";
+export type PromptTemplateScopeType = "global" | "workspace" | "datasource";
+
+export interface PromptTemplate {
+  id: string;
+  name: string;
+  scene: PromptTemplateScene;
+  scopeType: PromptTemplateScopeType;
+  scopeId: string | null;
+  scopeLabel: string;
+  version: number;
+  status: PromptTemplateStatus;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptTemplateListParams {
+  scene?: PromptTemplateScene | "all";
+  status?: PromptTemplateStatus | "all";
+  query?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface PromptTemplateUpsertInput {
+  name: string;
+  scene: PromptTemplateScene;
+  scopeType: PromptTemplateScopeType;
+  scopeId?: string;
+  content: string;
+  status: PromptTemplateStatus;
 }
 
 function toVariableList(
@@ -340,6 +415,234 @@ function normalizeWorkspaceDatasourceBinding(
       typeof record.datasourceStatus === "string" ? record.datasourceStatus : undefined,
     createdAt: String(record.createdAt ?? new Date(0).toISOString()),
     updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
+  };
+}
+
+function normalizePromptTemplateScene(value: unknown): PromptTemplateScene {
+  return value === "analysis" ? "analysis" : "sql";
+}
+
+function normalizePromptTemplateStatus(value: unknown): PromptTemplateStatus {
+  if (value === "draft" || value === "archived" || value === "inactive") {
+    return "draft";
+  }
+  return "active";
+}
+
+function normalizePromptTemplateScopeType(value: unknown): PromptTemplateScopeType {
+  if (value === "workspace" || value === "datasource") {
+    return value;
+  }
+  return "global";
+}
+
+function normalizePromptTemplate(value: unknown): PromptTemplate {
+  const record = isRecord(value) ? value : {};
+  const scopeType = normalizePromptTemplateScopeType(
+    record.scopeType ?? record.scope
+  );
+  const rawScopeId =
+    typeof record.scopeId === "string"
+      ? record.scopeId
+      : scopeType === "workspace" && typeof record.workspaceId === "string"
+        ? record.workspaceId
+        : scopeType === "datasource" && typeof record.datasourceId === "string"
+          ? record.datasourceId
+          : "";
+  const scopeId = rawScopeId.trim() ? rawScopeId.trim() : null;
+  const scopeLabel =
+    typeof record.scopeLabel === "string" && record.scopeLabel.trim()
+      ? record.scopeLabel.trim()
+      : scopeType === "global"
+        ? "全局"
+        : (scopeId ?? (scopeType === "workspace" ? "工作空间" : "数据源"));
+
+  return {
+    id: String(record.id ?? record.templateId ?? ""),
+    name: String(record.name ?? record.title ?? ""),
+    scene: normalizePromptTemplateScene(record.scene),
+    scopeType,
+    scopeId,
+    scopeLabel,
+    version: Math.max(1, readNumber(record.version ?? record.templateVersion, 1)),
+    status: normalizePromptTemplateStatus(record.status),
+    content: String(record.content ?? record.template ?? record.prompt ?? ""),
+    createdAt: String(record.createdAt ?? new Date(0).toISOString()),
+    updatedAt: String(
+      record.updatedAt ?? record.modifiedAt ?? record.createdAt ?? new Date(0).toISOString()
+    )
+  };
+}
+
+function normalizePromptTemplateFromPayload(value: unknown): PromptTemplate {
+  const record = isRecord(value) ? value : {};
+  if (isRecord(record.template)) {
+    return normalizePromptTemplate(record.template);
+  }
+  if (isRecord(record.item)) {
+    return normalizePromptTemplate(record.item);
+  }
+  return normalizePromptTemplate(value);
+}
+
+function normalizeGlossaryScope(value: unknown): GlossaryScope {
+  return value === "datasource" ? "datasource" : "global";
+}
+
+function normalizeGlossaryStatus(value: unknown): GlossaryTermStatus {
+  return value === "inactive" ? "inactive" : "active";
+}
+
+function normalizeGlossaryLinkageStatus(value: unknown): GlossaryLinkageStatus {
+  if (value === "degraded" || value === "empty" || value === "error") {
+    return value;
+  }
+  return "success";
+}
+
+function normalizeGlossaryConflictDecision(
+  value: unknown
+): GlossaryConflictDecision | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  return {
+    resolution: "priority_then_updated_at",
+    winnerTermId: String(value.winnerTermId ?? ""),
+    loserTermIds: Array.isArray(value.loserTermIds)
+      ? value.loserTermIds.map((item) => String(item))
+      : [],
+    winnerPriority: readNumber(value.winnerPriority, 0),
+    winnerUpdatedAt: String(value.winnerUpdatedAt ?? new Date(0).toISOString())
+  };
+}
+
+function normalizeGlossaryAnchor(value: unknown): GlossaryAnchor | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const scope = normalizeGlossaryScope(value.scope);
+  const anchorType = value.anchorType === "rollback" ? "rollback" : "release";
+  const status =
+    value.status === "superseded" || value.status === "rolled_back"
+      ? value.status
+      : "active";
+  const datasourceId =
+    typeof value.datasourceId === "string" && value.datasourceId.trim()
+      ? value.datasourceId
+      : null;
+  const metadata = isRecord(value.metadata)
+    ? (value.metadata as Record<string, unknown>)
+    : null;
+
+  return {
+    id: String(value.id ?? ""),
+    scope,
+    scopeKey: String(value.scopeKey ?? ""),
+    datasourceId,
+    version: readNumber(value.version, 1),
+    anchorType,
+    status,
+    summary: typeof value.summary === "string" ? value.summary : null,
+    rollbackFromAnchorId:
+      typeof value.rollbackFromAnchorId === "string"
+        ? value.rollbackFromAnchorId
+        : null,
+    rollbackReason:
+      typeof value.rollbackReason === "string" ? value.rollbackReason : null,
+    createdByRunId:
+      typeof value.createdByRunId === "string" ? value.createdByRunId : null,
+    metadata,
+    createdAt: String(value.createdAt ?? new Date(0).toISOString()),
+    updatedAt: String(value.updatedAt ?? new Date(0).toISOString())
+  };
+}
+
+function normalizeGlossaryTerm(value: unknown): GlossaryTerm {
+  const record = isRecord(value) ? value : {};
+  const scope = normalizeGlossaryScope(record.scope);
+  const datasourceId =
+    typeof record.datasourceId === "string" && record.datasourceId.trim()
+      ? record.datasourceId
+      : null;
+  const metadata = isRecord(record.metadata)
+    ? (record.metadata as Record<string, unknown>)
+    : null;
+  const rawSynonyms = Array.isArray(record.synonyms) ? record.synonyms : [];
+
+  return {
+    id: String(record.id ?? ""),
+    term: String(record.term ?? ""),
+    normalizedTerm: String(
+      record.normalizedTerm ?? String(record.term ?? "").toLowerCase()
+    ),
+    definition: String(record.definition ?? ""),
+    synonyms: rawSynonyms
+      .map((item) => String(item).trim())
+      .filter((item) => item.length > 0),
+    scope,
+    scopeKey: String(record.scopeKey ?? ""),
+    datasourceId,
+    priority: readNumber(record.priority, 50),
+    conflictResolution: "priority_then_updated_at",
+    status: normalizeGlossaryStatus(record.status),
+    version: readNumber(record.version, 1),
+    versionAnchorId:
+      typeof record.versionAnchorId === "string" ? record.versionAnchorId : null,
+    rollbackAnchorId:
+      typeof record.rollbackAnchorId === "string"
+        ? record.rollbackAnchorId
+        : null,
+    metadata,
+    createdAt: String(record.createdAt ?? new Date(0).toISOString()),
+    updatedAt: String(record.updatedAt ?? new Date(0).toISOString())
+  };
+}
+
+function normalizeGlossaryUpsertResponse(value: unknown): UpsertGlossaryTermResponse {
+  const record = isRecord(value) ? value : {};
+  return {
+    term: normalizeGlossaryTerm(record.term),
+    linkageStatus: normalizeGlossaryLinkageStatus(record.linkageStatus),
+    conflictDecision: normalizeGlossaryConflictDecision(record.conflictDecision),
+    activeAnchor: normalizeGlossaryAnchor(record.activeAnchor)
+  };
+}
+
+function normalizeGlossaryAnchorOrThrow(value: unknown): GlossaryAnchor {
+  const anchor = normalizeGlossaryAnchor(value);
+  if (!anchor || !anchor.id) {
+    throw new AdminApiError("术语锚点响应格式错误。", {
+      code: "GLOSSARY_ANCHOR_INVALID_RESPONSE",
+      details: value
+    });
+  }
+  return anchor;
+}
+
+function normalizeGlossaryAnchorMutationResult(
+  value: unknown,
+  anchorField: "anchor" | "activeAnchor"
+): CreateGlossaryAnchorResult {
+  const record = isRecord(value) ? value : {};
+  return {
+    anchor: normalizeGlossaryAnchorOrThrow(record[anchorField]),
+    previousAnchorId:
+      typeof record.previousAnchorId === "string" ? record.previousAnchorId : null,
+    replayed: Boolean(record.replayed),
+    idempotencyKey: String(record.idempotencyKey ?? "")
+  };
+}
+
+function normalizeRollbackGlossaryAnchorResponse(
+  value: unknown
+): RollbackGlossaryAnchorResponse {
+  const normalized = normalizeGlossaryAnchorMutationResult(value, "activeAnchor");
+  return {
+    activeAnchor: normalized.anchor,
+    previousAnchorId: normalized.previousAnchorId,
+    replayed: normalized.replayed,
+    idempotencyKey: normalized.idempotencyKey
   };
 }
 
@@ -958,6 +1261,251 @@ export async function replaceWorkspaceDatasourceTablePermissions(
       addedTables,
       removedTables
     };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listPromptTemplates(
+  params: PromptTemplateListParams = {}
+): Promise<PaginatedResult<PromptTemplate>> {
+  const query = toQuery({
+    scene: params.scene && params.scene !== "all" ? params.scene : undefined,
+    status: params.status && params.status !== "all" ? params.status : undefined,
+    query: params.query?.trim(),
+    page: params.page ?? 1,
+    pageSize: params.pageSize ?? 100
+  });
+
+  try {
+    const payload = await request<unknown>(`/api/v1/settings/prompts${query}`);
+    const result = normalizeListResult(
+      payload,
+      ["templates", "promptTemplates"],
+      normalizePromptTemplate,
+      params.page ?? 1,
+      params.pageSize ?? 100
+    );
+    if (!isRecord(payload)) {
+      return result;
+    }
+    const pagination = isRecord(payload.pagination) ? payload.pagination : {};
+    return {
+      ...result,
+      total: readNumber(pagination.total, result.total),
+      page: readNumber(pagination.page, result.page),
+      pageSize: readNumber(pagination.pageSize, result.pageSize)
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function createPromptTemplate(
+  input: PromptTemplateUpsertInput
+): Promise<PromptTemplate> {
+  try {
+    const data = await request<unknown>("/api/v1/settings/prompts", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        scene: input.scene,
+        scope: input.scopeType,
+        scopeType: input.scopeType,
+        scopeKey: input.scopeId?.trim() || undefined,
+        scopeId: input.scopeId?.trim() || undefined,
+        content: input.content,
+        status: input.status
+      })
+    });
+    return normalizePromptTemplateFromPayload(data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function updatePromptTemplate(
+  templateId: string,
+  input: Partial<PromptTemplateUpsertInput>
+): Promise<PromptTemplate> {
+  try {
+    const data = await request<unknown>(`/api/v1/settings/prompts/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.scene !== undefined ? { scene: input.scene } : {}),
+        ...(input.scopeType !== undefined
+          ? { scope: input.scopeType, scopeType: input.scopeType }
+          : {}),
+        ...(input.scopeId !== undefined
+          ? {
+              scopeKey: input.scopeId?.trim() || undefined,
+              scopeId: input.scopeId?.trim() || undefined
+            }
+          : {}),
+        ...(input.content !== undefined ? { content: input.content } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {})
+      })
+    });
+    return normalizePromptTemplateFromPayload(data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function deletePromptTemplate(
+  templateId: string
+): Promise<{ deleted: boolean }> {
+  try {
+    const data = await request<unknown>(`/api/v1/settings/prompts/${templateId}`, {
+      method: "DELETE"
+    });
+    const record = isRecord(data) ? data : {};
+    return { deleted: Boolean(record.deleted ?? true) };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listGlossaryTerms(
+  params: GlossaryListParams = {}
+): Promise<PaginatedResult<GlossaryTerm>> {
+  const query = toQuery({
+    scope: params.scope && params.scope !== "all" ? params.scope : undefined,
+    datasourceId: params.datasourceId?.trim(),
+    status: params.status && params.status !== "all" ? params.status : undefined,
+    query: params.query?.trim(),
+    version: params.version,
+    page: params.page ?? 1,
+    pageSize: params.pageSize ?? 100
+  });
+
+  try {
+    const payload = await request<unknown>(`/api/v1/glossary/terms${query}`);
+    return normalizeListResult(
+      payload,
+      ["terms"],
+      normalizeGlossaryTerm,
+      params.page ?? 1,
+      params.pageSize ?? 100
+    );
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function createGlossaryTerm(
+  input: CreateGlossaryTermRequest,
+  options?: { idempotencyKey?: string }
+): Promise<UpsertGlossaryTermResponse> {
+  try {
+    const data = await request<unknown>("/api/v1/glossary/terms", {
+      method: "POST",
+      headers: options?.idempotencyKey
+        ? { "x-idempotency-key": options.idempotencyKey }
+        : undefined,
+      body: JSON.stringify(input)
+    });
+    return normalizeGlossaryUpsertResponse(data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function updateGlossaryTerm(
+  termId: string,
+  input: UpdateGlossaryTermRequest,
+  options?: { idempotencyKey?: string }
+): Promise<UpsertGlossaryTermResponse> {
+  try {
+    const data = await request<unknown>(`/api/v1/glossary/terms/${termId}`, {
+      method: "PATCH",
+      headers: options?.idempotencyKey
+        ? { "x-idempotency-key": options.idempotencyKey }
+        : undefined,
+      body: JSON.stringify(input)
+    });
+    return normalizeGlossaryUpsertResponse(data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function toggleGlossaryTerm(
+  termId: string,
+  options?: { idempotencyKey?: string }
+): Promise<UpsertGlossaryTermResponse> {
+  try {
+    const data = await request<unknown>(`/api/v1/glossary/terms/${termId}/toggle`, {
+      method: "POST",
+      headers: options?.idempotencyKey
+        ? { "x-idempotency-key": options.idempotencyKey }
+        : undefined,
+      body: JSON.stringify({})
+    });
+    return normalizeGlossaryUpsertResponse(data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listGlossaryAnchors(
+  params: GlossaryAnchorListParams = {}
+): Promise<PaginatedResult<GlossaryAnchor>> {
+  const query = toQuery({
+    scope: params.scope && params.scope !== "all" ? params.scope : undefined,
+    datasourceId: params.datasourceId?.trim(),
+    anchorType:
+      params.anchorType && params.anchorType !== "all" ? params.anchorType : undefined,
+    page: params.page ?? 1,
+    pageSize: params.pageSize ?? 20
+  });
+
+  try {
+    const payload = await request<unknown>(`/api/v1/glossary/anchors${query}`);
+    return normalizeListResult(
+      payload,
+      ["anchors"],
+      normalizeGlossaryAnchorOrThrow,
+      params.page ?? 1,
+      params.pageSize ?? 20
+    );
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function createGlossaryAnchor(
+  input: CreateGlossaryAnchorRequest,
+  options?: { idempotencyKey?: string }
+): Promise<CreateGlossaryAnchorResult> {
+  try {
+    const data = await request<unknown>("/api/v1/glossary/anchors", {
+      method: "POST",
+      headers: options?.idempotencyKey
+        ? { "x-idempotency-key": options.idempotencyKey }
+        : undefined,
+      body: JSON.stringify(input)
+    });
+    return normalizeGlossaryAnchorMutationResult(data, "anchor");
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function rollbackGlossaryAnchor(
+  input: RollbackGlossaryAnchorRequest,
+  options?: { idempotencyKey?: string }
+): Promise<RollbackGlossaryAnchorResponse> {
+  try {
+    const data = await request<unknown>("/api/v1/glossary/anchors/rollback", {
+      method: "POST",
+      headers: options?.idempotencyKey
+        ? { "x-idempotency-key": options.idempotencyKey }
+        : undefined,
+      body: JSON.stringify(input)
+    });
+    return normalizeRollbackGlossaryAnchorResponse(data);
   } catch (error) {
     throw toAdminApiError(error);
   }

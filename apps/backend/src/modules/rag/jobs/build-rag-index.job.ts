@@ -32,8 +32,8 @@ export class BuildRagIndexJob {
     const startedAt = Date.now();
     const queueWaitMs = this.resolveQueueWaitMs(input.queuedAt, startedAt);
     const replayRunId = this.resolveReplayRunId(input.runId, input.datasourceId, startedAt);
-    const chunks =
-      input.chunks ?? (await this.repository.listChunksForBuild(input.datasourceId));
+    const baseChunks = await this.repository.listChunksForBuild(input.datasourceId);
+    const chunks = this.mergeChunks(baseChunks, input.chunks ?? []);
     try {
       const result = await this.builder.buildAndActivate({
         datasourceId: input.datasourceId,
@@ -137,5 +137,26 @@ export class BuildRagIndexJob {
       return 0;
     }
     return Math.max(0, startedAt - queuedAtMs);
+  }
+
+  private mergeChunks(
+    baseChunks: RagChunkBuildInput[],
+    incrementalChunks: RagChunkBuildInput[]
+  ): RagChunkBuildInput[] {
+    if (incrementalChunks.length === 0) {
+      return [...baseChunks];
+    }
+    const merged = new Map<string, RagChunkBuildInput>();
+    for (const chunk of baseChunks) {
+      merged.set(chunk.id, {
+        ...chunk
+      });
+    }
+    for (const chunk of incrementalChunks) {
+      merged.set(chunk.id, {
+        ...chunk
+      });
+    }
+    return [...merged.values()];
   }
 }

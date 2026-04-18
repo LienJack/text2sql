@@ -13,6 +13,7 @@ import { SettingsModule } from "./modules/settings/settings.module";
 import { SemanticRegistryModule } from "./modules/semantic-registry/semantic-registry.module";
 import { UserModule } from "./modules/user/user.module";
 import { WorkspaceModule } from "./modules/workspace/workspace.module";
+import { GlossaryModule } from "./modules/glossary/glossary.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { WorkspaceModule } from "./modules/workspace/workspace.module";
     SemanticRegistryModule,
     UserModule,
     WorkspaceModule,
+    GlossaryModule,
     AgentModule,
     ChatModule,
     EvalModule,

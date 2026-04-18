@@ -1,0 +1,62 @@
+{
+  "reviewer": "testing",
+  "findings": [
+    {
+      "title": "Wall-clock sleep makes cache TTL test timing-sensitive and flaky under CI load",
+      "severity": "medium",
+      "file": "apps/backend/test/integration/rag-cache-version-invalidation.spec.ts",
+      "line": 150,
+      "confidence": "high",
+      "autofix_class": "test_refactor",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Replace real-time wait (`setTimeout(20)`) with fake timers (`vi.useFakeTimers`/`vi.advanceTimersByTime`) or inject a clock into the cache service so TTL transition is deterministic."
+    },
+    {
+      "title": "Queue-wait metric test depends on real sleep duration and scheduler timing",
+      "severity": "medium",
+      "file": "apps/backend/test/integration/rag-datasource-gate-metrics.spec.ts",
+      "line": 72,
+      "confidence": "high",
+      "autofix_class": "test_refactor",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Remove `sleep(35)`-driven behavior; instead mock or inject time/queue wait signal directly and assert metric computation from controlled inputs."
+    },
+    {
+      "title": "Test name claims datasource boundary validation but assertions only verify health metrics",
+      "severity": "medium",
+      "file": "apps/backend/test/e2e/rag-multi-datasource-isolation.spec.ts",
+      "line": 42,
+      "confidence": "medium",
+      "autofix_class": "test_strengthen",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Add explicit retrieval assertions per datasource (e.g., each retrieval returns only its own seeded chunks/index version) and include a negative assertion that foreign datasource chunks are absent."
+    },
+    {
+      "title": "New rerank routing/parser paths lack dedicated negative-path tests",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/llm/provider-router.service.ts",
+      "line": 81,
+      "confidence": "high",
+      "autofix_class": "missing_test",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Add focused unit tests for `rerankCandidates` and parser behavior: empty candidates short-circuit, invalid/non-JSON model response fallback, fenced JSON extraction, score clamping, and missing `candidateId` row filtering."
+    }
+  ],
+  "residual_risks": [
+    "Several integration specs still use shared sqlite path (`data/sqlite/text2sql.db`) instead of isolated fixtures, which can leak state across runs and raise order-dependence risk.",
+    "RAG orchestration quality checks focus heavily on aggregate metrics; without stronger per-datasource output assertions, cross-tenant leakage regressions could pass silently."
+  ],
+  "testing_gaps": [
+    "No direct tests for `RagDatasourceQuotaPolicy` decision matrix boundaries (global/workspace concurrency edge values and circuit-open precedence).",
+    "No dedicated frontend unit coverage for `assistant-thread.tsx` and `sql-inline-panel.tsx` updates in this branch; regressions may only surface in broad chat flow tests.",
+    "Provider router rerank parser fallback behavior is untested against malformed/partial model payloads."
+  ]
+}

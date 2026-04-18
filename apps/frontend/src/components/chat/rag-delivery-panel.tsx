@@ -105,6 +105,43 @@ function resolveFailClosedAlerts(delivery?: DeliveryContract): string[] {
   return normalizeAlerts(alerts);
 }
 
+function resolvePromptTemplateSummary(delivery?: DeliveryContract): {
+  state: "hit" | "fallback" | "missing";
+  summary: string;
+  fallbackReasonText: string;
+} {
+  const promptTemplate = delivery?.evidence?.promptTemplate;
+  if (!promptTemplate) {
+    return {
+      state: "missing",
+      summary: "未记录（历史 run 或未启用模板）",
+      fallbackReasonText: "未记录"
+    };
+  }
+
+  const hasTemplateHit = Boolean(promptTemplate.templateId);
+  const scope = promptTemplate.scope ?? "scope-unknown";
+  const versionText =
+    promptTemplate.version !== undefined && Number.isFinite(promptTemplate.version)
+      ? `v${Math.floor(promptTemplate.version)}`
+      : "v?";
+  const fallbackReasonText = promptTemplate.fallbackReason ?? "未触发";
+
+  if (hasTemplateHit) {
+    return {
+      state: "hit",
+      summary: `${promptTemplate.templateId} · ${scope} · ${versionText}`,
+      fallbackReasonText
+    };
+  }
+
+  return {
+    state: "fallback",
+    summary: `未命中模板（${scope}）`,
+    fallbackReasonText
+  };
+}
+
 function renderSelectedContextState(
   delivery: DeliveryContract
 ): { state: SelectedContextState; node: JSX.Element } {
@@ -166,6 +203,7 @@ function renderSelectedContextState(
 export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
   const evidence = delivery?.evidence;
   const artifact = delivery?.artifact;
+  const promptTemplateSummary = resolvePromptTemplateSummary(delivery);
   const runLifecycleKey = runId?.trim() || evidence?.runId?.trim() || "__unknown-run__";
   const semanticVersionText = evidence?.semanticVersion ?? "版本不可用（字段缺失）";
   const semanticLockStatusText =
@@ -285,7 +323,7 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
         title="Evidence"
         open={expandedSections.evidence}
         severity={sectionSeverities.evidence}
-        summary={`runId=${evidence?.runId ?? "unknown"} · retrieval=${resolvedRetrievalStatus}`}
+        summary={`runId=${evidence?.runId ?? "unknown"} · retrieval=${resolvedRetrievalStatus} · template=${promptTemplateSummary.state}`}
         onOpenChange={(nextOpen) => handleOpenChange("evidence", nextOpen)}
       >
         <div className="space-y-2">
@@ -293,6 +331,8 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
             <p>运行 ID：{evidence?.runId ?? "未知"}</p>
             <p>检索状态：{resolvedRetrievalStatus}</p>
             <p>selected_context 状态：{selectedContextState.state}</p>
+            <p>模板命中摘要：{promptTemplateSummary.summary}</p>
+            <p>模板降级原因：{promptTemplateSummary.fallbackReasonText}</p>
           </div>
           {selectedContextState.node}
           {(evidence?.degradeReasons?.length ?? 0) > 0 ? (

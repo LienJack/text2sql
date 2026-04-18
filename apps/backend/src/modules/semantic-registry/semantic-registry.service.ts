@@ -62,6 +62,7 @@ export interface SemanticRegistryLookupInput {
   domain: string;
   term: string;
   semanticVersion?: number;
+  datasourceId?: string;
 }
 
 export interface SemanticRegistryLookupResult {
@@ -81,6 +82,28 @@ export interface SemanticRegistryLookupResult {
   activated_at?: string;
   degrade_reason?: string;
   risk_tags: string[];
+  matched_scope?: "datasource" | "global";
+  matched_domain?: string;
+}
+
+export interface PublishGlossaryAnchorSemanticInput {
+  scope: "global" | "datasource";
+  scopeKey?: string;
+  datasourceId?: string | null;
+  anchorId: string;
+  anchorType?: "release" | "rollback";
+  glossaryVersion: number;
+  summary?: string | null;
+  rollbackFromAnchorId?: string | null;
+  rollbackReason?: string | null;
+  runId?: string;
+  terms: Array<{
+    term: string;
+    definition: string;
+    synonyms?: string[];
+    priority: number;
+    updatedAt: string;
+  }>;
 }
 
 type PrismaClientLike = {
@@ -136,6 +159,15 @@ export class SemanticRegistryService implements OnModuleInit, OnModuleDestroy {
   private readonly termsByVersion = new Map<string, SemanticRegistryTermRecord[]>();
 
   constructor(private readonly appConfig: AppConfigService) {}
+
+  buildDatasourceScopedDomain(domain: string, datasourceId: string): string {
+    const normalizedDomain = this.normalize(domain);
+    const normalizedDatasourceId = this.normalizeOptional(datasourceId)?.toLowerCase();
+    if (!normalizedDomain || !normalizedDatasourceId) {
+      return normalizedDomain;
+    }
+    return `${normalizedDomain}::datasource::${normalizedDatasourceId}`;
+  }
 
   async onModuleInit(): Promise<void> {
     if (!this.isPrimaryPersistenceConfigured()) {
@@ -307,56 +339,197 @@ export class SemanticRegistryService implements OnModuleInit, OnModuleDestroy {
       return {
         status: "degraded",
         degrade_reason: SEMANTIC_VERSION_NOT_FOUND_REASON,
-        risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG]
+        risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG],
+        matched_scope: "global"
       };
     }
+    const lookupDomains = this.buildLookupDomains(domain, input.datasourceId);
+    let lastVersion: SemanticRegistryVersionRecord | undefined;
+    let lastMatchedDomain: string | undefined;
+    let lastMissingReason: "version" | "term" = "version";
 
-    const version =
-      typeof input.semanticVersion === "number"
-        ? await this.getVersion(domain, input.semanticVersion)
-        : await this.getActiveVersion(domain);
-    if (!version) {
-      return {
-        status: "degraded",
-        semantic_version: input.semanticVersion,
-        degrade_reason: SEMANTIC_VERSION_NOT_FOUND_REASON,
-        risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG]
-      };
-    }
+    for (const lookupDomain of lookupDomains) {
+      const version =
+        typeof input.semanticVersion === "number"
+          ? await this.getVersion(lookupDomain, input.semanticVersion)
+          : await this.getActiveVersion(lookupDomain);
+      if (!version) {
+        continue;
+      }
+      lastVersion = version;
+      lastMatchedDomain = lookupDomain;
 
-    const terms = await this.listTermsByVersion(version.id);
-    const matchedTerm = terms.find((item) => this.normalize(item.term) === term);
-    if (!matchedTerm) {
+      const terms = await this.listTermsByVersion(version.id);
+      const matchedTerm = terms.find((item) => this.normalize(item.term) === term);
+      if (!matchedTerm) {
+        lastMissingReason = "term";
+        continue;
+      }
+
       return {
-        status: "degraded",
+        status: "ready",
         semantic_version: version.semanticVersion,
+        term: {
+          term: matchedTerm.term,
+          canonical_key: matchedTerm.canonicalKey,
+          definition: matchedTerm.definition,
+          binding: matchedTerm.binding,
+          metadata: matchedTerm.metadata
+        },
         release_summary: version.releaseSummary,
         audit_summary: version.auditSummary,
         published_by_run_id: version.publishedByRunId,
         activated_by_run_id: version.activatedByRunId,
         activated_at: version.activatedAt,
-        degrade_reason: SEMANTIC_TERM_NOT_FOUND_REASON,
-        risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG]
+        risk_tags: version.riskTags,
+        matched_scope:
+          lookupDomain === domain ? "global" : "datasource",
+        matched_domain: lookupDomain
+      };
+    }
+
+    if (!lastVersion) {
+      return {
+        status: "degraded",
+        semantic_version: input.semanticVersion,
+        degrade_reason: SEMANTIC_VERSION_NOT_FOUND_REASON,
+        risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG],
+        matched_scope: "global",
+        matched_domain: domain
       };
     }
 
     return {
-      status: "ready",
-      semantic_version: version.semanticVersion,
-      term: {
-        term: matchedTerm.term,
-        canonical_key: matchedTerm.canonicalKey,
-        definition: matchedTerm.definition,
-        binding: matchedTerm.binding,
-        metadata: matchedTerm.metadata
-      },
-      release_summary: version.releaseSummary,
-      audit_summary: version.auditSummary,
-      published_by_run_id: version.publishedByRunId,
-      activated_by_run_id: version.activatedByRunId,
-      activated_at: version.activatedAt,
-      risk_tags: version.riskTags
+      status: "degraded",
+      semantic_version: lastVersion.semanticVersion,
+      release_summary: lastVersion.releaseSummary,
+      audit_summary: lastVersion.auditSummary,
+      published_by_run_id: lastVersion.publishedByRunId,
+      activated_by_run_id: lastVersion.activatedByRunId,
+      activated_at: lastVersion.activatedAt,
+      degrade_reason:
+        lastMissingReason === "term"
+          ? SEMANTIC_TERM_NOT_FOUND_REASON
+          : SEMANTIC_VERSION_NOT_FOUND_REASON,
+      risk_tags: [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG],
+      matched_scope: lastMatchedDomain === domain ? "global" : "datasource",
+      matched_domain: lastMatchedDomain ?? domain
     };
+  }
+
+  async publishGlossaryAnchorSemantic(
+    input: PublishGlossaryAnchorSemanticInput
+  ): Promise<SemanticRegistryVersionRecord | null> {
+    const anchorId = this.normalizeOptional(input.anchorId);
+    if (!anchorId) {
+      throw new DomainError("SEMANTIC_REGISTRY_ANCHOR_ID_REQUIRED", "anchorId 不能为空", 400);
+    }
+    if (!Number.isInteger(input.glossaryVersion) || input.glossaryVersion <= 0) {
+      throw new DomainError(
+        "SEMANTIC_REGISTRY_GLOSSARY_VERSION_INVALID",
+        "glossaryVersion 必须是正整数",
+        400,
+        {
+          glossaryVersion: input.glossaryVersion
+        }
+      );
+    }
+
+    if (input.scope === "datasource" && !this.normalizeOptional(input.datasourceId ?? undefined)) {
+      throw new DomainError(
+        "SEMANTIC_REGISTRY_DATASOURCE_REQUIRED",
+        "datasource scope 必须指定 datasourceId",
+        400
+      );
+    }
+
+    const domain =
+      input.scope === "datasource"
+        ? this.buildDatasourceScopedDomain("semantic_term", input.datasourceId ?? "")
+        : "semantic_term";
+    if (!domain) {
+      return null;
+    }
+
+    const terms = input.terms
+      .map<SemanticRegistryTermInput | null>((item) => {
+        const normalizedTerm = this.normalizeOptional(item.term);
+        const normalizedDefinition = this.normalizeOptional(item.definition);
+        if (!normalizedTerm || !normalizedDefinition) {
+          return null;
+        }
+        const synonyms = Array.isArray(item.synonyms)
+          ? Array.from(
+              new Set(
+                item.synonyms
+                  .map((candidate) => this.normalizeOptional(candidate))
+                  .filter((candidate): candidate is string => Boolean(candidate))
+              )
+            )
+          : [];
+        const scopedKey =
+          input.scope === "datasource"
+            ? `datasource.${(input.datasourceId ?? "unknown").trim().toLowerCase()}`
+            : "global";
+
+        return {
+          term: normalizedTerm,
+          canonicalKey: `glossary.${scopedKey}.${normalizedTerm}`,
+          definition: normalizedDefinition,
+          binding: JSON.stringify({
+            source: "glossary_anchor",
+            glossaryVersion: input.glossaryVersion,
+            anchorId,
+            anchorType: input.anchorType ?? "release",
+            scope: input.scope,
+            scopeKey: input.scopeKey ?? null,
+            datasourceId: input.datasourceId ?? null,
+            priority: Number.isFinite(item.priority) ? Math.floor(item.priority) : 50,
+            updatedAt: item.updatedAt
+          }),
+          metadata: JSON.stringify({
+            synonyms,
+            summary: input.summary ?? null,
+            anchorType: input.anchorType ?? "release",
+            scopeKey: input.scopeKey ?? null,
+            rollbackFromAnchorId: input.rollbackFromAnchorId ?? null,
+            rollbackReason: input.rollbackReason ?? null
+          })
+        };
+      })
+      .filter((item): item is SemanticRegistryTermInput => item !== null);
+
+    if (terms.length === 0) {
+      return null;
+    }
+
+    const isRollbackOperation =
+      input.anchorType === "rollback" || Boolean(input.rollbackFromAnchorId);
+    const scopeTag =
+      input.scope === "datasource"
+        ? `glossary_scope:datasource:${(input.datasourceId ?? "unknown").trim().toLowerCase()}`
+        : "glossary_scope:global";
+
+    return this.publishVersion({
+      domain,
+      releaseSummary:
+        isRollbackOperation
+          ? `rollback glossary anchor ${anchorId} to ${input.rollbackFromAnchorId ?? "unknown"}`
+          : `release glossary anchor ${anchorId}`,
+      auditSummary: `glossary anchor semantic snapshot (anchor=${anchorId}, version=${input.glossaryVersion}, scope=${input.scope}, scopeKey=${input.scopeKey ?? scopeTag})`,
+      riskTags: [
+        "glossary_anchor_semantic_snapshot",
+        `glossary_anchor_id:${anchorId}`,
+        `glossary_anchor_type:${input.anchorType ?? "release"}`,
+        scopeTag,
+        ...(input.rollbackFromAnchorId
+          ? ["glossary_anchor_rollback", `glossary_rollback_from:${input.rollbackFromAnchorId}`]
+          : [])
+      ],
+      publishedByRunId: this.normalizeOptional(input.runId),
+      activatedByRunId: this.normalizeOptional(input.runId),
+      terms
+    });
   }
 
   private toTermRecord(
@@ -540,6 +713,17 @@ export class SemanticRegistryService implements OnModuleInit, OnModuleDestroy {
     }
     const normalized = value.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private buildLookupDomains(domain: string, datasourceId?: string): string[] {
+    if (domain.includes("::datasource::")) {
+      return [domain];
+    }
+    const normalizedDatasourceId = this.normalizeOptional(datasourceId)?.toLowerCase();
+    if (!normalizedDatasourceId) {
+      return [domain];
+    }
+    return [this.buildDatasourceScopedDomain(domain, normalizedDatasourceId), domain];
   }
 
   private toIso(input: string): string {

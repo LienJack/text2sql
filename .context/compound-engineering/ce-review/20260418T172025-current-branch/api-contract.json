@@ -1,0 +1,112 @@
+{
+  "reviewer": "api-contract",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "tracked_files_only": true
+  },
+  "stage1_spec_compliance": {
+    "status": "failed",
+    "summary": "Core chat sync/stream contract additions are generally aligned, but newly introduced RAG quality and memory contracts are not consistently modeled in shared-types and controller signatures."
+  },
+  "stage2_code_quality": {
+    "lsp_diagnostics": {
+      "status": "fallback_used",
+      "reason": "omx_code_intel MCP transport closed during this review",
+      "fallback_checks": [
+        {
+          "command": "pnpm --filter @text2sql/shared-types run build",
+          "result": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/backend run build",
+          "result": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/frontend run build",
+          "result": "pass"
+        }
+      ]
+    },
+    "pattern_scans": {
+      "console_log_in_diff": "none",
+      "empty_catch_in_diff": "none",
+      "hardcoded_api_key_assignment_in_diff": "none"
+    }
+  },
+  "findings": [
+    {
+      "title": "RagQuality shared contract is missing fields returned by the new backend response",
+      "severity": "P1",
+      "file": "packages/shared-types/src/api.ts",
+      "line": 165,
+      "confidence": 0.97,
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Extend `RagQualityGateReport` in shared-types to include `datasourceOrchestration`, `cacheBudget`, and `r6` so it matches backend snapshot payload. Keep field names and nested shapes aligned with `apps/backend/src/modules/rag/quality/rag-quality.service.ts` to avoid typed-client blind spots."
+    },
+    {
+      "title": "New API controllers use `ApiResponse<unknown>`, which disables compile-time DTO/response contract locking",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.controller.ts",
+      "line": 15,
+      "confidence": 0.93,
+      "autofix_class": "gated_auto",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Replace `ApiResponse<unknown>` with concrete shared-types contracts: `ApiResponse<RagQualityGateReport>` for `/report`, `ApiResponse<RagReplayCompletenessReport>` for `/replay/:runId`, and similarly type memory feedback endpoint as `ApiResponse<RagMemoryFeedbackResponse>` in `memory.controller.ts`."
+    },
+    {
+      "title": "RAG quality report write endpoint uses service-local interface instead of a shared request DTO contract",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.controller.ts",
+      "line": 21,
+      "confidence": 0.9,
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Introduce a shared request contract (for example `RagQualityEvaluationRequest`) in `packages/shared-types`, mirror it with a backend class-validator DTO, and use that DTO in controller signatures to keep request shape consistent across producer/consumer code."
+    }
+  ],
+  "residual_risks": [
+    "Typed frontend/backend integrations can silently miss R6 and orchestration metrics even though backend already emits them.",
+    "`unknown`-typed controller responses increase future contract drift risk for newly added RAG endpoints."
+  ],
+  "testing_gaps": [
+    "No contract-freeze test currently asserts that shared `RagQualityGateReport` exactly matches backend `/api/v1/rag/quality/report` payload keys.",
+    "No compile-time API contract assertion binds `memory.controller` and `rag-quality.controller` return types to shared-types interfaces."
+  ],
+  "recommendation": "REQUEST_CHANGES",
+  "fresh_verification_evidence": {
+    "verified_at": "2026-04-18T17:46:37+09:00",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "head": "105684cf7a23ec4b6e6f3ee7a08c1a73ef100fa2",
+    "base_ancestor": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "checks": [
+      {
+        "name": "backend_rag_quality_fields",
+        "command": "rg -n \"datasourceOrchestration|cacheBudget|\\br6\\b\" apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+        "result": "109:  datasourceOrchestration: RagDatasourceOrchestrationReport;\n110:  cacheBudget: RagCacheBudgetReport;\n124:  r6: RagR6GateReport;\n199:  \"data/reports/r6/gate-summary.json\",\n200:  \"data/reports/r6/cache-budget-validation.json\",\n201:  \"data/reports/r6/graph-fallback-chaos.json\",\n202:  \"data/reports/r6/release-checklist.md\",\n203:  \"data/reports/r6/rollback-rehearsal.md\"\n294:  private readonly cacheBudgetRecords: RagCacheBudgetRecord[] = [];\n315:    this.cacheBudgetRecords.length = 0;\n334:    this.cacheBudgetRecords.push({\n372:    const r6 = this.snapshotR6(latest);\n379:      datasourceOrchestration: this.snapshotDatasourceOrchestration(),\n380:      cacheBudget: this.snapshotCacheBudget(),\n396:      r6,\n618:    const samples = this.cacheBudgetRecords.filter(\n651:    const cacheBudget = this.snapshotCacheBudget();\n653:    const cacheSamples = cacheBudget.sampleSize1h;\n696:          value: cacheBudget.cacheEligibleHitRate,\n710:          value: cacheBudget.budgetDegradeRate,\n761:      releaseCandidate: process.env.RELEASE_CANDIDATE?.trim() || \"r6-local\","
+      },
+      {
+        "name": "shared_rag_quality_fields",
+        "command": "rg -n \"interface RagQualityGateReport|datasourceOrchestration|cacheBudget|\\br6\\b\" packages/shared-types/src/api.ts",
+        "result": "189:export interface RagQualityGateReport {"
+      },
+      {
+        "name": "unknown_typed_api_responses",
+        "command": "rg -n \"ApiResponse<unknown>\" apps/backend/src/modules/rag/quality/rag-quality.controller.ts apps/backend/src/modules/memory/memory.controller.ts",
+        "result": "apps/backend/src/modules/memory/memory.controller.ts:20:  ): Promise<ApiResponse<unknown>> {\napps/backend/src/modules/rag/quality/rag-quality.controller.ts:15:  report(@Req() req: Request): ApiResponse<unknown> {\napps/backend/src/modules/rag/quality/rag-quality.controller.ts:20:  reportGlossarySelectedContext(@Req() req: Request): ApiResponse<unknown> {\napps/backend/src/modules/rag/quality/rag-quality.controller.ts:29:  ): ApiResponse<unknown> {\napps/backend/src/modules/rag/quality/rag-quality.controller.ts:38:  ): Promise<ApiResponse<unknown>> {"
+      },
+      {
+        "name": "shared_types_build",
+        "command": "pnpm --filter @text2sql/shared-types run build",
+        "result": "pass"
+      }
+    ]
+  }
+}

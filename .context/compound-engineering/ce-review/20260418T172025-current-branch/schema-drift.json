@@ -1,0 +1,12 @@
+{
+  "status": "clean",
+  "details": [
+    "schema.prisma adds PromptTemplate + Glossary entities and only back-relations on existing models.",
+    "Migration 20260418055410_glossary_rag_linkage matches glossary tables/indexes/FKs added in schema.",
+    "Migration 20260418074904_prompt_templates_foundation matches prompt template enums/table/indexes added in schema.",
+    "No unrelated ALTER/DROP changes against pre-existing schema objects were detected in tracked migration files.",
+    "Fresh check: git status shows Prisma scope limited to schema.prisma + two new migration directories.",
+    "Fresh check: migration SQL scan found only FK ALTER TABLE statements; no DROP TABLE / DROP INDEX / DROP TYPE drift signals.",
+    "Fresh check: `pnpm --filter @text2sql/backend exec prisma validate --schema prisma/schema.prisma` returned schema valid."
+  ]
+}

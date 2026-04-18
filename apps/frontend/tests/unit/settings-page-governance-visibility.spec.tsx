@@ -3,7 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LlmSettingsView, RagQualityGateReport } from "@text2sql/shared-types";
 import SettingsPage from "@/app/settings/page";
-import { listWorkspaces } from "@/lib/admin-api-client";
+import {
+  AdminApiError,
+  createGlossaryAnchor,
+  listGlossaryAnchors,
+  listWorkspaces,
+  rollbackGlossaryAnchor
+} from "@/lib/admin-api-client";
 import {
   batchSetModelsEnabled,
   checkProviderHealth,
@@ -40,7 +46,10 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin-api-client")>();
   return {
     ...actual,
-    listWorkspaces: vi.fn()
+    listWorkspaces: vi.fn(),
+    listGlossaryAnchors: vi.fn(),
+    createGlossaryAnchor: vi.fn(),
+    rollbackGlossaryAnchor: vi.fn()
   };
 });
 
@@ -65,6 +74,9 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
 });
 
 const mockListWorkspaces = vi.mocked(listWorkspaces);
+const mockListGlossaryAnchors = vi.mocked(listGlossaryAnchors);
+const mockCreateGlossaryAnchor = vi.mocked(createGlossaryAnchor);
+const mockRollbackGlossaryAnchor = vi.mocked(rollbackGlossaryAnchor);
 const mockFetchSettingsView = vi.mocked(fetchSettingsView);
 const mockFetchSupportedProviders = vi.mocked(fetchSupportedProviders);
 const mockFetchBackendHealthSnapshot = vi.mocked(fetchBackendHealthSnapshot);
@@ -306,6 +318,87 @@ describe("SettingsPage governance visibility", () => {
       page: 1,
       pageSize: 200
     });
+    mockListGlossaryAnchors.mockResolvedValue({
+      items: [
+        {
+          id: "anchor-release-v2",
+          scope: "global",
+          scopeKey: "global",
+          datasourceId: null,
+          version: 2,
+          anchorType: "release",
+          status: "active",
+          summary: "release",
+          rollbackFromAnchorId: null,
+          rollbackReason: null,
+          createdByRunId: "run-anchor-release-v2",
+          metadata: null,
+          createdAt: "2026-04-18T00:00:00.000Z",
+          updatedAt: "2026-04-18T00:00:00.000Z"
+        },
+        {
+          id: "anchor-rollback-v1",
+          scope: "global",
+          scopeKey: "global",
+          datasourceId: null,
+          version: 1,
+          anchorType: "rollback",
+          status: "active",
+          summary: "rollback",
+          rollbackFromAnchorId: "anchor-release-v1",
+          rollbackReason: "manual-check",
+          createdByRunId: "run-anchor-rollback-v1",
+          metadata: null,
+          createdAt: "2026-04-18T00:01:00.000Z",
+          updatedAt: "2026-04-18T00:01:00.000Z"
+        }
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 50
+    });
+    mockCreateGlossaryAnchor.mockResolvedValue({
+      anchor: {
+        id: "anchor-release-v3",
+        scope: "global",
+        scopeKey: "global",
+        datasourceId: null,
+        version: 3,
+        anchorType: "release",
+        status: "active",
+        summary: "release v3",
+        rollbackFromAnchorId: null,
+        rollbackReason: null,
+        createdByRunId: "run-anchor-release-v3",
+        metadata: null,
+        createdAt: "2026-04-18T00:02:00.000Z",
+        updatedAt: "2026-04-18T00:02:00.000Z"
+      },
+      previousAnchorId: "anchor-release-v2",
+      replayed: false,
+      idempotencyKey: "idem-create-v3"
+    });
+    mockRollbackGlossaryAnchor.mockResolvedValue({
+      activeAnchor: {
+        id: "anchor-rollback-v3",
+        scope: "global",
+        scopeKey: "global",
+        datasourceId: null,
+        version: 3,
+        anchorType: "rollback",
+        status: "active",
+        summary: "rollback v3",
+        rollbackFromAnchorId: "anchor-release-v3",
+        rollbackReason: "manual",
+        createdByRunId: "run-anchor-rollback-v3",
+        metadata: null,
+        createdAt: "2026-04-18T00:03:00.000Z",
+        updatedAt: "2026-04-18T00:03:00.000Z"
+      },
+      previousAnchorId: "anchor-release-v3",
+      replayed: false,
+      idempotencyKey: "idem-rollback-v3"
+    });
   });
 
   afterEach(() => {
@@ -322,6 +415,64 @@ describe("SettingsPage governance visibility", () => {
     await waitFor(() => {
       expect(mockListWorkspaces).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("supports create and rollback actions in users governance section", async () => {
+    const user = userEvent.setup();
+    mockFetchSettingsView.mockResolvedValue(createSettingsView("admin"));
+    render(<SettingsPage />);
+
+    await screen.findByText("用户列表");
+    await user.click(screen.getByRole("tab", { name: "用户列表" }));
+    expect(await screen.findByText("术语锚点治理")).toBeInTheDocument();
+    expect(screen.getByText(/当前锚点：release · v2 · global/)).toBeInTheDocument();
+    expect(screen.getByText(/最近回滚：v1 · from=anchor-release-v1/)).toBeInTheDocument();
+
+    const versionInput = screen.getByLabelText("锚点版本号");
+    await user.clear(versionInput);
+    await user.type(versionInput, "3");
+    await user.click(screen.getByRole("button", { name: "创建锚点" }));
+
+    await waitFor(() => {
+      expect(mockCreateGlossaryAnchor).toHaveBeenCalledWith({
+        scope: "global",
+        version: 3,
+        summary: undefined
+      });
+    });
+    expect(await screen.findByText("已创建锚点 anchor-release-v3（v3）")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("回滚目标锚点"), "anchor-release-v2");
+    await user.click(screen.getByRole("button", { name: "执行回滚" }));
+
+    await waitFor(() => {
+      expect(mockRollbackGlossaryAnchor).toHaveBeenCalledWith({
+        scope: "global",
+        targetAnchorId: "anchor-release-v2",
+        rollbackReason: undefined
+      });
+    });
+    expect(await screen.findByText("回滚完成，当前锚点 anchor-rollback-v3")).toBeInTheDocument();
+  });
+
+  it("renders readable 403 error when rollback is forbidden", async () => {
+    const user = userEvent.setup();
+    mockFetchSettingsView.mockResolvedValue(createSettingsView("admin"));
+    mockRollbackGlossaryAnchor.mockRejectedValueOnce(
+      new AdminApiError("仅管理员可执行回滚。", {
+        code: "FORBIDDEN"
+      })
+    );
+    render(<SettingsPage />);
+
+    await screen.findByText("用户列表");
+    await user.click(screen.getByRole("tab", { name: "用户列表" }));
+    await screen.findByText("术语锚点治理");
+    await user.click(screen.getByRole("button", { name: "执行回滚" }));
+
+    expect(
+      await screen.findByText("无权限（403）：仅管理员可执行回滚。")
+    ).toBeInTheDocument();
   });
 
   it("hides governance tabs for non-admin actor", async () => {
@@ -375,6 +526,25 @@ describe("SettingsPage governance visibility", () => {
     expect(await screen.findByText("Foundation 状态")).toBeInTheDocument();
     expect(screen.getByText("激活成功")).toBeInTheDocument();
     expect(screen.getByText(/索引版本：idx-orders-v2/)).toBeInTheDocument();
+  });
+
+  it("shows glossary anchor governance visibility on rag tab", async () => {
+    const user = userEvent.setup();
+    mockFetchSettingsView.mockResolvedValue(createSettingsView("admin"));
+    render(<SettingsPage />);
+
+    await screen.findByText("用户列表");
+    await user.click(screen.getByRole("tab", { name: "RAG 运行" }));
+
+    expect(await screen.findByText("术语锚点治理")).toBeInTheDocument();
+    expect(screen.getByText("当前锚点：release · v2 · global")).toBeInTheDocument();
+    expect(
+      screen.getByText("最近回滚：v1 · from=anchor-release-v1 · manual-check")
+    ).toBeInTheDocument();
+    expect(mockListGlossaryAnchors).toHaveBeenCalledWith({
+      page: 1,
+      pageSize: 50
+    });
   });
 
   it("shows explicit empty state when foundation data is missing", async () => {

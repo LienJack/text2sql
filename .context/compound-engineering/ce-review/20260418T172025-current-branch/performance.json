@@ -1,0 +1,153 @@
+{
+  "reviewer": "performance",
+  "timestamp": "2026-04-18T17:20:25+09:00",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "tracked_files_only": true
+  },
+  "focus": [
+    "query/runtime hotspots",
+    "inefficient loops/transforms",
+    "cache invalidation and key correctness",
+    "RAG retrieval/rerank latency risks and quota/orchestration scalability"
+  ],
+  "summary": {
+    "high": 4,
+    "medium": 3,
+    "low": 0
+  },
+  "findings": [
+    {
+      "title": "Rerank cache key omits model and manual rerank switches, causing cross-configuration stale hits",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/rerank/rag-rerank.service.ts",
+      "line": 65,
+      "confidence": "high",
+      "autofix_class": "cache_key_fix",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Include `modelCatalogId`, effective `secondaryEnabled` (budget + request override), and `secondaryTimeoutMs`/`secondaryMinCandidates` in the rerank cache key. Keep cache keys aligned with all inputs that can change rerank ordering/output."
+    },
+    {
+      "title": "Retrieval executes full-index in-process scans per request (O(N) lanes + full sort), which will not scale with index size",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 162,
+      "confidence": "high",
+      "autofix_class": "algorithmic_optimization",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Push candidate narrowing into persistence/search layer (lexical + vector + graph prefilter) and retrieve bounded top-K per lane. Replace full-array sort with top-K heap/select to avoid O(N log N) on every lane."
+    },
+    {
+      "title": "Lane timeout guard does not cap CPU-heavy lexical/dense work because those lanes are synchronous",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 329,
+      "confidence": "high",
+      "autofix_class": "timeout_enforcement",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Make lexical/dense execution cooperatively cancellable (chunked async loop with deadline checks) or offload to worker threads/processes. `Promise.race` with `setTimeout` only limits async waits, not synchronous CPU loops."
+    },
+    {
+      "title": "Replay persistence is synchronous in retrieval/rerank hot paths and adds multiple blocking upserts per request",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 156,
+      "confidence": "high",
+      "autofix_class": "async_pipeline",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Move replay writes to async/background queue (or batched fire-and-forget with bounded retry), and keep only essential latency-critical state on request path. If synchronous writes are required, batch replay records in one repository call/transaction."
+    },
+    {
+      "title": "Replay store performs global in-memory scans for per-run lookups, creating O(total_replays) overhead on response mapping",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/rag/observability/rag-replay.repository.ts",
+      "line": 201,
+      "confidence": "high",
+      "autofix_class": "data_structure_refactor",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Index memory by `runId` (e.g., `Map<runId, Map<replayKey, record>>`) instead of filtering the global map for each lookup. Also add bounded retention/eviction for in-memory replay cache."
+    },
+    {
+      "title": "Query cache deep-clones values with JSON serialize/parse on every read/write, amplifying CPU and GC under load",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/rag/perf/rag-query-cache.service.ts",
+      "line": 157,
+      "confidence": "high",
+      "autofix_class": "hotpath_optimization",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Avoid JSON deep clone in hot path. Prefer immutable cached payloads, structuredClone with benchmarks, or shallow-copy targeted mutable fields only."
+    },
+    {
+      "title": "Datasource orchestrator queue dispatch uses repeated linear scans and degrades at large queue depth",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/rag/orchestration/rag-datasource-orchestrator.service.ts",
+      "line": 62,
+      "confidence": "medium",
+      "autofix_class": "queue_algorithm",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Use partitioned ready-queues (by workspace/datasource eligibility) or maintain a rotating cursor/priority structure to avoid O(n) scans per dispatch cycle."
+    }
+  ],
+  "residual_risks": [
+    "`RagQualityService` and replay/query caches keep unbounded in-memory arrays/maps, so long-lived processes can accumulate memory and increase lookup costs over time.",
+    "Current retrieval architecture still computes lexical+dense+graph lanes in a single Node.js process; quota degradation reduces candidate counts but does not fundamentally cap worst-case CPU for large indexes."
+  ],
+  "testing_gaps": [
+    "No stress benchmark asserting retrieval latency vs index cardinality growth (e.g., 10k/100k chunk tiers).",
+    "No regression test validating rerank cache-key isolation across `modelCatalogId` and `secondaryEnabled` toggles.",
+    "No load test proving replay write path can sustain target QPS without materially impacting p95 chat latency."
+  ],
+  "diagnostics": {
+    "lsp_diagnostics": "unavailable (omx_code_intel transport closed)",
+    "fallback_typecheck": {
+      "backend_tsc_noemit": "pass",
+      "frontend_tsc_noemit": "pass",
+      "shared_types_tsc_noemit": "pass"
+    },
+    "pattern_checks": {
+      "console_log": "no matches in apps/backend/src apps/frontend/src packages/shared-types/src",
+      "empty_catch": "no matches in apps/backend/src apps/frontend/src packages/shared-types/src",
+      "hardcoded_api_key_assignment": "no matches in apps/backend/src apps/frontend/src packages/shared-types/src"
+    }
+  },
+  "fresh_verification": {
+    "verified_at_utc": "2026-04-18T08:30:34Z",
+    "head_commit": "105684cf7a23ec4b6e6f3ee7a08c1a73ef100fa2",
+    "perf_tests": [
+      {
+        "command": "pnpm --filter @text2sql/backend test -- test/perf/rag-cache-budget-load.spec.ts --runInBand",
+        "result": "pass",
+        "suite": "rag cache budget load",
+        "tests_passed": "1/1"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend test -- test/perf/rag-r6-mixed-load.spec.ts --runInBand",
+        "result": "pass",
+        "suite": "rag r6 mixed load perf",
+        "tests_passed": "1/1"
+      }
+    ],
+    "line_rechecks": [
+      "apps/backend/src/modules/rag/rerank/rag-rerank.service.ts:65",
+      "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:162",
+      "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:329",
+      "apps/backend/src/modules/rag/observability/rag-replay.repository.ts:201"
+    ]
+  },
+  "recommendation": "REQUEST_CHANGES"
+}

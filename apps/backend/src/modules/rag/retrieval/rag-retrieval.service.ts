@@ -36,6 +36,7 @@ const DEFAULT_LANE_TIMEOUT_MS: Record<RagRetrievalLane, number> = {
   graph: 300
 };
 const REQUIRED_DOMAIN_COVERAGE = ["schema", "sql_example", "semantic_term"];
+const SEMANTIC_PROMOTED_DEGRADED_REASON = "semantic_promoted_linkage_degraded";
 
 class LaneTimeoutError extends Error {
   constructor(public readonly lane: RagRetrievalLane) {
@@ -175,14 +176,16 @@ export class RagRetrievalService {
       graph: laneResults.graph.hits
     };
     const fused = fuseWithRrf({ laneHits });
-    const candidates = this.applyDomainCoverage(
+    const coveredCandidates = this.applyDomainCoverage(
       fused,
       finalCandidateLimit,
       REQUIRED_DOMAIN_COVERAGE
     );
+    const candidates = this.decorateSemanticCandidates(coveredCandidates);
     const skillContext = await this.resolveSkillContext(query, candidates);
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
+    degradeReasons.push(...this.collectSemanticLinkageDegradeReasons(candidates));
     if (skillContext.degrade_reason) {
       degradeReasons.push(skillContext.degrade_reason);
     }
@@ -646,6 +649,46 @@ export class RagRetrievalService {
     return degradeReasons;
   }
 
+  private collectSemanticLinkageDegradeReasons(
+    candidates: RagRetrievalCandidate[]
+  ): string[] {
+    const reasons: string[] = [];
+    for (const candidate of candidates) {
+      if (candidate.chunk.metadata.domain !== "semantic_term") {
+        continue;
+      }
+      const sourceMetadata = candidate.chunk.metadata.sourceMetadata;
+      const linkageStatus =
+        this.isRecord(sourceMetadata) && typeof sourceMetadata.linkageStatus === "string"
+          ? sourceMetadata.linkageStatus.trim().toLowerCase()
+          : undefined;
+      if (linkageStatus !== "degraded") {
+        continue;
+      }
+      const degradeReason =
+        this.isRecord(sourceMetadata) && typeof sourceMetadata.linkageDegradeReason === "string"
+          ? sourceMetadata.linkageDegradeReason.trim()
+          : undefined;
+      reasons.push(degradeReason || SEMANTIC_PROMOTED_DEGRADED_REASON);
+    }
+    return reasons;
+  }
+
+  private decorateSemanticCandidates(
+    candidates: RagRetrievalCandidate[]
+  ): RagRetrievalCandidate[] {
+    return candidates.map((candidate) => {
+      const semanticHitClues = this.readSemanticHitClues(candidate.chunk.metadata.sourceMetadata);
+      if (semanticHitClues.length === 0) {
+        return candidate;
+      }
+      return {
+        ...candidate,
+        evidence: this.unique([...candidate.evidence, ...semanticHitClues])
+      };
+    });
+  }
+
   private resolveLaneTimeoutMs(
     input: RagRetrievalRequest
   ): Record<RagRetrievalLane, number> {
@@ -799,6 +842,18 @@ export class RagRetrievalService {
         .map((item) => this.readString(item))
         .filter((item): item is string => Boolean(item))
     );
+  }
+
+  private readSemanticHitClues(value: unknown): string[] {
+    if (!this.isRecord(value)) {
+      return [];
+    }
+    return this.readStringArray(value.semanticHitClues).map((clue) => {
+      if (clue.includes(":")) {
+        return clue;
+      }
+      return `semantic_hit:${clue}`;
+    });
   }
 
   private async persistReplay(bundle: RagRetrievalResponse["retrieval_bundle"]): Promise<void> {

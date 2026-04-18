@@ -10,11 +10,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  GlossaryAnchor,
   LlmSettingsView,
   ModelCatalogItem,
   RagMemoryStatus,
   RagQualityGateReport,
   RagReplayCompletenessReport,
+  RollbackGlossaryAnchorResponse,
   SqlRun
 } from "@text2sql/shared-types";
 import { RagFoundationStatusCard } from "@/components/chat/rag-foundation-status-card";
@@ -28,7 +30,14 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { StateBlock } from "@/components/ui/state-block";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { listWorkspaces, type WorkspaceSummary } from "@/lib/admin-api-client";
+import {
+  AdminApiError,
+  createGlossaryAnchor,
+  listGlossaryAnchors,
+  listWorkspaces,
+  rollbackGlossaryAnchor,
+  type WorkspaceSummary
+} from "@/lib/admin-api-client";
 import { getRun } from "@/lib/api-client";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "@/lib/datasource-session-context";
 import {
@@ -106,6 +115,16 @@ function resolveWorkspaceId(
     : (items[0]?.id ?? "");
 }
 
+function formatGovernanceError(error: unknown): string {
+  if (error instanceof AdminApiError) {
+    if (error.code === "FORBIDDEN") {
+      return `无权限（403）：${error.message}`;
+    }
+    return error.code ? `${error.message}（${error.code}）` : error.message;
+  }
+  return error instanceof Error ? error.message : "术语锚点治理操作失败";
+}
+
 export default function SettingsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -135,6 +154,19 @@ export default function SettingsPage() {
   const [ragQuality, setRagQuality] = useState<RagQualityGateReport | null>(null);
   const [ragReplay, setRagReplay] = useState<RagReplayCompletenessReport | null>(null);
   const [ragRun, setRagRun] = useState<SqlRun | null>(null);
+  const [glossaryAnchors, setGlossaryAnchors] = useState<GlossaryAnchor[]>([]);
+  const [glossaryAnchorError, setGlossaryAnchorError] = useState("");
+  const [activeGlossaryAnchorText, setActiveGlossaryAnchorText] = useState("暂无锚点");
+  const [latestRollbackAnchorText, setLatestRollbackAnchorText] = useState("暂无回滚记录");
+  const [anchorVersionInput, setAnchorVersionInput] = useState("1");
+  const [anchorSummaryInput, setAnchorSummaryInput] = useState("");
+  const [rollbackTargetAnchorId, setRollbackTargetAnchorId] = useState("");
+  const [rollbackReasonInput, setRollbackReasonInput] = useState("");
+  const [governanceActionMessage, setGovernanceActionMessage] = useState("");
+  const [latestRollbackResult, setLatestRollbackResult] =
+    useState<RollbackGlossaryAnchorResponse | null>(null);
+  const [anchorSubmitting, setAnchorSubmitting] = useState(false);
+  const [rollbackSubmitting, setRollbackSubmitting] = useState(false);
   const [ragRunId, setRagRunId] = useState("");
   const [ragRunSource, setRagRunSource] = useState<RagRunSource>("none");
   const [feedbackRunId, setFeedbackRunId] = useState("");
@@ -178,13 +210,15 @@ export default function SettingsPage() {
     setRagLoading(true);
     setRagError("");
     setRagFoundationError("");
+    setGlossaryAnchorError("");
 
     const deepLinkRunId = readRunIdFromQuery();
     const ragErrors: string[] = [];
     let quality: RagQualityGateReport | null = null;
-    const [healthResult, qualityResult] = await Promise.allSettled([
+    const [healthResult, qualityResult, glossaryAnchorsResult] = await Promise.allSettled([
       fetchBackendHealthSnapshot(),
-      fetchRagQualityReport()
+      fetchRagQualityReport(),
+      listGlossaryAnchors({ page: 1, pageSize: 50 })
     ]);
 
     if (healthResult.status === "fulfilled") {
@@ -207,6 +241,35 @@ export default function SettingsPage() {
         qualityResult.reason instanceof Error
           ? qualityResult.reason.message
           : "加载 RAG 质量报告失败"
+      );
+    }
+
+    if (glossaryAnchorsResult.status === "fulfilled") {
+      const items = glossaryAnchorsResult.value.items;
+      setGlossaryAnchors(items);
+      const activeAnchor = items.find((item) => item.status === "active") ?? null;
+      const latestRollback = items.find((item) => item.anchorType === "rollback") ?? null;
+      setRollbackTargetAnchorId((previous) => previous || activeAnchor?.id || "");
+      setActiveGlossaryAnchorText(
+        activeAnchor
+          ? `${activeAnchor.anchorType} · v${activeAnchor.version} · ${activeAnchor.scopeKey}`
+          : "暂无锚点"
+      );
+      setLatestRollbackAnchorText(
+        latestRollback
+          ? `v${latestRollback.version} · from=${latestRollback.rollbackFromAnchorId ?? "unknown"}${
+              latestRollback.rollbackReason ? ` · ${latestRollback.rollbackReason}` : ""
+            }`
+          : "暂无回滚记录"
+      );
+    } else {
+      setGlossaryAnchors([]);
+      setActiveGlossaryAnchorText("暂无锚点");
+      setLatestRollbackAnchorText("暂无回滚记录");
+      setGlossaryAnchorError(
+        glossaryAnchorsResult.reason instanceof Error
+          ? glossaryAnchorsResult.reason.message
+          : "加载术语锚点失败"
       );
     }
 
@@ -402,6 +465,13 @@ export default function SettingsPage() {
       }`
     : "skills=0（字段缺失）, context=0（字段缺失）, degradeReason=不可用（字段缺失）";
   const canSubmitFeedback = actorRole === "admin" && feedbackRunId.trim().length > 0;
+  const anchorCandidates = useMemo(
+    () =>
+      glossaryAnchors.filter(
+        (anchor) => anchor.anchorType === "release" || anchor.anchorType === "rollback"
+      ),
+    [glossaryAnchors]
+  );
 
   const submitFeedback = async (): Promise<void> => {
     if (!canSubmitFeedback) {
@@ -427,6 +497,73 @@ export default function SettingsPage() {
       );
     } finally {
       setFeedbackSubmitting(false);
+    }
+  };
+
+  const submitCreateAnchor = async (): Promise<void> => {
+    if (actorRole !== "admin") {
+      setGovernanceActionMessage("当前账号无权创建锚点。");
+      return;
+    }
+    const version = Number.parseInt(anchorVersionInput.trim(), 10);
+    if (!Number.isFinite(version) || version <= 0) {
+      setGovernanceActionMessage("版本号必须是大于 0 的整数。");
+      return;
+    }
+
+    setAnchorSubmitting(true);
+    setGovernanceActionMessage("");
+    try {
+      const result = await createGlossaryAnchor({
+        scope: "global",
+        version,
+        summary: anchorSummaryInput.trim() || undefined
+      });
+      setGovernanceActionMessage(
+        result.replayed
+          ? `锚点已存在，复用 ${result.anchor.id}（v${result.anchor.version}）`
+          : `已创建锚点 ${result.anchor.id}（v${result.anchor.version}）`
+      );
+      setAnchorSummaryInput("");
+      await loadRagView();
+    } catch (submitError) {
+      setGovernanceActionMessage(formatGovernanceError(submitError));
+    } finally {
+      setAnchorSubmitting(false);
+    }
+  };
+
+  const submitRollbackAnchor = async (): Promise<void> => {
+    if (actorRole !== "admin") {
+      setGovernanceActionMessage("当前账号无权执行回滚。");
+      return;
+    }
+    const targetAnchorId = rollbackTargetAnchorId.trim();
+    if (!targetAnchorId) {
+      setGovernanceActionMessage("请先选择或输入要回滚到的锚点 ID。");
+      return;
+    }
+
+    setRollbackSubmitting(true);
+    setGovernanceActionMessage("");
+    try {
+      const result = await rollbackGlossaryAnchor({
+        scope: "global",
+        targetAnchorId,
+        rollbackReason: rollbackReasonInput.trim() || undefined
+      });
+      setLatestRollbackResult(result);
+      setGovernanceActionMessage(
+        result.replayed
+          ? `回滚目标已激活：${result.activeAnchor.id}`
+          : `回滚完成，当前锚点 ${result.activeAnchor.id}`
+      );
+      setRollbackReasonInput("");
+      await loadRagView();
+    } catch (submitError) {
+      setGovernanceActionMessage(formatGovernanceError(submitError));
+    } finally {
+      setRollbackSubmitting(false);
     }
   };
 
@@ -556,6 +693,7 @@ export default function SettingsPage() {
                 }
                 if (actorRole === "admin") {
                   void loadWorkspaceOptions(true);
+                  void loadRagView();
                 }
                 setManagementRefreshToken((previous) => previous + 1);
               }}
@@ -702,6 +840,19 @@ export default function SettingsPage() {
 
               <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
                 <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  术语锚点治理
+                </h3>
+                {glossaryAnchorError ? (
+                  <StateBlock variant="error">{glossaryAnchorError}</StateBlock>
+                ) : null}
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>当前锚点：{activeGlossaryAnchorText}</p>
+                  <p>最近回滚：{latestRollbackAnchorText}</p>
+                </div>
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
                   语义与回放概览
                 </h3>
                 {ragRunId ? (
@@ -801,12 +952,111 @@ export default function SettingsPage() {
               )}
             </div>
           ) : tab === "users" ? (
-            <UsersManagementPanel
-              actorRole={actorRole}
-              workspaceScopeId={workspaceId}
-              workspaceScopeName={selectedWorkspace?.name}
-              refreshToken={managementRefreshToken}
-            />
+            <div className="space-y-4">
+              <section className="space-y-3 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  术语锚点治理
+                </h3>
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>当前锚点：{activeGlossaryAnchorText}</p>
+                  <p>
+                    最近回滚：
+                    {latestRollbackResult
+                      ? `${latestRollbackResult.activeAnchor.id}（replayed=${latestRollbackResult.replayed ? "true" : "false"}）`
+                      : latestRollbackAnchorText}
+                  </p>
+                </div>
+                {glossaryAnchorError ? (
+                  <StateBlock variant="error">{glossaryAnchorError}</StateBlock>
+                ) : null}
+
+                {actorRole === "admin" ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2 rounded-md border border-[var(--border-default)] bg-white/70 p-3">
+                      <p className="text-xs font-medium text-[var(--text-secondary)]">
+                        创建锚点（global）
+                      </p>
+                      <Input
+                        value={anchorVersionInput}
+                        onChange={(event) => setAnchorVersionInput(event.target.value)}
+                        placeholder="版本号，例如 2"
+                        aria-label="锚点版本号"
+                      />
+                      <Input
+                        value={anchorSummaryInput}
+                        onChange={(event) => setAnchorSummaryInput(event.target.value)}
+                        placeholder="摘要（可选）"
+                        aria-label="锚点摘要"
+                      />
+                      <Button
+                        onClick={() => {
+                          void submitCreateAnchor();
+                        }}
+                        disabled={anchorSubmitting}
+                      >
+                        {anchorSubmitting ? "创建中..." : "创建锚点"}
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2 rounded-md border border-[var(--border-default)] bg-white/70 p-3">
+                      <p className="text-xs font-medium text-[var(--text-secondary)]">
+                        执行回滚（global）
+                      </p>
+                      <NativeSelect
+                        value={rollbackTargetAnchorId}
+                        onChange={(event) => setRollbackTargetAnchorId(event.target.value)}
+                        aria-label="回滚目标锚点"
+                      >
+                        <NativeSelectOption value="">请选择回滚目标锚点</NativeSelectOption>
+                        {anchorCandidates.map((anchor) => (
+                          <NativeSelectOption key={anchor.id} value={anchor.id}>
+                            {`${anchor.id} · v${anchor.version} · ${anchor.anchorType}`}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                      <Input
+                        value={rollbackReasonInput}
+                        onChange={(event) => setRollbackReasonInput(event.target.value)}
+                        placeholder="回滚原因（可选）"
+                        aria-label="回滚原因"
+                      />
+                      <Button
+                        onClick={() => {
+                          void submitRollbackAnchor();
+                        }}
+                        disabled={rollbackSubmitting}
+                      >
+                        {rollbackSubmitting ? "回滚中..." : "执行回滚"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <StateBlock variant="idle">
+                    当前账号只读，可查看锚点状态，不可创建或回滚。
+                  </StateBlock>
+                )}
+
+                {governanceActionMessage ? (
+                  <StateBlock
+                    variant={
+                      governanceActionMessage.includes("无权限") ||
+                      governanceActionMessage.includes("失败")
+                        ? "error"
+                        : "success"
+                    }
+                  >
+                    {governanceActionMessage}
+                  </StateBlock>
+                ) : null}
+              </section>
+
+              <UsersManagementPanel
+                actorRole={actorRole}
+                workspaceScopeId={workspaceId}
+                workspaceScopeName={selectedWorkspace?.name}
+                refreshToken={managementRefreshToken}
+              />
+            </div>
           ) : (
             <div className="space-y-4">
               <StateBlock variant="idle">

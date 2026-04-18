@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/commo
 import type {
   ChatMessage,
   EvaluationReport,
+  PromptTemplateTraceEvidenceCompat,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -478,46 +479,54 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   }
 
   async persistRun(run: SqlRun): Promise<void> {
-    this.runs.set(run.runId, run);
+    const normalizedRun: SqlRun = {
+      ...run,
+      trace: this.normalizeTrace(run.trace, run.runId, run.provider)
+    };
+    this.runs.set(normalizedRun.runId, normalizedRun);
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
       return;
     }
     await this.tryPrismaWrite(async () => {
       await this.prisma?.sqlRun.upsert({
-        where: { runId: run.runId },
+        where: { runId: normalizedRun.runId },
         update: {
-          status: run.status,
-          provider: run.provider,
-          model: run.model ?? null,
-          question: run.question,
-          sql: run.sql ?? null,
-          explanation: run.explanation ?? null,
-          answer: run.answer ?? null,
-          columns: run.columns ? JSON.stringify(run.columns) : null,
-          rows: run.rows ? JSON.stringify(run.rows) : null,
-          error: run.error ?? null,
-          clarification: run.clarification ? JSON.stringify(run.clarification) : null,
-          trace: JSON.stringify(run.trace),
-          llmRaw: run.llmRaw ? JSON.stringify(run.llmRaw) : null,
-          createdAt: new Date(run.createdAt)
+          status: normalizedRun.status,
+          provider: normalizedRun.provider,
+          model: normalizedRun.model ?? null,
+          question: normalizedRun.question,
+          sql: normalizedRun.sql ?? null,
+          explanation: normalizedRun.explanation ?? null,
+          answer: normalizedRun.answer ?? null,
+          columns: normalizedRun.columns ? JSON.stringify(normalizedRun.columns) : null,
+          rows: normalizedRun.rows ? JSON.stringify(normalizedRun.rows) : null,
+          error: normalizedRun.error ?? null,
+          clarification: normalizedRun.clarification
+            ? JSON.stringify(normalizedRun.clarification)
+            : null,
+          trace: JSON.stringify(normalizedRun.trace),
+          llmRaw: normalizedRun.llmRaw ? JSON.stringify(normalizedRun.llmRaw) : null,
+          createdAt: new Date(normalizedRun.createdAt)
         },
         create: {
-          runId: run.runId,
-          sessionId: run.sessionId,
-          status: run.status,
-          provider: run.provider,
-          model: run.model ?? null,
-          question: run.question,
-          sql: run.sql ?? null,
-          explanation: run.explanation ?? null,
-          answer: run.answer ?? null,
-          columns: run.columns ? JSON.stringify(run.columns) : null,
-          rows: run.rows ? JSON.stringify(run.rows) : null,
-          error: run.error ?? null,
-          clarification: run.clarification ? JSON.stringify(run.clarification) : null,
-          trace: JSON.stringify(run.trace),
-          llmRaw: run.llmRaw ? JSON.stringify(run.llmRaw) : null,
-          createdAt: new Date(run.createdAt)
+          runId: normalizedRun.runId,
+          sessionId: normalizedRun.sessionId,
+          status: normalizedRun.status,
+          provider: normalizedRun.provider,
+          model: normalizedRun.model ?? null,
+          question: normalizedRun.question,
+          sql: normalizedRun.sql ?? null,
+          explanation: normalizedRun.explanation ?? null,
+          answer: normalizedRun.answer ?? null,
+          columns: normalizedRun.columns ? JSON.stringify(normalizedRun.columns) : null,
+          rows: normalizedRun.rows ? JSON.stringify(normalizedRun.rows) : null,
+          error: normalizedRun.error ?? null,
+          clarification: normalizedRun.clarification
+            ? JSON.stringify(normalizedRun.clarification)
+            : null,
+          trace: JSON.stringify(normalizedRun.trace),
+          llmRaw: normalizedRun.llmRaw ? JSON.stringify(normalizedRun.llmRaw) : null,
+          createdAt: new Date(normalizedRun.createdAt)
         }
       });
     });
@@ -747,7 +756,23 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     const traceWithPlannerMetadata = trace as SqlRun["trace"] & {
       plannerCache?: Record<string, unknown>;
       plannerReplay?: Record<string, unknown>;
+      prompt_template?: unknown;
+      prompt_template_evidence?: unknown;
+      templateEvidence?: unknown;
     };
+    const {
+      promptTemplate: canonicalPromptTemplate,
+      prompt_template: legacySnakePromptTemplate,
+      prompt_template_evidence: legacyEvidencePromptTemplate,
+      templateEvidence: legacyTemplateEvidence,
+      ...traceWithoutPromptTemplateAliases
+    } = traceWithPlannerMetadata;
+    const normalizedPromptTemplate = this.normalizePromptTemplateTraceEvidence(
+      canonicalPromptTemplate ??
+        legacySnakePromptTemplate ??
+        legacyEvidencePromptTemplate ??
+        legacyTemplateEvidence
+    );
     const normalizedSteps = (trace.steps ?? []).map((step, index) => {
       const sequence = step.sequence ?? index + 1;
       return {
@@ -765,12 +790,97 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     });
 
     return {
-      ...traceWithPlannerMetadata,
+      ...traceWithoutPromptTemplateAliases,
       runId: trace.runId ?? runId,
       provider: trace.provider ?? provider,
       retryCount: trace.retryCount ?? 0,
-      steps: normalizedSteps
+      steps: normalizedSteps,
+      ...(normalizedPromptTemplate
+        ? { promptTemplate: normalizedPromptTemplate }
+        : {})
     };
+  }
+
+  private normalizePromptTemplateTraceEvidence(
+    value: unknown
+  ): SqlRun["trace"]["promptTemplate"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const candidate = value as PromptTemplateTraceEvidenceCompat;
+    const templateId = this.readNonEmptyString(candidate.templateId ?? candidate.template_id);
+    const scope = this.normalizePromptTemplateScope(
+      candidate.scope ?? candidate.scope_type ?? candidate.template_scope
+    );
+    const version = this.readPositiveInteger(candidate.version ?? candidate.template_version);
+    const fallbackReason = this.readNonEmptyString(
+      candidate.fallbackReason ?? candidate.fallback_reason
+    );
+    const scene = this.normalizePromptTemplateScene(
+      candidate.scene ?? candidate.scene_name ?? candidate.template_scene
+    );
+
+    if (!templateId && !scope && version === undefined && !fallbackReason && !scene) {
+      return undefined;
+    }
+
+    return {
+      ...(templateId ? { templateId } : {}),
+      ...(scene ? { scene } : {}),
+      ...(scope ? { scope } : {}),
+      ...(version !== undefined ? { version } : {}),
+      ...(fallbackReason ? { fallbackReason } : {})
+    };
+  }
+
+  private normalizePromptTemplateScope(
+    raw: unknown
+  ): "global" | "workspace" | "datasource" | undefined {
+    const normalized = this.readNonEmptyString(raw)?.toLowerCase();
+    if (
+      normalized === "global" ||
+      normalized === "workspace" ||
+      normalized === "datasource"
+    ) {
+      return normalized;
+    }
+    return undefined;
+  }
+
+  private normalizePromptTemplateScene(raw: unknown): "sql" | "analysis" | undefined {
+    const normalized = this.readNonEmptyString(raw)?.toLowerCase();
+    if (normalized === "sql" || normalized === "analysis") {
+      return normalized;
+    }
+    if (normalized === "sql_generation") {
+      return "sql";
+    }
+    return undefined;
+  }
+
+  private readPositiveInteger(raw: unknown): number | undefined {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      return Math.floor(raw);
+    }
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return undefined;
+  }
+
+  private readNonEmptyString(raw: unknown): string | undefined {
+    if (typeof raw !== "string") {
+      return undefined;
+    }
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
   }
 
   private toSyncStatus(value: string): SessionSyncStatus {

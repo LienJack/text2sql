@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
 import { GraphBuilderService } from "../../src/modules/agent/graph/graph.builder";
+import { RagEventConsumerService } from "../../src/modules/rag/events/rag-event-consumer.service";
 import { RagIndexBuilderService } from "../../src/modules/rag/index/rag-index-builder.service";
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
 
@@ -26,6 +27,7 @@ describe("agent rag main flow integration", () => {
     const graph = moduleRef.get(GraphBuilderService);
     const repository = moduleRef.get(RagIndexRepository);
     const builder = moduleRef.get(RagIndexBuilderService);
+    const eventConsumer = moduleRef.get(RagEventConsumerService);
 
     repository.seedChunksForDatasource("sqlite_main", [
       {
@@ -83,6 +85,49 @@ describe("agent rag main flow integration", () => {
 
     const safetyStep = run.trace.steps.find((step) => step.node === "safety-check");
     expect(safetyStep?.outputSummary).toContain("riskTags");
+
+    await eventConsumer.consumeEvent({
+      eventId: "evt-agent-rag-main-linkage-degraded-1",
+      datasourceId: "sqlite_main",
+      sourceVersion: "source-agent-rag-main-v2",
+      eventType: "semantic_promoted",
+      runId: "run-agent-rag-main-linkage-degraded-build-v2",
+      payload: {
+        linkageStatus: "degraded",
+        degradeReason: "semantic_promoted_linkage_degraded",
+        glossaryTerms: [
+          {
+            id: "gterm-agent-main-1",
+            term: "GMV",
+            definition: "GMV means gross merchandise volume",
+            scope: "datasource",
+            datasourceId: "sqlite_main",
+            priority: 90,
+            updatedAt: "2026-04-18T02:30:00.000Z"
+          }
+        ]
+      }
+    });
+
+    const degradedRun = await graph.run({
+      runId: "run-agent-rag-main-v2",
+      sessionId: "session-agent-rag-main-v2",
+      question: "统计订单 GMV",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite",
+      planningScaffoldEnabled: true
+    });
+
+    const degradedRetrieveStep = degradedRun.trace.steps.find(
+      (step) => step.node === "retrieve-knowledge"
+    );
+    const degradedGenerateStep = degradedRun.trace.steps.find(
+      (step) => step.node === "generate-sql"
+    );
+
+    expect(degradedRetrieveStep?.outputSummary).toContain("semantic_promoted_linkage_degraded");
+    expect(degradedGenerateStep?.inputSummary).toContain("retrievalDegradeReasons");
+    expect(degradedGenerateStep).toBeDefined();
 
     await moduleRef.close();
   });

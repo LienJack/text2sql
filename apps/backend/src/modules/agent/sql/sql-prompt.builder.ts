@@ -16,7 +16,10 @@ export class SqlPromptBuilder {
   build(
     question: string,
     datasourceType: DatasourceType = "sqlite",
-    selectedContext?: RagRetrievalChunkPayload[]
+    selectedContext?: RagRetrievalChunkPayload[],
+    options?: {
+      templateOverlay?: string;
+    }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
     const tableHint =
@@ -24,6 +27,7 @@ export class SqlPromptBuilder {
         ? "For file datasources, the default imported table name is usually `uploaded_data`."
         : "";
     const contextBlock = this.buildContextBlock(selectedContext);
+    const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
     return {
       systemPrompt: [
         `You are a senior SQL analyst for a ${dialect} datasource.`,
@@ -31,6 +35,7 @@ export class SqlPromptBuilder {
         "Prefer SELECT or WITH ... SELECT statements.",
         "Never generate INSERT/UPDATE/DELETE/DDL.",
         tableHint,
+        overlayBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
       ].join(" "),
       userPrompt: [
@@ -41,6 +46,14 @@ export class SqlPromptBuilder {
         .filter((line) => line.trim().length > 0)
         .join("\n")
     };
+  }
+
+  private buildTemplateOverlay(templateOverlay?: string): string {
+    const normalized = templateOverlay?.trim();
+    if (!normalized) {
+      return "";
+    }
+    return `Runtime template overlay (higher priority guidance): ${normalized}`;
   }
 
   private buildContextBlock(selectedContext?: RagRetrievalChunkPayload[]): string {

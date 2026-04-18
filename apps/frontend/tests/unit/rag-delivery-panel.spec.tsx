@@ -186,4 +186,34 @@ describe("RagDeliveryPanel", () => {
       )
     ).toBeInTheDocument();
   });
+
+  it("renders prompt-template hit and fallback metadata in evidence section", async () => {
+    const user = userEvent.setup();
+    render(
+      <RagDeliveryPanel
+        delivery={createDelivery({
+          promptTemplate: {
+            templateId: "pt_ds_001",
+            scene: "sql",
+            scope: "datasource",
+            version: 4,
+            fallbackReason: "not_triggered"
+          }
+        })}
+        runId="run-template-evidence"
+      />
+    );
+
+    const evidenceTrigger = screen.getByRole("button", {
+      name: "切换 Evidence 区块"
+    });
+    if (evidenceTrigger.getAttribute("aria-expanded") !== "true") {
+      await user.click(evidenceTrigger);
+    }
+
+    expect(
+      screen.getByText("模板命中摘要：pt_ds_001 · datasource · v4")
+    ).toBeInTheDocument();
+    expect(screen.getByText("模板降级原因：not_triggered")).toBeInTheDocument();
+  });
 });

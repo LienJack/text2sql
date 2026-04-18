@@ -31,7 +31,7 @@ export class PlannerVersionLockService {
   constructor(private readonly semanticRegistry: SemanticRegistryService) {}
 
   async resolve(input: PlannerVersionLockInput): Promise<PlannerVersionLockResult> {
-    const { domain, term } = this.resolveDomainAndTerm(input);
+    const { domain, term, datasourceId } = this.resolveDomainAndTerm(input);
     const requestedSemanticVersion =
       typeof input.requestedSemanticVersion === "number" &&
       Number.isInteger(input.requestedSemanticVersion) &&
@@ -43,7 +43,8 @@ export class PlannerVersionLockService {
       const requested = await this.semanticRegistry.resolveTerm({
         domain,
         term,
-        semanticVersion: requestedSemanticVersion
+        semanticVersion: requestedSemanticVersion,
+        datasourceId
       });
       if (requested.status === "ready") {
         return {
@@ -60,7 +61,8 @@ export class PlannerVersionLockService {
       if (requested.degrade_reason === SEMANTIC_VERSION_NOT_FOUND_REASON) {
         const fallback = await this.semanticRegistry.resolveTerm({
           domain,
-          term
+          term,
+          datasourceId
         });
         if (fallback.status === "ready") {
           return {
@@ -94,7 +96,8 @@ export class PlannerVersionLockService {
 
     const resolved = await this.semanticRegistry.resolveTerm({
       domain,
-      term
+      term,
+      datasourceId
     });
     if (resolved.status === "ready") {
       return {
@@ -123,24 +126,40 @@ export class PlannerVersionLockService {
   private resolveDomainAndTerm(input: PlannerVersionLockInput): {
     domain: string;
     term: string;
+    datasourceId?: string;
   } {
     const bundle = input.retrievalBundle;
     const fromSkillContext = bundle?.skill_context?.context.at(0);
     const fromSelectedContext = bundle?.selected_context?.at(0);
+    const sourceMetadata = fromSelectedContext?.metadata.sourceMetadata;
     const domain =
       fromSkillContext?.domain ??
       fromSelectedContext?.metadata.domain ??
       bundle?.candidates.at(0)?.chunk.metadata.domain ??
       "semantic_term";
+    const datasourceId =
+      bundle?.datasource_id ??
+      fromSelectedContext?.metadata.datasourceId ??
+      (typeof sourceMetadata?.datasourceId === "string"
+        ? sourceMetadata.datasourceId
+        : undefined);
+    const semanticHint =
+      typeof sourceMetadata?.glossaryTerm === "string"
+        ? sourceMetadata.glossaryTerm
+        : typeof sourceMetadata?.term === "string"
+          ? sourceMetadata.term
+          : undefined;
 
     const term =
       fromSkillContext?.term ??
+      semanticHint ??
       this.extractFirstToken(input.question) ??
       "default";
 
     return {
       domain: domain.trim().toLowerCase(),
-      term: term.trim().toLowerCase()
+      term: term.trim().toLowerCase(),
+      datasourceId: datasourceId?.trim() || undefined
     };
   }
 

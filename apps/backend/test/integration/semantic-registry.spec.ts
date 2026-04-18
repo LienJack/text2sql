@@ -57,4 +57,62 @@ describe("semantic registry integration", () => {
 
     await moduleRef.close();
   });
+
+  it("resolves datasource-scoped semantic term first and falls back to global scope", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const registry = moduleRef.get(SemanticRegistryService);
+
+    await registry.publishVersion({
+      domain: "semantic_term",
+      semanticVersion: 1,
+      releaseSummary: "global semantic release",
+      auditSummary: "integration global publish",
+      terms: [
+        {
+          term: "gmv",
+          canonicalKey: "metric.gmv.global",
+          definition: "global gmv",
+          binding: "{\"metric\":\"sum(order_amount)\"}"
+        }
+      ]
+    });
+
+    const datasourceDomain = registry.buildDatasourceScopedDomain("semantic_term", "ds-semantic-a");
+    await registry.publishVersion({
+      domain: datasourceDomain,
+      semanticVersion: 1,
+      releaseSummary: "datasource semantic release",
+      auditSummary: "integration datasource publish",
+      terms: [
+        {
+          term: "gmv",
+          canonicalKey: "metric.gmv.ds",
+          definition: "datasource gmv",
+          binding: "{\"metric\":\"sum(amount_paid)\"}"
+        }
+      ]
+    });
+
+    const datasourceScoped = await registry.resolveTerm({
+      domain: "semantic_term",
+      datasourceId: "ds-semantic-a",
+      term: "GMV"
+    });
+    const fallbackToGlobal = await registry.resolveTerm({
+      domain: "semantic_term",
+      datasourceId: "ds-semantic-missing",
+      term: "GMV"
+    });
+
+    expect(datasourceScoped.status).toBe("ready");
+    expect(datasourceScoped.term?.canonical_key).toBe("metric.gmv.ds");
+    expect(datasourceScoped.matched_scope).toBe("datasource");
+    expect(fallbackToGlobal.status).toBe("ready");
+    expect(fallbackToGlobal.term?.canonical_key).toBe("metric.gmv.global");
+    expect(fallbackToGlobal.matched_scope).toBe("global");
+
+    await moduleRef.close();
+  });
 });

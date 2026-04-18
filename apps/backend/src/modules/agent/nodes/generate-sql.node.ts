@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType } from "@text2sql/shared-types";
+import type { DatasourceType, PromptTemplateTraceEvidence } from "@text2sql/shared-types";
 import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
@@ -20,6 +20,8 @@ export class GenerateSqlNode {
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
       selectedContext?: RagRetrievalChunkPayload[];
+      datasourceId?: string;
+      workspaceId?: string;
     }
   ): Promise<{
     provider: string;
@@ -32,11 +34,14 @@ export class GenerateSqlNode {
       systemPrompt: string;
       userPrompt: string;
     };
+    promptTemplate?: PromptTemplateTraceEvidence;
   }> {
     if (options?.stream) {
       return this.sqlGeneration.stream(
         question,
         {
+          datasourceId: options.datasourceId,
+          workspaceId: options.workspaceId,
           datasourceType,
           modelCatalogId,
           selectedContext: options.selectedContext
@@ -48,6 +53,8 @@ export class GenerateSqlNode {
       );
     }
     return this.sqlGeneration.generate(question, {
+      datasourceId: options?.datasourceId,
+      workspaceId: options?.workspaceId,
       datasourceType,
       modelCatalogId,
       selectedContext: options?.selectedContext

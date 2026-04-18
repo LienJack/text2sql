@@ -22,6 +22,8 @@
   - `kind: "agent-run"`
   - `outcome: "clarification" | "executionResult" | "rejected" | "failed"`
   - `run: SqlRun`
+  - `run.trace.promptTemplate?`：SQL 运行时模板命中证据（`templateId/scene/scope/version/fallbackReason`）
+  - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
 ### Stream Contract (`/messages/stream`)
@@ -44,6 +46,7 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
+- `finish` 事件中的 `data.delivery.evidence.promptTemplate?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
 
 ## Tool Calling Baseline
 
@@ -72,3 +75,4 @@
 - 同步/流式的错误分类在相同故障输入下保持一致。
 - Compare stream endpoint success rate against legacy endpoint baseline.
 - Verify trace persistence includes tool events when tools are called.
+- Verify `GET /api/v1/runs/:runId` 对历史 run（无模板字段）与新 run（含模板字段）都可稳定返回，且不会破坏反序列化。

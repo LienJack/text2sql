@@ -605,10 +605,14 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
                 stream: true,
                 tools: callbacks.tools,
                 onEvent: callbacks.onLlmEvent,
-                selectedContext: state.retrievalBundle?.selected_context
+                selectedContext: state.retrievalBundle?.selected_context,
+                datasourceId: state.datasourceId,
+                workspaceId: state.accessContext?.workspaceId
               }
             : {
-                selectedContext: state.retrievalBundle?.selected_context
+                selectedContext: state.retrievalBundle?.selected_context,
+                datasourceId: state.datasourceId,
+                workspaceId: state.accessContext?.workspaceId
               }
         );
         const endedAt = new Date().toISOString();
@@ -620,6 +624,8 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           retrievalDegradeReasons: state.retrievalBundle?.degrade_reasons,
           retrievalRiskTags: state.retrievalBundle?.risk_tags ?? [],
           modelCatalogId: state.modelCatalogId,
+          datasourceId: state.datasourceId,
+          workspaceId: state.accessContext?.workspaceId,
           planningScaffoldEnabled: state.planningScaffoldEnabled,
           planningStatus: state.planningStatus,
           planningWarnings: state.planningWarnings,
@@ -633,7 +639,8 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           model: generated.model,
           modelCatalogId: generated.modelCatalogId,
           sql: generated.sql,
-          rawText: generated.rawText
+          rawText: generated.rawText,
+          promptTemplate: generated.promptTemplate
         };
         const trace = appendStep(state, {
           step: {
@@ -653,7 +660,12 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           ...trace,
           trace: {
             ...trace.trace,
-            provider: generated.provider
+            provider: generated.provider,
+            ...(generated.promptTemplate
+              ? {
+                  promptTemplate: generated.promptTemplate
+                }
+              : {})
           },
           provider: generated.provider,
           model: generated.model,

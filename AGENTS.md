@@ -118,6 +118,7 @@ CI 参考：
 - 同步接口保持 `AgentRunResponse` 合同。
 - 流式事件字段必须完整（`type/runId/sessionId/at/data`）。
 - 工具调用走 allowlist，失败可追踪。
+- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致，且旧 run 缺字段可兼容读取。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。

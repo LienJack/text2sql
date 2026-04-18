@@ -6,17 +6,22 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
+  Res,
   UseGuards
 } from "@nestjs/common";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 import type { ApiResponse } from "@text2sql/shared-types";
 import { fail, ok } from "../../common/api-response";
 import { DomainError } from "../../common/domain-error";
 import { AdminOnlyGuard } from "../auth/admin-only.guard";
 import { BatchUpdateModelStatusDto } from "./dto/batch-update-model-status.dto";
+import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { CreateProviderDto } from "./dto/create-provider.dto";
+import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";
 import { RefreshProviderModelsDto } from "./dto/refresh-provider-models.dto";
+import { UpdatePromptTemplateDto } from "./dto/update-prompt-template.dto";
 import { UpdateModelStatusDto } from "./dto/update-model-status.dto";
 import { SettingsService } from "./settings.service";
 
@@ -41,6 +46,69 @@ export class SettingsController {
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);
+    }
+  }
+
+  @Get("/prompts")
+  async listPromptTemplates(
+    @Query() query: ListPromptTemplatesQueryDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.listPromptTemplates(query);
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/prompts")
+  @UseGuards(AdminOnlyGuard)
+  async createPromptTemplate(
+    @Body() body: CreatePromptTemplateDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.createPromptTemplate(req.actor, body);
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error, res);
+    }
+  }
+
+  @Patch("/prompts/:templateId")
+  @UseGuards(AdminOnlyGuard)
+  async updatePromptTemplate(
+    @Param("templateId") templateId: string,
+    @Body() body: UpdatePromptTemplateDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.updatePromptTemplate(
+        req.actor,
+        templateId,
+        body
+      );
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error, res);
+    }
+  }
+
+  @Delete("/prompts/:templateId")
+  @UseGuards(AdminOnlyGuard)
+  async deletePromptTemplate(
+    @Param("templateId") templateId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.deletePromptTemplate(req.actor, templateId);
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error, res);
     }
   }
 
@@ -162,9 +230,19 @@ export class SettingsController {
     }
   }
 
-  private toError(requestId: string, error: unknown): ApiResponse<never> {
+  private toError(
+    requestId: string,
+    error: unknown,
+    res?: Response
+  ): ApiResponse<never> {
     if (error instanceof DomainError) {
+      if (res) {
+        res.status(error.statusCode);
+      }
       return fail(requestId, error.code, error.message, error.details);
+    }
+    if (res) {
+      res.status(500);
     }
     return fail(
       requestId,
