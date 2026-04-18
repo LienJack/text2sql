@@ -15,6 +15,7 @@ export interface BuildRagIndexJobInput {
   sourceVersion: string;
   buildReason?: string;
   runId?: string;
+  queuedAt?: string;
   chunks?: RagChunkBuildInput[];
 }
 
@@ -29,6 +30,7 @@ export class BuildRagIndexJob {
 
   async run(input: BuildRagIndexJobInput): Promise<RagIndexBuildResult> {
     const startedAt = Date.now();
+    const queueWaitMs = this.resolveQueueWaitMs(input.queuedAt, startedAt);
     const replayRunId = this.resolveReplayRunId(input.runId, input.datasourceId, startedAt);
     const chunks =
       input.chunks ?? (await this.repository.listChunksForBuild(input.datasourceId));
@@ -62,7 +64,8 @@ export class BuildRagIndexJob {
           entryCount: result.entryCount,
           archivedChannels: result.archivedChannels,
           denseMode: result.denseMode,
-          activationLatencyMs
+          activationLatencyMs,
+          queueWaitMs
         }
       });
 
@@ -98,7 +101,8 @@ export class BuildRagIndexJob {
         payload: {
           sourceVersion: input.sourceVersion,
           buildReason: input.buildReason ?? "scheduled_build",
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
+          queueWaitMs
         }
       });
       throw error;
@@ -122,5 +126,16 @@ export class BuildRagIndexJob {
       return error.message.trim().toLowerCase();
     }
     return "unknown";
+  }
+
+  private resolveQueueWaitMs(queuedAt: string | undefined, startedAt: number): number {
+    if (!queuedAt) {
+      return 0;
+    }
+    const queuedAtMs = Date.parse(queuedAt);
+    if (Number.isNaN(queuedAtMs)) {
+      return 0;
+    }
+    return Math.max(0, startedAt - queuedAtMs);
   }
 }

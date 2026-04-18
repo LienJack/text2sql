@@ -3,6 +3,12 @@ import type { RagChunkIndexEntryRecord } from "../index/rag-index.repository";
 export const RAG_RETRIEVAL_LANES = ["lexical", "dense", "graph"] as const;
 export type RagRetrievalLane = (typeof RAG_RETRIEVAL_LANES)[number];
 
+export interface RagBudgetSignal {
+  tokenPressure?: number;
+  latencyPressure?: number;
+  costPressure?: number;
+}
+
 export interface RagRetrievalRequest {
   query: string;
   datasourceId: string;
@@ -12,6 +18,7 @@ export interface RagRetrievalRequest {
   finalCandidateLimit?: number;
   laneTimeoutMs?: Partial<Record<RagRetrievalLane, number>>;
   laneArtificialDelayMs?: Partial<Record<RagRetrievalLane, number>>;
+  budgetSignal?: RagBudgetSignal;
 }
 
 export interface RagRetrievalChunkMetadata {
@@ -96,6 +103,7 @@ export interface RagRetrievalBundle {
   selected_context?: RagRetrievalChunkPayload[];
   risk_tags?: string[];
   skill_context?: RagSkillContext;
+  decision_reasons?: string[];
 }
 
 export interface RagRetrievalResponse {

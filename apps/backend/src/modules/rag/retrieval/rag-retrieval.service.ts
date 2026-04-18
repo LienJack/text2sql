@@ -1,11 +1,16 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { GraphService } from "../../graph/graph.service";
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
   SkillRegistryService
 } from "../../skill-registry/skill-registry.service";
 import { RagIndexRepository } from "../index/rag-index.repository";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
+import { RagBudgetPolicy } from "../perf/rag-budget-policy";
+import { RagCacheKeyFactory } from "../perf/rag-cache-key.factory";
+import { RagQueryCacheService } from "../perf/rag-query-cache.service";
+import { RagQualityService } from "../quality/rag-quality.service";
 import { fuseWithRrf } from "./fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
@@ -23,6 +28,8 @@ import {
 
 const DEFAULT_PER_LANE_LIMIT = 20;
 const DEFAULT_FINAL_CANDIDATE_LIMIT = 20;
+const RETRIEVAL_CACHE_L1_TTL_MS = 30_000;
+const RETRIEVAL_CACHE_L2_TTL_MS = 5 * 60_000;
 const DEFAULT_LANE_TIMEOUT_MS: Record<RagRetrievalLane, number> = {
   lexical: 250,
   dense: 300,
@@ -36,20 +43,32 @@ class LaneTimeoutError extends Error {
   }
 }
 
+type LaneExecutionOutput =
+  | RagRetrievalLaneHit[]
+  | {
+      hits: RagRetrievalLaneHit[];
+      degradeReason?: string;
+    };
+
 @Injectable()
 export class RagRetrievalService {
   constructor(
     private readonly indexRepository: RagIndexRepository,
     private readonly replayRepository: RagReplayRepository,
-    private readonly skillRegistry: SkillRegistryService
+    private readonly skillRegistry: SkillRegistryService,
+    private readonly graphService: GraphService,
+    private readonly cacheKeyFactory: RagCacheKeyFactory,
+    private readonly queryCache: RagQueryCacheService,
+    private readonly budgetPolicy: RagBudgetPolicy,
+    private readonly ragQualityService: RagQualityService
   ) {}
 
   async retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse> {
     const query = input.query.trim();
     const datasourceId = input.datasourceId.trim();
     const runId = input.runId.trim();
-    const perLaneLimit = this.normalizeLimit(input.perLaneLimit, DEFAULT_PER_LANE_LIMIT);
-    const finalCandidateLimit = this.normalizeLimit(
+    const requestedPerLaneLimit = this.normalizeLimit(input.perLaneLimit, DEFAULT_PER_LANE_LIMIT);
+    const requestedFinalCandidateLimit = this.normalizeLimit(
       input.finalCandidateLimit,
       DEFAULT_FINAL_CANDIDATE_LIMIT
     );
@@ -91,6 +110,54 @@ export class RagRetrievalService {
       return response;
     }
 
+    this.queryCache.pruneDatasourceStaleVersions(datasourceId, activeVersion.id);
+    const budgetDecision = this.budgetPolicy.planRetrieval({
+      requestedPerLaneLimit,
+      requestedFinalCandidateLimit,
+      signal: input.budgetSignal
+    });
+    const perLaneLimit = budgetDecision.perLaneLimit;
+    const finalCandidateLimit = budgetDecision.finalCandidateLimit;
+    const budgetLaneProfile = budgetDecision.enabledLanes.join("+");
+    await this.writeBudgetReplay({
+      runId,
+      datasourceId,
+      indexVersionId: activeVersion.id,
+      decisionReasons: budgetDecision.decisionReasons,
+      perLaneLimit,
+      finalCandidateLimit,
+      enabledLanes: budgetDecision.enabledLanes
+    });
+
+    const cacheKey = this.cacheKeyFactory.build({
+      stage: "retrieval_bundle",
+      datasourceId,
+      indexVersionId: activeVersion.id,
+      query,
+      budgetProfile: budgetLaneProfile,
+      perLaneLimit,
+      finalCandidateLimit
+    });
+    const cacheRead = this.queryCache.get<RagRetrievalResponse["retrieval_bundle"]>(cacheKey);
+    if (cacheRead.hit && cacheRead.value) {
+      const cachedBundle = this.hydrateCachedBundle({
+        cachedBundle: cacheRead.value,
+        query,
+        datasourceId,
+        runId,
+        decisionReasons: budgetDecision.decisionReasons
+      });
+      this.ragQualityService.recordCacheBudget({
+        cacheEligible: true,
+        cacheHit: true,
+        budgetDegraded: budgetDecision.degraded
+      });
+      await this.persistReplay(cachedBundle);
+      return {
+        retrieval_bundle: cachedBundle
+      };
+    }
+
     const entries = await this.indexRepository.listEntriesByVersion(activeVersion.id);
     const contexts = entries.map((entry) => this.toEntryContext(activeVersion.id, entry));
     const laneResults = await this.collectLaneResults({
@@ -98,6 +165,7 @@ export class RagRetrievalService {
       contexts,
       perLaneLimit,
       laneTimeoutMs,
+      enabledLanes: budgetDecision.enabledLanes,
       laneArtificialDelayMs: input.laneArtificialDelayMs
     });
 
@@ -121,7 +189,10 @@ export class RagRetrievalService {
     if (candidates.length === 0) {
       degradeReasons.push("zero_recall");
     }
-    const uniqueDegradeReasons = this.unique(degradeReasons);
+    const uniqueDegradeReasons = this.unique([
+      ...degradeReasons,
+      ...budgetDecision.decisionReasons
+    ]);
 
     const response: RagRetrievalResponse = {
       retrieval_bundle: {
@@ -133,12 +204,51 @@ export class RagRetrievalService {
         degrade_reasons: uniqueDegradeReasons,
         lane_results: laneResults,
         candidates,
-        skill_context: skillContext
+        skill_context: skillContext,
+        decision_reasons: budgetDecision.decisionReasons
       }
     };
 
+    this.queryCache.set({
+      key: cacheKey,
+      stage: "retrieval_bundle",
+      datasourceId,
+      indexVersionId: activeVersion.id,
+      value: response.retrieval_bundle,
+      l1TtlMs: RETRIEVAL_CACHE_L1_TTL_MS,
+      l2TtlMs: RETRIEVAL_CACHE_L2_TTL_MS
+    });
+    this.ragQualityService.recordCacheBudget({
+      cacheEligible: true,
+      cacheHit: false,
+      budgetDegraded: budgetDecision.degraded
+    });
     await this.persistReplay(response.retrieval_bundle);
     return response;
+  }
+
+  private hydrateCachedBundle(input: {
+    cachedBundle: RagRetrievalResponse["retrieval_bundle"];
+    query: string;
+    datasourceId: string;
+    runId: string;
+    decisionReasons: string[];
+  }): RagRetrievalResponse["retrieval_bundle"] {
+    return {
+      ...input.cachedBundle,
+      query: input.query,
+      datasource_id: input.datasourceId,
+      run_id: input.runId,
+      decision_reasons: this.unique([
+        ...(input.cachedBundle.decision_reasons ?? []),
+        ...input.decisionReasons,
+        "cache_hit"
+      ]),
+      degrade_reasons: this.unique([
+        ...(input.cachedBundle.degrade_reasons ?? []),
+        ...input.decisionReasons
+      ])
+    };
   }
 
   private async collectLaneResults(input: {
@@ -146,17 +256,25 @@ export class RagRetrievalService {
     contexts: RagRetrievalEntryContext[];
     perLaneLimit: number;
     laneTimeoutMs: Record<RagRetrievalLane, number>;
+    enabledLanes: RagRetrievalLane[];
     laneArtificialDelayMs?: Partial<Record<RagRetrievalLane, number>>;
   }): Promise<Record<RagRetrievalLane, RagRetrievalLaneResult>> {
-    const lexicalPromise = this.executeLane("lexical", input, () =>
-      this.runLexicalLane(input.query, input.contexts, input.perLaneLimit)
-    );
-    const densePromise = this.executeLane("dense", input, () =>
-      this.runDenseLane(input.query, input.contexts, input.perLaneLimit)
-    );
-    const graphPromise = this.executeLane("graph", input, () =>
-      this.runGraphLane(input.query, input.contexts, input.perLaneLimit)
-    );
+    const enabledLanes = new Set(input.enabledLanes);
+    const lexicalPromise = enabledLanes.has("lexical")
+      ? this.executeLane("lexical", input, () =>
+          this.runLexicalLane(input.query, input.contexts, input.perLaneLimit)
+        )
+      : Promise.resolve(this.createBudgetDisabledLaneResult("lexical", input.laneTimeoutMs.lexical));
+    const densePromise = enabledLanes.has("dense")
+      ? this.executeLane("dense", input, () =>
+          this.runDenseLane(input.query, input.contexts, input.perLaneLimit)
+        )
+      : Promise.resolve(this.createBudgetDisabledLaneResult("dense", input.laneTimeoutMs.dense));
+    const graphPromise = enabledLanes.has("graph")
+      ? this.executeLane("graph", input, () =>
+          this.runGraphLane(input.query, input.contexts, input.perLaneLimit)
+        )
+      : Promise.resolve(this.createBudgetDisabledLaneResult("graph", input.laneTimeoutMs.graph));
 
     const [lexical, dense, graph] = await Promise.all([
       lexicalPromise,
@@ -170,6 +288,20 @@ export class RagRetrievalService {
     };
   }
 
+  private createBudgetDisabledLaneResult(
+    lane: RagRetrievalLane,
+    timeoutMs: number
+  ): RagRetrievalLaneResult {
+    return {
+      lane,
+      status: "degraded",
+      timeout_ms: timeoutMs,
+      elapsed_ms: 0,
+      degrade_reason: `budget_lane_disabled_${lane}`,
+      hits: []
+    };
+  }
+
   private async executeLane(
     lane: RagRetrievalLane,
     input: {
@@ -179,7 +311,7 @@ export class RagRetrievalService {
       laneTimeoutMs: Record<RagRetrievalLane, number>;
       laneArtificialDelayMs?: Partial<Record<RagRetrievalLane, number>>;
     },
-    laneExecutor: () => RagRetrievalLaneHit[]
+    laneExecutor: () => LaneExecutionOutput | Promise<LaneExecutionOutput>
   ): Promise<RagRetrievalLaneResult> {
     const timeoutMs = input.laneTimeoutMs[lane];
     const startedAt = Date.now();
@@ -191,16 +323,18 @@ export class RagRetrievalService {
         }
         return laneExecutor();
       });
-      const hits = await Promise.race([
+      const laneOutput = await Promise.race([
         lanePromise,
         this.timeout(timeoutMs, lane)
       ]);
+      const normalizedOutput = this.normalizeLaneOutput(laneOutput);
       return {
         lane,
-        status: "ok",
+        status: normalizedOutput.degradeReason ? "degraded" : "ok",
         timeout_ms: timeoutMs,
         elapsed_ms: Date.now() - startedAt,
-        hits: hits.slice(0, input.perLaneLimit)
+        degrade_reason: normalizedOutput.degradeReason,
+        hits: normalizedOutput.hits.slice(0, input.perLaneLimit)
       };
     } catch (error) {
       const degradeReason =
@@ -292,7 +426,20 @@ export class RagRetrievalService {
     return this.sortHits(hits).slice(0, limit);
   }
 
-  private runGraphLane(
+  private async runGraphLane(
+    query: string,
+    contexts: RagRetrievalEntryContext[],
+    limit: number
+  ): Promise<LaneExecutionOutput> {
+    return this.graphService.runLane({
+      query,
+      contexts,
+      limit,
+      fallbackRunner: () => this.runGraphLaneHeuristic(query, contexts, limit)
+    });
+  }
+
+  private runGraphLaneHeuristic(
     query: string,
     contexts: RagRetrievalEntryContext[],
     limit: number
@@ -346,6 +493,21 @@ export class RagRetrievalService {
       });
     }
     return this.sortHits(hits).slice(0, limit);
+  }
+
+  private normalizeLaneOutput(output: LaneExecutionOutput): {
+    hits: RagRetrievalLaneHit[];
+    degradeReason?: string;
+  } {
+    if (Array.isArray(output)) {
+      return {
+        hits: output
+      };
+    }
+    return {
+      hits: output.hits,
+      degradeReason: output.degradeReason
+    };
   }
 
   private toEntryContext(
@@ -672,6 +834,7 @@ export class RagRetrievalService {
       payload: {
         status: bundle.status,
         degradeReasons: bundle.degrade_reasons,
+        decisionReasons: bundle.decision_reasons ?? [],
         candidateCount: bundle.candidates.length,
         skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
@@ -680,6 +843,30 @@ export class RagRetrievalService {
           score: candidate.score,
           domain: candidate.chunk.metadata.domain
         }))
+      }
+    });
+  }
+
+  private async writeBudgetReplay(input: {
+    runId: string;
+    datasourceId: string;
+    indexVersionId: string;
+    decisionReasons: string[];
+    perLaneLimit: number;
+    finalCandidateLimit: number;
+    enabledLanes: RagRetrievalLane[];
+  }): Promise<void> {
+    await this.replayRepository.writeReplay({
+      runId: input.runId,
+      replayKey: "retrieval:budget",
+      datasourceId: input.datasourceId,
+      stage: "retrieval_budget",
+      indexVersionId: input.indexVersionId,
+      payload: {
+        decisionReasons: input.decisionReasons,
+        perLaneLimit: input.perLaneLimit,
+        finalCandidateLimit: input.finalCandidateLimit,
+        enabledLanes: input.enabledLanes
       }
     });
   }

@@ -5,6 +5,7 @@ import type {
   ChatSessionView,
   ChatMessage,
   ChatStreamEvent,
+  DeliveryContract,
   ExecutionTraceStep,
   ModelCatalogItem,
   ReasoningStage,
@@ -13,6 +14,13 @@ import type {
 } from "@text2sql/shared-types";
 import { Menu } from "lucide-react";
 import { AssistantThread } from "@/components/chat/assistant-thread";
+import {
+  normalizeDeliveryContract,
+  normalizeRunForVisibility,
+  toRunVisibilityStatusFromRunStatus,
+  transitionRunVisibilityStatus,
+  type RunVisibilityStatus
+} from "@/components/chat/run-visibility-mapper";
 import { ModelSelector } from "@/components/chat/model-selector";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
 import { Button } from "@/components/ui/button";
@@ -210,6 +218,12 @@ export function ChatPanel() {
   const [runLoadingById, setRunLoadingById] = useState<Record<string, boolean>>(
     {}
   );
+  const [streamDeliveryByRunId, setStreamDeliveryByRunId] = useState<
+    Record<string, DeliveryContract>
+  >({});
+  const [runVisibilityByRunId, setRunVisibilityByRunId] = useState<
+    Record<string, RunVisibilityStatus>
+  >({});
   const [activeStreamRunId, setActiveStreamRunId] = useState<string | null>(null);
   const [thinkingRequestPending, setThinkingRequestPending] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
@@ -267,6 +281,8 @@ export function ChatPanel() {
     setRunsById({});
     setStreamThinkingByRunId({});
     setRunLoadingById({});
+    setStreamDeliveryByRunId({});
+    setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
     setThreadVersion((previous) => previous + 1);
@@ -280,7 +296,7 @@ export function ChatPanel() {
       mergeSessionMessages(previous, sessionView.messages, sessionView.session.id)
     );
     if (sessionView.latestRun) {
-      const latestRun = sessionView.latestRun;
+      const latestRun = normalizeRunForVisibility(sessionView.latestRun);
       setRunsById((previous) => ({
         ...previous,
         [latestRun.runId]: latestRun
@@ -288,6 +304,21 @@ export function ChatPanel() {
     }
     setStreamThinkingByRunId({});
     setRunLoadingById({});
+    setStreamDeliveryByRunId({});
+    setRunVisibilityByRunId((previous) => {
+      if (!sessionView.latestRun) {
+        return {};
+      }
+      const runId = sessionView.latestRun.runId;
+      const runStatus = toRunVisibilityStatusFromRunStatus(sessionView.latestRun.status);
+      if (!runStatus) {
+        return {};
+      }
+      const previousStatus = previous[runId];
+      return {
+        [runId]: transitionRunVisibilityStatus(previousStatus, runStatus) ?? runStatus
+      };
+    });
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
     setThreadVersion((previous) => previous + 1);
@@ -531,17 +562,44 @@ export function ChatPanel() {
     if (!runId || runsById[runId] || runLoadingById[runId]) {
       return;
     }
+    setRunVisibilityByRunId((previous) => ({
+      ...previous,
+      [runId]:
+        transitionRunVisibilityStatus(previous[runId], "loading") ?? "loading"
+    }));
     setRunLoadingById((previous) => ({
       ...previous,
       [runId]: true
     }));
     try {
-      const run = await getRun(runId);
+      const run = normalizeRunForVisibility(await getRun(runId));
       setRunsById((previous) => ({
         ...previous,
         [runId]: run
       }));
+      const resolvedStatus = toRunVisibilityStatusFromRunStatus(run.status);
+      if (resolvedStatus) {
+        setRunVisibilityByRunId((previous) => ({
+          ...previous,
+          [runId]:
+            transitionRunVisibilityStatus(previous[runId], resolvedStatus) ??
+            resolvedStatus
+        }));
+      }
+      setStreamDeliveryByRunId((previous) => {
+        if (!previous[runId]) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
     } catch (error) {
+      setRunVisibilityByRunId((previous) => ({
+        ...previous,
+        [runId]:
+          transitionRunVisibilityStatus(previous[runId], "error") ?? "error"
+      }));
       setSessionError(error instanceof Error ? error.message : "加载运行轨迹失败");
     } finally {
       setRunLoadingById((previous) => {
@@ -650,6 +708,8 @@ export function ChatPanel() {
           runsById={runsById}
           streamThinkingByRunId={streamThinkingByRunId}
           runLoadingById={runLoadingById}
+          streamDeliveryByRunId={streamDeliveryByRunId}
+          runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
@@ -666,17 +726,63 @@ export function ChatPanel() {
           }}
           onStreamEvent={(event) => {
             if (event.type === "start") {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [event.runId]:
+                  transitionRunVisibilityStatus(previous[event.runId], "loading") ??
+                  "loading"
+              }));
               setActiveStreamRunId(event.runId);
               setStreamThinkingByRunId((previous) => ({
                 ...previous,
                 [event.runId]: []
               }));
+              setStreamDeliveryByRunId((previous) => {
+                const next = { ...previous };
+                delete next[event.runId];
+                return next;
+              });
               setThinkingRequestPending(true);
               return;
+            }
+            if (event.type === "finish") {
+              const finishData = event.data as
+                | { delivery?: unknown; status?: unknown }
+                | undefined;
+              const finishDelivery = normalizeDeliveryContract(finishData?.delivery);
+              if (finishDelivery) {
+                setStreamDeliveryByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]: finishDelivery
+                }));
+              }
+              const finishStatus = toRunVisibilityStatusFromRunStatus(
+                typeof finishData?.status === "string"
+                  ? (finishData.status as SqlRun["status"])
+                  : "executionResult"
+              );
+              if (finishStatus) {
+                setRunVisibilityByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]:
+                    transitionRunVisibilityStatus(
+                      previous[event.runId],
+                      finishStatus
+                    ) ?? finishStatus
+                }));
+              }
             }
             const step = toThinkingStep(event);
             if (!step) {
               if (event.type === "finish" || event.type === "error") {
+                if (event.type === "error") {
+                  setRunVisibilityByRunId((previous) => ({
+                    ...previous,
+                    [event.runId]:
+                      transitionRunVisibilityStatus(previous[event.runId], "error") ??
+                      "error"
+                  }));
+                }
                 setActiveStreamRunId((current) =>
                   current === event.runId ? null : current
                 );

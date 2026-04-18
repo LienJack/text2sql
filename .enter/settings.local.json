@@ -53,7 +53,11 @@
       "Bash(grep -n \"graph/events\\\\|graph/feedback\\\\|audit-log\\\\|observability\" \"/Users/lienli/Documents/GitHub/text2sql/docs/plans/2026-04-17-005-feat-rag-r4-delivery-sandbox-r5-memory-plan.md\")",
       "Bash(for f in /Users/lienli/Documents/GitHub/text2sql/docs/plans/2026-04-17-00*.md; do echo \"=== $\\(basename $f\\) ===\"; grep -c \"Boundary\" \"$f\"; done)",
       "Bash(grep -n \"modules/graph/events\\\\|modules/graph/feedback\\\\|modules/agent/planner/\\\\*\\\\|modules/graph/\\\\*\" /Users/lienli/Documents/GitHub/text2sql/docs/plans/2026-04-17-00*.md | grep -v \"注：\" | grep -v \"graph/events.*和.*graph/feedback.*目录需\" | grep -v \"planner.*需在本阶段新建\")",
-      "Bash(grep -A 20 \"Boundary \u0026 Edge\" \"/Users/lienli/Documents/GitHub/text2sql/docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md\" | head -25)"
+      "Bash(grep -A 20 \"Boundary \u0026 Edge\" \"/Users/lienli/Documents/GitHub/text2sql/docs/plans/2026-04-17-002-feat-rag-r2-foundation-ingestion-index-plan.md\" | head -25)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 git diff HEAD 2\u003e/dev/null | head -20000)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/backend run test 2\u003e\u00261 | tail -50)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test 2\u003e\u00261 | tail -30)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/backend run build 2\u003e\u00261 | tail -20)"
     ]
   }
 }

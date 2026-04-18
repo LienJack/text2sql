@@ -1,6 +1,11 @@
 "use client";
 
-import type { ExecutionTraceStep, ReasoningStage, SqlRun } from "@text2sql/shared-types";
+import type {
+  DeliveryContract,
+  ExecutionTraceStep,
+  ReasoningStage,
+  SqlRun
+} from "@text2sql/shared-types";
 import { MessagePartPrimitive, MessagePrimitive } from "@assistant-ui/react";
 import { Database } from "lucide-react";
 import { AssistantThinkingPanel } from "@/components/chat/assistant-thinking-panel";
@@ -36,6 +41,7 @@ export function UserMessageBubble() {
 
 interface AssistantMessageBubbleProps {
   run: SqlRun | null;
+  streamDelivery?: DeliveryContract;
   runId?: string;
   debugEnabled: boolean;
   thinkingSteps: Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>;
@@ -48,6 +54,7 @@ interface AssistantMessageBubbleProps {
 
 export function AssistantMessageBubble({
   run,
+  streamDelivery,
   runId,
   debugEnabled,
   thinkingSteps,
@@ -81,10 +88,25 @@ export function AssistantMessageBubble({
         />
         <SqlInlinePanel
           run={run}
+          streamDelivery={streamDelivery}
           debugEnabled={debugEnabled}
           openSignal={openSqlSignal}
           highlight={highlightSql}
         />
+        {runId ? (
+          <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
+            同 run 摘要可在
+            {" "}
+            <a
+              href={`/settings?tab=rag&runId=${encodeURIComponent(runId)}`}
+              className="text-[var(--action-primary)] underline-offset-2 hover:underline"
+            >
+              设置 / RAG 运行与记忆治理
+            </a>
+            {" "}
+            查看。
+          </p>
+        ) : null}
       </div>
     </MessagePrimitive.Root>
   );

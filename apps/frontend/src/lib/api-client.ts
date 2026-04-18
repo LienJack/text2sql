@@ -1,6 +1,7 @@
 import type {
   AgentRunResponse,
   ApiResponse,
+  DeliveryEvidenceLayer,
   ChatStreamEvent,
   ChatSessionView,
   Datasource,
@@ -85,6 +86,99 @@ class ApiClientRequestError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function normalizeSkillContextSummary(
+  value: unknown
+): DeliveryEvidenceLayer["skillContextSummary"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const skills = Array.isArray(value.skills) ? value.skills.length : undefined;
+  const contexts = Array.isArray(value.context) ? value.context.length : undefined;
+  const skillCount = readNumber(value.skillCount) ?? readNumber(value.skill_count) ?? skills;
+  const contextCount =
+    readNumber(value.contextCount) ?? readNumber(value.context_count) ?? contexts;
+  const degradeReason = readString(value.degradeReason) ?? readString(value.degrade_reason);
+
+  if (skillCount === undefined && contextCount === undefined && !degradeReason) {
+    return undefined;
+  }
+
+  return {
+    skillCount: Math.max(0, Math.floor(skillCount ?? 0)),
+    contextCount: Math.max(0, Math.floor(contextCount ?? 0)),
+    ...(degradeReason ? { degradeReason } : {})
+  };
+}
+
+function normalizeRunSemanticEvidenceCompatibility(
+  run: AgentRunResponse["run"]
+): AgentRunResponse["run"] {
+  const delivery = run.delivery;
+  if (!delivery?.evidence) {
+    return run;
+  }
+
+  const rawEvidence = delivery.evidence as DeliveryEvidenceLayer &
+    Record<string, unknown>;
+  const semanticVersionRaw =
+    readNumber(rawEvidence.semanticVersion) ?? readNumber(rawEvidence.semantic_version);
+  const semanticVersion =
+    semanticVersionRaw !== undefined && semanticVersionRaw > 0
+      ? Math.floor(semanticVersionRaw)
+      : undefined;
+  const semanticLockStatusRaw =
+    readString(rawEvidence.semanticLockStatus) ??
+    readString(rawEvidence.semantic_lock_status);
+  const semanticLockStatus =
+    semanticLockStatusRaw === "locked" ||
+    semanticLockStatusRaw === "fallback" ||
+    semanticLockStatusRaw === "degraded"
+      ? semanticLockStatusRaw
+      : undefined;
+  const semanticDegradeReason =
+    readString(rawEvidence.semanticDegradeReason) ??
+    readString(rawEvidence.semantic_degrade_reason);
+  const skillContextSummary = normalizeSkillContextSummary(
+    rawEvidence.skillContextSummary ??
+      rawEvidence.skill_context_summary ??
+      rawEvidence.skill_context
+  );
+
+  const nextEvidence: DeliveryEvidenceLayer = {
+    ...delivery.evidence,
+    ...(semanticVersion !== undefined ? { semanticVersion } : {}),
+    ...(semanticLockStatus ? { semanticLockStatus } : {}),
+    ...(semanticDegradeReason ? { semanticDegradeReason } : {}),
+    ...(skillContextSummary ? { skillContextSummary } : {})
+  };
+
+  return {
+    ...run,
+    delivery: {
+      ...delivery,
+      evidence: nextEvidence
+    }
+  };
 }
 
 function resolveWorkflowStage(details: unknown): string | undefined {
@@ -563,7 +657,8 @@ export async function getMessages(sessionId: string): Promise<ChatSessionView> {
 }
 
 export async function getRun(runId: string): Promise<AgentRunResponse["run"]> {
-  return request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
+  const run = await request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
+  return normalizeRunSemanticEvidenceCompatibility(run);
 }
 
 export async function getSettingsModelsView(): Promise<LlmSettingsView> {

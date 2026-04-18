@@ -26,8 +26,7 @@ export class HealthController {
     private readonly ragQuality: RagQualityService
   ) {}
 
-  @Get("/health")
-  async health(@Req() req: Request): Promise<ApiResponse<unknown>> {
+  private async buildHealthResponse(req: Request): Promise<ApiResponse<unknown>> {
     const sqliteReady = await this.sqlite.healthCheck();
     const redisReady = await this.redis.healthCheck();
     const sessionSyncStats = await this.repository.getSessionSyncStats();
@@ -35,6 +34,7 @@ export class HealthController {
       includeUnavailable: true
     });
     const postgresEnabled = Boolean(this.config.databaseUrl);
+    const ragQualityGate = this.ragQuality.snapshot();
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
       runtime: {
@@ -84,7 +84,8 @@ export class HealthController {
           foundation: this.ragIngestionMetrics.snapshot()
         },
         ragQuality: {
-          gate: this.ragQuality.snapshot()
+          gate: ragQualityGate,
+          r6: ragQualityGate.r6
         }
       },
       cors: {
@@ -92,5 +93,15 @@ export class HealthController {
       },
       datasources
     });
+  }
+
+  @Get("/health")
+  async health(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    return this.buildHealthResponse(req);
+  }
+
+  @Get("/api/health")
+  async healthApi(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    return this.buildHealthResponse(req);
   }
 }

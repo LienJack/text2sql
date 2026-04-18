@@ -367,5 +367,12 @@ describe("chat api (e2e)", () => {
         gatePass: expect.any(Boolean)
       })
     );
+
+    const apiHealthRes = await request(app.getHttpServer())
+      .get("/api/health")
+      .send();
+    expect(apiHealthRes.status).toBe(200);
+    expect(apiHealthRes.body.status).toBe("success");
+    expect(apiHealthRes.body.data.status).toBe(res.body.data.status);
   });
 });

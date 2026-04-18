@@ -101,6 +101,7 @@ CI 参考：
 - React 函数组件 + shadcn-ui 体系。
 - Tailwind CSS v4，不回退 v3 模式。
 - 保持核心演示链路可用（创建会话/发送消息/SQL 预览）。
+- 涉及 RAG 可见化改造时，必须覆盖 runId（sync/stream）一致性、`selected_context` 四态矩阵、terminal 不回退 loading、375px 与键盘可达性（`Enter/Space` + `aria-expanded`）验收。
 
 必跑门禁：
 - `pnpm --filter @text2sql/frontend run lint`

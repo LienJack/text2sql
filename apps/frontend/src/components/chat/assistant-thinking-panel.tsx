@@ -7,6 +7,7 @@ import type {
   SqlRun
 } from "@text2sql/shared-types";
 import { BrainCircuit, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { mergeRunThinkingSteps } from "@/components/chat/run-visibility-mapper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StateBlock } from "@/components/ui/state-block";
@@ -39,7 +40,13 @@ const nodeTitleMap: Record<string, string> = {
   "generate-sql": "生成 SQL",
   "safety-check": "安全校验",
   "execute-sql": "执行查询",
-  "format-answer": "整理回答"
+  "format-answer": "整理回答",
+  retrieve_knowledge: "知识检索",
+  "retrieve-knowledge": "知识检索",
+  build_intent_plan: "意图规划",
+  "build-intent-plan": "意图规划",
+  build_semantic_query: "语义检索构建",
+  "build-semantic-query": "语义检索构建"
 };
 
 function resolveStepTitle(step: ThinkingStreamStep): string {
@@ -97,14 +104,7 @@ export function AssistantThinkingPanel({
   const [requested, setRequested] = useState(false);
 
   const steps = useMemo<ThinkingStreamStep[]>(() => {
-    if (run?.trace.steps?.length) {
-      return [...run.trace.steps].sort(
-        (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
-      );
-    }
-    return [...streamSteps].sort(
-      (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
-    );
+    return mergeRunThinkingSteps(run?.trace.steps, streamSteps);
   }, [run, streamSteps]);
   const latestStep = steps.at(-1);
   const completedCount = steps.filter(

@@ -2,6 +2,10 @@ import { RagRerankService } from "../../src/modules/rag/rerank/rag-rerank.servic
 import type { ModelRerankerAdapter } from "../../src/modules/rag/rerank/model-reranker.adapter";
 import type { RagReplayRepository } from "../../src/modules/rag/observability/rag-replay.repository";
 import type { RagRetrievalBundle } from "../../src/modules/rag/retrieval/rag-retrieval.types";
+import { RagBudgetPolicy } from "../../src/modules/rag/perf/rag-budget-policy";
+import { RagCacheKeyFactory } from "../../src/modules/rag/perf/rag-cache-key.factory";
+import { RagQueryCacheService } from "../../src/modules/rag/perf/rag-query-cache.service";
+import type { RagQualityService } from "../../src/modules/rag/quality/rag-quality.service";
 
 const createBundle = (): RagRetrievalBundle => ({
   query: "orders amount",
@@ -80,6 +84,22 @@ const createBundle = (): RagRetrievalBundle => ({
 });
 
 describe("rag rerank service", () => {
+  function createService(
+    adapter: Pick<ModelRerankerAdapter, "rerank">,
+    replay: Pick<RagReplayRepository, "writeReplay">
+  ): RagRerankService {
+    return new RagRerankService(
+      adapter as ModelRerankerAdapter,
+      replay as RagReplayRepository,
+      new RagBudgetPolicy(),
+      new RagCacheKeyFactory(),
+      new RagQueryCacheService(),
+      ({
+        recordCacheBudget: jest.fn()
+      } as unknown) as RagQualityService
+    );
+  }
+
   it("skips secondary rerank when candidate count is below threshold", async () => {
     const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
       rerank: jest.fn().mockResolvedValue([])
@@ -87,10 +107,7 @@ describe("rag rerank service", () => {
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
     };
-    const service = new RagRerankService(
-      adapter as ModelRerankerAdapter,
-      replay as RagReplayRepository
-    );
+    const service = createService(adapter, replay);
     const bundle = createBundle();
 
     const response = await service.rerank({
@@ -112,10 +129,7 @@ describe("rag rerank service", () => {
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
     };
-    const service = new RagRerankService(
-      adapter as ModelRerankerAdapter,
-      replay as RagReplayRepository
-    );
+    const service = createService(adapter, replay);
     const bundle = createBundle();
 
     const response = await service.rerank({
@@ -150,10 +164,7 @@ describe("rag rerank service", () => {
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
     };
-    const service = new RagRerankService(
-      adapter as ModelRerankerAdapter,
-      replay as RagReplayRepository
-    );
+    const service = createService(adapter, replay);
     const bundle = createBundle();
 
     const response = await service.rerank({

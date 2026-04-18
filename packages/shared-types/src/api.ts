@@ -113,6 +113,108 @@ export interface LlmRawOutput {
   createdAt: string;
 }
 
+export interface DeliveryAnswerLayer {
+  text: string;
+  status: RunStatus;
+  provider: string;
+  model?: string;
+}
+
+export interface DeliveryEvidenceReplayLog {
+  replayKey: string;
+  stage: string;
+  indexVersionId?: string;
+  createdAt: string;
+}
+
+export interface DeliveryEvidenceLayer {
+  runId: string;
+  retrievalStatus?: "ready" | "degraded";
+  degradeReasons?: string[];
+  selectedContext?: {
+    count: number;
+    snippets?: string[];
+  };
+  retrievalLogs?: DeliveryEvidenceReplayLog[];
+  riskTags?: string[];
+  semanticVersion?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticDegradeReason?: string;
+  skillContextSummary?: {
+    skillCount: number;
+    contextCount: number;
+    degradeReason?: string;
+  };
+  evidenceStale?: boolean;
+}
+
+export interface DeliveryArtifactLayer {
+  sql?: string;
+  columns?: string[];
+  rowCount: number;
+  rowsPreview?: Array<Record<string, unknown>>;
+  hasError: boolean;
+}
+
+export interface DeliveryContract {
+  answer: DeliveryAnswerLayer;
+  evidence?: DeliveryEvidenceLayer;
+  artifact?: DeliveryArtifactLayer;
+}
+
+export interface RagQualityGateReport {
+  thresholds: {
+    recallAt20Min: number;
+    mrrAt10Min: number;
+    retrievalRerankP95MsMax: number;
+    degradeRateMax: number;
+    minSamples: number;
+  };
+  sampleSize: number;
+  sampleReady: boolean;
+  latest?: {
+    runId: string;
+    datasourceId: string;
+    recordedAt: string;
+    metrics: {
+      recallAt20: number;
+      mrrAt10: number;
+      retrievalRerankP95Ms: number;
+      degradeRate: number;
+    };
+  };
+  gatePass: boolean;
+  reasons: string[];
+  generatedAt: string;
+}
+
+export interface RagReplayCompletenessReport {
+  runId: string;
+  requiredStages: string[];
+  observedStages: string[];
+  missingStages: string[];
+  completeness: number;
+  ready: boolean;
+}
+
+export type RagMemoryStatus = "candidate" | "verified" | "production";
+
+export interface RagMemoryFeedbackRequest {
+  runId: string;
+  targetStatus: RagMemoryStatus;
+  note?: string;
+}
+
+export interface RagMemoryFeedbackResponse {
+  runId: string;
+  candidateId: string;
+  beforeStatus: RagMemoryStatus;
+  afterStatus: RagMemoryStatus;
+  applied: boolean;
+  note?: string;
+  updatedAt: string;
+}
+
 export interface SqlRun {
   runId: string;
   sessionId: string;
@@ -129,6 +231,7 @@ export interface SqlRun {
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
   llmRaw?: LlmRawOutput | null;
+  delivery?: DeliveryContract;
   createdAt: string;
 }
 
@@ -142,6 +245,7 @@ export interface AgentRunResponse {
   kind: "agent-run";
   outcome: RunStatus;
   run: SqlRun;
+  delivery?: DeliveryContract;
   agent: {
     provider: string;
     model?: string;
@@ -203,6 +307,7 @@ export type ChatStreamEventData =
   | {
       status: RunStatus;
       rowCount: number;
+      delivery?: DeliveryContract;
     }
   | {
       code?: string;

@@ -139,6 +139,7 @@ export class ChatController {
         kind: "agent-run",
         outcome: run.status,
         run,
+        delivery: run.delivery,
         agent: {
           provider: run.provider,
           model: run.model,

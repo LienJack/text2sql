@@ -1,6 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
+import { RagBudgetPolicy } from "../perf/rag-budget-policy";
+import { RagCacheKeyFactory } from "../perf/rag-cache-key.factory";
+import { RagQueryCacheService } from "../perf/rag-query-cache.service";
+import { RagQualityService } from "../quality/rag-quality.service";
 import {
+  type RagBudgetSignal,
   type RagRetrievalBundle,
   type RagRetrievalCandidate,
   type RagRerankedCandidate
@@ -15,6 +20,7 @@ export interface RagRerankRequest {
   secondaryMinCandidates?: number;
   secondaryTimeoutMs?: number;
   selectedContextLimit?: number;
+  budgetSignal?: RagBudgetSignal;
 }
 
 export interface RagRerankResponse {
@@ -25,17 +31,70 @@ const DEFAULT_SECONDARY_TOP_K = 8;
 const DEFAULT_SECONDARY_TIMEOUT_MS = 350;
 const DEFAULT_SECONDARY_MIN_CANDIDATES = 3;
 const DEFAULT_SELECTED_CONTEXT_LIMIT = 6;
+const RERANK_CACHE_L1_TTL_MS = 20_000;
+const RERANK_CACHE_L2_TTL_MS = 3 * 60_000;
 
 @Injectable()
 export class RagRerankService {
   constructor(
     private readonly modelReranker: ModelRerankerAdapter,
-    private readonly replayRepository: RagReplayRepository
+    private readonly replayRepository: RagReplayRepository,
+    private readonly budgetPolicy: RagBudgetPolicy,
+    private readonly cacheKeyFactory: RagCacheKeyFactory,
+    private readonly queryCache: RagQueryCacheService,
+    private readonly ragQualityService: RagQualityService
   ) {}
 
   async rerank(input: RagRerankRequest): Promise<RagRerankResponse> {
     const bundle = input.retrievalBundle;
     const rerankDegradeReasons: string[] = [];
+    const selectedContextLimit = this.normalizePositiveInt(
+      input.selectedContextLimit,
+      DEFAULT_SELECTED_CONTEXT_LIMIT
+    );
+    const requestedSecondaryTopK = this.normalizePositiveInt(
+      input.secondaryTopK,
+      DEFAULT_SECONDARY_TOP_K
+    );
+    const budgetDecision = this.budgetPolicy.planRerank({
+      requestedSecondaryTopK,
+      signal: input.budgetSignal
+    });
+    rerankDegradeReasons.push(...budgetDecision.decisionReasons);
+
+    const cacheKey = this.cacheKeyFactory.build({
+      stage: "rerank_bundle",
+      datasourceId: bundle.datasource_id,
+      indexVersionId: bundle.index_version_id ?? "none",
+      query: bundle.query,
+      budgetProfile: budgetDecision.secondaryEnabled
+        ? "secondary_enabled"
+        : "secondary_disabled",
+      secondaryTopK: budgetDecision.secondaryTopK,
+      selectedContextLimit
+    });
+    const cacheRead = this.queryCache.get<RagRetrievalBundle>(cacheKey);
+    if (cacheRead.hit && cacheRead.value) {
+      this.ragQualityService.recordCacheBudget({
+        cacheEligible: true,
+        cacheHit: true,
+        budgetDegraded: budgetDecision.degraded
+      });
+      return {
+        retrieval_bundle: {
+          ...cacheRead.value,
+          run_id: bundle.run_id,
+          decision_reasons: this.unique([
+            ...(cacheRead.value.decision_reasons ?? []),
+            ...budgetDecision.decisionReasons,
+            "cache_hit"
+          ]),
+          degrade_reasons: this.unique([
+            ...(cacheRead.value.degrade_reasons ?? [])
+          ])
+        }
+      };
+    }
 
     const primary = this.primaryRerank(bundle.candidates);
     await this.writePrimaryReplay(bundle, primary);
@@ -46,16 +105,20 @@ export class RagRerankService {
       input.secondaryMinCandidates,
       DEFAULT_SECONDARY_MIN_CANDIDATES
     );
-    const secondaryTopK = this.normalizePositiveInt(
-      input.secondaryTopK,
-      DEFAULT_SECONDARY_TOP_K
-    );
+    const secondaryTopK = budgetDecision.secondaryTopK;
     const secondaryTimeoutMs = this.normalizePositiveInt(
       input.secondaryTimeoutMs,
       DEFAULT_SECONDARY_TIMEOUT_MS
     );
 
-    if (!secondaryEnabled) {
+    if (!budgetDecision.secondaryEnabled) {
+      rerankDegradeReasons.push("secondary_rerank_disabled_by_budget");
+      await this.writeSecondaryReplay(bundle, {
+        status: "skipped",
+        reason: "secondary_rerank_disabled_by_budget",
+        timeoutMs: secondaryTimeoutMs
+      });
+    } else if (!secondaryEnabled) {
       rerankDegradeReasons.push("secondary_rerank_disabled");
       await this.writeSecondaryReplay(bundle, {
         status: "skipped",
@@ -97,10 +160,6 @@ export class RagRerankService {
 
     const reranked = this.mergePrimaryWithSecondary(primary, secondaryScores);
     const degradeReasons = this.unique([...bundle.degrade_reasons, ...rerankDegradeReasons]);
-    const selectedContextLimit = this.normalizePositiveInt(
-      input.selectedContextLimit,
-      DEFAULT_SELECTED_CONTEXT_LIMIT
-    );
     const selectedContext = reranked
       .slice(0, selectedContextLimit)
       .map((item) => item.chunk);
@@ -114,8 +173,31 @@ export class RagRerankService {
       risk_tags: this.buildRiskTags({
         degradeReasons,
         reranked
-      })
+      }),
+      decision_reasons: this.unique([
+        ...(bundle.decision_reasons ?? []),
+        ...budgetDecision.decisionReasons
+      ])
     };
+    await this.writeBudgetReplay(responseBundle, {
+      decisionReasons: budgetDecision.decisionReasons,
+      secondaryEnabled: budgetDecision.secondaryEnabled,
+      secondaryTopK
+    });
+    this.queryCache.set({
+      key: cacheKey,
+      stage: "rerank_bundle",
+      datasourceId: responseBundle.datasource_id,
+      indexVersionId: responseBundle.index_version_id ?? "none",
+      value: responseBundle,
+      l1TtlMs: RERANK_CACHE_L1_TTL_MS,
+      l2TtlMs: RERANK_CACHE_L2_TTL_MS
+    });
+    this.ragQualityService.recordCacheBudget({
+      cacheEligible: true,
+      cacheHit: false,
+      budgetDegraded: budgetDecision.degraded
+    });
     await this.writeFinalReplay(responseBundle);
     return {
       retrieval_bundle: responseBundle
@@ -310,9 +392,32 @@ export class RagRerankService {
       payload: {
         status: bundle.status,
         degradeReasons: bundle.degrade_reasons,
+        decisionReasons: bundle.decision_reasons ?? [],
         rerankedCount: bundle.reranked?.length ?? 0,
         selectedContextCount: bundle.selected_context?.length ?? 0,
         riskTags: bundle.risk_tags ?? []
+      }
+    });
+  }
+
+  private async writeBudgetReplay(
+    bundle: RagRetrievalBundle,
+    input: {
+      decisionReasons: string[];
+      secondaryEnabled: boolean;
+      secondaryTopK: number;
+    }
+  ): Promise<void> {
+    await this.replayRepository.writeReplay({
+      runId: bundle.run_id,
+      replayKey: "rerank:budget",
+      datasourceId: bundle.datasource_id,
+      stage: "rerank_budget",
+      indexVersionId: bundle.index_version_id,
+      payload: {
+        decisionReasons: input.decisionReasons,
+        secondaryEnabled: input.secondaryEnabled,
+        secondaryTopK: input.secondaryTopK
       }
     });
   }

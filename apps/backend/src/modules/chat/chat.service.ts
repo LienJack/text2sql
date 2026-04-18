@@ -14,6 +14,10 @@ import { DomainError } from "../../common/domain-error";
 import { GraphBuilderService } from "../agent/graph/graph.builder";
 import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
 import {
+  DeliveryContractMapper,
+  type DeliveryReplayRecordInput
+} from "../delivery/delivery-contract.mapper";
+import {
   type AccessContext
 } from "../auth/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
@@ -24,7 +28,9 @@ import { DatasourceRegistryService } from "../datasource/datasource-registry.ser
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
+import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
 import { DatasourceService } from "../datasource/datasource.service";
+import { MemoryPromotionService } from "../memory/memory-promotion.service";
 import type { SessionListView } from "./dto/list-sessions.dto";
 
 const MODEL_PROBE_PROMPT = {
@@ -45,7 +51,10 @@ export class ChatService {
     private readonly datasourceRegistry: DatasourceRegistryService,
     private readonly providerCatalog: ProviderCatalogService,
     private readonly providerRouter: ProviderRouterService,
-    private readonly traceService: TraceService
+    private readonly traceService: TraceService,
+    private readonly ragReplayRepository: RagReplayRepository,
+    private readonly deliveryContractMapper: DeliveryContractMapper,
+    private readonly memoryPromotionService: MemoryPromotionService
   ) {}
 
   async createSession(
@@ -399,12 +408,14 @@ export class ChatService {
     });
 
     const finalRun = this.applyRejectedFallback(run, session.datasource);
+    const runWithDelivery = await this.attachDeliveryContract(finalRun);
     await this.persistAssistantAndRun(
       sessionId,
-      finalRun,
+      runWithDelivery,
       userPersistResult.primaryPersisted
     );
-    return finalRun;
+    await this.triggerMemoryPromotion(session, runWithDelivery, requestId);
+    return runWithDelivery;
   }
 
   async streamMessage(
@@ -554,23 +565,27 @@ export class ChatService {
       const finalRun = this.applyRejectedFallback(run, session.datasource);
       finalRun.trace.streamStatus = finalRun.error ? "failed" : "completed";
       finalRun.trace.toolCalls = toolCalls;
-      if (finalRun.error) {
+      const runWithDelivery = await this.attachDeliveryContract(finalRun);
+      if (runWithDelivery.error) {
         await emit("error", {
-          code: finalRun.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
-          message: finalRun.error,
+          code:
+            runWithDelivery.status === "rejected" ? "SQL_READONLY_REJECTED" : undefined,
+          message: runWithDelivery.error,
           details: null
         });
       }
       await emit("finish", {
-        status: finalRun.status,
-        rowCount: finalRun.rows?.length ?? 0
+        status: runWithDelivery.status,
+        rowCount: runWithDelivery.rows?.length ?? 0,
+        delivery: runWithDelivery.delivery
       });
       await this.persistAssistantAndRun(
         sessionId,
-        finalRun,
+        runWithDelivery,
         userPersistResult.primaryPersisted
       );
-      return finalRun;
+      await this.triggerMemoryPromotion(session, runWithDelivery, requestId);
+      return runWithDelivery;
     } catch (error) {
       const messageText = error instanceof Error ? error.message : String(error);
       const run: SqlRun = {
@@ -599,8 +614,14 @@ export class ChatService {
         message: messageText,
         details: (domainError?.details as Record<string, unknown> | undefined) ?? null
       });
-      await this.persistAssistantAndRun(sessionId, run, userPersistResult.primaryPersisted);
-      return run;
+      const runWithDelivery = await this.attachDeliveryContract(run);
+      await this.persistAssistantAndRun(
+        sessionId,
+        runWithDelivery,
+        userPersistResult.primaryPersisted
+      );
+      await this.triggerMemoryPromotion(session, runWithDelivery, requestId);
+      return runWithDelivery;
     }
   }
 
@@ -635,7 +656,10 @@ export class ChatService {
       throw new DomainError("SESSION_NOT_FOUND", "会话不存在", 404, { sessionId });
     }
     const messages = await this.listMessages(sessionId, page, pageSize);
-    const latestRun = await this.repository.getLatestRunBySessionId(sessionId);
+    const latestRunRaw = await this.repository.getLatestRunBySessionId(sessionId);
+    const latestRun = latestRunRaw
+      ? await this.attachDeliveryContract(latestRunRaw)
+      : undefined;
     return {
       session: await this.mergeDatasourceMetadata(session),
       messages,
@@ -652,7 +676,7 @@ export class ChatService {
     if (!session) {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
-    return run;
+    return this.attachDeliveryContract(run);
   }
 
   private async assertSessionWritableByPolicy(session: Session): Promise<void> {
@@ -876,5 +900,54 @@ export class ChatService {
       answer:
         "请求触发了只读安全策略，本次未执行 SQL。你可以改为查询统计口径或时间范围，我会继续协助。"
     };
+  }
+
+  private async attachDeliveryContract(run: SqlRun): Promise<SqlRun> {
+    try {
+      const replayRecords = await this.loadReplayRecords(run.runId);
+      const delivery = this.deliveryContractMapper.map({
+        run,
+        replayRecords
+      });
+      return {
+        ...run,
+        delivery
+      };
+    } catch {
+      return {
+        ...run,
+        delivery: this.deliveryContractMapper.buildFallback(
+          run,
+          "delivery_mapper_failed"
+        )
+      };
+    }
+  }
+
+  private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {
+    const records = await this.ragReplayRepository.listByRunId(runId);
+    return records.map((item) => ({
+      replayKey: item.replayKey,
+      stage: item.stage,
+      indexVersionId: item.indexVersionId,
+      payload: item.payload,
+      createdAt: item.createdAt
+    }));
+  }
+
+  private async triggerMemoryPromotion(
+    session: Session,
+    run: SqlRun,
+    requestId?: string
+  ): Promise<void> {
+    try {
+      await this.memoryPromotionService.promoteFromRun({
+        run,
+        datasourceId: session.datasource,
+        requestId
+      });
+    } catch {
+      // memory promotion is additive and must not interrupt chat completion.
+    }
   }
 }

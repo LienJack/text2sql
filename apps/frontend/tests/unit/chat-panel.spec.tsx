@@ -185,6 +185,9 @@ describe("ChatPanel", () => {
     expect(
       screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
   });
 
   it("does not render debug switch control", async () => {
@@ -261,5 +264,212 @@ describe("ChatPanel", () => {
     if (releaseFirstEvent) {
       releaseFirstEvent();
     }
+  });
+
+  it("keeps run detail entry visible while run backfill is still loading", async () => {
+    const user = userEvent.setup();
+    let resolveRun: (() => void) | undefined;
+    const runBackfillGate = new Promise<void>((resolve) => {
+      resolveRun = resolve;
+    });
+    mockGetMessages
+      .mockResolvedValueOnce({
+        session,
+        messages: createMockMessages(),
+        latestRun: undefined
+      })
+      .mockResolvedValueOnce({
+        session,
+        messages: createMockMessages(),
+        latestRun: undefined
+      });
+    mockGetRun.mockImplementationOnce(async () => {
+      await runBackfillGate;
+      return createMockRun();
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText("已为你生成 SQL，并展示结果。");
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.getByText("运行详情回填中，请稍候...")).toBeInTheDocument();
+
+    if (resolveRun) {
+      resolveRun();
+    }
+  }, 15000);
+
+  it("shows phase-b retrieval stages and run detail summary signals for the same run", async () => {
+    const user = userEvent.setup();
+    const phaseBRun = createMockRun({
+      trace: {
+        runId: "run-1",
+        provider: "mock",
+        retryCount: 0,
+        steps: [
+          {
+            node: "retrieve_knowledge",
+            status: "success",
+            stepId: "run-1:retrieve_knowledge:1",
+            sequence: 1,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:00.000Z"
+          },
+          {
+            node: "build_intent_plan",
+            status: "success",
+            stepId: "run-1:build_intent_plan:2",
+            sequence: 2,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:01.000Z"
+          },
+          {
+            node: "build_semantic_query",
+            status: "success",
+            stepId: "run-1:build_semantic_query:3",
+            sequence: 3,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:02.000Z"
+          }
+        ]
+      },
+      delivery: {
+        answer: {
+          text: "已为你生成 SQL，并展示结果。",
+          status: "executionResult",
+          provider: "mock"
+        },
+        evidence: {
+          runId: "run-1",
+          retrievalStatus: "degraded",
+          degradeReasons: ["retrieval_timeout"],
+          selectedContext: {
+            count: 0
+          },
+          riskTags: ["semantic_registry_degraded"]
+        }
+      }
+    });
+
+    mockGetMessages.mockResolvedValue({
+      session,
+      messages: createMockMessages(),
+      latestRun: phaseBRun
+    });
+    mockGetRun.mockResolvedValue(phaseBRun);
+    mockStreamMessageEvents.mockImplementationOnce(async function* () {
+      yield {
+        type: "start",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: { requestId: null }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "retrieve_knowledge",
+          status: "success",
+          stepId: "run-1:retrieve_knowledge:1",
+          sequence: 1,
+          lifecycle: "completed",
+          detail: "hit=2"
+        }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:01.000Z",
+        data: {
+          node: "build_intent_plan",
+          status: "success",
+          stepId: "run-1:build_intent_plan:2",
+          sequence: 2,
+          lifecycle: "completed",
+          detail: "intent=payment_distribution"
+        }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:02.000Z",
+        data: {
+          node: "build_semantic_query",
+          status: "success",
+          stepId: "run-1:build_semantic_query:3",
+          sequence: 3,
+          lifecycle: "completed",
+          detail: "semantic=orders.payment_method"
+        }
+      };
+      yield {
+        type: "text-delta",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:03.000Z",
+        data: {
+          text: "SELECT payment_method"
+        }
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:04.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1,
+          delivery: {
+            answer: {
+              text: "已为你生成 SQL，并展示结果。",
+              status: "executionResult",
+              provider: "mock"
+            },
+            evidence: {
+              runId: "run-1",
+              retrievalStatus: "degraded",
+              degradeReasons: ["retrieval_timeout"],
+              selectedContext: {
+                count: 0
+              },
+              riskTags: ["semantic_registry_degraded"]
+            }
+          }
+        }
+      };
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("知识检索")).toBeInTheDocument();
+    expect(screen.getByText("意图规划")).toBeInTheDocument();
+    expect(screen.getByText("语义检索构建")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.getByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
+    expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
+    expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
   });
 });
