@@ -25,6 +25,7 @@
 - 用户可见交互必须覆盖至少四类状态：`loading`、`empty`、`error`、`success`。
 - 表单与提交动作必须具备禁用态和错误反馈，不允许静默失败。
 - 关键视图必须在移动端宽度（至少 375px）可用，不允许核心操作不可点击或内容溢出不可读。
+- 涉及治理接口展示或调用时，仅允许 canonical 术语（`workspace datasource binding`、`table-permissions`、`policyVersion`）；不得在主链路继续使用 `table-acl`、`acl`、`rule-group`（governance-terminology:allow-legacy）。
 - 涉及聊天 RAG 可见化改造时，必须满足以下验收：sync `AgentRunResponse` 与 stream `ChatStreamEvent` 同 `runId` 可追踪；`selected_context` 四态（`happy/nil/empty/error`）可见；duplicate/out-of-order 事件下终态不回退到 loading；折叠区支持 `Enter/Space` 键盘触发并保持 `aria-expanded` 与可视状态一致。
 - 涉及术语治理联动时，`/settings` 必须提供锚点状态可见化（当前锚点/最近回滚）与管理员操作反馈（成功/403/业务错误可读）。
 

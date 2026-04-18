@@ -1,6 +1,6 @@
 import { Injectable, Module, OnModuleInit } from "@nestjs/common";
-import { DatasourceAccessPolicyService } from "../auth/datasource-access-policy.service";
-import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
+import { DatasourceAccessPolicyService } from "../governance/access/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../governance/access/policy-evaluator.service";
 import { AppConfigModule } from "../config/config.module";
 import { AppConfigService } from "../config/app-config.service";
 import { PersistenceRetryService } from "./cache/persistence-retry.service";

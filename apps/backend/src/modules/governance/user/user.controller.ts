@@ -12,9 +12,9 @@ import {
 } from "@nestjs/common";
 import type { ApiResponse } from "@text2sql/shared-types";
 import type { Request } from "express";
-import { fail, ok } from "../../common/api-response";
-import { DomainError } from "../../common/domain-error";
-import { AdminOnlyGuard } from "../auth/admin-only.guard";
+import { fail, ok } from "../../../common/api-response";
+import { DomainError } from "../../../common/domain-error";
+import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { BatchDeleteUsersDto } from "./dto/batch-delete-users.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { ListUsersDto } from "./dto/list-users.dto";

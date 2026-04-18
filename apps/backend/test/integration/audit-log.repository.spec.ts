@@ -34,8 +34,8 @@ describe("audit log repository", () => {
 
     const runScoped = await repository.appendEvent({
       phase: "governance",
-      eventType: "workspace.datasource.acl.denied",
-      eventCode: "ACL_DENIED",
+      eventType: "workspace.datasource.table-permissions.denied",
+      eventCode: "TABLE_PERMISSIONS_DENIED",
       message: "检测到未授权读表请求",
       runId: "run-audit-1",
       sessionId: "session-audit-1",
@@ -66,8 +66,8 @@ describe("audit log repository", () => {
 
     const requestScoped = await repository.appendEvent({
       phase: "governance",
-      eventType: "workspace.datasource.acl.denied",
-      eventCode: "ACL_DENIED",
+      eventType: "workspace.datasource.table-permissions.denied",
+      eventCode: "TABLE_PERMISSIONS_DENIED",
       message: "拒绝事件带 requestId",
       runId: "run-audit-2",
       sessionId: "session-audit-2",
@@ -78,7 +78,7 @@ describe("audit log repository", () => {
     });
 
     const requestScopedList = await repository.listEvents({
-      eventType: "workspace.datasource.acl.denied",
+      eventType: "workspace.datasource.table-permissions.denied",
       requestId: "req-audit-2",
       limit: 10
     });

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
-import { PolicyEvaluatorService } from "../../src/modules/auth/policy-evaluator.service";
+import { PolicyEvaluatorService } from "../../src/modules/governance/access/policy-evaluator.service";
 import { DataModule } from "../../src/modules/data/data.module";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../../src/modules/data/persistence/workspace-datasource-policy.repository";

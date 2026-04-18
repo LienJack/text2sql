@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { AppModule } from "../../src/app.module";
 import { ChatRepository } from "../../src/modules/data/persistence/chat.repository";
 
-describe("workspace datasource acl schema baseline", () => {
+describe("workspace datasource table-permissions schema baseline", () => {
   beforeAll(() => {
     process.env.SQLITE_PATH = resolve(
       __dirname,

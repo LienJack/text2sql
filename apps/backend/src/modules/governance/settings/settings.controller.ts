@@ -13,9 +13,9 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import type { ApiResponse } from "@text2sql/shared-types";
-import { fail, ok } from "../../common/api-response";
-import { DomainError } from "../../common/domain-error";
-import { AdminOnlyGuard } from "../auth/admin-only.guard";
+import { fail, ok } from "../../../common/api-response";
+import { DomainError } from "../../../common/domain-error";
+import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { BatchUpdateModelStatusDto } from "./dto/batch-update-model-status.dto";
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { CreateProviderDto } from "./dto/create-provider.dto";

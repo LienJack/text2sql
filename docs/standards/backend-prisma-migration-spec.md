@@ -55,3 +55,7 @@
 - 新增结构必须保持对 `sessions/messages/sql_runs` 的向后兼容，禁止通过迁移删除或重建旧核心表。
 - 图谱与语义表必须具备最小查询索引（按 datasource、type、sourceRunId）以支撑后续 R2-R5 演进。
 - 审计表必须包含 run/session 关联能力，且外键采用 `ON DELETE SET NULL`，避免清理历史会话时丢失审计记录。
+
+## 9. Governance 术语一致性要求
+- 与治理域相关的表/列命名与迁移注释应使用 canonical 术语：`workspace datasource binding`、`table-permissions`、`policyVersion`。
+- 新迁移不得再次引入 `table-acl` / `acl` / `rule-group` 作为活跃结构命名；历史迁移保留仅用于回放兼容（governance-terminology:allow-legacy）。

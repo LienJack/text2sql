@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("settings rule-group retirement guard", () => {
-  it("keeps legacy rule-group management UI files removed", () => {
+describe("settings retired governance ui guard", () => {
+  it("keeps retired governance management UI files removed", () => {
     const frontendRoot = resolve(__dirname, "../../src/components/settings");
     const retiredFiles = [
       "rule-groups-management-panel.tsx",

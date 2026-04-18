@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import type { PlatformUser, PlatformUserStatus } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
-import { DomainError } from "../../common/domain-error";
-import { UserRepository } from "../data/persistence/user.repository";
-import { WorkspaceRepository } from "../data/persistence/workspace.repository";
+import { DomainError } from "../../../common/domain-error";
+import { UserRepository } from "../../data/persistence/user.repository";
+import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
 import { BatchDeleteUsersDto } from "./dto/batch-delete-users.dto";
 import { CreateUserDto } from "./dto/create-user.dto";
 import { ListUsersDto } from "./dto/list-users.dto";

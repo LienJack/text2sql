@@ -11,8 +11,8 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import type { ApiResponse } from "@text2sql/shared-types";
-import { fail, ok } from "../../common/api-response";
-import { DomainError } from "../../common/domain-error";
+import { fail, ok } from "../../../common/api-response";
+import { DomainError } from "../../../common/domain-error";
 import { AddWorkspaceMemberDto } from "./dto/add-workspace-member.dto";
 import { CreateWorkspaceDto } from "./dto/create-workspace.dto";
 import { ListWorkspaceMembersDto } from "./dto/list-workspace-members.dto";

@@ -4,7 +4,7 @@ import type {
   SettingsActor
 } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
-import { DomainError } from "../../common/domain-error";
+import { DomainError } from "../../../common/domain-error";
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";
 import { UpdatePromptTemplateDto } from "./dto/update-prompt-template.dto";

@@ -4,9 +4,9 @@ import { ChatRepository } from "../../data/persistence/chat.repository";
 import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
 import { QueryExecutorRouterService } from "../../data/query/query-executor-router.service";
 import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
-import { DatasourceService } from "../../datasource/datasource.service";
-import type { AccessContext } from "../../auth/datasource-access-policy.service";
-import { PolicyEvaluatorService } from "../../auth/policy-evaluator.service";
+import { DatasourceService } from "../../governance/datasource/datasource.service";
+import type { AccessContext } from "../../governance/access/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../../governance/access/policy-evaluator.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -67,7 +67,7 @@ export class ExecuteSqlNode {
       return await this.queryExecutorRouter.execute({
         datasource,
         sql: input.sql,
-        acl: effectiveAccessContext
+        tablePermissions: effectiveAccessContext
           ? {
               accessContext: effectiveAccessContext,
               allowedTables: policyResult?.readableTables
@@ -75,8 +75,8 @@ export class ExecuteSqlNode {
           : undefined
       });
     } catch (error) {
-      if (this.isAclGuardError(error) && effectiveAccessContext) {
-        await this.writeAclDeniedAudit({
+      if (this.isTablePermissionsGuardError(error) && effectiveAccessContext) {
+        await this.writeTablePermissionsDeniedAudit({
           error,
           sql: input.sql,
           datasourceId: input.datasourceId,
@@ -148,14 +148,15 @@ export class ExecuteSqlNode {
     };
   }
 
-  private isAclGuardError(error: unknown): error is DomainError {
+  private isTablePermissionsGuardError(error: unknown): error is DomainError {
     return (
       error instanceof DomainError &&
-      (error.code === "ACL_FORBIDDEN" || error.code === "ACL_PARSE_REJECTED")
+      (error.code === "TABLE_PERMISSIONS_FORBIDDEN" ||
+        error.code === "TABLE_PERMISSIONS_PARSE_REJECTED")
     );
   }
 
-  private async writeAclDeniedAudit(input: {
+  private async writeTablePermissionsDeniedAudit(input: {
     error: DomainError;
     sql: string;
     datasourceId: string;
@@ -166,7 +167,7 @@ export class ExecuteSqlNode {
     try {
       await this.auditLogRepository.appendEvent({
         phase: "governance",
-        eventType: "workspace.datasource.acl.denied",
+        eventType: "workspace.datasource.table-permissions.denied",
         eventCode: input.error.code,
         severity: "warning",
         message: input.error.message,
@@ -183,7 +184,7 @@ export class ExecuteSqlNode {
       });
     } catch (auditError) {
       throw new DomainError(
-        "ACL_AUDIT_WRITE_FAILED",
+        "TABLE_PERMISSIONS_AUDIT_WRITE_FAILED",
         "授权拒绝审计写入失败，已拒绝执行。",
         503,
         {

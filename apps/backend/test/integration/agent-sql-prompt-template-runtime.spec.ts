@@ -5,7 +5,7 @@ import { GenerateSqlNode } from "../../src/modules/agent/nodes/generate-sql.node
 import { SqlGenerationService } from "../../src/modules/agent/sql/sql-generation.service";
 import { SqlOutputExtractor } from "../../src/modules/agent/sql/sql-output-extractor";
 import { SqlPromptBuilder } from "../../src/modules/agent/sql/sql-prompt.builder";
-import { PromptTemplateService } from "../../src/modules/settings/prompt-template.service";
+import { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
 
 describe("agent sql prompt template runtime integration", () => {
   let generateSqlNode: GenerateSqlNode;

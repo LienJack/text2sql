@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
 import { DomainError } from "../../src/common/domain-error";
-import { DatasourceService } from "../../src/modules/datasource/datasource.service";
+import { DatasourceService } from "../../src/modules/governance/datasource/datasource.service";
 
 describe("datasource service", () => {
   beforeAll(() => {

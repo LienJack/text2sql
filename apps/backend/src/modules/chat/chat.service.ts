@@ -20,17 +20,17 @@ import {
 } from "../delivery/delivery-contract.mapper";
 import {
   type AccessContext
-} from "../auth/datasource-access-policy.service";
-import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
+} from "../governance/access/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../governance/access/policy-evaluator.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
-import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+import { DatasourceRegistryService } from "../governance/datasource/datasource-registry.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
 import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
-import { DatasourceService } from "../datasource/datasource.service";
+import { DatasourceService } from "../governance/datasource/datasource.service";
 import { MemoryPromotionService } from "../memory/memory-promotion.service";
 import type { SessionListView } from "./dto/list-sessions.dto";
 

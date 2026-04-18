@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
 import { DataModule } from "../data/data.module";
-import { DatasourceModule } from "../datasource/datasource.module";
+import { DatasourceModule } from "../governance/datasource/datasource.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../rag/rag.module";

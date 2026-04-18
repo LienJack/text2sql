@@ -123,6 +123,23 @@ CI 参考：
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 
+### D. Governance 术语硬切规范
+来源：`docs/standards/governance-terminology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/governance/**`
+- `apps/frontend/src/lib/admin-api-client.ts`
+- `docs/standards/**`
+- `README.md`
+
+关键 MUST：
+- 治理主链路仅使用 `workspace datasource binding`、`table-permissions`、`policyVersion`。
+- 不得在治理主链路继续接受 legacy 路由/字段（`table-acl`、`acl`、`rule-group`）。
+- 历史术语只允许出现在明确迁移上下文（带迁移注记），不得作为 active narrative。
+
+必跑检查：
+- `pnpm run governance:terminology:check`
+
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。
 

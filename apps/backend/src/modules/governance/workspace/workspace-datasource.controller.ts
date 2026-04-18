@@ -12,9 +12,9 @@ import {
 } from "@nestjs/common";
 import type { Request } from "express";
 import type { ApiResponse } from "@text2sql/shared-types";
-import { fail, ok } from "../../common/api-response";
-import { DomainError } from "../../common/domain-error";
-import { WorkspaceAdminGuard } from "../auth/workspace-admin.guard";
+import { fail, ok } from "../../../common/api-response";
+import { DomainError } from "../../../common/domain-error";
+import { WorkspaceAdminGuard } from "../../auth/workspace-admin.guard";
 import { ListWorkspaceDatasourceTablePermissionsDto } from "./dto/list-workspace-datasource-table-permissions.dto";
 import { ReplaceWorkspaceDatasourceTablePermissionsDto } from "./dto/replace-workspace-datasource-table-permissions.dto";
 import { WorkspaceDatasourceBindingBatchDto } from "./dto/workspace-datasource-binding-batch.dto";

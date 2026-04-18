@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
-import { LlmModule } from "../llm/llm.module";
-import { AdminOnlyGuard } from "../auth/admin-only.guard";
+import { LlmModule } from "../../llm/llm.module";
+import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { PromptTemplateService } from "./prompt-template.service";
 import { SettingsController } from "./settings.controller";
 import { SettingsService } from "./settings.service";

@@ -9,7 +9,7 @@ import { ProviderRouterService } from "../../llm/provider-router.service";
 import { SqlOutputExtractor } from "./sql-output-extractor";
 import { SqlPromptBuilder } from "./sql-prompt.builder";
 import type { RagRetrievalChunkPayload } from "../../rag/retrieval/rag-retrieval.types";
-import { PromptTemplateService } from "../../settings/prompt-template.service";
+import { PromptTemplateService } from "../../governance/settings/prompt-template.service";
 
 export interface SqlDraft {
   provider: string;

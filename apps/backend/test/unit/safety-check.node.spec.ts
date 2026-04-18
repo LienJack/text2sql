@@ -44,7 +44,7 @@ describe("SafetyCheckNode", () => {
     });
   });
 
-  it("surfaces ACL_FORBIDDEN when allowed table set does not match", async () => {
+  it("surfaces TABLE_PERMISSIONS_FORBIDDEN when allowed table set does not match", async () => {
     await expect(
       node.run({
         sql: "SELECT * FROM orders",
@@ -64,7 +64,7 @@ describe("SafetyCheckNode", () => {
     });
   });
 
-  it("surfaces ACL_PARSE_REJECTED for unsupported table extraction pattern", async () => {
+  it("surfaces TABLE_PERMISSIONS_PARSE_REJECTED for unsupported table extraction pattern", async () => {
     await expect(
       node.run({
         sql: "SELECT * FROM (SELECT * FROM orders) o",

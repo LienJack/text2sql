@@ -5,13 +5,13 @@ import { DomainError } from "../../src/common/domain-error";
 import { QueryExecutorRouterService } from "../../src/modules/data/query/query-executor-router.service";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
-describe("query executor router acl integration", () => {
+describe("query executor router table-permissions integration", () => {
   let router: QueryExecutorRouterService;
   let cleanupFixture: (() => Promise<void>) | undefined;
   let closeModuleRef: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
-    const fixture = await createSeededSqliteFixture("query-router-acl");
+    const fixture = await createSeededSqliteFixture("query-router-table-permissions");
     cleanupFixture = fixture.cleanup;
     process.env.SQLITE_PATH = fixture.dbPath;
     process.env.DATABASE_URL = "";
@@ -36,7 +36,7 @@ describe("query executor router acl integration", () => {
   });
 
   const datasource = (type: Datasource["type"]): Datasource => ({
-    id: `ds-acl-${type}`,
+    id: `ds-table-permissions-${type}`,
     name: `Datasource ${type}`,
     type,
     status: "available",
@@ -60,7 +60,7 @@ describe("query executor router acl integration", () => {
       router.execute({
         datasource: datasource("sqlite"),
         sql: "SELECT status, COUNT(*) AS total FROM orders GROUP BY status",
-        acl: {
+        tablePermissions: {
           accessContext,
           resolveAllowedTables: async () => ["orders"]
         }
@@ -71,33 +71,33 @@ describe("query executor router acl integration", () => {
     });
   });
 
-  it("returns ACL_FORBIDDEN for unauthorized table before executor dispatch", async () => {
+  it("returns TABLE_PERMISSIONS_FORBIDDEN for unauthorized table before executor dispatch", async () => {
     await expect(
       router.execute({
         datasource: datasource("sqlite"),
         sql: "SELECT * FROM orders",
-        acl: {
+        tablePermissions: {
           accessContext,
           allowedTables: ["users"]
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_FORBIDDEN"
+      code: "TABLE_PERMISSIONS_FORBIDDEN"
     } satisfies Partial<DomainError>);
   });
 
-  it("returns ACL_PARSE_REJECTED for unsupported extraction pattern", async () => {
+  it("returns TABLE_PERMISSIONS_PARSE_REJECTED for unsupported extraction pattern", async () => {
     await expect(
       router.execute({
         datasource: datasource("sqlite"),
         sql: "SELECT * FROM (SELECT * FROM orders) o",
-        acl: {
+        tablePermissions: {
           accessContext,
           allowedTables: ["orders"]
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_PARSE_REJECTED"
+      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
     } satisfies Partial<DomainError>);
   });
 
@@ -106,7 +106,7 @@ describe("query executor router acl integration", () => {
       router.execute({
         datasource: datasource("sqlite"),
         sql: "SELECT id FROM orders UNION SELECT id FROM orders",
-        acl: {
+        tablePermissions: {
           accessContext: {
             ...accessContext,
             rowFiltersByTable: {
@@ -117,11 +117,11 @@ describe("query executor router acl integration", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_PARSE_REJECTED"
+      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
     } satisfies Partial<DomainError>);
   });
 
-  it("applies ACL gate consistently across datasource types", async () => {
+  it("applies table-permissions gate consistently across datasource types", async () => {
     const types: Datasource["type"][] = [
       "sqlite",
       "mysql",
@@ -131,18 +131,18 @@ describe("query executor router acl integration", () => {
     ];
 
     for (const type of types) {
-      // ACL check runs before executor dispatch for every datasource type.
+      // table-permissions check runs before executor dispatch for every datasource type.
       await expect(
         router.execute({
           datasource: datasource(type),
           sql: "SELECT * FROM orders",
-          acl: {
+          tablePermissions: {
             accessContext,
             allowedTables: ["users"]
           }
         })
       ).rejects.toMatchObject({
-        code: "ACL_FORBIDDEN"
+        code: "TABLE_PERMISSIONS_FORBIDDEN"
       } satisfies Partial<DomainError>);
     }
   });

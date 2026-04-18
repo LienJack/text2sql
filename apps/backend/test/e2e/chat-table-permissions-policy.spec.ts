@@ -6,7 +6,7 @@ import { AppModule } from "../../src/app.module";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
 
-describe("chat table acl / policy guard (e2e)", () => {
+describe("chat table-permissions policy guard (e2e)", () => {
   let app: INestApplication;
 
   beforeAll(async () => {
@@ -42,23 +42,23 @@ describe("chat table acl / policy guard (e2e)", () => {
   it("blocks message sending when workspace binding is removed after session creation", async () => {
     const workspaceRes = await request(app.getHttpServer())
       .post("/api/v1/system/workspaces")
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
       .send({ name: "会话只读策略空间" });
     const workspaceId = workspaceRes.body.data.id as string;
 
     await request(app.getHttpServer())
       .post(`/api/v1/system/workspaces/${workspaceId}/members`)
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
       .send({
-        userId: "chat-member-acl",
+        userId: "chat-member-table-permissions",
         role: "member"
       });
 
     await request(app.getHttpServer())
       .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/add`)
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
       .send({
         datasourceIds: ["sqlite_main"]
@@ -68,7 +68,7 @@ describe("chat table acl / policy guard (e2e)", () => {
       .get(
         `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
       )
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin");
     expect(listPermissionsRes.status).toBe(200);
     const policyVersion = Number(listPermissionsRes.body.data.policyVersion ?? 0);
@@ -77,9 +77,9 @@ describe("chat table acl / policy guard (e2e)", () => {
       .put(
         `/api/v1/system/workspaces/${workspaceId}/datasources/sqlite_main/table-permissions`
       )
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
-      .set("x-idempotency-key", "idem-chat-table-acl")
+      .set("x-idempotency-key", "idem-chat-table-permissions")
       .send({
         policyVersion: Number.isFinite(policyVersion) ? policyVersion : 0,
         tableNames: ["users"]
@@ -88,7 +88,7 @@ describe("chat table acl / policy guard (e2e)", () => {
 
     const retiredRuleGroupRouteRes = await request(app.getHttpServer())
       .post("/api/v1/system/rule-groups")
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
       .send({
         workspaceId,
@@ -98,7 +98,7 @@ describe("chat table acl / policy guard (e2e)", () => {
 
     const createSessionRes = await request(app.getHttpServer())
       .post("/api/v1/sessions")
-      .set("x-user-id", "chat-member-acl")
+      .set("x-user-id", "chat-member-table-permissions")
       .set("x-user-role", "user")
       .set("x-workspace-id", workspaceId)
       .send({
@@ -110,7 +110,7 @@ describe("chat table acl / policy guard (e2e)", () => {
 
     await request(app.getHttpServer())
       .post(`/api/v1/system/workspaces/${workspaceId}/datasources/bindings/remove`)
-      .set("x-user-id", "admin-chat-acl")
+      .set("x-user-id", "admin-chat-table-permissions")
       .set("x-user-role", "admin")
       .send({
         datasourceIds: ["sqlite_main"]
@@ -118,7 +118,7 @@ describe("chat table acl / policy guard (e2e)", () => {
 
     const sendRes = await request(app.getHttpServer())
       .post(`/api/v1/sessions/${sessionId}/messages`)
-      .set("x-user-id", "chat-member-acl")
+      .set("x-user-id", "chat-member-table-permissions")
       .set("x-user-role", "user")
       .set("x-workspace-id", workspaceId)
       .send({ message: "查询订单总数" });

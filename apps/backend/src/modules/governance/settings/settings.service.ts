@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { SettingsActor } from "@text2sql/shared-types";
-import { ProviderCatalogService } from "../llm/provider-catalog.service";
+import { ProviderCatalogService } from "../../llm/provider-catalog.service";
 import { CreateProviderDto } from "./dto/create-provider.dto";
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";

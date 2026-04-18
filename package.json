@@ -11,6 +11,7 @@
     "test": "pnpm -r test",
     "test:backend": "pnpm --filter @text2sql/backend test",
     "test:frontend": "pnpm --filter @text2sql/frontend test",
-    "format:check": "pnpm -r lint"
+    "format:check": "pnpm -r lint",
+    "governance:terminology:check": "pnpm --filter @text2sql/backend exec ts-node --transpile-only --skipProject --compilerOptions '{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' ../../scripts/check-governance-terminology.ts"
   }
 }

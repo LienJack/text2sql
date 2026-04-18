@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import type { Workspace, WorkspaceMember } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
-import { DomainError } from "../../common/domain-error";
-import { UserRepository } from "../data/persistence/user.repository";
-import { WorkspaceRepository } from "../data/persistence/workspace.repository";
+import { DomainError } from "../../../common/domain-error";
+import { UserRepository } from "../../data/persistence/user.repository";
+import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
 
 export type WorkspaceMemberRole = "admin" | "member";
 

@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
-import { WorkspaceAdminGuard } from "../auth/workspace-admin.guard";
-import { DataModule } from "../data/data.module";
+import { WorkspaceAdminGuard } from "../../auth/workspace-admin.guard";
+import { DataModule } from "../../data/data.module";
 import { WorkspaceDatasourceController } from "./workspace-datasource.controller";
 import { WorkspaceDatasourceService } from "./workspace-datasource.service";
 import { WorkspaceController } from "./workspace.controller";

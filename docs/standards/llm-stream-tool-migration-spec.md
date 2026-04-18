@@ -10,6 +10,10 @@
 
 ## API Changes
 
+术语约束（governance 相关）：
+- 本规范涉及治理字段时，仅使用 canonical 词典：`workspace datasource binding`、`table-permissions`、`policyVersion`。
+- 不在治理主链路文档中引入 `table-acl` / `acl` / `rule-group` 兼容叙事（governance-terminology:allow-legacy）。
+
 ### Message Endpoints
 
 - `POST /api/v1/sessions/:sessionId/messages`

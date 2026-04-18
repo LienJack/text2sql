@@ -147,7 +147,7 @@ describe("workspace datasource governance audit (e2e)", () => {
     expect(event?.severity).toBe("warning");
   });
 
-  it("records acl denied audit event before rejecting unauthorized table read", async () => {
+  it("records table-permissions denied audit event before rejecting unauthorized table read", async () => {
     const workspaceRes = await request(app.getHttpServer())
       .post("/api/v1/system/workspaces")
       .set("x-user-id", "admin-audit-deny")
@@ -179,18 +179,18 @@ describe("workspace datasource governance audit (e2e)", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_FORBIDDEN"
+      code: "TABLE_PERMISSIONS_FORBIDDEN"
     });
 
     const deniedEvents = await auditLogRepository.listEvents({
-      eventType: "workspace.datasource.acl.denied",
+      eventType: "workspace.datasource.table-permissions.denied",
       requestId: "req-audit-denied-1",
       limit: 20
     });
     expect(
       deniedEvents.some(
         (event) =>
-          event.eventCode === "ACL_FORBIDDEN" &&
+          event.eventCode === "TABLE_PERMISSIONS_FORBIDDEN" &&
           event.metadata?.workspaceId === workspaceId &&
           event.metadata?.datasourceId === "sqlite_main" &&
           event.requestId === "req-audit-denied-1"

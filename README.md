@@ -14,6 +14,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
 - R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
+- 治理术语硬切规范：`docs/standards/governance-terminology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
 ### 数据库结构改动铁律（必须遵守）
