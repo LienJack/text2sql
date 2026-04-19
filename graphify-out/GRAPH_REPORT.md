@@ -1,7 +1,7 @@
 # Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-19)
 
 ## Corpus Check
-- 568 files · ~694,852 words
+- 568 files · ~695,009 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -2602,9 +2602,11 @@ Nodes (0):
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `ok()` connect `Community 2` to `Community 0`, `Community 10`, `Community 19`, `Community 6`?**
-  _High betweenness centrality (0.027) - this node is a cross-community bridge._
-- **Why does `mergeSessionMessages()` connect `Community 34` to `Community 3`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+  _High betweenness centrality (0.038) - this node is a cross-community bridge._
+- **Why does `RagRetrievalService` connect `Community 1` to `Community 24`, `Community 22`?**
+  _High betweenness centrality (0.022) - this node is a cross-community bridge._
+- **Why does `DatasourceService` connect `Community 6` to `Community 0`?**
+  _High betweenness centrality (0.020) - this node is a cross-community bridge._
 - **Are the 65 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.createSession()`) actually correct?**
   _`ok()` has 65 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `AppModule`, `LlmModule`, `ApplyMemoryFeedbackDto` to the rest of the system?**
@@ -2613,5 +2615,3 @@ _Questions this graph is uniquely positioned to answer:_
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
-- **Should `Community 2` be split into smaller, more focused modules?**
-  _Cohesion score 0.03 - nodes in this community are weakly interconnected._

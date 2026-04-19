@@ -130,7 +130,7 @@ export class GlossaryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     try {
-      const prismaClientModulePath = "../../../generated/prisma/client";
+      const prismaClientModulePath = "../../generated/prisma/client";
       const prismaModule = (await import(prismaClientModulePath)) as unknown as {
         PrismaClient?: new (...args: unknown[]) => PrismaClientLike;
         default?: {
