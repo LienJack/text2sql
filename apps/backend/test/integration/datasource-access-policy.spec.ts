@@ -1,10 +1,13 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { DatasourceAccessPolicyService } from "../../src/modules/governance/access/datasource-access-policy.service";
-import { PlatformDataModule } from "../../src/modules/platform/data/data.module";
-import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
-import { WorkspaceDatasourcePolicyRepository } from "../../src/modules/data/persistence/workspace-datasource-policy.repository";
-import { WorkspaceRepository } from "../../src/modules/data/persistence/workspace.repository";
+import { GovernanceAccessModule } from "../../src/modules/governance/access/access.module";
+import { PlatformDataPersistenceModule } from "../../src/modules/platform/data/persistence.module";
+import {
+  DatasourceRepository,
+  WorkspaceDatasourcePolicyRepository,
+  WorkspaceRepository
+} from "../../src/modules/platform/data/persistence";
 
 describe("datasource access policy service", () => {
   beforeAll(() => {
@@ -20,7 +23,7 @@ describe("datasource access policy service", () => {
 
   it("resolves datasource visibility and workspace table-permission decisions", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [PlatformDataModule]
+      imports: [PlatformDataPersistenceModule, GovernanceAccessModule]
     }).compile();
 
     const workspaceRepository = moduleRef.get(WorkspaceRepository);
@@ -103,7 +106,7 @@ describe("datasource access policy service", () => {
 
   it("rejects missing or unverified workspace context for non-admin actor", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [PlatformDataModule]
+      imports: [PlatformDataPersistenceModule, GovernanceAccessModule]
     }).compile();
     const workspaceRepository = moduleRef.get(WorkspaceRepository);
     const policyService = moduleRef.get(DatasourceAccessPolicyService);
@@ -141,7 +144,7 @@ describe("datasource access policy service", () => {
 
   it("allows system admin to resolve workspace context without membership", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [PlatformDataModule]
+      imports: [PlatformDataPersistenceModule, GovernanceAccessModule]
     }).compile();
     const workspaceRepository = moduleRef.get(WorkspaceRepository);
     const policyService = moduleRef.get(DatasourceAccessPolicyService);

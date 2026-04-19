@@ -22,9 +22,11 @@ import {
   type AccessContext
 } from "../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../governance/access/policy-evaluator.service";
-import { RedisBufferService } from "../data/cache/redis-buffer.service";
-import { ChatRepository } from "../data/persistence/chat.repository";
-import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
+import { RedisBufferService } from "../platform/data/cache/index";
+import {
+  ChatRepository,
+  WorkspaceDatasourcePolicyRepository
+} from "../platform/data/persistence/index";
 import { DatasourceRegistryService } from "../governance/datasource/datasource-registry.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";

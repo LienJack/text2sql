@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { PlatformDataModule } from "../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { PlatformDataQueryModule } from "../platform/data/query.module";
 import { DatasourceModule } from "../governance/datasource/datasource.module";
+import { GovernanceAccessModule } from "../governance/access/access.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../rag/rag.module";
@@ -30,7 +32,9 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
 @Module({
   imports: [
     AppConfigModule,
-    PlatformDataModule,
+    PlatformDataPersistenceModule,
+    PlatformDataQueryModule,
+    GovernanceAccessModule,
     DatasourceModule,
     LlmModule,
     SettingsModule,

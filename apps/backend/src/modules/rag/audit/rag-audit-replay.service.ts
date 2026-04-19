@@ -1,11 +1,14 @@
 import type { ExecutionTrace } from "@text2sql/shared-types";
 import { Injectable } from "@nestjs/common";
-import type { GovernanceAuditLog } from "../../data/persistence/audit-log.repository";
-import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
-import { ChatRepository } from "../../data/persistence/chat.repository";
+import {
+  AuditLogRepository,
+  ChatRepository
+} from "../../platform/data/persistence/index";
 import { RagIndexRepository } from "../index/rag-index.repository";
 import type { RagReplayRecord } from "../observability/rag-replay.repository";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
+
+type GovernanceAuditLog = Awaited<ReturnType<AuditLogRepository["listEvents"]>>[number];
 
 export interface RagAuditReplayQueryInput {
   runId?: string;

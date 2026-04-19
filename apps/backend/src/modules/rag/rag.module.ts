@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { PlatformDataModule } from "../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
 import { GraphAccelerationAdapter } from "../knowledge/graph/adapter/graph-acceleration.adapter";
 import { GraphAccelerationCircuitBreaker } from "../knowledge/graph/adapter/graph-acceleration-circuit-breaker";
 import { GraphService } from "../knowledge/graph/graph.service";
@@ -27,7 +27,7 @@ import { RagRerankService } from "./rerank/rag-rerank.service";
 @Module({
   imports: [
     AppConfigModule,
-    PlatformDataModule,
+    PlatformDataPersistenceModule,
     LlmModule,
     ObservabilityModule,
     SkillRegistryModule

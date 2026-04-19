@@ -1,12 +1,12 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../conversation/agent/agent.module";
-import { PlatformDataModule } from "../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
 import { AppConfigModule } from "../config/config.module";
 import { EvalController } from "./eval.controller";
 import { EvalService } from "./eval.service";
 
 @Module({
-  imports: [AgentModule, PlatformDataModule, AppConfigModule],
+  imports: [AgentModule, PlatformDataPersistenceModule, AppConfigModule],
   controllers: [EvalController],
   providers: [EvalService],
   exports: [EvalService]

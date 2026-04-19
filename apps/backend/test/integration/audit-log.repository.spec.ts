@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
-import { PlatformDataModule } from "../../src/modules/platform/data/data.module";
-import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
+import { PlatformDataPersistenceModule } from "../../src/modules/platform/data/persistence.module";
+import { AuditLogRepository } from "../../src/modules/platform/data/persistence";
 
 describe("audit log repository", () => {
   beforeAll(() => {
@@ -17,7 +17,7 @@ describe("audit log repository", () => {
 
   it("persists and filters governance events", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [PlatformDataModule]
+      imports: [PlatformDataPersistenceModule]
     }).compile();
     const repository = moduleRef.get(AuditLogRepository);
 

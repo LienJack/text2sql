@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../agent/agent.module";
-import { PlatformDataModule } from "../../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../../platform/data/persistence.module";
+import { GovernanceAccessModule } from "../../governance/access/access.module";
 import { DatasourceModule } from "../../governance/datasource/datasource.module";
 import { LlmModule } from "../../llm/llm.module";
 import { ObservabilityModule } from "../../observability/observability.module";
@@ -10,11 +11,20 @@ import { SandboxRuntimeService } from "../delivery/sandbox/sandbox-runtime.servi
 import { MemoryModule } from "../../knowledge/memory/memory.module";
 import { ChatController } from "./chat.controller";
 import { ChatService } from "./chat.service";
+import { ExecuteMessageUsecase } from "./application/execute-message.usecase";
+import { RunViewUsecase } from "./application/run-view.usecase";
+import { SessionLifecycleUsecase } from "./application/session-lifecycle.usecase";
+import { StreamMessageUsecase } from "./application/stream-message.usecase";
+import { ChatDeliveryEnrichmentService } from "./application/shared/chat-delivery-enrichment.service";
+import { ChatPolicyGuardService } from "./application/shared/chat-policy-guard.service";
+import { ChatPostRunHooksService } from "./application/shared/chat-post-run-hooks.service";
+import { ChatRunPersistenceService } from "./application/shared/chat-run-persistence.service";
 
 @Module({
   imports: [
     AgentModule,
-    PlatformDataModule,
+    PlatformDataPersistenceModule,
+    GovernanceAccessModule,
     DatasourceModule,
     LlmModule,
     ObservabilityModule,
@@ -22,7 +32,19 @@ import { ChatService } from "./chat.service";
     MemoryModule
   ],
   controllers: [ChatController],
-  providers: [ChatService, DeliveryContractMapper, SandboxRuntimeService],
+  providers: [
+    ChatService,
+    DeliveryContractMapper,
+    SandboxRuntimeService,
+    SessionLifecycleUsecase,
+    ExecuteMessageUsecase,
+    StreamMessageUsecase,
+    RunViewUsecase,
+    ChatPostRunHooksService,
+    ChatPolicyGuardService,
+    ChatRunPersistenceService,
+    ChatDeliveryEnrichmentService
+  ],
   exports: [ChatService]
 })
 export class ChatModule {}

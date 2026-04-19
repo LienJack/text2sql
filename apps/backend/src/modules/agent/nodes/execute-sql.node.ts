@@ -1,9 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import { DomainError } from "../../../common/domain-error";
-import { ChatRepository } from "../../data/persistence/chat.repository";
-import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
-import { QueryExecutorRouterService } from "../../data/query/query-executor-router.service";
-import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
+import { AuditLogRepository, ChatRepository } from "../../platform/data/persistence/index";
+import {
+  QueryExecutorRouterService,
+  type SqlTableAccessContext
+} from "../../platform/data/query/index";
 import { DatasourceService } from "../../governance/datasource/datasource.service";
 import type { AccessContext } from "../../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../../governance/access/policy-evaluator.service";

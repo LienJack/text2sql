@@ -10,8 +10,8 @@ import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../../common/domain-error";
 import { encryptSecret } from "../../../common/secret-crypto";
 import { AppConfigService } from "../../config/app-config.service";
-import { DatasourceRepository } from "../../data/persistence/datasource.repository";
-import { QueryExecutorRouterService } from "../../data/query/query-executor-router.service";
+import { DatasourceRepository } from "../../platform/data/persistence/index";
+import { QueryExecutorRouterService } from "../../platform/data/query/index";
 import type { AccessContext } from "../access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../access/policy-evaluator.service";
 

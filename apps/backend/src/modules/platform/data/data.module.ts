@@ -1,21 +1,9 @@
 import { Module } from "@nestjs/common";
-import { PlatformDataAccessModule } from "./access.module";
-import { PlatformDataBootstrapModule } from "./bootstrap.module";
-import { PlatformDataPersistenceModule } from "./persistence.module";
-import { PlatformDataQueryModule } from "./query.module";
 
+// Transitional compatibility shell.
+// Do not use this aggregate module for new wiring.
 @Module({
-  imports: [
-    PlatformDataPersistenceModule,
-    PlatformDataAccessModule,
-    PlatformDataQueryModule,
-    PlatformDataBootstrapModule
-  ],
-  exports: [
-    PlatformDataPersistenceModule,
-    PlatformDataAccessModule,
-    PlatformDataQueryModule,
-    PlatformDataBootstrapModule
-  ]
+  imports: [],
+  exports: []
 })
 export class PlatformDataModule {}

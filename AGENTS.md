@@ -153,6 +153,8 @@ CI 参考：
 - 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
 - `platform` 禁止反向依赖业务域；跨域调用仅允许稳定入口（facade/public entry）。
 - 禁止新增“宽导出中枢”形态依赖。
+- 业务域及其兼容根模块（`chat/agent/memory/glossary/rag`）禁止直接 import `modules/data/**` 实现路径。
+- 业务域及其兼容根模块禁止依赖 `platform/data/data.module.ts`（`PlatformDataModule` 聚合入口）。
 
 必跑检查：
 - `pnpm run backend:capability-boundary:check`（落地后）

@@ -1,11 +1,9 @@
 import { Module } from "@nestjs/common";
-import { DatasourceAccessPolicyService } from "../../governance/access/datasource-access-policy.service";
-import { PolicyEvaluatorService } from "../../governance/access/policy-evaluator.service";
-import { PlatformDataPersistenceModule } from "./persistence.module";
 
+// Transitional compatibility shell.
+// Use GovernanceAccessModule for policy services.
 @Module({
-  imports: [PlatformDataPersistenceModule],
-  providers: [DatasourceAccessPolicyService, PolicyEvaluatorService],
-  exports: [DatasourceAccessPolicyService, PolicyEvaluatorService]
+  imports: [],
+  exports: []
 })
 export class PlatformDataAccessModule {}

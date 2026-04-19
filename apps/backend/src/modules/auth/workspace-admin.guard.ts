@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { DomainError } from "../../common/domain-error";
-import { WorkspaceRepository } from "../data/persistence/workspace.repository";
+import { WorkspaceRepository } from "../platform/data/persistence/index";
 
 type RequestLike = {
   actor?: {

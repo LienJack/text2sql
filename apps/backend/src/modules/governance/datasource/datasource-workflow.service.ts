@@ -1,7 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { DomainError } from "../../../common/domain-error";
-import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
-import { DatasourceRepository } from "../../data/persistence/datasource.repository";
+import {
+  AuditLogRepository,
+  DatasourceRepository
+} from "../../platform/data/persistence/index";
 import { WorkspaceDatasourceService } from "../workspace/workspace-datasource.service";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { DatasourceService } from "./datasource.service";

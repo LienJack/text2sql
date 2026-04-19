@@ -1,8 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import type { Datasource } from "@text2sql/shared-types";
 import { z } from "zod";
-import { QueryExecutorRouterService } from "../../../../data/query/query-executor-router.service";
-import type { SqlTableAccessContext } from "../../../../data/query/sql-table-access-guard.service";
+import {
+  QueryExecutorRouterService,
+  type SqlTableAccessContext
+} from "../../../../platform/data/query/index";
 import type { LlmGatewayToolDefinition } from "../../../../llm/llm-gateway.interface";
 import { DomainError } from "../../../../../common/domain-error";
 import type { AccessContext } from "../../../../governance/access/datasource-access-policy.service";

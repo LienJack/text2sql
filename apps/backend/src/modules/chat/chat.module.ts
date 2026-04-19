@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
 import { AgentModule } from "../conversation/agent/agent.module";
-import { PlatformDataModule } from "../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
 import { DatasourceModule } from "../governance/datasource/datasource.module";
+import { GovernanceAccessModule } from "../governance/access/access.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../rag/rag.module";
@@ -14,7 +15,8 @@ import { ChatService } from "./chat.service";
 @Module({
   imports: [
     AgentModule,
-    PlatformDataModule,
+    PlatformDataPersistenceModule,
+    GovernanceAccessModule,
     DatasourceModule,
     LlmModule,
     ObservabilityModule,

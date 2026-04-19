@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type { Datasource, WorkspaceMemberRole } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
-import { DatasourceRepository } from "../../data/persistence/datasource.repository";
-import { WorkspaceDatasourcePolicyRepository } from "../../data/persistence/workspace-datasource-policy.repository";
-import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
+import {
+  DatasourceRepository,
+  WorkspaceDatasourcePolicyRepository,
+  WorkspaceRepository
+} from "../../platform/data/persistence/index";
 
 export type AccessRole =
   | "system_admin"

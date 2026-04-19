@@ -1,12 +1,12 @@
 import { Module } from "@nestjs/common";
 import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { AppConfigModule } from "../../config/config.module";
-import { PlatformDataModule } from "../../platform/data/data.module";
+import { PlatformDataPersistenceModule } from "../../platform/data/persistence.module";
 import { GlossaryController } from "../../glossary/glossary.controller";
 import { GlossaryService } from "../../glossary/glossary.service";
 
 @Module({
-  imports: [AppConfigModule, PlatformDataModule],
+  imports: [AppConfigModule, PlatformDataPersistenceModule],
   controllers: [GlossaryController],
   providers: [GlossaryService, AdminOnlyGuard],
   exports: [GlossaryService]

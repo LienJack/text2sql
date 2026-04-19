@@ -2,11 +2,13 @@ import { Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import type { Datasource, DatasourceType } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
-import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
-import { DatasourceRepository } from "../../data/persistence/datasource.repository";
-import { QueryExecutorRouterService } from "../../data/query/query-executor-router.service";
-import { WorkspaceDatasourcePolicyRepository } from "../../data/persistence/workspace-datasource-policy.repository";
-import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
+import {
+  AuditLogRepository,
+  DatasourceRepository,
+  WorkspaceDatasourcePolicyRepository,
+  WorkspaceRepository
+} from "../../platform/data/persistence/index";
+import { QueryExecutorRouterService } from "../../platform/data/query/index";
 
 type Actor = {
   id: string;

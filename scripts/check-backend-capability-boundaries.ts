@@ -15,7 +15,6 @@ const EXCLUDED_DIRECTORY_NAMES = new Set([
   ".omx",
   ".turbo",
   "coverage",
-  "data",
   "dist",
   "graphify-out",
   "node_modules",
@@ -91,17 +90,17 @@ const ALLOWED_DOMAIN_DEPENDENCIES: Record<CapabilityDomain, Set<CapabilityDomain
   platform: new Set(["platform"])
 };
 
-// First-pass migration exception: platform/data facade still bridges governance access services.
+const BUSINESS_DOMAINS = new Set<CapabilityDomain>([
+  "conversation",
+  "governance",
+  "knowledge"
+]);
+const PLATFORM_DATA_AGGREGATE_MODULE_PATH =
+  `${MODULES_ROOT}/platform/data/data.module.ts`;
+const PLATFORM_DATA_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/data/`;
+
+// Transitional cross-domain wiring allowances that are still pending module reshaping.
 const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
-  {
-    sourceDomain: "platform",
-    targetDomain: "governance",
-    sourcePathPattern: /^apps\/backend\/src\/modules\/platform\/data\/access\.module\.ts$/,
-    targetPathPattern:
-      /^apps\/backend\/src\/modules\/governance\/access\/(datasource-access-policy|policy-evaluator)\.service\.ts$/,
-    reason:
-      "Temporary bridge while policy services remain under governance/access."
-  },
   {
     sourceDomain: "platform",
     targetDomain: "conversation",
@@ -422,6 +421,19 @@ function isAllowedByRule(input: {
   });
 }
 
+function isForbiddenBusinessDomainDependency(input: {
+  sourceDomain: CapabilityDomain;
+  targetRelativePath: string;
+}): boolean {
+  if (!BUSINESS_DOMAINS.has(input.sourceDomain)) {
+    return false;
+  }
+  if (input.targetRelativePath === PLATFORM_DATA_AGGREGATE_MODULE_PATH) {
+    return true;
+  }
+  return input.targetRelativePath.startsWith(PLATFORM_DATA_IMPLEMENTATION_PREFIX);
+}
+
 export async function runCapabilityBoundaryCheck(
   input: CapabilityBoundaryCheckInput
 ): Promise<CapabilityBoundaryCheckReport> {
@@ -469,6 +481,39 @@ export async function runCapabilityBoundaryCheck(
 
       const targetDomain = resolveDomain(input.repoRoot, targetAbsolutePath);
       if (!targetDomain) {
+        continue;
+      }
+
+      if (
+        isForbiddenBusinessDomainDependency({
+          sourceDomain: sourceDomain.domain,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
+        if (
+          isAllowedByRule({
+            sourceDomain: sourceDomain.domain,
+            targetDomain: targetDomain.domain,
+            sourceRelativePath: sourceDomain.relativePath,
+            targetRelativePath: targetDomain.relativePath,
+            allowRules
+          })
+        ) {
+          continue;
+        }
+
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        violations.push({
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        });
         continue;
       }
 

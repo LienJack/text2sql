@@ -26,7 +26,32 @@ describe("capability boundary check", () => {
     }
   });
 
-  it("allows governance -> platform imports", async () => {
+  it("allows governance -> platform stable entry imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/governance/user/user.service.ts",
+      `import { DatasourceRepository } from "../../platform/data/persistence";
+export class UserService {
+  constructor(private readonly datasourceRepository: DatasourceRepository) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/platform/data/persistence/index.ts",
+      `export { DatasourceRepository } from "../../../data/persistence/datasource.repository";`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/data/persistence/datasource.repository.ts",
+      "export class DatasourceRepository {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+  });
+
+  it("reports governance -> data implementation direct import violations", async () => {
     await writeRepoFile(
       repoRoot,
       "apps/backend/src/modules/governance/user/user.service.ts",
@@ -43,7 +68,41 @@ export class UserService {
     );
 
     const report = await runCapabilityBoundaryCheck({ repoRoot });
-    expect(report.violations).toHaveLength(0);
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "governance",
+      targetDomain: "platform",
+      sourceFile: "apps/backend/src/modules/governance/user/user.service.ts",
+      targetFile: "apps/backend/src/modules/data/persistence/datasource.repository.ts",
+      line: 1
+    });
+  });
+
+  it("reports conversation -> PlatformDataModule aggregate import violations", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/chat/chat.module.ts",
+      `import { PlatformDataModule } from "../../platform/data/data.module";
+export class ChatModule {
+  constructor(private readonly module: PlatformDataModule) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/platform/data/data.module.ts",
+      "export class PlatformDataModule {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "conversation",
+      targetDomain: "platform",
+      sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",
+      targetFile: "apps/backend/src/modules/platform/data/data.module.ts",
+      line: 1
+    });
   });
 
   it("reports platform -> governance violations with location details", async () => {
@@ -77,7 +136,7 @@ export class SystemModule {
     });
   });
 
-  it("keeps first-pass migration allow rule for platform/data access bridge", async () => {
+  it("reports platform/data access bridge imports as violations by default", async () => {
     await writeRepoFile(
       repoRoot,
       "apps/backend/src/modules/platform/data/access.module.ts",
@@ -94,6 +153,13 @@ export class PlatformDataAccessModule {
     );
 
     const report = await runCapabilityBoundaryCheck({ repoRoot });
-    expect(report.violations).toHaveLength(0);
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "platform",
+      targetDomain: "governance",
+      sourceFile: "apps/backend/src/modules/platform/data/access.module.ts",
+      targetFile: "apps/backend/src/modules/governance/access/policy-evaluator.service.ts",
+      line: 1
+    });
   });
 });

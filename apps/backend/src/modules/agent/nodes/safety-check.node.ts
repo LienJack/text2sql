@@ -3,7 +3,7 @@ import { DomainError } from "../../../common/domain-error";
 import {
   SqlTableAccessGuardService,
   type SqlTableAccessContext
-} from "../../data/query/sql-table-access-guard.service";
+} from "../../platform/data/query/index";
 import {
   SqlSafetyGuard,
   type SqlSafetyDecision
