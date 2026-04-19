@@ -1,6 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { Session, SqlRun } from "@text2sql/shared-types";
-import { MemoryPromotionService } from "../../../../knowledge/memory/memory-promotion.service";
+import {
+  KNOWLEDGE_FACADE_CONTRACT,
+  type KnowledgeFacadeContract
+} from "../../../../knowledge/contracts/knowledge-facade.contract";
 import { TraceService } from "../../../../observability/trace.service";
 
 export interface ChatPostRunHooksInput {
@@ -13,7 +16,8 @@ export interface ChatPostRunHooksInput {
 export class ChatPostRunHooksService {
   constructor(
     private readonly traceService: TraceService,
-    private readonly memoryPromotionService: MemoryPromotionService
+    @Inject(KNOWLEDGE_FACADE_CONTRACT)
+    private readonly knowledgeFacade: KnowledgeFacadeContract
   ) {}
 
   async run(input: ChatPostRunHooksInput): Promise<void> {
@@ -22,7 +26,7 @@ export class ChatPostRunHooksService {
       error: input.run.error
     });
     try {
-      await this.memoryPromotionService.promoteFromRun({
+      await this.knowledgeFacade.memory.promotion.promoteFromRun({
         run: input.run,
         datasourceId: input.session.datasource,
         requestId: input.requestId

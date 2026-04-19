@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { SemanticRegistryService } from "../../src/modules/knowledge/semantic-registry/semantic-registry.service";
+import {
+  KNOWLEDGE_FACADE_CONTRACT,
+  type KnowledgeFacadeContract
+} from "../../src/modules/knowledge/contracts/knowledge-facade.contract";
 
 describe("semantic registry integration", () => {
   beforeAll(() => {
@@ -19,7 +22,10 @@ describe("semantic registry integration", () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
     }).compile();
-    const registry = moduleRef.get(SemanticRegistryService);
+    const knowledgeFacade = moduleRef.get<KnowledgeFacadeContract>(
+      KNOWLEDGE_FACADE_CONTRACT
+    );
+    const registry = knowledgeFacade.semanticRegistry.registry;
 
     const runId = "run-semantic-registry-int-v1";
     await registry.publishVersion({
@@ -62,7 +68,10 @@ describe("semantic registry integration", () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
     }).compile();
-    const registry = moduleRef.get(SemanticRegistryService);
+    const knowledgeFacade = moduleRef.get<KnowledgeFacadeContract>(
+      KNOWLEDGE_FACADE_CONTRACT
+    );
+    const registry = knowledgeFacade.semanticRegistry.registry;
 
     await registry.publishVersion({
       domain: "semantic_term",

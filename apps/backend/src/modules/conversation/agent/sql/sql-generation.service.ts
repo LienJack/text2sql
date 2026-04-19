@@ -8,8 +8,12 @@ import type {
 import { ProviderRouterService } from "../../../llm/provider-router.service";
 import { SqlOutputExtractor } from "./sql-output-extractor";
 import { SqlPromptBuilder } from "./sql-prompt.builder";
-import type { RagRetrievalChunkPayload } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 import { PromptTemplateService } from "../../../governance/settings/prompt-template.service";
+import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
+
+type RagRetrievalChunkPayload = NonNullable<
+  NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
+>[number];
 
 export interface SqlDraft {
   provider: string;

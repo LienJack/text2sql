@@ -1,16 +1,20 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable } from "@nestjs/common";
 import type { PromptTemplateTraceEvidenceCompat, SqlRun } from "@text2sql/shared-types";
 import {
   DeliveryContractMapper,
   type DeliveryReplayRecordInput
 } from "../../../delivery/delivery-contract.mapper";
-import { RagReplayRepository } from "../../../../knowledge/rag/observability/rag-replay.repository";
+import {
+  KNOWLEDGE_FACADE_CONTRACT,
+  type KnowledgeFacadeContract
+} from "../../../../knowledge/contracts/knowledge-facade.contract";
 
 @Injectable()
 export class ChatDeliveryEnrichmentService {
   constructor(
     private readonly deliveryContractMapper: DeliveryContractMapper,
-    private readonly ragReplayRepository: RagReplayRepository
+    @Inject(KNOWLEDGE_FACADE_CONTRACT)
+    private readonly knowledgeFacade: KnowledgeFacadeContract
   ) {}
 
   async attachDeliveryContract(run: SqlRun): Promise<SqlRun> {
@@ -178,7 +182,7 @@ export class ChatDeliveryEnrichmentService {
   }
 
   private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {
-    const records = await this.ragReplayRepository.listByRunId(runId);
+    const records = await this.knowledgeFacade.rag.replay.listByRunId(runId);
     return records.map((item) => ({
       replayKey: item.replayKey,
       stage: item.stage,

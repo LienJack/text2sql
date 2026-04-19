@@ -162,4 +162,87 @@ export class PlatformDataAccessModule {
       line: 1
     });
   });
+
+  it("reports non-allowlisted conversation -> knowledge/* direct imports as violations", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      `import { RagRetrievalService } from "../../../knowledge/rag/retrieval/rag-retrieval.service";
+export class RetrieveKnowledgeNode {
+  constructor(private readonly retrieval: RagRetrievalService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
+      "export class RagRetrievalService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "conversation",
+      targetDomain: "knowledge",
+      sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
+      line: 1
+    });
+  });
+
+  it("supports temporary allowlist + baseline counting for conversation -> knowledge/* direct imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
+      `import { RagRetrievalService } from "../../../../knowledge/rag/retrieval/rag-retrieval.service";
+import { MemoryPromotionService } from "../../../../knowledge/memory/memory-promotion.service";
+export class ChatPostRunHooksService {
+  constructor(
+    private readonly retrieval: RagRetrievalService,
+    private readonly promotion: MemoryPromotionService
+  ) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
+      "export class RagRetrievalService {}"
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/memory/memory-promotion.service.ts",
+      "export class MemoryPromotionService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({
+      repoRoot,
+      conversationKnowledgeSubpathBaselineCount: 2,
+      conversationKnowledgeSubpathAllowlist: [
+        {
+          sourceFile:
+            "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
+          targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
+          reason: "Temporary bridge: keep retrieval import until facade migration lands."
+        }
+      ]
+    });
+
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "conversation",
+      targetDomain: "knowledge",
+      sourceFile:
+        "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
+      targetFile: "apps/backend/src/modules/knowledge/memory/memory-promotion.service.ts",
+      line: 2
+    });
+    expect((report as unknown as Record<string, unknown>).conversationKnowledgeSubpath).toMatchObject({
+      currentCount: 2,
+      baselineCount: 2,
+      remainingFromBaseline: 0,
+      overBaselineCount: 0,
+      exceedsBaseline: false
+    });
+  });
 });

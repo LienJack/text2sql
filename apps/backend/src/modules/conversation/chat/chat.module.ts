@@ -5,10 +5,9 @@ import { GovernanceAccessModule } from "../../governance/access/access.module";
 import { DatasourceModule } from "../../governance/datasource/datasource.module";
 import { LlmModule } from "../../llm/llm.module";
 import { ObservabilityModule } from "../../observability/observability.module";
-import { RagModule } from "../../knowledge/rag/rag.module";
+import { KnowledgeModule } from "../../knowledge/knowledge.module";
 import { DeliveryContractMapper } from "../delivery/delivery-contract.mapper";
 import { SandboxRuntimeService } from "../delivery/sandbox/sandbox-runtime.service";
-import { MemoryModule } from "../../knowledge/memory/memory.module";
 import { ChatController } from "./chat.controller";
 import { ChatService } from "./chat.service";
 import { ExecuteMessageUsecase } from "./application/execute-message.usecase";
@@ -28,8 +27,7 @@ import { ChatRunPersistenceService } from "./application/shared/chat-run-persist
     DatasourceModule,
     LlmModule,
     ObservabilityModule,
-    RagModule,
-    MemoryModule
+    KnowledgeModule
   ],
   controllers: [ChatController],
   providers: [

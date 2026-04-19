@@ -1,6 +1,8 @@
-import { Injectable } from "@nestjs/common";
-import { RagRetrievalService } from "../../../knowledge/rag/retrieval/rag-retrieval.service";
-import { RagRerankService } from "../../../knowledge/rag/rerank/rag-rerank.service";
+import { Inject, Injectable } from "@nestjs/common";
+import {
+  KNOWLEDGE_RAG_CONTRACT,
+  type KnowledgeRagContract
+} from "../../../knowledge/contracts/knowledge-rag.contract";
 import type { RagRetrievalBundle } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 
 export interface RetrievedKnowledge {
@@ -13,8 +15,8 @@ export interface RetrievedKnowledge {
 @Injectable()
 export class RetrieveKnowledgeNode {
   constructor(
-    private readonly retrievalService: RagRetrievalService,
-    private readonly rerankService: RagRerankService
+    @Inject(KNOWLEDGE_RAG_CONTRACT)
+    private readonly ragContract: KnowledgeRagContract
   ) {}
 
   async run(input: {
@@ -73,12 +75,12 @@ export class RetrieveKnowledgeNode {
       };
     }
 
-    const retrieved = await this.retrievalService.retrieve({
+    const retrieved = await this.ragContract.retrieval.retrieve({
       query: normalized,
       datasourceId,
       runId
     });
-    const reranked = await this.rerankService.rerank({
+    const reranked = await this.ragContract.rerank.rerank({
       retrievalBundle: retrieved.retrieval_bundle,
       modelCatalogId: input.modelCatalogId
     });

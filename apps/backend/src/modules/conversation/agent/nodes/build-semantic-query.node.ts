@@ -1,7 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import type { IntentPlan } from "./build-intent-plan.node";
-import type { RagRetrievalBundle } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type { RetrievedKnowledge } from "./retrieve-knowledge.node";
 import { PlannerVersionLockService } from "../planner/planner-version-lock.service";
+
+type RagRetrievalBundle = NonNullable<RetrievedKnowledge["retrievalBundle"]>;
 
 export interface SemanticQueryPlan {
   status: "ready" | "degraded";

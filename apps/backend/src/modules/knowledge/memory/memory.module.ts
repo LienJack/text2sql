@@ -7,6 +7,13 @@ import { MemoryPromotionPolicy } from "../../memory/memory-promotion-policy";
 import { MemoryPromotionService as LegacyMemoryPromotionService } from "../../memory/memory-promotion.service";
 import { MemoryPromotionService as KnowledgeMemoryPromotionService } from "./memory-promotion.service";
 
+export const KNOWLEDGE_MEMORY_COMPAT_BRIDGE = Object.freeze({
+  capability: "memory",
+  status: "active",
+  lifecycle: "one-milestone",
+  removeBy: "next-milestone"
+});
+
 @Module({
   imports: [PlatformDataPersistenceModule, RagModule],
   controllers: [MemoryController],

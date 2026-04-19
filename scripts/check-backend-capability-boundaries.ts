@@ -31,6 +31,12 @@ type BoundaryAllowRule = {
   reason: string;
 };
 
+type ConversationKnowledgeSubpathAllowlistEntry = {
+  sourceFile: string;
+  targetFile: string;
+  reason: string;
+};
+
 type ImportReference = {
   specifier: string;
   index: number;
@@ -50,12 +56,21 @@ type Violation = {
 type CapabilityBoundaryCheckReport = {
   scannedFiles: number;
   violations: Violation[];
+  conversationKnowledgeSubpath: {
+    currentCount: number;
+    baselineCount: number;
+    remainingFromBaseline: number;
+    overBaselineCount: number;
+    exceedsBaseline: boolean;
+  };
 };
 
 type CapabilityBoundaryCheckInput = {
   repoRoot: string;
   scanPaths?: string[];
   allowRules?: BoundaryAllowRule[];
+  conversationKnowledgeSubpathAllowlist?: ConversationKnowledgeSubpathAllowlistEntry[];
+  conversationKnowledgeSubpathBaselineCount?: number;
 };
 
 const MODULE_DOMAIN_MAP: Record<string, CapabilityDomain> = {
@@ -95,9 +110,11 @@ const BUSINESS_DOMAINS = new Set<CapabilityDomain>([
   "governance",
   "knowledge"
 ]);
+const KNOWLEDGE_MODULE_SUBPATH_PREFIX = `${MODULES_ROOT}/knowledge/`;
 const PLATFORM_DATA_AGGREGATE_MODULE_PATH =
   `${MODULES_ROOT}/platform/data/data.module.ts`;
 const PLATFORM_DATA_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/data/`;
+const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT = 15;
 
 // Transitional cross-domain wiring allowances that are still pending module reshaping.
 const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
@@ -173,6 +190,72 @@ const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
   }
 ];
 
+const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_ALLOWLIST:
+ConversationKnowledgeSubpathAllowlistEntry[] = [
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/agent.module.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
+    reason: "Temporary bridge: agent module still imports knowledge facade contract directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/agent.module.ts",
+    targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
+    reason: "Temporary bridge: agent module still imports knowledge module directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/graph/langgraph.state.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: langgraph state still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/generate-sql.node.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: generate-sql node still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-rag.contract.ts",
+    reason: "Temporary bridge: retrieve-knowledge node still imports knowledge RAG contract directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: retrieve-knowledge node still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/planner/planner-version-lock.service.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: planner-version-lock still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: sql-generation still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/agent/sql/sql-prompt.builder.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason: "Temporary bridge: sql prompt builder still imports RAG retrieval payload types directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
+    reason: "Temporary bridge: chat delivery enrichment still imports knowledge facade contract directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
+    reason: "Temporary bridge: post-run hooks still imports knowledge facade contract directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",
+    targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
+    reason: "Temporary bridge: chat module still imports knowledge module directly."
+  }
+];
+
 function toPosix(relativeOrAbsolutePath: string): string {
   return relativeOrAbsolutePath.split(path.sep).join("/");
 }
@@ -186,6 +269,42 @@ function parseCsvEnv(key: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseIntegerEnv(key: string): number | undefined {
+  const raw = process.env[key];
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+function parseConversationKnowledgeAllowlistEnv(key: string): {
+  entries: ConversationKnowledgeSubpathAllowlistEntry[];
+  invalidEntries: string[];
+} {
+  const rawEntries = parseCsvEnv(key);
+  const entries: ConversationKnowledgeSubpathAllowlistEntry[] = [];
+  const invalidEntries: string[] = [];
+  for (const entry of rawEntries) {
+    const [sourceFileRaw, targetFileRaw] = entry.split("=>");
+    const sourceFile = sourceFileRaw?.trim();
+    const targetFile = targetFileRaw?.trim();
+    if (!sourceFile || !targetFile) {
+      invalidEntries.push(entry);
+      continue;
+    }
+    entries.push({
+      sourceFile: toPosix(sourceFile),
+      targetFile: toPosix(targetFile),
+      reason: `Temporary allowlist from ${key}`
+    });
+  }
+  return { entries, invalidEntries };
 }
 
 async function findRepoRoot(startDir: string): Promise<string> {
@@ -293,6 +412,26 @@ function indexToLineColumn(lineStarts: number[], index: number): { line: number;
 
 function compactLine(line: string): string {
   return line.trim().replace(/\s+/g, " ").slice(0, 180);
+}
+
+function toImportPairKey(sourceFile: string, targetFile: string): string {
+  return `${sourceFile}=>${targetFile}`;
+}
+
+function buildConversationKnowledgeAllowlistSet(
+  allowlist: ConversationKnowledgeSubpathAllowlistEntry[]
+): Set<string> {
+  const keys = allowlist.map((entry) =>
+    toImportPairKey(toPosix(entry.sourceFile), toPosix(entry.targetFile))
+  );
+  return new Set(keys);
+}
+
+function normalizeNonNegativeInteger(value: number | undefined, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 function extractImportReferences(content: string): ImportReference[] {
@@ -441,6 +580,15 @@ export async function runCapabilityBoundaryCheck(
     ? input.scanPaths
     : DEFAULT_SCAN_PATHS;
   const allowRules = input.allowRules ?? DEFAULT_ALLOW_RULES;
+  const conversationKnowledgeSubpathAllowlist =
+    input.conversationKnowledgeSubpathAllowlist ?? DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_ALLOWLIST;
+  const conversationKnowledgeSubpathAllowlistSet = buildConversationKnowledgeAllowlistSet(
+    conversationKnowledgeSubpathAllowlist
+  );
+  const conversationKnowledgeSubpathBaselineCount = normalizeNonNegativeInteger(
+    input.conversationKnowledgeSubpathBaselineCount,
+    DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT
+  );
 
   const files = new Set<string>();
   for (const scanPath of scanPaths) {
@@ -452,6 +600,7 @@ export async function runCapabilityBoundaryCheck(
 
   const orderedFiles = Array.from(files).sort();
   const violations: Violation[] = [];
+  let conversationKnowledgeSubpathCurrentCount = 0;
 
   for (const sourceAbsolutePath of orderedFiles) {
     const sourceDomain = resolveDomain(input.repoRoot, sourceAbsolutePath);
@@ -481,6 +630,32 @@ export async function runCapabilityBoundaryCheck(
 
       const targetDomain = resolveDomain(input.repoRoot, targetAbsolutePath);
       if (!targetDomain) {
+        continue;
+      }
+
+      if (
+        sourceDomain.domain === "conversation" &&
+        targetDomain.domain === "knowledge" &&
+        targetDomain.relativePath.startsWith(KNOWLEDGE_MODULE_SUBPATH_PREFIX)
+      ) {
+        conversationKnowledgeSubpathCurrentCount += 1;
+        const allowlistKey = toImportPairKey(sourceDomain.relativePath, targetDomain.relativePath);
+        if (conversationKnowledgeSubpathAllowlistSet.has(allowlistKey)) {
+          continue;
+        }
+
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        violations.push({
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        });
         continue;
       }
 
@@ -548,11 +723,28 @@ export async function runCapabilityBoundaryCheck(
     }
   }
 
+  const conversationKnowledgeSubpathExceedsBaseline =
+    conversationKnowledgeSubpathCurrentCount > conversationKnowledgeSubpathBaselineCount;
+  const conversationKnowledgeSubpathOverBaselineCount = Math.max(
+    0,
+    conversationKnowledgeSubpathCurrentCount - conversationKnowledgeSubpathBaselineCount
+  );
+
   return {
     scannedFiles: orderedFiles.length,
     violations: violations.sort((a, b) =>
       a.sourceFile === b.sourceFile ? a.line - b.line : a.sourceFile.localeCompare(b.sourceFile)
-    )
+    ),
+    conversationKnowledgeSubpath: {
+      currentCount: conversationKnowledgeSubpathCurrentCount,
+      baselineCount: conversationKnowledgeSubpathBaselineCount,
+      remainingFromBaseline: Math.max(
+        0,
+        conversationKnowledgeSubpathBaselineCount - conversationKnowledgeSubpathCurrentCount
+      ),
+      overBaselineCount: conversationKnowledgeSubpathOverBaselineCount,
+      exceedsBaseline: conversationKnowledgeSubpathExceedsBaseline
+    }
   };
 }
 
@@ -572,17 +764,55 @@ function printViolations(violations: Violation[]): void {
 async function main(): Promise<void> {
   const repoRoot = await findRepoRoot(process.cwd());
   const scanPathOverrides = parseCsvEnv("BACKEND_CAPABILITY_BOUNDARY_SCAN_PATHS");
+  const conversationKnowledgeBaselineOverride = parseIntegerEnv(
+    "BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE"
+  );
+  const conversationKnowledgeAllowlistEnv = parseConversationKnowledgeAllowlistEnv(
+    "BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_ALLOWLIST"
+  );
+  if (conversationKnowledgeAllowlistEnv.invalidEntries.length > 0) {
+    console.error(
+      `[${SCRIPT_NAME}] failed: invalid BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_ALLOWLIST entries: ` +
+      `${conversationKnowledgeAllowlistEnv.invalidEntries.join(", ")}`
+    );
+    console.error(
+      "Expected CSV format: source/path.ts=>target/path.ts[,source/path.ts=>target/path.ts]"
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   const report = await runCapabilityBoundaryCheck({
     repoRoot,
-    scanPaths: scanPathOverrides.length > 0 ? scanPathOverrides : undefined
+    scanPaths: scanPathOverrides.length > 0 ? scanPathOverrides : undefined,
+    conversationKnowledgeSubpathBaselineCount: conversationKnowledgeBaselineOverride,
+    conversationKnowledgeSubpathAllowlist: [
+      ...DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_ALLOWLIST,
+      ...conversationKnowledgeAllowlistEnv.entries
+    ]
   });
 
-  if (report.violations.length > 0) {
+  const conversationKnowledgeSubpathSummary =
+    `[${SCRIPT_NAME}] conversation->knowledge/* direct imports: ` +
+    `current=${report.conversationKnowledgeSubpath.currentCount}, ` +
+    `baseline=${report.conversationKnowledgeSubpath.baselineCount}, ` +
+    `over-baseline=${report.conversationKnowledgeSubpath.overBaselineCount}.`;
+
+  if (
+    report.violations.length > 0 ||
+    report.conversationKnowledgeSubpath.exceedsBaseline
+  ) {
     console.error(
       `[${SCRIPT_NAME}] failed: found ${report.violations.length} capability boundary violation(s).`
     );
+    console.error(conversationKnowledgeSubpathSummary);
     printViolations(report.violations);
+    if (report.conversationKnowledgeSubpath.exceedsBaseline) {
+      console.error(
+        "- conversation -> knowledge/* direct imports exceed baseline; reduce legacy bridges " +
+        "or lower allowlist usage before merging."
+      );
+    }
     console.error("");
     console.error("Allowed dependencies:");
     console.error("- conversation -> conversation|governance|knowledge|platform");
@@ -593,6 +823,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  console.log(conversationKnowledgeSubpathSummary);
   console.log(
     `[${SCRIPT_NAME}] passed: scanned ${report.scannedFiles} file(s), no capability boundary violations found.`
   );

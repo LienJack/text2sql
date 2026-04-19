@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type { DatasourceType } from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
-import type { RagRetrievalChunkPayload } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
+
+type RagRetrievalChunkPayload = NonNullable<
+  NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
+>[number];
 
 const DIALECT_HINT: Record<DatasourceType, string> = {
   sqlite: "SQLite",

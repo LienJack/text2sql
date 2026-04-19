@@ -27,6 +27,42 @@ import { ModelRerankerAdapter } from "../../rag/rerank/model-reranker.adapter";
 import { RagRerankService as LegacyRagRerankService } from "../../rag/rerank/rag-rerank.service";
 import { RagRerankService } from "./rerank/rag-rerank.service";
 
+export const KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW = "next-milestone";
+
+export const KNOWLEDGE_RAG_COMPAT_BRIDGE = Object.freeze({
+  capability: "rag",
+  status: "active",
+  lifecycle: "one-milestone",
+  removeBy: KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW
+});
+
+export interface KnowledgeCompatBridgeRetirementChecks {
+  conversationImportsClosed: boolean;
+  boundaryGatePassed: boolean;
+  keyRegressionsPassed: boolean;
+}
+
+export function assertKnowledgeCompatBridgeRetirementReady(
+  capability: string,
+  checks: KnowledgeCompatBridgeRetirementChecks
+): void {
+  const blockers: string[] = [];
+  if (!checks.conversationImportsClosed) {
+    blockers.push("conversation imports are not fully migrated to knowledge facade contracts");
+  }
+  if (!checks.boundaryGatePassed) {
+    blockers.push("backend capability boundary gate is not green");
+  }
+  if (!checks.keyRegressionsPassed) {
+    blockers.push("key integration regressions are not green");
+  }
+  if (blockers.length > 0) {
+    throw new Error(
+      `[knowledge-compat-bridge:${capability}] retirement blocked: ${blockers.join("; ")}`
+    );
+  }
+}
+
 @Module({
   imports: [
     AppConfigModule,

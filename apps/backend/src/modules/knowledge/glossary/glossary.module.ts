@@ -5,6 +5,13 @@ import { PlatformDataPersistenceModule } from "../../platform/data/persistence.m
 import { GlossaryController } from "../../glossary/glossary.controller";
 import { GlossaryService } from "../../glossary/glossary.service";
 
+export const KNOWLEDGE_GLOSSARY_COMPAT_BRIDGE = Object.freeze({
+  capability: "glossary",
+  status: "active",
+  lifecycle: "one-milestone",
+  removeBy: "next-milestone"
+});
+
 @Module({
   imports: [AppConfigModule, PlatformDataPersistenceModule],
   controllers: [GlossaryController],

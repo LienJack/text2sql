@@ -6,8 +6,12 @@ import { GovernanceAccessModule } from "../../governance/access/access.module";
 import { DatasourceModule } from "../../governance/datasource/datasource.module";
 import { LlmModule } from "../../llm/llm.module";
 import { ObservabilityModule } from "../../observability/observability.module";
-import { RagModule } from "../../knowledge/rag/rag.module";
-import { SemanticRegistryModule } from "../../knowledge/semantic-registry/semantic-registry.module";
+import {
+  KNOWLEDGE_FACADE_CONTRACT,
+  type KnowledgeFacadeContract
+} from "../../knowledge/contracts/knowledge-facade.contract";
+import { KnowledgeModule } from "../../knowledge/knowledge.module";
+import { SemanticRegistryService } from "../../semantic-registry/semantic-registry.service";
 import { SettingsModule } from "../../governance/settings/settings.module";
 import { BuildIntentPlanNode } from "./nodes/build-intent-plan.node";
 import { ClarifyNode } from "./nodes/clarify.node";
@@ -39,10 +43,20 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
     LlmModule,
     SettingsModule,
     ObservabilityModule,
-    RagModule,
-    SemanticRegistryModule
+    KnowledgeModule
   ],
   providers: [
+    {
+      provide: SemanticRegistryService,
+      useFactory: (
+        knowledgeFacade: KnowledgeFacadeContract
+      ): Pick<SemanticRegistryService, "resolveTerm"> =>
+        knowledgeFacade.semanticRegistry.registry as Pick<
+          SemanticRegistryService,
+          "resolveTerm"
+        >,
+      inject: [KNOWLEDGE_FACADE_CONTRACT]
+    },
     GraphBuilderService,
     LangGraphRuntimeService,
     ClarifyNode,
