@@ -15,7 +15,14 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
 - 治理术语硬切规范：`docs/standards/governance-terminology-spec.md`
+- 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
+
+## 后端能力域拓扑（迁移中）
+- 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- 迁移阶段允许兼容入口（re-export/wrapper）短期存在，但禁止引入新的跨域实现细节直连。
+- 详细规则见：`docs/standards/backend-business-capability-topology-spec.md`。
 
 ### 数据库结构改动铁律（必须遵守）
 - 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。

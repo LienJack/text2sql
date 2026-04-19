@@ -1,4 +1,4 @@
-import { SqlPromptBuilder } from "../../src/modules/agent/sql/sql-prompt.builder";
+import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
 
 describe("SqlPromptBuilder", () => {
   it("should build sql-specific prompt payload", () => {

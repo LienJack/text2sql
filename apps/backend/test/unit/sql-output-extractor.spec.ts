@@ -1,4 +1,4 @@
-import { SqlOutputExtractor } from "../../src/modules/agent/sql/sql-output-extractor";
+import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql-output-extractor";
 
 describe("SqlOutputExtractor", () => {
   const extractor = new SqlOutputExtractor();

@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { BuildPhysicalPlanNode } from "../../src/modules/agent/nodes/build-physical-plan.node";
-import { BuildSemanticQueryNode } from "../../src/modules/agent/nodes/build-semantic-query.node";
+import { BuildPhysicalPlanNode } from "../../src/modules/conversation/agent/nodes/build-physical-plan.node";
+import { BuildSemanticQueryNode } from "../../src/modules/conversation/agent/nodes/build-semantic-query.node";
 import { SemanticRegistryService } from "../../src/modules/semantic-registry/semantic-registry.service";
 
 describe("r3 gate rehearsal", () => {

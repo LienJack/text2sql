@@ -1,6 +1,6 @@
 import type { SqlRun } from "@text2sql/shared-types";
-import { DeliveryContractMapper } from "../../src/modules/delivery/delivery-contract.mapper";
-import { SandboxRuntimeService } from "../../src/modules/delivery/sandbox/sandbox-runtime.service";
+import { DeliveryContractMapper } from "../../src/modules/conversation/delivery/delivery-contract.mapper";
+import { SandboxRuntimeService } from "../../src/modules/conversation/delivery/sandbox/sandbox-runtime.service";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
   runId: "run-delivery-unit",

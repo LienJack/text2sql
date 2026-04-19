@@ -1,66 +1,39 @@
-# Governance Hard Cut Progress (2026-04-18)
+# Governance Hard Cut Progress (2026-04-19 Revalidation)
 
 Branch: `codex/governance-terminology-hard-cut-exec`
 
 ## Current Status
 
-- Unit 1 (boundary scaffold): done
-- Unit 2 (physical migration + import cutover): done
-- Unit 3 (canonical contract hard cut): done
-- Unit 4 (regression matrix realignment): done
-- Unit 5 (docs alignment): done
-- Unit 6 (terminology gate + pilot output): done
+- Unit 1 (boundary scaffold): partial
+- Unit 2 (auth policy boundary cutover): partial
+- Unit 3 (canonical contract + workflow secret baseline): done
+- Unit 4 (single-window consumer contract cutover): partial
+- Unit 5 (docs/gate closeout): partial
 
-## What Landed
+## Multi-Agent Audit Summary
 
-1. Governance modules moved to `apps/backend/src/modules/governance/**`.
-2. Backend source/test import graph rewired off legacy governance roots.
-3. Frontend governance client tightened to canonical table-permissions payload fields.
-4. Backend e2e now asserts legacy table-permissions payload keys are rejected.
-5. Terminology drift guard added:
-   - `scripts/check-governance-terminology.ts`
-   - `.github/workflows/governance-terminology-quality.yml`
-   - `pnpm run governance:terminology:check`
-6. Governance mainline internals completed terminology hard cut:
-   - query execution input key renamed from `acl` to `tablePermissions`
-   - guard/domain error codes renamed to `TABLE_PERMISSIONS_*`
-   - audit event type renamed to `workspace.datasource.table-permissions.denied`
-7. Regression matrix aligned with canonical wording:
-   - renamed test suites/files from `*acl*` to `*table-permissions*`
-   - updated assertions to new error/event codes
-8. Documentation hard-cut alignment completed on core standards/docs:
-   - `README.md`
-   - `AGENTS.md`
-   - `docs/business-logic.md`
-   - `docs/standards/frontend-react-shadcn-spec.md`
-   - `docs/standards/llm-stream-tool-migration-spec.md`
-   - `docs/standards/backend-prisma-migration-spec.md`
-   - `docs/standards/governance-terminology-spec.md`
-9. Unit 6 guardrail outputs are in place and validated:
-   - terminology check script + CI workflow
-   - execution log / progress tracker updates synchronized
+1. Three parallel lanes executed for status revalidation:
+   - Lane A: Unit 1 + Unit 2
+   - Lane B: Unit 3 + Unit 4
+   - Lane C: Unit 5 + Gate traceability
+2. Unit 3 is technically complete and test-covered.
+3. Unit 1/2/4/5 are behavior-mostly-green but not fully plan-file-parity-complete.
+4. A gate-trace mismatch remains between plan naming (`G0/G1/G2/G3`) and execution log naming (`Gate A/B/C`).
 
-## Validation Snapshot
+## Fresh Verification Snapshot
 
-- `pnpm --filter @text2sql/backend run build` pass
-- `pnpm --filter @text2sql/backend run lint` pass
-- `pnpm --filter @text2sql/frontend run lint` pass
-- `pnpm --filter @text2sql/frontend run build` pass
-- `pnpm run test` pass
-- `pnpm run build` pass
-- `pnpm run governance:terminology:check` pass
-- `pnpm --filter @text2sql/backend run test -- test/unit/sql-table-access-guard.spec.ts test/unit/safety-check.node.spec.ts test/integration/query-executor-router-table-permissions.spec.ts test/integration/audit-log.repository.spec.ts test/e2e/workspace-datasource-audit.spec.ts` pass
-- `pnpm --filter @text2sql/backend run test -- test/e2e/chat-table-permissions-policy.spec.ts test/integration/workspace-datasource-table-permissions-schema.spec.ts` pass
-- `pnpm --filter @text2sql/frontend run test -- settings-retired-governance-management.spec.tsx` pass
-- `pnpm run governance:terminology:check` pass (post-doc-alignment recheck)
-- `graphify update .` pass (post-change graph refresh)
+- `pnpm run backend:capability-boundary:check` pass
+- `pnpm --filter @text2sql/backend exec jest --runInBand test/unit/capability-boundary-check.spec.ts test/integration/policy-evaluator.spec.ts test/e2e/workspace-datasource-authz.spec.ts test/e2e/user-workspace-authz.spec.ts` pass
+- `pnpm --filter @text2sql/backend exec jest --runInBand test/e2e/datasource-workflow-api.spec.ts test/e2e/workspace-datasource-api.spec.ts test/e2e/chat-table-permissions-policy.spec.ts test/integration/datasource-service.spec.ts` pass
+- `pnpm run governance:terminology:check` pass (legacy module list line marked with `governance-terminology:allow-legacy`)
 
-## Next Steps
+## Open Items
 
-1. Add Gate A owner sign-off record and close Gate C.
-2. Final PR scope decision for graphify artifact updates.
-3. Stage/commit by logical units and prepare PR description.
+1. Complete Unit 2 governance access guard ownership landing.
+2. Reconcile Unit 4 plan-listed declaration file expectation (`api.d.ts`) with actual shared-types generation/runtime path.
+3. Align and close gate records (G0/G1/G2/G3) with owner sign-off evidence.
 
 ## Detailed Log
 
 - Full execution notes: `docs/plans/2026-04-18-004-refactor-governance-domain-terminology-hard-cut-execution-log.md`
+- Working tracker: `docs/plans/2026-04-18-004-refactor-governance-domain-terminology-hard-cut-progress-tracker.md`

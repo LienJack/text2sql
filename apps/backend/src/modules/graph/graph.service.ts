@@ -12,7 +12,7 @@ import {
 import type {
   RagRetrievalEntryContext,
   RagRetrievalLaneHit
-} from "../rag/retrieval/rag-retrieval.types";
+} from "../knowledge/rag/retrieval/rag-retrieval.types";
 
 export interface GraphLaneExecutionInput {
   query: string;

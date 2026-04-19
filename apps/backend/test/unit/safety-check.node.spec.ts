@@ -1,4 +1,4 @@
-import { SafetyCheckNode } from "../../src/modules/agent/nodes/safety-check.node";
+import { SafetyCheckNode } from "../../src/modules/conversation/agent/nodes/safety-check.node";
 
 describe("SafetyCheckNode", () => {
   const node = new SafetyCheckNode();

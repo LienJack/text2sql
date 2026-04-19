@@ -1,8 +1,8 @@
 import {
   createInitialLangGraphState,
   normalizeTraceContext
-} from "../../src/modules/agent/graph/langgraph.state";
-import { createLangGraphRuntime } from "../../src/modules/agent/graph/langgraph.runtime";
+} from "../../src/modules/conversation/agent/graph/langgraph.state";
+import { createLangGraphRuntime } from "../../src/modules/conversation/agent/graph/langgraph.runtime";
 
 describe("langgraph runtime", () => {
   it("should run through executionResult path with expected node steps", async () => {

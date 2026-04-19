@@ -1,6 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { DataModule } from "../data/data.module";
+import { PlatformDataModule } from "../platform/data/data.module";
 import { DatasourceModule } from "../governance/datasource/datasource.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
@@ -30,7 +30,7 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
 @Module({
   imports: [
     AppConfigModule,
-    DataModule,
+    PlatformDataModule,
     DatasourceModule,
     LlmModule,
     SettingsModule,

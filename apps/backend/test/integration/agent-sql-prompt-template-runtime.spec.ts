@@ -1,10 +1,10 @@
 import { Test } from "@nestjs/testing";
 import type { LlmGatewayPrompt } from "../../src/modules/llm/llm-gateway.interface";
 import { ProviderRouterService } from "../../src/modules/llm/provider-router.service";
-import { GenerateSqlNode } from "../../src/modules/agent/nodes/generate-sql.node";
-import { SqlGenerationService } from "../../src/modules/agent/sql/sql-generation.service";
-import { SqlOutputExtractor } from "../../src/modules/agent/sql/sql-output-extractor";
-import { SqlPromptBuilder } from "../../src/modules/agent/sql/sql-prompt.builder";
+import { GenerateSqlNode } from "../../src/modules/conversation/agent/nodes/generate-sql.node";
+import { SqlGenerationService } from "../../src/modules/conversation/agent/sql/sql-generation.service";
+import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql-output-extractor";
+import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
 import { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
 
 describe("agent sql prompt template runtime integration", () => {

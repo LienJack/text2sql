@@ -12,12 +12,12 @@ import type {
 } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
-import { GraphBuilderService } from "../agent/graph/graph.builder";
-import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
+import { GraphBuilderService } from "../conversation/agent/graph/graph.builder";
+import { SqlToolRegistryService } from "../conversation/agent/sql/tools/sql-tool-registry.service";
 import {
   DeliveryContractMapper,
   type DeliveryReplayRecordInput
-} from "../delivery/delivery-contract.mapper";
+} from "../conversation/delivery/delivery-contract.mapper";
 import {
   type AccessContext
 } from "../governance/access/datasource-access-policy.service";

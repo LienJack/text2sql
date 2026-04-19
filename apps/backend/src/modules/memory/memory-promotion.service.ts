@@ -3,7 +3,7 @@ import type { RagMemoryFeedbackResponse, RagMemoryStatus, SqlRun } from "@text2s
 import { DomainError } from "../../common/domain-error";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { AuditLogRepository } from "../data/persistence/audit-log.repository";
-import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
+import { RagReplayRepository } from "../knowledge/rag/observability/rag-replay.repository";
 import {
   type MemoryPromotionRecord,
   type MemoryPromotionStatus,

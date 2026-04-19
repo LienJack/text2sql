@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { PolicyEvaluatorService } from "../../src/modules/governance/access/policy-evaluator.service";
-import { DataModule } from "../../src/modules/data/data.module";
+import { PlatformDataModule } from "../../src/modules/platform/data/data.module";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../../src/modules/data/persistence/workspace-datasource-policy.repository";
 import { WorkspaceRepository } from "../../src/modules/data/persistence/workspace.repository";
@@ -20,7 +20,7 @@ describe("policy evaluator service", () => {
 
   it("resolves readable tables from workspace table-permission source", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [DataModule]
+      imports: [PlatformDataModule]
     }).compile();
 
     const workspaceRepository = moduleRef.get(WorkspaceRepository);

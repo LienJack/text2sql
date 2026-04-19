@@ -140,6 +140,23 @@ CI 参考：
 必跑检查：
 - `pnpm run governance:terminology:check`
 
+### E. 后端业务能力拓扑规范
+来源：`docs/standards/backend-business-capability-topology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/**`
+- `apps/backend/src/app.module.ts`
+- `scripts/check-backend-capability-boundaries.ts`
+
+关键 MUST：
+- 后端一级能力域固定为 `conversation/governance/knowledge/platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- `platform` 禁止反向依赖业务域；跨域调用仅允许稳定入口（facade/public entry）。
+- 禁止新增“宽导出中枢”形态依赖。
+
+必跑检查：
+- `pnpm run backend:capability-boundary:check`（落地后）
+
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。
 

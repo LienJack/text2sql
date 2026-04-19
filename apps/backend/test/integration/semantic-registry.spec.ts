@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { SemanticRegistryService } from "../../src/modules/semantic-registry/semantic-registry.service";
+import { SemanticRegistryService } from "../../src/modules/knowledge/semantic-registry/semantic-registry.service";
 
 describe("semantic registry integration", () => {
   beforeAll(() => {

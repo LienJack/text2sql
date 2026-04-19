@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import { GraphService } from "../../graph/graph.service";
+import { GraphService } from "../../knowledge/graph/graph.service";
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
   SkillRegistryService

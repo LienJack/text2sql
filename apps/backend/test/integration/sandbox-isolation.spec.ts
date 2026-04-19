@@ -1,6 +1,6 @@
 import type { DeliveryArtifactLayer } from "@text2sql/shared-types";
-import { createDeliverySandboxPolicy } from "../../src/modules/delivery/sandbox/sandbox-policy";
-import { SandboxRuntimeService } from "../../src/modules/delivery/sandbox/sandbox-runtime.service";
+import { createDeliverySandboxPolicy } from "../../src/modules/conversation/delivery/sandbox/sandbox-policy";
+import { SandboxRuntimeService } from "../../src/modules/conversation/delivery/sandbox/sandbox-runtime.service";
 
 const buildArtifact = (): DeliveryArtifactLayer => ({
   sql: "SELECT id, status FROM orders LIMIT 10",

@@ -1,4 +1,4 @@
-import { PlannerCacheService } from "../../src/modules/agent/planner/planner-cache.service";
+import { PlannerCacheService } from "../../src/modules/conversation/agent/planner/planner-cache.service";
 
 describe("planner cache service", () => {
   it("builds cache key using datasource + query hash + semantic version", () => {

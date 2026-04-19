@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { ChatService } from "../../src/modules/chat/chat.service";
+import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 
 describe("data flow", () => {
   beforeAll(() => {

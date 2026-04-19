@@ -3,7 +3,7 @@ import { INestApplication, ValidationPipe } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
-import { ExecuteSqlNode } from "../../src/modules/agent/nodes/execute-sql.node";
+import { ExecuteSqlNode } from "../../src/modules/conversation/agent/nodes/execute-sql.node";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";

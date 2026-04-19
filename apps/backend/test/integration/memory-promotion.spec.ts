@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from "@nestjs/testing";
 import type { SqlRun } from "@text2sql/shared-types";
 import { AppModule } from "../../src/app.module";
-import { MemoryPromotionService } from "../../src/modules/memory/memory-promotion.service";
+import { MemoryPromotionService } from "../../src/modules/knowledge/memory/memory-promotion.service";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 function createRun(runId: string, override: Partial<SqlRun> = {}): SqlRun {

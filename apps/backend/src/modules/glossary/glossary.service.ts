@@ -19,8 +19,8 @@ import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { AuditLogRepository } from "../data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../data/persistence/datasource.repository";
-import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
-import { SemanticRegistryService } from "../semantic-registry/semantic-registry.service";
+import { RagReplayRepository } from "../knowledge/rag/observability/rag-replay.repository";
+import { SemanticRegistryService } from "../knowledge/semantic-registry/semantic-registry.service";
 import { ListGlossaryTermsQueryDto } from "./dto/list-glossary-terms.query.dto";
 import { RollbackGlossaryAnchorDto } from "./dto/rollback-glossary-anchor.dto";
 
