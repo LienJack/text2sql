@@ -5,6 +5,7 @@ import type {
   LlmGatewayToolDefinition
 } from "../../../llm/llm-gateway.interface";
 import { SqlGenerationService } from "../sql/sql-generation.service";
+import type { SqlSemanticIntent } from "../sql/sql-prompt.builder";
 import type { RagRetrievalChunkPayload } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 
 @Injectable()
@@ -22,6 +23,7 @@ export class GenerateSqlNode {
       selectedContext?: RagRetrievalChunkPayload[];
       datasourceId?: string;
       workspaceId?: string;
+      semanticIntent?: SqlSemanticIntent;
     }
   ): Promise<{
     provider: string;
@@ -35,6 +37,8 @@ export class GenerateSqlNode {
       userPrompt: string;
     };
     promptTemplate?: PromptTemplateTraceEvidence;
+    retryCount?: number;
+    semanticIntent?: SqlSemanticIntent;
   }> {
     if (options?.stream) {
       return this.sqlGeneration.stream(
@@ -44,7 +48,8 @@ export class GenerateSqlNode {
           workspaceId: options.workspaceId,
           datasourceType,
           modelCatalogId,
-          selectedContext: options.selectedContext
+          selectedContext: options.selectedContext,
+          semanticIntent: options.semanticIntent
         },
         {
           tools: options.tools,
@@ -57,7 +62,8 @@ export class GenerateSqlNode {
       workspaceId: options?.workspaceId,
       datasourceType,
       modelCatalogId,
-      selectedContext: options?.selectedContext
+      selectedContext: options?.selectedContext,
+      semanticIntent: options?.semanticIntent
     });
   }
 }

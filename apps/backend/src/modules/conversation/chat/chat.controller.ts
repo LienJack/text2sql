@@ -8,7 +8,9 @@ import {
   Post,
   Query,
   Req,
-  Res
+  Res,
+  UsePipes,
+  ValidationPipe
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import type {
@@ -123,6 +125,12 @@ export class ChatController {
   }
 
   @Post("/sessions/:sessionId/messages")
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true
+    })
+  )
   async sendMessage(
     @Param("sessionId") sessionId: string,
     @Body() body: SendMessageDto,
@@ -133,7 +141,8 @@ export class ChatController {
       const run = await this.chatService.sendMessage(
         sessionId,
         body.message,
-        req.requestId
+        req.requestId,
+        body.contextEnvelope
       );
       return ok(req.requestId, {
         kind: "agent-run",
@@ -168,6 +177,12 @@ export class ChatController {
   }
 
   @Post("/sessions/:sessionId/messages/stream")
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true
+    })
+  )
   async streamMessage(
     @Param("sessionId") sessionId: string,
     @Body() body: SendMessageDto,
@@ -195,7 +210,8 @@ export class ChatController {
         req.requestId,
         async (event) => {
           sendEvent(event.type, event);
-        }
+        },
+        body.contextEnvelope
       );
     } catch (error) {
       const fallbackEvent: ChatStreamEvent = {

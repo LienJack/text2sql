@@ -22,12 +22,18 @@
 
 ### Synchronous Contract (`/messages`)
 
+- Request body:
+  - `message: string`（必填）
+  - `contextEnvelope?: { metricDefinition?, timeRange?, entityMappings?, mustIncludeTables?, mustExcludeTables?, businessConstraints? }`（可选）
 - Response body is `AgentRunResponse`:
   - `kind: "agent-run"`
   - `outcome: "clarification" | "executionResult" | "rejected" | "failed"`
   - `run: SqlRun`
   - `run.trace.promptTemplate?`：SQL 运行时模板命中证据（`templateId/scene/scope/version/fallbackReason`）
+  - `run.trace.effectiveContextSummary?`：用户显式上下文生效摘要（来源优先级与槽位计数）
+  - `run.trace.conflictHint?`：上下文冲突提示（`hasConflict/preferredSource/reasonCodes`）
   - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
+  - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
 ### Stream Contract (`/messages/stream`)
@@ -50,7 +56,7 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
-- `finish` 事件中的 `data.delivery.evidence.promptTemplate?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
+- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
 
 ## Tool Calling Baseline
 

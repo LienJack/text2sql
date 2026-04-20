@@ -162,6 +162,17 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
+  it("keeps advanced context panel collapsed by default", async () => {
+    render(<ChatPanel />);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+
+    const advancedContextButton = screen.getByRole("button", {
+      name: "展开高级上下文"
+    });
+    expect(advancedContextButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("指标口径")).not.toBeInTheDocument();
+  });
+
   it("sends message and keeps sql preview available in chat flow", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
@@ -264,6 +275,126 @@ describe("ChatPanel", () => {
     if (releaseFirstEvent) {
       releaseFirstEvent();
     }
+  });
+
+  it("handles stream error events without unhandled promise rejection", async () => {
+    const user = userEvent.setup();
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      unhandledRejections.push(event.reason);
+      event.preventDefault();
+    };
+
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    try {
+      mockStreamMessageEvents.mockImplementationOnce(async function* () {
+        yield {
+          type: "start",
+          runId: "run-1",
+          sessionId: "session-1",
+          at: "2026-04-10T00:00:00.000Z",
+          data: {
+            requestId: null
+          }
+        };
+        yield {
+          type: "error",
+          runId: "run-1",
+          sessionId: "session-1",
+          at: "2026-04-10T00:00:00.100Z",
+          data: {
+            message: "LLM 输出中未提取到可执行 SQL。"
+          }
+        };
+      });
+
+      render(<ChatPanel />);
+      await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+      const getMessagesCallsBeforeSend = mockGetMessages.mock.calls.length;
+
+      await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => {
+        expect(mockGetMessages.mock.calls.length).toBeGreaterThan(
+          getMessagesCallsBeforeSend
+        );
+      });
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    }
+  });
+
+  it("keeps stream request payload unchanged when advanced context is not provided", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    const latestCall = mockStreamMessageEvents.mock.calls.at(-1);
+    expect(latestCall?.[0]).toBe("session-1");
+    expect(latestCall?.[1]).toBe("近30天支付方式分布");
+    expect(latestCall?.[3]).toBeUndefined();
+  });
+
+  it("injects advanced context envelope into stream request and clears it after send by default", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "展开高级上下文"
+      })
+    );
+
+    await user.type(
+      screen.getByLabelText("指标口径"),
+      "按支付成功口径统计订单"
+    );
+    await user.type(screen.getByLabelText("开始日期"), "2026-03-01");
+    await user.type(screen.getByLabelText("结束日期"), "2026-03-31");
+    await user.type(
+      screen.getByLabelText("实体映射"),
+      "华北大区=region_north"
+    );
+
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    const latestCall = mockStreamMessageEvents.mock.calls.at(-1);
+    expect(latestCall?.[3]).toEqual({
+      metricDefinition: "按支付成功口径统计订单",
+      timeRange: {
+        from: "2026-03-01",
+        to: "2026-03-31"
+      },
+      entityMappings: [
+        {
+          entity: "华北大区",
+          mappedTo: "region_north"
+        }
+      ]
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "展开高级上下文"
+      })
+    );
+    expect(screen.getByLabelText("指标口径")).toHaveValue("");
   });
 
   it("keeps run detail entry visible while run backfill is still loading", async () => {

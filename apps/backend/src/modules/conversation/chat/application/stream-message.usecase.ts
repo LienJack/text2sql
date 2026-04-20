@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   ChatMessage,
+  ContextEnvelope,
   ChatStreamEvent,
   ReasoningStage,
   SqlRun
@@ -22,6 +23,7 @@ export interface StreamMessageInput {
   sessionId: string;
   message: string;
   requestId?: string;
+  contextEnvelope?: ContextEnvelope;
   onEvent: (event: ChatStreamEvent) => Promise<void> | void;
 }
 
@@ -96,6 +98,7 @@ export class StreamMessageUsecase {
           datasourceId: session.datasource,
           datasourceType: datasource.type,
           modelCatalogId: session.modelCatalogId ?? undefined,
+          contextEnvelope: input.contextEnvelope,
           accessContext: sqlAccessContext,
           traceContext: {
             source: "chat",

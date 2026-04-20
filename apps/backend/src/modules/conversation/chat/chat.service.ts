@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ChatSessionView,
   ChatStreamEvent,
+  ContextEnvelope,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -92,11 +93,17 @@ export class ChatService {
     return this.sessionLifecycleUsecase.probeModelConnectivity(modelCatalogId);
   }
 
-  sendMessage(sessionId: string, message: string, requestId?: string): Promise<SqlRun> {
+  sendMessage(
+    sessionId: string,
+    message: string,
+    requestId?: string,
+    contextEnvelope?: ContextEnvelope
+  ): Promise<SqlRun> {
     return this.executeMessageUsecase.executeMessage({
       sessionId,
       message,
-      requestId
+      requestId,
+      contextEnvelope
     });
   }
 
@@ -104,13 +111,15 @@ export class ChatService {
     sessionId: string,
     message: string,
     requestId: string | undefined,
-    onEvent: (event: ChatStreamEvent) => Promise<void> | void
+    onEvent: (event: ChatStreamEvent) => Promise<void> | void,
+    contextEnvelope?: ContextEnvelope
   ): Promise<SqlRun> {
     return this.streamMessageUsecase.streamMessage({
       sessionId,
       message,
       requestId,
-      onEvent
+      onEvent,
+      contextEnvelope
     });
   }
 

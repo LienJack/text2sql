@@ -217,11 +217,13 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
   - `kind`：固定为 `agent-run`
   - `outcome`：`clarification | executionResult | rejected | failed`
   - `run`：完整运行结果（含 `trace` 与可选 `llmRaw`）
+  - 请求体支持可选 `contextEnvelope`（`metricDefinition/timeRange/entityMappings/mustIncludeTables/mustExcludeTables/businessConstraints`）
   - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
 - SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
 - SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
+- 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
 
 ## 测试
 ```bash

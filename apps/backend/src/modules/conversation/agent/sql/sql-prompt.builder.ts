@@ -7,6 +7,8 @@ type RagRetrievalChunkPayload = NonNullable<
   NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
 >[number];
 
+export type SqlSemanticIntent = "count" | "metadata" | "general";
+
 const DIALECT_HINT: Record<DatasourceType, string> = {
   sqlite: "SQLite",
   mysql: "MySQL",
@@ -23,6 +25,10 @@ export class SqlPromptBuilder {
     selectedContext?: RagRetrievalChunkPayload[],
     options?: {
       templateOverlay?: string;
+      semanticGuardrail?: {
+        intent: SqlSemanticIntent;
+        retryReason?: string;
+      };
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -32,12 +38,20 @@ export class SqlPromptBuilder {
         : "";
     const contextBlock = this.buildContextBlock(selectedContext);
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
+    const semanticGuardrailBlock = this.buildSemanticGuardrailBlock(
+      options?.semanticGuardrail?.intent ?? "general"
+    );
+    const repairHintBlock = this.buildRepairHintBlock(
+      options?.semanticGuardrail?.retryReason
+    );
     return {
       systemPrompt: [
         `You are a senior SQL analyst for a ${dialect} datasource.`,
         "Only produce read-only SQL queries.",
         "Prefer SELECT or WITH ... SELECT statements.",
         "Never generate INSERT/UPDATE/DELETE/DDL.",
+        semanticGuardrailBlock,
+        repairHintBlock,
         tableHint,
         overlayBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
@@ -58,6 +72,33 @@ export class SqlPromptBuilder {
       return "";
     }
     return `Runtime template overlay (higher priority guidance): ${normalized}`;
+  }
+
+  private buildSemanticGuardrailBlock(intent: SqlSemanticIntent): string {
+    if (intent === "count") {
+      return [
+        "Semantic guardrail: this is a business count-intent query.",
+        "The final SQL must contain COUNT(...) aggregation over business data.",
+        "Do not return schema/metadata introspection SQL."
+      ].join(" ");
+    }
+    if (intent === "metadata") {
+      return [
+        "Semantic guardrail: this is a metadata-intent query.",
+        "The final SQL must use schema introspection paths",
+        "(for example sqlite_master, sqlite_schema, pragma, information_schema, SHOW TABLES).",
+        "Do not return business row counting SQL."
+      ].join(" ");
+    }
+    return "Semantic guardrail: ensure SQL semantics strictly match the user question intent.";
+  }
+
+  private buildRepairHintBlock(retryReason?: string): string {
+    const normalized = retryReason?.trim();
+    if (!normalized) {
+      return "";
+    }
+    return `Retry repair hint (single automatic retry): previous SQL failed semantic guardrail because ${normalized}. Return corrected final SQL only.`;
   }
 
   private buildContextBlock(selectedContext?: RagRetrievalChunkPayload[]): string {
