@@ -1,6 +1,7 @@
 import type {
   AgentRunResponse,
   ChatStreamEvent,
+  ContextEnvelope,
   CreatePromptTemplateRequest,
   DeletePromptTemplateResponse,
   DeliveryContract,
@@ -10,6 +11,7 @@ import type {
   PromptTemplate,
   PromptTemplateTraceEvidence,
   RollbackGlossaryAnchorResponse,
+  SendMessageRequest,
   SqlRun,
   UpdatePromptTemplateRequest,
   UpsertGlossaryTermResponse
@@ -57,6 +59,33 @@ const createPromptTemplateRequestSample: CreatePromptTemplateRequest = {
   status: "draft"
 };
 
+const contextEnvelopeSample: ContextEnvelope = {
+  metricDefinition: "净销售额=订单金额-退款金额",
+  timeRange: {
+    from: "2026-01-01",
+    to: "2026-03-31",
+    timezone: "Asia/Shanghai"
+  },
+  entityMappings: [
+    {
+      entity: "华东区",
+      mappedTo: "region=east_china"
+    }
+  ],
+  mustIncludeTables: ["orders", "refunds"],
+  mustExcludeTables: ["internal_audit_logs"],
+  businessConstraints: ["仅统计已支付订单"]
+};
+
+const sendMessageRequestWithEnvelopeSample: SendMessageRequest = {
+  message: "统计华东区本季度净销售额",
+  contextEnvelope: contextEnvelopeSample
+};
+
+const sendMessageRequestLegacySample: SendMessageRequest = {
+  message: "统计订单状态分布"
+};
+
 const updatePromptTemplateRequestSample: UpdatePromptTemplateRequest = {
   name: "workspace sql guidance v2",
   status: "active"
@@ -90,7 +119,26 @@ const deliverySample: DeliveryContract = {
         createdAt: "2026-04-18T00:00:00.000Z"
       }
     ],
-    riskTags: []
+    riskTags: [],
+    effectiveContextSummary: {
+      sourcePriority: "user_explicit_over_system",
+      userEnvelope: {
+        metricDefinitionProvided: true,
+        timeRangeProvided: true,
+        entityMappingCount: 1,
+        includeTableCount: 1,
+        excludeTableCount: 0,
+        businessConstraintCount: 1
+      },
+      retrievalContext: {
+        status: "ready",
+        selectedContextCount: 1
+      }
+    },
+    conflictHint: {
+      hasConflict: false,
+      preferredSource: "user_explicit"
+    }
   },
   artifact: {
     sql: "select 1",
@@ -229,11 +277,58 @@ type PromptTemplateSceneSupportsSql = Expect<IsAssignable<"sql", PromptTemplate[
 type PromptTemplateTraceFallbackShape = Expect<
   IsAssignable<string | undefined, PromptTemplateTraceEvidence["fallbackReason"]>
 >;
+type TraceEffectiveContextPriorityShape = Expect<
+  IsAssignable<
+    "user_explicit_over_system",
+    NonNullable<SqlRun["trace"]["effectiveContextSummary"]>["sourcePriority"]
+  >
+>;
+type TraceConflictHintPreferredSourceShape = Expect<
+  IsAssignable<
+    "user_explicit",
+    NonNullable<SqlRun["trace"]["conflictHint"]>["preferredSource"]
+  >
+>;
+type DeliveryEffectiveContextPriorityShape = Expect<
+  IsAssignable<
+    "user_explicit_over_system",
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["effectiveContextSummary"]
+    >["sourcePriority"]
+  >
+>;
+type DeliveryConflictHintPreferredSourceShape = Expect<
+  IsAssignable<
+    "user_explicit",
+    NonNullable<NonNullable<DeliveryContract["evidence"]>["conflictHint"]>["preferredSource"]
+  >
+>;
 type PromptTemplateCreateRequestShape = Expect<
   IsAssignable<"datasource", CreatePromptTemplateRequest["scope"]>
 >;
 type PromptTemplateDeleteResponseShape = Expect<
   IsAssignable<string, DeletePromptTemplateResponse["deletedAt"]>
+>;
+type ContextEnvelopeMetricDefinitionShape = Expect<
+  IsAssignable<string | undefined, ContextEnvelope["metricDefinition"]>
+>;
+type ContextEnvelopeTimeRangeTimezoneShape = Expect<
+  IsAssignable<
+    string | undefined,
+    NonNullable<ContextEnvelope["timeRange"]>["timezone"]
+  >
+>;
+type ContextEnvelopeEntityMappingShape = Expect<
+  IsAssignable<
+    string,
+    NonNullable<ContextEnvelope["entityMappings"]>[number]["entity"]
+  >
+>;
+type SendMessageRequestContextOptional = Expect<
+  IsAssignable<ContextEnvelope | undefined, SendMessageRequest["contextEnvelope"]>
+>;
+type SendMessageRequestMessageShape = Expect<
+  IsAssignable<string, SendMessageRequest["message"]>
 >;
 type GlossaryScopeSupportsDatasource = Expect<IsAssignable<"datasource", GlossaryTerm["scope"]>>;
 type GlossaryPriorityIsNumeric = Expect<IsAssignable<number, GlossaryTerm["priority"]>>;
@@ -254,5 +349,8 @@ void listPromptTemplatesResponseSample;
 void createPromptTemplateRequestSample;
 void updatePromptTemplateRequestSample;
 void deletePromptTemplateResponseSample;
+void contextEnvelopeSample;
+void sendMessageRequestWithEnvelopeSample;
+void sendMessageRequestLegacySample;
 void upsertGlossaryTermResponseSample;
 void rollbackGlossaryAnchorResponseSample;

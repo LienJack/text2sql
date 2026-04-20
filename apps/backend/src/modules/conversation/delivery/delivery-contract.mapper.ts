@@ -51,6 +51,38 @@ interface SemanticSnapshot {
   semanticDegradeReason?: string;
 }
 
+interface EffectiveContextSummary {
+  sourcePriority: "user_explicit_over_system";
+  userEnvelope: {
+    metricDefinitionProvided: boolean;
+    timeRangeProvided: boolean;
+    entityMappingCount: number;
+    includeTableCount: number;
+    excludeTableCount: number;
+    businessConstraintCount: number;
+  };
+  retrievalContext?: {
+    status?: "ready" | "degraded";
+    selectedContextCount?: number;
+  };
+}
+
+interface ContextConflictHint {
+  hasConflict: boolean;
+  preferredSource: "user_explicit";
+  reasonCodes?: string[];
+}
+
+interface TraceContextEvidence {
+  effectiveContextSummary?: EffectiveContextSummary;
+  conflictHint?: ContextConflictHint;
+}
+
+type DeliveryEvidenceWithContext = NonNullable<DeliveryContract["evidence"]> & {
+  effectiveContextSummary?: EffectiveContextSummary;
+  conflictHint?: ContextConflictHint;
+};
+
 interface SandboxPostProcessOutcome {
   artifact?: DeliveryContract["artifact"];
   riskTags: string[];
@@ -68,6 +100,7 @@ export class DeliveryContractMapper {
     const finalSnapshot = this.readRerankFinalSnapshot(replayIndex.rerankFinal);
     const fusedSnapshot = this.readRetrievalFusedSnapshot(replayIndex.retrievalFused);
     const semanticSnapshot = this.readSemanticSnapshot(input.run);
+    const traceContextEvidence = this.readTraceContextEvidence(input.run);
     const invalidInput = replayIndex.invalidPayload;
     const artifact = this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
@@ -79,6 +112,9 @@ export class DeliveryContractMapper {
     const evidenceRiskTags = this.unique([
       ...finalSnapshot.riskTags,
       ...(invalidInput ? ["delivery_input_invalid"] : []),
+      ...(traceContextEvidence.conflictHint?.hasConflict
+        ? ["context_conflict_detected"]
+        : []),
       ...sandboxOutcome.riskTags
     ]);
 
@@ -103,7 +139,7 @@ export class DeliveryContractMapper {
       ? (finalSnapshot.status ?? fusedSnapshot.status)
       : (input.run.error ? "degraded" : undefined);
 
-    const evidence = {
+    const evidence: DeliveryEvidenceWithContext = {
       runId: input.run.runId,
       retrievalStatus: derivedRetrievalStatus,
       degradeReasons: finalSnapshot.degradeReasons,
@@ -120,8 +156,10 @@ export class DeliveryContractMapper {
       semanticLockStatus: semanticSnapshot.semanticLockStatus,
       semanticDegradeReason: semanticSnapshot.semanticDegradeReason,
       skillContextSummary: fusedSnapshot.skillContextSummary,
-      evidenceStale: evidenceStale || undefined
-    } satisfies DeliveryContract["evidence"];
+      evidenceStale: evidenceStale || undefined,
+      effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
+      conflictHint: traceContextEvidence.conflictHint
+    };
 
     return {
       answer,
@@ -398,6 +436,123 @@ export class DeliveryContractMapper {
     return {};
   }
 
+  private readTraceContextEvidence(run: SqlRun): TraceContextEvidence {
+    const traceWithCompat = run.trace as SqlRun["trace"] & {
+      effectiveContextSummary?: unknown;
+      effective_context_summary?: unknown;
+      conflictHint?: unknown;
+      context_conflict_hint?: unknown;
+    };
+
+    return {
+      effectiveContextSummary: this.readEffectiveContextSummary(
+        traceWithCompat.effectiveContextSummary ??
+          traceWithCompat.effective_context_summary
+      ),
+      conflictHint: this.readConflictHint(
+        traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
+      )
+    };
+  }
+
+  private readEffectiveContextSummary(value: unknown): EffectiveContextSummary | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const sourcePriority = this.readSourcePriority(value.sourcePriority);
+    const userEnvelope = this.readEffectiveContextUserEnvelope(value.userEnvelope);
+    if (!sourcePriority || !userEnvelope) {
+      return undefined;
+    }
+
+    const retrievalContext = this.readEffectiveContextRetrieval(value.retrievalContext);
+
+    return {
+      sourcePriority,
+      userEnvelope,
+      ...(retrievalContext ? { retrievalContext } : {})
+    };
+  }
+
+  private readConflictHint(value: unknown): ContextConflictHint | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const preferredSource = this.readPreferredSource(value.preferredSource);
+    if (!preferredSource) {
+      return undefined;
+    }
+    const hasConflict = Boolean(value.hasConflict);
+    const reasonCodes = this.readStringArray(value.reasonCodes);
+    return {
+      hasConflict,
+      preferredSource,
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {})
+    };
+  }
+
+  private readEffectiveContextUserEnvelope(
+    value: unknown
+  ): EffectiveContextSummary["userEnvelope"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+
+    const entityMappingCount = this.readNonNegativeInteger(value.entityMappingCount);
+    const includeTableCount = this.readNonNegativeInteger(value.includeTableCount);
+    const excludeTableCount = this.readNonNegativeInteger(value.excludeTableCount);
+    const businessConstraintCount = this.readNonNegativeInteger(
+      value.businessConstraintCount
+    );
+
+    if (
+      entityMappingCount === undefined ||
+      includeTableCount === undefined ||
+      excludeTableCount === undefined ||
+      businessConstraintCount === undefined
+    ) {
+      return undefined;
+    }
+
+    return {
+      metricDefinitionProvided: Boolean(value.metricDefinitionProvided),
+      timeRangeProvided: Boolean(value.timeRangeProvided),
+      entityMappingCount,
+      includeTableCount,
+      excludeTableCount,
+      businessConstraintCount
+    };
+  }
+
+  private readEffectiveContextRetrieval(
+    value: unknown
+  ): EffectiveContextSummary["retrievalContext"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const statusRaw = value.status;
+    const status = statusRaw === "ready" || statusRaw === "degraded" ? statusRaw : undefined;
+    const selectedContextCount = this.readNonNegativeInteger(value.selectedContextCount);
+
+    if (!status && selectedContextCount === undefined) {
+      return undefined;
+    }
+    return {
+      ...(status ? { status } : {}),
+      ...(selectedContextCount !== undefined ? { selectedContextCount } : {})
+    };
+  }
+
+  private readSourcePriority(
+    value: unknown
+  ): EffectiveContextSummary["sourcePriority"] | undefined {
+    return value === "user_explicit_over_system" ? value : undefined;
+  }
+
+  private readPreferredSource(value: unknown): ContextConflictHint["preferredSource"] | undefined {
+    return value === "user_explicit" ? value : undefined;
+  }
+
   private readSkillContextSummary(
     value: unknown
   ): RetrievalFusedSnapshot["skillContextSummary"] {
@@ -466,6 +621,19 @@ export class DeliveryContractMapper {
     }
     const normalized = value.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private readNonNegativeInteger(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return undefined;
   }
 
   private readStringArray(value: unknown): string[] {

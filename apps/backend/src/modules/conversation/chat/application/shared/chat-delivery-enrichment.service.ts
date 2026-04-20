@@ -44,7 +44,19 @@ export class ChatDeliveryEnrichmentService {
       prompt_template?: unknown;
       prompt_template_evidence?: unknown;
       templateEvidence?: unknown;
+      effectiveContextSummary?: unknown;
+      effective_context_summary?: unknown;
+      conflictHint?: unknown;
+      context_conflict_hint?: unknown;
     };
+    const evidenceWithCompat = run.delivery?.evidence as
+      | (NonNullable<SqlRun["delivery"]>["evidence"] & {
+          effectiveContextSummary?: unknown;
+          effective_context_summary?: unknown;
+          conflictHint?: unknown;
+          context_conflict_hint?: unknown;
+        })
+      | undefined;
     const tracePromptTemplate = this.normalizePromptTemplateTraceEvidence(
       traceWithCompat.promptTemplate ??
         traceWithCompat.prompt_template ??
@@ -54,14 +66,53 @@ export class ChatDeliveryEnrichmentService {
     const evidencePromptTemplate = this.normalizePromptTemplateTraceEvidence(
       run.delivery?.evidence?.promptTemplate
     );
+    const traceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
+      traceWithCompat.effectiveContextSummary ??
+        traceWithCompat.effective_context_summary
+    );
+    const evidenceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
+      evidenceWithCompat?.effectiveContextSummary ??
+        evidenceWithCompat?.effective_context_summary
+    );
+    const traceConflictHint = this.normalizeContextConflictHint(
+      traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
+    );
+    const evidenceConflictHint = this.normalizeContextConflictHint(
+      evidenceWithCompat?.conflictHint ?? evidenceWithCompat?.context_conflict_hint
+    );
     const resolvedPromptTemplate = evidencePromptTemplate ?? tracePromptTemplate;
+    const resolvedEffectiveContextSummary =
+      evidenceEffectiveContextSummary ?? traceEffectiveContextSummary;
+    const resolvedConflictHint = evidenceConflictHint ?? traceConflictHint;
 
     const normalizedTrace = resolvedPromptTemplate
       ? {
           ...run.trace,
-          promptTemplate: resolvedPromptTemplate
+          ...(resolvedPromptTemplate ? { promptTemplate: resolvedPromptTemplate } : {}),
+          ...(resolvedEffectiveContextSummary
+            ? {
+                effectiveContextSummary: resolvedEffectiveContextSummary
+              }
+            : {}),
+          ...(resolvedConflictHint
+            ? {
+                conflictHint: resolvedConflictHint
+              }
+            : {})
         }
-      : run.trace;
+      : ({
+          ...run.trace,
+          ...(resolvedEffectiveContextSummary
+            ? {
+                effectiveContextSummary: resolvedEffectiveContextSummary
+              }
+            : {}),
+          ...(resolvedConflictHint
+            ? {
+                conflictHint: resolvedConflictHint
+              }
+            : {})
+        } as SqlRun["trace"]);
 
     if (!run.delivery) {
       return normalizedTrace === run.trace ? run : { ...run, trace: normalizedTrace };
@@ -75,6 +126,16 @@ export class ChatDeliveryEnrichmentService {
             ...(resolvedPromptTemplate
               ? {
                   promptTemplate: resolvedPromptTemplate
+                }
+              : {}),
+            ...(resolvedEffectiveContextSummary
+              ? {
+                  effectiveContextSummary: resolvedEffectiveContextSummary
+                }
+              : {}),
+            ...(resolvedConflictHint
+              ? {
+                  conflictHint: resolvedConflictHint
                 }
               : {})
           }
@@ -131,6 +192,125 @@ export class ChatDeliveryEnrichmentService {
     };
   }
 
+  private normalizeEffectiveContextSummary(
+    value: unknown
+  ):
+    | {
+        sourcePriority: "user_explicit_over_system";
+        userEnvelope: {
+          metricDefinitionProvided: boolean;
+          timeRangeProvided: boolean;
+          entityMappingCount: number;
+          includeTableCount: number;
+          excludeTableCount: number;
+          businessConstraintCount: number;
+        };
+        retrievalContext?: {
+          status?: "ready" | "degraded";
+          selectedContextCount?: number;
+        };
+      }
+    | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    if (value.sourcePriority !== "user_explicit_over_system") {
+      return undefined;
+    }
+    const userEnvelope = this.normalizeEffectiveContextUserEnvelope(value.userEnvelope);
+    if (!userEnvelope) {
+      return undefined;
+    }
+    const retrievalContext = this.normalizeEffectiveContextRetrieval(value.retrievalContext);
+    return {
+      sourcePriority: "user_explicit_over_system",
+      userEnvelope,
+      ...(retrievalContext ? { retrievalContext } : {})
+    };
+  }
+
+  private normalizeContextConflictHint(
+    value: unknown
+  ):
+    | {
+        hasConflict: boolean;
+        preferredSource: "user_explicit";
+        reasonCodes?: string[];
+      }
+    | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    if (value.preferredSource !== "user_explicit") {
+      return undefined;
+    }
+    const reasonCodes = this.normalizeStringArray(value.reasonCodes);
+    return {
+      hasConflict: Boolean(value.hasConflict),
+      preferredSource: "user_explicit",
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {})
+    };
+  }
+
+  private normalizeEffectiveContextUserEnvelope(
+    value: unknown
+  ):
+    | {
+        metricDefinitionProvided: boolean;
+        timeRangeProvided: boolean;
+        entityMappingCount: number;
+        includeTableCount: number;
+        excludeTableCount: number;
+        businessConstraintCount: number;
+      }
+    | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const entityMappingCount = this.readNonNegativeInteger(value.entityMappingCount);
+    const includeTableCount = this.readNonNegativeInteger(value.includeTableCount);
+    const excludeTableCount = this.readNonNegativeInteger(value.excludeTableCount);
+    const businessConstraintCount = this.readNonNegativeInteger(
+      value.businessConstraintCount
+    );
+    if (
+      entityMappingCount === undefined ||
+      includeTableCount === undefined ||
+      excludeTableCount === undefined ||
+      businessConstraintCount === undefined
+    ) {
+      return undefined;
+    }
+    return {
+      metricDefinitionProvided: Boolean(value.metricDefinitionProvided),
+      timeRangeProvided: Boolean(value.timeRangeProvided),
+      entityMappingCount,
+      includeTableCount,
+      excludeTableCount,
+      businessConstraintCount
+    };
+  }
+
+  private normalizeEffectiveContextRetrieval(
+    value: unknown
+  ): { status?: "ready" | "degraded"; selectedContextCount?: number } | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const status =
+      value.status === "ready" || value.status === "degraded"
+        ? value.status
+        : undefined;
+    const selectedContextCount = this.readNonNegativeInteger(value.selectedContextCount);
+    if (!status && selectedContextCount === undefined) {
+      return undefined;
+    }
+    return {
+      ...(status ? { status } : {}),
+      ...(selectedContextCount !== undefined ? { selectedContextCount } : {})
+    };
+  }
+
   private normalizePromptTemplateScope(
     raw: unknown
   ): "global" | "workspace" | "datasource" | undefined {
@@ -179,6 +359,32 @@ export class ChatDeliveryEnrichmentService {
 
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+  }
+
+  private readNonNegativeInteger(raw: unknown): number | undefined {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) {
+      return Math.floor(raw);
+    }
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return undefined;
+  }
+
+  private normalizeStringArray(raw: unknown): string[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return Array.from(
+      new Set(
+        raw
+          .map((item) => this.readNonEmptyString(item))
+          .filter((item): item is string => Boolean(item))
+      )
+    );
   }
 
   private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {

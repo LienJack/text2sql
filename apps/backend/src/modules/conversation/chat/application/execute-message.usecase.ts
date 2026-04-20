@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { ChatMessage, SqlRun } from "@text2sql/shared-types";
+import type { ChatMessage, ContextEnvelope, SqlRun } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import { GraphBuilderService } from "../../agent/graph/graph.builder";
 import { DatasourceRegistryService } from "../../../governance/datasource/datasource-registry.service";
@@ -16,6 +16,7 @@ export interface ExecuteMessageInput {
   sessionId: string;
   message: string;
   requestId?: string;
+  contextEnvelope?: ContextEnvelope;
 }
 
 @Injectable()
@@ -68,6 +69,7 @@ export class ExecuteMessageUsecase {
       datasourceId: session.datasource,
       datasourceType: datasource.type,
       modelCatalogId: session.modelCatalogId ?? undefined,
+      contextEnvelope: input.contextEnvelope,
       accessContext: sqlAccessContext,
       traceContext: {
         source: "chat",

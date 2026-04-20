@@ -5,6 +5,100 @@ import {
 import { createLangGraphRuntime } from "../../src/modules/conversation/agent/graph/langgraph.runtime";
 
 describe("langgraph runtime", () => {
+  it("passes contextEnvelope into clarify node", async () => {
+    const clarifyRun = jest.fn().mockReturnValue({
+      reason: "need clarification",
+      question: "请补充指标口径"
+    });
+    const runtime = createLangGraphRuntime({
+      clarifyNode: {
+        run: clarifyRun
+      },
+      retrieveKnowledgeNode: {
+        run: async () => ({
+          status: "ready",
+          snippets: ["stub"],
+          summary: "stub"
+        })
+      },
+      buildIntentPlanNode: {
+        run: () => ({
+          status: "ready",
+          intent: "aggregate",
+          constraints: [],
+          summary: "stub"
+        })
+      },
+      buildSemanticQueryNode: {
+        run: async () => ({
+          status: "ready",
+          semanticHints: [],
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          riskTags: [],
+          summary: "stub"
+        })
+      },
+      buildPhysicalPlanNode: {
+        run: async () => ({
+          status: "ready",
+          strategy: "direct_sql",
+          semanticVersion: 1,
+          lockStatus: "locked" as const,
+          fallbackApplied: false,
+          cacheStatus: "miss" as const,
+          summary: "stub"
+        })
+      },
+      generateSqlNode: {
+        run: async () => ({
+          provider: "mock-provider",
+          model: "mock-model",
+          sql: "SELECT 1 AS value",
+          explanation: "mock explanation",
+          rawText: "mock raw text",
+          prompt: {
+            systemPrompt: "sys",
+            userPrompt: "usr"
+          }
+        })
+      },
+      safetyNode: {
+        run: async () => ({
+          allowed: true,
+          mode: "pass" as const,
+          riskLevel: "low" as const,
+          riskTags: []
+        })
+      },
+      executeNode: {
+        run: async () => ({
+          rows: [{ value: 1 }],
+          columns: ["value"]
+        })
+      },
+      formatNode: {
+        run: () => "formatted"
+      }
+    });
+
+    const contextEnvelope = {
+      metricDefinition: "订单总数"
+    };
+    const state = createInitialLangGraphState({
+      runId: "run-with-envelope",
+      sessionId: "session-1",
+      question: "这个趋势怎么样",
+      datasourceId: "ds-1",
+      contextEnvelope
+    });
+    const output = await runtime.invoke(state);
+
+    expect(clarifyRun).toHaveBeenCalledWith("这个趋势怎么样", contextEnvelope);
+    expect(output.terminalStatus).toBe("clarification");
+  });
+
   it("should run through executionResult path with expected node steps", async () => {
     const runtime = createLangGraphRuntime({
       clarifyNode: {

@@ -65,6 +65,69 @@ describe("chat api (e2e)", () => {
     expect(messageViewRes.body.data.latestRun.runId).toBe(runRes.body.data.run.runId);
   });
 
+  it("should accept optional contextEnvelope on sync message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    expect(sessionRes.status).toBe(201);
+    const sessionId = sessionRes.body.data.id as string;
+
+    const runRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages`)
+      .send({
+        message: "统计华东区已支付订单净销售额",
+        contextEnvelope: {
+          metricDefinition: "净销售额=订单金额-退款金额",
+          timeRange: {
+            from: "2026-01-01",
+            to: "2026-03-31",
+            timezone: "Asia/Shanghai"
+          },
+          entityMappings: [
+            {
+              entity: "华东区",
+              mappedTo: "region=east_china"
+            }
+          ],
+          mustIncludeTables: ["orders", "refunds"],
+          mustExcludeTables: ["internal_audit_logs"],
+          businessConstraints: ["仅统计已支付订单"]
+        }
+      });
+
+    expect(runRes.status).toBe(201);
+    expect(runRes.body.status).toBe("success");
+    expect(runRes.body.data.kind).toBe("agent-run");
+    expect(runRes.body.data.run.runId).toBeDefined();
+  });
+
+  it("should reject invalid contextEnvelope boundary on sync message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    expect(sessionRes.status).toBe(201);
+    const sessionId = sessionRes.body.data.id as string;
+
+    const invalidRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages`)
+      .send({
+        message: "统计订单",
+        contextEnvelope: {
+          metricDefinition: "x".repeat(301)
+        }
+      });
+
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.body.statusCode).toBe(400);
+    expect(invalidRes.body.error).toBe("Bad Request");
+    expect(Array.isArray(invalidRes.body.message)).toBe(true);
+    expect(
+      (invalidRes.body.message as string[]).some((item) =>
+        item.includes("contextEnvelope.metricDefinition")
+      )
+    ).toBe(true);
+  });
+
   it("should list, rename and soft-delete sessions", async () => {
     const sessionRes = await request(app.getHttpServer())
       .post("/api/v1/sessions")

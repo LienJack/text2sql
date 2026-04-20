@@ -30,6 +30,7 @@ const LangGraphStateAnnotation = Annotation.Root({
   datasourceId: Annotation<string>(),
   datasourceType: Annotation<DatasourceType | undefined>(),
   modelCatalogId: Annotation<string | undefined>(),
+  contextEnvelope: Annotation<LangGraphState["contextEnvelope"]>(),
   accessContext: Annotation<LangGraphState["accessContext"]>(),
   planningScaffoldEnabled: Annotation<boolean | undefined>(),
   traceContext: Annotation<LangGraphState["traceContext"]>(),
@@ -170,7 +171,10 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         config,
         buildRunningStep(state, "clarify", startedAt, "正在理解问题")
       );
-      const clarification = deps.clarifyNode.run(state.question);
+      const clarification = deps.clarifyNode.run(
+        state.question,
+        state.contextEnvelope
+      );
       const endedAt = new Date().toISOString();
       if (clarification) {
         const outputs = {
@@ -640,7 +644,9 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           modelCatalogId: generated.modelCatalogId,
           sql: generated.sql,
           rawText: generated.rawText,
-          promptTemplate: generated.promptTemplate
+          promptTemplate: generated.promptTemplate,
+          retryCount: generated.retryCount ?? 0,
+          semanticIntent: generated.semanticIntent
         };
         const trace = appendStep(state, {
           step: {
@@ -661,6 +667,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           trace: {
             ...trace.trace,
             provider: generated.provider,
+            retryCount: generated.retryCount ?? trace.trace.retryCount ?? 0,
             ...(generated.promptTemplate
               ? {
                   promptTemplate: generated.promptTemplate
