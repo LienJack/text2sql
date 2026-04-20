@@ -3,7 +3,7 @@ import type { ChatStreamEvent } from "@text2sql/shared-types";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
-import { DeliveryContractMapper } from "../../src/modules/delivery/delivery-contract.mapper";
+import { DeliveryContractMapper } from "../../src/modules/conversation/delivery/delivery-contract.mapper";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 interface ParsedSseEvent {

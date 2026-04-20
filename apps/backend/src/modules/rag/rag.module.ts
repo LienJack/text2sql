@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { DataModule } from "../data/data.module";
-import { GraphAccelerationAdapter } from "../graph/adapter/graph-acceleration.adapter";
-import { GraphAccelerationCircuitBreaker } from "../graph/adapter/graph-acceleration-circuit-breaker";
-import { GraphService } from "../graph/graph.service";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { GraphAccelerationAdapter } from "../knowledge/graph/adapter/graph-acceleration.adapter";
+import { GraphAccelerationCircuitBreaker } from "../knowledge/graph/adapter/graph-acceleration-circuit-breaker";
+import { GraphService } from "../knowledge/graph/graph.service";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { SkillRegistryModule } from "../skill-registry/skill-registry.module";
@@ -27,7 +27,7 @@ import { RagRerankService } from "./rerank/rag-rerank.service";
 @Module({
   imports: [
     AppConfigModule,
-    DataModule,
+    PlatformDataPersistenceModule,
     LlmModule,
     ObservabilityModule,
     SkillRegistryModule

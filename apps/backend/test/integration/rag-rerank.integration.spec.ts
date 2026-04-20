@@ -3,10 +3,10 @@ import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
 import { RagIndexBuilderService } from "../../src/modules/rag/index/rag-index-builder.service";
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
-import { RagReplayRepository } from "../../src/modules/rag/observability/rag-replay.repository";
-import { RagRetrievalService } from "../../src/modules/rag/retrieval/rag-retrieval.service";
+import { RagReplayRepository } from "../../src/modules/knowledge/rag/observability/rag-replay.repository";
+import { RagRetrievalService } from "../../src/modules/knowledge/rag/retrieval/rag-retrieval.service";
 import { ModelRerankerAdapter } from "../../src/modules/rag/rerank/model-reranker.adapter";
-import { RagRerankService } from "../../src/modules/rag/rerank/rag-rerank.service";
+import { RagRerankService } from "../../src/modules/knowledge/rag/rerank/rag-rerank.service";
 
 describe("rag rerank integration", () => {
   beforeAll(() => {

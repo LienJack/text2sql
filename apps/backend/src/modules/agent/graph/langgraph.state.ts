@@ -5,7 +5,7 @@ import type {
   SqlRun
 } from "@text2sql/shared-types";
 import type { GraphInput, GraphTraceContext } from "./agent.types";
-import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
+import type { SqlTableAccessContext } from "../../platform/data/query/index";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { IntentPlan } from "../nodes/build-intent-plan.node";
 import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";

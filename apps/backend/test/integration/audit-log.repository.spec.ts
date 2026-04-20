@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
-import { DataModule } from "../../src/modules/data/data.module";
-import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
+import { PlatformDataPersistenceModule } from "../../src/modules/platform/data/persistence.module";
+import { AuditLogRepository } from "../../src/modules/platform/data/persistence";
 
 describe("audit log repository", () => {
   beforeAll(() => {
@@ -17,7 +17,7 @@ describe("audit log repository", () => {
 
   it("persists and filters governance events", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [DataModule]
+      imports: [PlatformDataPersistenceModule]
     }).compile();
     const repository = moduleRef.get(AuditLogRepository);
 
@@ -34,8 +34,8 @@ describe("audit log repository", () => {
 
     const runScoped = await repository.appendEvent({
       phase: "governance",
-      eventType: "workspace.datasource.acl.denied",
-      eventCode: "ACL_DENIED",
+      eventType: "workspace.datasource.table-permissions.denied",
+      eventCode: "TABLE_PERMISSIONS_DENIED",
       message: "检测到未授权读表请求",
       runId: "run-audit-1",
       sessionId: "session-audit-1",
@@ -66,8 +66,8 @@ describe("audit log repository", () => {
 
     const requestScoped = await repository.appendEvent({
       phase: "governance",
-      eventType: "workspace.datasource.acl.denied",
-      eventCode: "ACL_DENIED",
+      eventType: "workspace.datasource.table-permissions.denied",
+      eventCode: "TABLE_PERMISSIONS_DENIED",
       message: "拒绝事件带 requestId",
       runId: "run-audit-2",
       sessionId: "session-audit-2",
@@ -78,7 +78,7 @@ describe("audit log repository", () => {
     });
 
     const requestScopedList = await repository.listEvents({
-      eventType: "workspace.datasource.acl.denied",
+      eventType: "workspace.datasource.table-permissions.denied",
       requestId: "req-audit-2",
       limit: 10
     });

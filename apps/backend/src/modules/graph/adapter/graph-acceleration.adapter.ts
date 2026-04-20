@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type {
   RagRetrievalEntryContext,
   RagRetrievalLaneHit
-} from "../../rag/retrieval/rag-retrieval.types";
+} from "../../knowledge/rag/retrieval/rag-retrieval.types";
 
 export class GraphAccelerationError extends Error {}
 

@@ -78,6 +78,31 @@ export interface ClarificationPrompt {
   reason: string;
 }
 
+export interface ContextEnvelopeTimeRange {
+  from?: string;
+  to?: string;
+  timezone?: string;
+}
+
+export interface ContextEnvelopeEntityMapping {
+  entity: string;
+  mappedTo: string;
+}
+
+export interface ContextEnvelope {
+  metricDefinition?: string;
+  timeRange?: ContextEnvelopeTimeRange;
+  entityMappings?: ContextEnvelopeEntityMapping[];
+  mustIncludeTables?: string[];
+  mustExcludeTables?: string[];
+  businessConstraints?: string[];
+}
+
+export interface SendMessageRequest {
+  message: string;
+  contextEnvelope?: ContextEnvelope;
+}
+
 export interface PromptTemplateTraceEvidence {
   templateId?: string;
   scene?: PromptTemplateScene;
@@ -127,6 +152,26 @@ export interface ExecutionTrace {
     at: string;
   }>;
   promptTemplate?: PromptTemplateTraceEvidence;
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
+  };
 }
 
 export interface LlmRawOutput {
@@ -168,6 +213,26 @@ export interface DeliveryEvidenceLayer {
     skillCount: number;
     contextCount: number;
     degradeReason?: string;
+  };
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
   };
   evidenceStale?: boolean;
 }

@@ -2,6 +2,11 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
+import { KNOWLEDGE_MEMORY_COMPAT_BRIDGE } from "../../src/modules/knowledge/memory/memory.module";
+import {
+  assertKnowledgeCompatBridgeRetirementReady,
+  KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW
+} from "../../src/modules/knowledge/rag/rag.module";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 function withActor(
@@ -128,5 +133,18 @@ describe("memory feedback api integration", () => {
     expect(conflictRes.status).toBe(409);
     expect(conflictRes.body.status).toBe("error");
     expect(conflictRes.body.error.code).toBe("MEMORY_FEEDBACK_CONFLICT");
+  });
+
+  it("allows memory bridge retirement once prerequisites are met", () => {
+    expect(KNOWLEDGE_MEMORY_COMPAT_BRIDGE.removeBy).toBe(
+      KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW
+    );
+    expect(() =>
+      assertKnowledgeCompatBridgeRetirementReady("memory", {
+        conversationImportsClosed: true,
+        boundaryGatePassed: true,
+        keyRegressionsPassed: true
+      })
+    ).not.toThrow();
   });
 });

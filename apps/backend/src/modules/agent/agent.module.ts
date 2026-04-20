@@ -1,12 +1,14 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { DataModule } from "../data/data.module";
-import { DatasourceModule } from "../datasource/datasource.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { PlatformDataQueryModule } from "../platform/data/query.module";
+import { DatasourceModule } from "../governance/datasource/datasource.module";
+import { GovernanceAccessModule } from "../governance/access/access.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../rag/rag.module";
 import { SemanticRegistryModule } from "../semantic-registry/semantic-registry.module";
-import { SettingsModule } from "../settings/settings.module";
+import { SettingsModule } from "../governance/settings/settings.module";
 import { BuildIntentPlanNode } from "./nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
@@ -30,7 +32,9 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
 @Module({
   imports: [
     AppConfigModule,
-    DataModule,
+    PlatformDataPersistenceModule,
+    PlatformDataQueryModule,
+    GovernanceAccessModule,
     DatasourceModule,
     LlmModule,
     SettingsModule,

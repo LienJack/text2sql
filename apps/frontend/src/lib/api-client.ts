@@ -1,6 +1,7 @@
 import type {
   AgentRunResponse,
   ApiResponse,
+  ContextEnvelope,
   DeliveryEvidenceLayer,
   ChatStreamEvent,
   ChatSessionView,
@@ -11,6 +12,7 @@ import type {
   DatasourceUpsertPayload,
   LlmSettingsView,
   ModelCatalogItem,
+  SendMessageRequest,
   Session,
   UpsertDatasourceWorkflowRequest,
   UpsertDatasourceWorkflowResponse
@@ -651,13 +653,18 @@ export async function deleteSession(
 
 export async function sendMessage(
   sessionId: string,
-  message: string
+  message: string,
+  contextEnvelope?: ContextEnvelope
 ): Promise<AgentRunResponse> {
+  const payload: SendMessageRequest = {
+    message,
+    ...(contextEnvelope ? { contextEnvelope } : {})
+  };
   const response = await request<AgentRunResponse>(
     `/api/v1/sessions/${sessionId}/messages`,
     {
       method: "POST",
-      body: JSON.stringify({ message })
+      body: JSON.stringify(payload)
     }
   );
   const normalizedRun = normalizeRunSemanticEvidenceCompatibility(response.run);
@@ -674,12 +681,14 @@ export async function sendMessageStream(
   handlers?: {
     onEvent?: (event: ChatStreamEvent) => void;
     abortSignal?: AbortSignal;
+    contextEnvelope?: ContextEnvelope;
   }
 ): Promise<void> {
   for await (const event of streamMessageEvents(
     sessionId,
     message,
-    handlers?.abortSignal
+    handlers?.abortSignal,
+    handlers?.contextEnvelope
   )) {
     handlers?.onEvent?.(event);
     if (event.type === "error") {
@@ -693,7 +702,8 @@ export async function sendMessageStream(
 export async function* streamMessageEvents(
   sessionId: string,
   message: string,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  contextEnvelope?: ContextEnvelope
 ): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
@@ -710,8 +720,9 @@ export async function* streamMessageEvents(
       },
       signal: abortSignal,
       body: JSON.stringify({
-        message
-      })
+        message,
+        ...(contextEnvelope ? { contextEnvelope } : {})
+      } satisfies SendMessageRequest)
     }
   );
   if (!response.ok) {

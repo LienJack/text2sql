@@ -191,4 +191,69 @@ describe("chat stream api (e2e)", () => {
       expect(eventTypes).toContain("error");
     }
   });
+
+  it("should accept optional contextEnvelope on stream message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    const sessionId = sessionRes.body.data.id as string;
+
+    const streamRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages/stream`)
+      .send({
+        message: "统计华东区已支付订单净销售额",
+        contextEnvelope: {
+          metricDefinition: "净销售额=订单金额-退款金额",
+          timeRange: {
+            from: "2026-01-01",
+            to: "2026-03-31",
+            timezone: "Asia/Shanghai"
+          },
+          entityMappings: [
+            {
+              entity: "华东区",
+              mappedTo: "region=east_china"
+            }
+          ],
+          mustIncludeTables: ["orders"],
+          mustExcludeTables: ["internal_audit_logs"],
+          businessConstraints: ["仅统计已支付订单"]
+        }
+      });
+
+    expect(streamRes.status).toBe(200);
+    expect(streamRes.headers["content-type"]).toContain("text/event-stream");
+
+    const parsedEvents = parseSseEvents(streamRes.text);
+    expect(parsedEvents.length).toBeGreaterThanOrEqual(2);
+    expect(parsedEvents.some(({ eventType }) => eventType === "start")).toBe(true);
+    expect(parsedEvents.some(({ eventType }) => eventType === "finish")).toBe(true);
+  });
+
+  it("should reject invalid contextEnvelope boundary on stream message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    const sessionId = sessionRes.body.data.id as string;
+
+    const invalidRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages/stream`)
+      .send({
+        message: "统计订单",
+        contextEnvelope: {
+          metricDefinition: "x".repeat(301)
+        }
+      });
+
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.headers["content-type"]).toContain("application/json");
+    expect(invalidRes.body.statusCode).toBe(400);
+    expect(invalidRes.body.error).toBe("Bad Request");
+    expect(Array.isArray(invalidRes.body.message)).toBe(true);
+    expect(
+      (invalidRes.body.message as string[]).some((item) =>
+        item.includes("contextEnvelope.metricDefinition")
+      )
+    ).toBe(true);
+  });
 });

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
-import { AuditLogRepository } from "../../data/persistence/audit-log.repository";
-import { SemanticRegistryService } from "../../semantic-registry/semantic-registry.service";
+import { AuditLogRepository } from "../../platform/data/persistence/index";
+import { SemanticRegistryService } from "../../knowledge/semantic-registry/semantic-registry.service";
 import type { RagChunkBuildInput } from "../index/rag-index.repository";
 import { BuildRagIndexJob } from "../jobs/build-rag-index.job";
 import { RagReplayRepository } from "../observability/rag-replay.repository";

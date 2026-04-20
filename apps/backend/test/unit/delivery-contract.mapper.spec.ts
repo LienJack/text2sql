@@ -1,6 +1,6 @@
 import type { SqlRun } from "@text2sql/shared-types";
-import { DeliveryContractMapper } from "../../src/modules/delivery/delivery-contract.mapper";
-import { SandboxRuntimeService } from "../../src/modules/delivery/sandbox/sandbox-runtime.service";
+import { DeliveryContractMapper } from "../../src/modules/conversation/delivery/delivery-contract.mapper";
+import { SandboxRuntimeService } from "../../src/modules/conversation/delivery/sandbox/sandbox-runtime.service";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
   runId: "run-delivery-unit",
@@ -115,6 +115,67 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.retrievalLogs).toHaveLength(2);
     expect(delivery.artifact?.rowCount).toBe(1);
     expect(delivery.artifact?.hasError).toBe(false);
+  });
+
+  it("echoes sanitized effective context summary and conflict hint from trace", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        effectiveContextSummary: {
+          sourcePriority: "user_explicit_over_system",
+          userEnvelope: {
+            metricDefinitionProvided: true,
+            timeRangeProvided: true,
+            entityMappingCount: 2,
+            includeTableCount: 1,
+            excludeTableCount: 1,
+            businessConstraintCount: 1
+          },
+          retrievalContext: {
+            status: "degraded",
+            selectedContextCount: 1
+          }
+        },
+        conflictHint: {
+          hasConflict: true,
+          preferredSource: "user_explicit",
+          reasonCodes: ["user_envelope_include_exclude_overlap"]
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.effectiveContextSummary).toEqual({
+      sourcePriority: "user_explicit_over_system",
+      userEnvelope: {
+        metricDefinitionProvided: true,
+        timeRangeProvided: true,
+        entityMappingCount: 2,
+        includeTableCount: 1,
+        excludeTableCount: 1,
+        businessConstraintCount: 1
+      },
+      retrievalContext: {
+        status: "degraded",
+        selectedContextCount: 1
+      }
+    });
+    expect(delivery.evidence?.conflictHint).toEqual({
+      hasConflict: true,
+      preferredSource: "user_explicit",
+      reasonCodes: ["user_envelope_include_exclude_overlap"]
+    });
+    expect(delivery.evidence?.riskTags).toEqual(
+      expect.arrayContaining(["context_conflict_detected"])
+    );
   });
 
   it("keeps contract complete when artifact is absent", () => {

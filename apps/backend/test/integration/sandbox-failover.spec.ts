@@ -1,9 +1,9 @@
 import type { SqlRun } from "@text2sql/shared-types";
-import { DeliveryContractMapper } from "../../src/modules/delivery/delivery-contract.mapper";
+import { DeliveryContractMapper } from "../../src/modules/conversation/delivery/delivery-contract.mapper";
 import {
   DELIVERY_SANDBOX_REPLAY_KEY,
   SandboxRuntimeService
-} from "../../src/modules/delivery/sandbox/sandbox-runtime.service";
+} from "../../src/modules/conversation/delivery/sandbox/sandbox-runtime.service";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
   runId: "run-sandbox-failover",

@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { BuildPhysicalPlanNode } from "../../src/modules/agent/nodes/build-physical-plan.node";
-import { PlannerCacheService } from "../../src/modules/agent/planner/planner-cache.service";
+import { BuildPhysicalPlanNode } from "../../src/modules/conversation/agent/nodes/build-physical-plan.node";
+import { PlannerCacheService } from "../../src/modules/conversation/agent/planner/planner-cache.service";
 
 describe("planner cache replay integration", () => {
   beforeAll(() => {

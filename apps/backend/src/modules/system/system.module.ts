@@ -1,15 +1,15 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { DataModule } from "../data/data.module";
-import { DatasourceModule } from "../datasource/datasource.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { DatasourceModule } from "../governance/datasource/datasource.module";
 import { ObservabilityModule } from "../observability/observability.module";
-import { RagModule } from "../rag/rag.module";
+import { RagModule } from "../knowledge/rag/rag.module";
 import { HealthController } from "./health.controller";
 
 @Module({
   imports: [
     AppConfigModule,
-    DataModule,
+    PlatformDataPersistenceModule,
     DatasourceModule,
     ObservabilityModule,
     RagModule

@@ -1,5 +1,5 @@
-import { SqlReadonlyTool } from "../../src/modules/agent/sql/tools/sql-readonly.tool";
-import { SqlToolRegistryService } from "../../src/modules/agent/sql/tools/sql-tool-registry.service";
+import { SqlReadonlyTool } from "../../src/modules/conversation/agent/sql/tools/sql-readonly.tool";
+import { SqlToolRegistryService } from "../../src/modules/conversation/agent/sql/tools/sql-tool-registry.service";
 
 describe("SqlToolRegistryService", () => {
   it("should expose read-only sql tool", async () => {

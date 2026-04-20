@@ -6,7 +6,7 @@ import {
   isSandboxFilesystemWriteAllowed,
   isSandboxNetworkAllowed,
   isSandboxProcessSpawnAllowed
-} from "../../src/modules/delivery/sandbox/sandbox-policy";
+} from "../../src/modules/conversation/delivery/sandbox/sandbox-policy";
 
 describe("delivery sandbox policy", () => {
   it("is explicit, versioned, and deny-by-default", () => {

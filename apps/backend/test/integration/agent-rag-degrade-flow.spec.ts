@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { GraphBuilderService } from "../../src/modules/agent/graph/graph.builder";
+import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
 
 describe("agent rag degrade flow integration", () => {
   beforeAll(() => {

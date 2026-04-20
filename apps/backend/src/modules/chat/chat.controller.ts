@@ -22,7 +22,7 @@ import { CreateSessionDto } from "./dto/create-session.dto";
 import { ListSessionsDto } from "./dto/list-sessions.dto";
 import { RenameSessionDto } from "./dto/rename-session.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
-import { ChatService } from "./chat.service";
+import { ChatService } from "../conversation/chat/chat.service";
 
 @Controller("/api/v1")
 export class ChatController {

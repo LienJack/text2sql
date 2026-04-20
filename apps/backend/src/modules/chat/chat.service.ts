@@ -12,25 +12,27 @@ import type {
 } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../common/domain-error";
-import { GraphBuilderService } from "../agent/graph/graph.builder";
-import { SqlToolRegistryService } from "../agent/sql/tools/sql-tool-registry.service";
+import { GraphBuilderService } from "../conversation/agent/graph/graph.builder";
+import { SqlToolRegistryService } from "../conversation/agent/sql/tools/sql-tool-registry.service";
 import {
   DeliveryContractMapper,
   type DeliveryReplayRecordInput
-} from "../delivery/delivery-contract.mapper";
+} from "../conversation/delivery/delivery-contract.mapper";
 import {
   type AccessContext
-} from "../auth/datasource-access-policy.service";
-import { PolicyEvaluatorService } from "../auth/policy-evaluator.service";
-import { RedisBufferService } from "../data/cache/redis-buffer.service";
-import { ChatRepository } from "../data/persistence/chat.repository";
-import { WorkspaceDatasourcePolicyRepository } from "../data/persistence/workspace-datasource-policy.repository";
-import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+} from "../governance/access/datasource-access-policy.service";
+import { PolicyEvaluatorService } from "../governance/access/policy-evaluator.service";
+import { RedisBufferService } from "../platform/data/cache/index";
+import {
+  ChatRepository,
+  WorkspaceDatasourcePolicyRepository
+} from "../platform/data/persistence/index";
+import { DatasourceRegistryService } from "../governance/datasource/datasource-registry.service";
 import { ProviderCatalogService } from "../llm/provider-catalog.service";
 import { ProviderRouterService } from "../llm/provider-router.service";
 import { TraceService } from "../observability/trace.service";
 import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
-import { DatasourceService } from "../datasource/datasource.service";
+import { DatasourceService } from "../governance/datasource/datasource.service";
 import { MemoryPromotionService } from "../memory/memory-promotion.service";
 import type { SessionListView } from "./dto/list-sessions.dto";
 

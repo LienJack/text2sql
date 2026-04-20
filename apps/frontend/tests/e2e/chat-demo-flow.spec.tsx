@@ -186,9 +186,14 @@ describe("chat demo flow", () => {
           retrievalStatus: "degraded",
           degradeReasons: ["retrieval_timeout"],
           selectedContext: {
-            count: 0
+            count: 2,
+            snippets: ["用户显式：时间范围: 近30天", "系统推断：schema.orders"]
           },
-          riskTags: ["semantic_registry_degraded"]
+          riskTags: [
+            "semantic_registry_degraded",
+            "context:user-explicit",
+            "context:system-inferred"
+          ]
         }
       }
     });
@@ -306,9 +311,14 @@ describe("chat demo flow", () => {
               retrievalStatus: "degraded",
               degradeReasons: ["retrieval_timeout"],
               selectedContext: {
-                count: 0
+                count: 2,
+                snippets: ["用户显式：时间范围: 近30天", "系统推断：schema.orders"]
               },
-              riskTags: ["semantic_registry_degraded"]
+              riskTags: [
+                "semantic_registry_degraded",
+                "context:user-explicit",
+                "context:system-inferred"
+              ]
             }
           }
         }
@@ -354,6 +364,8 @@ describe("chat demo flow", () => {
     expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
     expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
     expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
+    expect(screen.getByText("context:user-explicit")).toBeInTheDocument();
+    expect(screen.getByText("context:system-inferred")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
     ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");

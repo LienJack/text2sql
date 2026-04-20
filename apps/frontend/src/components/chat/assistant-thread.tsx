@@ -14,6 +14,10 @@ import {
 } from "@assistant-ui/react";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { AssistantComposer } from "@/components/chat/assistant-composer";
+import {
+  buildContextEnvelopeFromDraft,
+  createEmptyContextEnvelopeDraft
+} from "@/components/chat/context-envelope-panel";
 import type { ThinkingStreamStep } from "@/components/chat/assistant-thinking-panel";
 import {
   AssistantMessageBubble,
@@ -86,6 +90,11 @@ export function AssistantThread({
   onStreamEvent
 }: AssistantThreadProps) {
   const [sqlOpenSignal, setSqlOpenSignal] = useState(0);
+  const [contextEnvelopeDraft, setContextEnvelopeDraft] = useState(
+    createEmptyContextEnvelopeDraft
+  );
+  const [clearContextEnvelopeAfterSend, setClearContextEnvelopeAfterSend] =
+    useState(true);
 
   const latestAssistantMessageId = useMemo(() => {
     return [...messages].reverse().find((message) => message.role === "assistant")?.id;
@@ -130,10 +139,25 @@ export function AssistantThread({
     ]
   );
 
+  const resolveContextEnvelopeForSend = useMemo(
+    () => () => {
+      const envelope = buildContextEnvelopeFromDraft(contextEnvelopeDraft);
+      if (clearContextEnvelopeAfterSend) {
+        setContextEnvelopeDraft(createEmptyContextEnvelopeDraft());
+      }
+      return envelope;
+    },
+    [
+      clearContextEnvelopeAfterSend,
+      contextEnvelopeDraft
+    ]
+  );
+
   const runtime = useChatAssistantRuntime({
     sessionId,
     messages,
-    callbacks
+    callbacks,
+    resolveContextEnvelope: resolveContextEnvelopeForSend
   });
 
   return (
@@ -223,6 +247,12 @@ export function AssistantThread({
               onOpenDetail={() => {
                 setSqlOpenSignal((previous) => previous + 1);
               }}
+              contextEnvelopeDraft={contextEnvelopeDraft}
+              clearContextEnvelopeAfterSend={clearContextEnvelopeAfterSend}
+              onContextEnvelopeDraftChange={setContextEnvelopeDraft}
+              onClearContextEnvelopeAfterSendChange={
+                setClearContextEnvelopeAfterSend
+              }
             />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>

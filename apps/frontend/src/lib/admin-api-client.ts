@@ -1172,13 +1172,8 @@ export async function listWorkspaceDatasourceTablePermissions(
       `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/table-permissions`
     );
     const record = isRecord(data) ? data : {};
-    const tableNames = normalizeTableNames(
-      record.tableNames ??
-        record.tables ??
-        record.selectedTables ??
-        record.items
-    );
-    const policyVersion = readNumber(record.policyVersion ?? record.version, 0);
+    const tableNames = normalizeTableNames(record.tableNames);
+    const policyVersion = readNumber(record.policyVersion, 0);
 
     return {
       workspaceId: String(record.workspaceId ?? workspaceId),
@@ -1221,16 +1216,8 @@ export async function replaceWorkspaceDatasourceTablePermissions(
     const removedTables = normalizeTableNames(
       impactSummary.removedTables ?? record.removedTables
     );
-    const tableNames = normalizeTableNames(
-      record.tableNames ??
-        record.tables ??
-        record.selectedTables ??
-        normalizedTableNames
-    );
-    const policyVersion = readNumber(
-      record.policyVersion ?? record.version,
-      normalizedPolicyVersion
-    );
+    const tableNames = normalizeTableNames(record.tableNames ?? normalizedTableNames);
+    const policyVersion = readNumber(record.policyVersion, normalizedPolicyVersion);
 
     const addedCount = readNumber(impactSummary.addedCount ?? record.addedCount, addedTables.length);
     const removedCount = readNumber(

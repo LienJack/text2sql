@@ -4,6 +4,11 @@ import request from "supertest";
 import { AppModule } from "../../src/app.module";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
+import { KNOWLEDGE_GLOSSARY_COMPAT_BRIDGE } from "../../src/modules/knowledge/glossary/glossary.module";
+import {
+  assertKnowledgeCompatBridgeRetirementReady,
+  KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW
+} from "../../src/modules/knowledge/rag/rag.module";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 function asActor(
@@ -250,5 +255,22 @@ describe("glossary api integration", () => {
     expect(rollbackEvent?.metadata?.winnerTerm).toBeNull();
     expect(rollbackEvent?.metadata?.loserTerms).toEqual([]);
     expect(rollbackEvent?.metadata?.priority).toBeNull();
+  });
+
+  it("blocks glossary bridge retirement with explicit reasons before prerequisites are met", () => {
+    expect(KNOWLEDGE_GLOSSARY_COMPAT_BRIDGE.removeBy).toBe(
+      KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW
+    );
+    expect(() =>
+      assertKnowledgeCompatBridgeRetirementReady("glossary", {
+        conversationImportsClosed: false,
+        boundaryGatePassed: true,
+        keyRegressionsPassed: false
+      })
+    ).toThrow(
+      "[knowledge-compat-bridge:glossary] retirement blocked: " +
+      "conversation imports are not fully migrated to knowledge facade contracts; " +
+      "key integration regressions are not green"
+    );
   });
 });

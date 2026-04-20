@@ -1,4 +1,4 @@
-import { PlannerVersionLockService } from "../../src/modules/agent/planner/planner-version-lock.service";
+import { PlannerVersionLockService } from "../../src/modules/conversation/agent/planner/planner-version-lock.service";
 import type { SemanticRegistryService } from "../../src/modules/semantic-registry/semantic-registry.service";
 import {
   SEMANTIC_REGISTRY_DEGRADED_RISK_TAG,

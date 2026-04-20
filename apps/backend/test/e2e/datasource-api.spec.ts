@@ -5,7 +5,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
-import { DatasourceService } from "../../src/modules/datasource/datasource.service";
+import { DatasourceService } from "../../src/modules/governance/datasource/datasource.service";
 
 describe("datasource api (e2e)", () => {
   let app: INestApplication;
@@ -237,7 +237,7 @@ describe("datasource api (e2e)", () => {
     ).toBe(false);
   });
 
-  it("returns table preview list for ACL checked selection", async () => {
+  it("returns table preview list for table-permissions checked selection", async () => {
     jest.spyOn(datasourceService, "previewDatasourceTables").mockResolvedValue({
       mode: "create",
       items: ["orders", "users"]
