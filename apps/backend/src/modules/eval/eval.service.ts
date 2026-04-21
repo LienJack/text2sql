@@ -8,7 +8,7 @@ import type {
   EvaluationCaseResult,
   EvaluationReport
 } from "@text2sql/shared-types";
-import { GraphBuilderService } from "../agent/graph/graph.builder";
+import { GraphBuilderService } from "../conversation/agent/graph/graph.builder";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { AppConfigService } from "../config/app-config.service";
 

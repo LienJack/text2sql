@@ -1,4 +1,4 @@
-import type { ChatMessage, SqlRun } from "@text2sql/shared-types";
+import type { ChatMessage, DeliveryContract, SqlRun } from "@text2sql/shared-types";
 
 export function createMockRun(partial?: Partial<SqlRun>): SqlRun {
   return {
@@ -36,6 +36,72 @@ export function createMockRun(partial?: Partial<SqlRun>): SqlRun {
     createdAt: "2026-04-10T00:00:00.000Z",
     ...partial
   };
+}
+
+export type RagSelectedContextState = "happy" | "nil" | "empty" | "error";
+
+export function createMockRagDelivery(
+  state: RagSelectedContextState,
+  options?: {
+    runId?: string;
+    answerText?: string;
+    artifact?: DeliveryContract["artifact"];
+    evidencePatch?: Partial<NonNullable<DeliveryContract["evidence"]>>;
+  }
+): DeliveryContract {
+  const runId = options?.runId ?? "run-1";
+  const answerText = options?.answerText ?? "已为你生成 SQL，并展示结果。";
+  const baseEvidence: NonNullable<DeliveryContract["evidence"]> = {
+    runId
+  };
+
+  if (state === "happy") {
+    baseEvidence.retrievalStatus = "ready";
+    baseEvidence.selectedContext = {
+      count: 2,
+      snippets: ["schema.orders", "few-shot.payment_method"]
+    };
+  }
+
+  if (state === "empty") {
+    baseEvidence.retrievalStatus = "ready";
+    baseEvidence.selectedContext = {
+      count: 0
+    };
+  }
+
+  if (state === "error") {
+    baseEvidence.retrievalStatus = "degraded";
+    baseEvidence.degradeReasons = ["retrieval_timeout"];
+    baseEvidence.riskTags = ["semantic_registry_degraded"];
+  }
+
+  const evidence = {
+    ...baseEvidence,
+    ...(options?.evidencePatch ?? {})
+  };
+
+  const delivery: DeliveryContract = {
+    answer: {
+      text: answerText,
+      status: "executionResult",
+      provider: "mock-provider"
+    },
+    ...(state === "nil" ? {} : { evidence }),
+    ...(options?.artifact ? { artifact: options.artifact } : {})
+  };
+
+  return delivery;
+}
+
+export function createMockRunWithRagState(
+  state: RagSelectedContextState,
+  partial?: Partial<SqlRun>
+): SqlRun {
+  return createMockRun({
+    delivery: createMockRagDelivery(state),
+    ...partial
+  });
 }
 
 export function createMockMessages(partial?: Partial<ChatMessage>[]): ChatMessage[] {

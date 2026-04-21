@@ -1,0 +1,182 @@
+{
+  "reviewer": "reliability",
+  "timestamp": "2026-04-18T17:42:59+09:00",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "tracked_files_only": true
+  },
+  "stage1_spec_compliance": {
+    "status": "FAIL",
+    "blocking_gaps": [
+      {
+        "requirement_ref": "docs/plans/2026-04-17-006-feat-rag-r6-scale-optimization-plan.md:115,331",
+        "expected": "Orchestrator restart must recover queued task state from durable storage and avoid duplicate activation.",
+        "observed": "Queue/running/circuit state are process-memory only and are lost on restart."
+      },
+      {
+        "requirement_ref": "docs/plans/2026-04-17-006-feat-rag-r6-scale-optimization-plan.md:176",
+        "expected": "Circuit breaker must trip on timeout-rate degradation.",
+        "observed": "Lane timeout is handled outside GraphService, so breaker timeout-rate logic is not fed by real lane timeouts."
+      }
+    ]
+  },
+  "risk_level": "HIGH",
+  "summary": {
+    "critical": 0,
+    "high": 6,
+    "medium": 1,
+    "low": 0
+  },
+  "findings": [
+    {
+      "id": "REL-001",
+      "title": "Concurrent duplicate consumption can execute the same idempotency key multiple times",
+      "severity": "HIGH",
+      "category": "idempotency/race-condition",
+      "locations": [
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:90",
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:100",
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:125"
+      ],
+      "issue": "The service checks terminal state and increments attempts before any in-flight lock, then awaits I/O. Parallel deliveries of the same event can both proceed into build execution.",
+      "impact": "Duplicate index builds, inconsistent attempts accounting, and non-deterministic retry/DLQ behavior under concurrent delivery.",
+      "suggested_fix": "Add per-idempotency in-flight deduplication (promise lock) and enforce durable idempotency with a DB uniqueness boundary (insert-if-not-exists on idempotency key)."
+    },
+    {
+      "id": "REL-002",
+      "title": "Orchestrator queue/circuit state is not recoverable after process restart",
+      "severity": "HIGH",
+      "category": "durability/recovery",
+      "locations": [
+        "apps/backend/src/modules/rag/orchestration/rag-datasource-orchestrator.service.ts:33",
+        "apps/backend/src/modules/rag/orchestration/rag-datasource-orchestrator.service.ts:36",
+        "apps/backend/src/modules/rag/orchestration/rag-datasource-orchestrator.service.ts:51"
+      ],
+      "issue": "Queued tasks, running state, and datasource circuit-open windows are held only in memory; no persistence or startup rehydration exists.",
+      "impact": "Node restart can drop queued tasks and reset failure isolation, violating recovery expectations and causing silent work loss.",
+      "suggested_fix": "Persist orchestrator task state and breaker metadata in storage, then reload and resume on bootstrap with idempotent task dispatch."
+    },
+    {
+      "id": "REL-003",
+      "title": "Retry/DLQ state is memory-only and unbounded in event consumer",
+      "severity": "HIGH",
+      "category": "durability/resource-exhaustion",
+      "locations": [
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:79",
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:80",
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:190",
+        "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:258"
+      ],
+      "issue": "attemptsByIdempotency/terminalResultsByIdempotency are process-local maps with no TTL or persistence.",
+      "impact": "After restart, retry/DLQ progression resets; over time, key cardinality can cause memory growth and eventual pressure/OOM.",
+      "suggested_fix": "Move attempts/terminal state to durable storage with retention policy; apply bounded cache (TTL/LRU) only as read-through optimization."
+    },
+    {
+      "id": "REL-004",
+      "title": "Post-activation replay write failures incorrectly fail the whole build job",
+      "severity": "HIGH",
+      "category": "error-boundary/failure-amplification",
+      "locations": [
+        "apps/backend/src/modules/rag/jobs/build-rag-index.job.ts:38",
+        "apps/backend/src/modules/rag/jobs/build-rag-index.job.ts:55",
+        "apps/backend/src/modules/rag/jobs/build-rag-index.job.ts:89"
+      ],
+      "issue": "After buildAndActivate succeeds, replay writes are still in the main try-block; telemetry write failure enters catch and rethrows as build failure.",
+      "impact": "Callers may retry successful activations, creating duplicate churn and false failure signals while active index has already advanced.",
+      "suggested_fix": "Split critical activation from best-effort telemetry. Do not rethrow telemetry-only failures; emit degraded observability event and continue."
+    },
+    {
+      "id": "REL-005",
+      "title": "Lane timeout does not cancel underlying work and does not contribute to graph breaker timeout-rate",
+      "severity": "HIGH",
+      "category": "timeout/circuit-breaker",
+      "locations": [
+        "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:329",
+        "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:344",
+        "apps/backend/src/modules/graph/graph.service.ts:69"
+      ],
+      "issue": "Promise.race timeout returns degraded lane result, but the underlying lane task is not cancelled. Also GraphService timeout-rate breaker logic only updates when GraphAccelerationTimeoutError is thrown internally, not when retrieval-level lane timeout fires.",
+      "impact": "Timed-out work can continue consuming resources; repeated latency timeouts may never trip timeout-rate breaker, reducing protective effectiveness.",
+      "suggested_fix": "Introduce AbortController propagation through lane executors/adapters and record timeout signals into GraphAccelerationCircuitBreaker when retrieval-level timeout occurs."
+    },
+    {
+      "id": "REL-006",
+      "title": "R6 gate can fail-open due synthetic/hardcoded reliability metrics",
+      "severity": "HIGH",
+      "category": "gate-correctness/release-safety",
+      "locations": [
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:655",
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:701",
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:715",
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:722"
+      ],
+      "issue": "indexBuildSuccessRate is derived from isolation violations rather than actual build success/failure, and staleCacheReadRate/graphFallbackActivationRate/securityGatePass are hardcoded (0/0/true).",
+      "impact": "Release gate may report healthy when core reliability controls are degraded or failing.",
+      "suggested_fix": "Source each metric from real telemetry counters; if metric pipeline is unavailable, mark as insufficient_samples or unknown and block pass."
+    },
+    {
+      "id": "REL-007",
+      "title": "Cache memory can grow without effective upper bound",
+      "severity": "MEDIUM",
+      "category": "resource-exhaustion",
+      "locations": [
+        "apps/backend/src/modules/rag/perf/rag-query-cache.service.ts:28",
+        "apps/backend/src/modules/rag/perf/rag-query-cache.service.ts:87",
+        "apps/backend/src/modules/rag/perf/rag-query-cache.service.ts:145"
+      ],
+      "issue": "L1/L2 maps have no max-size policy. Expired keys are evicted only on read-path checks, so cold expired keys may accumulate indefinitely.",
+      "impact": "High-cardinality traffic can cause steady memory growth and unstable latency due GC pressure.",
+      "suggested_fix": "Add bounded cache policy (max entries/bytes + proactive sweep) and eviction telemetry; include jittered TTL to avoid synchronized expiry spikes."
+    }
+  ],
+  "testing_gaps": [
+    "No test simulates orchestrator process restart with persisted queue/task recovery (required by R6 Unit 1).",
+    "No test verifies retrieval-level lane timeout increments graph breaker timeout-rate and eventually opens breaker.",
+    "No test covers replay write failure after successful index activation to ensure no false build failure is propagated."
+  ],
+  "verification": {
+    "lsp_diagnostics": {
+      "status": "unavailable",
+      "detail": "mcp__omx_code_intel transport closed for lsp_diagnostics_directory"
+    },
+    "fallback_typecheck": [
+      {
+        "command": "pnpm --filter @text2sql/backend run build",
+        "status": "passed"
+      },
+      {
+        "command": "pnpm --filter @text2sql/frontend run build",
+        "status": "passed"
+      },
+      {
+        "command": "pnpm --filter @text2sql/shared-types run build",
+        "status": "passed"
+      }
+    ],
+    "pattern_scan": {
+      "method": "rg over tracked changed files (.ts/.tsx/.js/.mjs)",
+      "console_log_matches": 0,
+      "empty_catch_matches": 0,
+      "hardcoded_apiKey_assignment_matches": 0
+    },
+    "fresh_evidence": [
+      {
+        "command": "pnpm --filter @text2sql/backend run test -- test/integration/rag-multi-datasource-orchestrator.spec.ts test/integration/graph-acceleration-circuit-breaker.spec.ts test/integration/rag-incremental-refresh.spec.ts test/integration/r6-gate-readiness.spec.ts --runInBand",
+        "status": "passed",
+        "evidence": "4 suites, 8 tests passed"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend exec jest --config ./test/jest-e2e.json --testRegex \"e2e/(graph-acceleration-chaos|rag-multi-datasource-isolation)\\.e2e-spec\\.ts$\" --runInBand",
+        "status": "passed",
+        "evidence": "graph-acceleration-chaos.e2e-spec.ts passed"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend exec jest --config ./test/jest-e2e.json --runInBand test/e2e/rag-multi-datasource-isolation.spec.ts",
+        "status": "passed",
+        "evidence": "rag-multi-datasource-isolation.spec.ts passed"
+      }
+    ]
+  },
+  "recommendation": "REQUEST_CHANGES"
+}

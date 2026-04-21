@@ -1,40 +1,80 @@
 "use client";
 
-import { Building2, Search, Settings2, ShieldCheck, Users } from "lucide-react";
+import {
+  Activity,
+  Building2,
+  Search,
+  Settings2,
+  ShieldCheck,
+  Users
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { LlmSettingsView, ModelCatalogItem } from "@text2sql/shared-types";
+import type {
+  GlossaryAnchor,
+  LlmSettingsView,
+  ModelCatalogItem,
+  RagMemoryStatus,
+  RagQualityGateReport,
+  RagReplayCompletenessReport,
+  RollbackGlossaryAnchorResponse,
+  SqlRun
+} from "@text2sql/shared-types";
+import { RagFoundationStatusCard } from "@/components/chat/rag-foundation-status-card";
 import { ModelCatalogTable } from "@/components/settings/model-catalog-table";
 import { ProviderConfigSheet } from "@/components/settings/provider-config-sheet";
 import { UsersManagementPanel } from "@/components/settings/users-management-panel";
 import { WorkspaceManagementPanel } from "@/components/settings/workspace-management-panel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { StateBlock } from "@/components/ui/state-block";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { listWorkspaces, type WorkspaceSummary } from "@/lib/admin-api-client";
+import {
+  AdminApiError,
+  createGlossaryAnchor,
+  listGlossaryAnchors,
+  listWorkspaces,
+  rollbackGlossaryAnchor,
+  type WorkspaceSummary
+} from "@/lib/admin-api-client";
+import { getRun } from "@/lib/api-client";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "@/lib/datasource-session-context";
 import {
   batchSetModelsEnabled,
   checkProviderHealth,
   createProviderConfig,
+  extractRagFoundationSnapshot,
   deleteProviderConfig,
+  fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  fetchRagQualityReport,
+  fetchRagReplayCompleteness,
   fetchSettingsView,
   fetchSupportedProviders,
+  resolveRagQualityLatestRunId,
   setModelEnabled,
+  submitRagMemoryFeedback,
   syncProviderModels
 } from "@/lib/settings-api-client";
 
-type SettingsTab = "users" | "workspaces" | "models";
-const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models"];
-const USER_TABS: SettingsTab[] = ["models"];
+type SettingsTab = "users" | "workspaces" | "models" | "rag";
+type RagRunSource = "deep-link" | "latest-run" | "none";
+const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models", "rag"];
+const USER_TABS: SettingsTab[] = ["models", "rag"];
 
 function readWorkspaceIdFromQuery(): string {
   if (typeof window === "undefined") {
     return "";
   }
   return new URLSearchParams(window.location.search).get("workspaceId")?.trim() ?? "";
+}
+
+function readRunIdFromQuery(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("runId")?.trim() ?? "";
 }
 
 function syncWorkspaceContext(workspaceId: string): void {
@@ -75,6 +115,16 @@ function resolveWorkspaceId(
     : (items[0]?.id ?? "");
 }
 
+function formatGovernanceError(error: unknown): string {
+  if (error instanceof AdminApiError) {
+    if (error.code === "FORBIDDEN") {
+      return `无权限（403）：${error.message}`;
+    }
+    return error.code ? `${error.message}（${error.code}）` : error.message;
+  }
+  return error instanceof Error ? error.message : "术语锚点治理操作失败";
+}
+
 export default function SettingsPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -95,6 +145,35 @@ export default function SettingsPage() {
       supportsModelListing: boolean;
     }>
   >([]);
+  const [ragLoading, setRagLoading] = useState(false);
+  const [ragError, setRagError] = useState("");
+  const [ragFoundationError, setRagFoundationError] = useState("");
+  const [ragHealth, setRagHealth] = useState<
+    Awaited<ReturnType<typeof fetchBackendHealthSnapshot>> | null
+  >(null);
+  const [ragQuality, setRagQuality] = useState<RagQualityGateReport | null>(null);
+  const [ragReplay, setRagReplay] = useState<RagReplayCompletenessReport | null>(null);
+  const [ragRun, setRagRun] = useState<SqlRun | null>(null);
+  const [glossaryAnchors, setGlossaryAnchors] = useState<GlossaryAnchor[]>([]);
+  const [glossaryAnchorError, setGlossaryAnchorError] = useState("");
+  const [activeGlossaryAnchorText, setActiveGlossaryAnchorText] = useState("暂无锚点");
+  const [latestRollbackAnchorText, setLatestRollbackAnchorText] = useState("暂无回滚记录");
+  const [anchorVersionInput, setAnchorVersionInput] = useState("1");
+  const [anchorSummaryInput, setAnchorSummaryInput] = useState("");
+  const [rollbackTargetAnchorId, setRollbackTargetAnchorId] = useState("");
+  const [rollbackReasonInput, setRollbackReasonInput] = useState("");
+  const [governanceActionMessage, setGovernanceActionMessage] = useState("");
+  const [latestRollbackResult, setLatestRollbackResult] =
+    useState<RollbackGlossaryAnchorResponse | null>(null);
+  const [anchorSubmitting, setAnchorSubmitting] = useState(false);
+  const [rollbackSubmitting, setRollbackSubmitting] = useState(false);
+  const [ragRunId, setRagRunId] = useState("");
+  const [ragRunSource, setRagRunSource] = useState<RagRunSource>("none");
+  const [feedbackRunId, setFeedbackRunId] = useState("");
+  const [feedbackStatus, setFeedbackStatus] = useState<RagMemoryStatus>("verified");
+  const [feedbackNote, setFeedbackNote] = useState("");
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState("");
 
   const loadWorkspaceOptions = useCallback(async (enabled: boolean): Promise<void> => {
     if (!enabled) {
@@ -127,6 +206,122 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const loadRagView = useCallback(async (): Promise<void> => {
+    setRagLoading(true);
+    setRagError("");
+    setRagFoundationError("");
+    setGlossaryAnchorError("");
+
+    const deepLinkRunId = readRunIdFromQuery();
+    const ragErrors: string[] = [];
+    let quality: RagQualityGateReport | null = null;
+    const [healthResult, qualityResult, glossaryAnchorsResult] = await Promise.allSettled([
+      fetchBackendHealthSnapshot(),
+      fetchRagQualityReport(),
+      listGlossaryAnchors({ page: 1, pageSize: 50 })
+    ]);
+
+    if (healthResult.status === "fulfilled") {
+      setRagHealth(healthResult.value);
+    } else {
+      setRagHealth(null);
+      setRagFoundationError(
+        healthResult.reason instanceof Error
+          ? healthResult.reason.message
+          : "health 请求失败"
+      );
+    }
+
+    if (qualityResult.status === "fulfilled") {
+      quality = qualityResult.value;
+      setRagQuality(quality);
+    } else {
+      setRagQuality(null);
+      ragErrors.push(
+        qualityResult.reason instanceof Error
+          ? qualityResult.reason.message
+          : "加载 RAG 质量报告失败"
+      );
+    }
+
+    if (glossaryAnchorsResult.status === "fulfilled") {
+      const items = glossaryAnchorsResult.value.items;
+      setGlossaryAnchors(items);
+      const activeAnchor = items.find((item) => item.status === "active") ?? null;
+      const latestRollback = items.find((item) => item.anchorType === "rollback") ?? null;
+      setRollbackTargetAnchorId((previous) => previous || activeAnchor?.id || "");
+      setActiveGlossaryAnchorText(
+        activeAnchor
+          ? `${activeAnchor.anchorType} · v${activeAnchor.version} · ${activeAnchor.scopeKey}`
+          : "暂无锚点"
+      );
+      setLatestRollbackAnchorText(
+        latestRollback
+          ? `v${latestRollback.version} · from=${latestRollback.rollbackFromAnchorId ?? "unknown"}${
+              latestRollback.rollbackReason ? ` · ${latestRollback.rollbackReason}` : ""
+            }`
+          : "暂无回滚记录"
+      );
+    } else {
+      setGlossaryAnchors([]);
+      setActiveGlossaryAnchorText("暂无锚点");
+      setLatestRollbackAnchorText("暂无回滚记录");
+      setGlossaryAnchorError(
+        glossaryAnchorsResult.reason instanceof Error
+          ? glossaryAnchorsResult.reason.message
+          : "加载术语锚点失败"
+      );
+    }
+
+    const latestRunId = resolveRagQualityLatestRunId(quality);
+    const targetRunId = deepLinkRunId || latestRunId || "";
+    const runSource: RagRunSource = deepLinkRunId
+      ? "deep-link"
+      : latestRunId
+        ? "latest-run"
+        : "none";
+    setRagRunSource(runSource);
+    setRagRunId(targetRunId);
+
+    if (!targetRunId) {
+      setRagRun(null);
+      setRagReplay(null);
+      setRagError(ragErrors.join("；"));
+      setRagLoading(false);
+      return;
+    }
+
+    const [runResult, replayResult] = await Promise.allSettled([
+      getRun(targetRunId),
+      fetchRagReplayCompleteness(targetRunId)
+    ]);
+
+    if (runResult.status === "fulfilled") {
+      setRagRun(runResult.value);
+    } else {
+      setRagRun(null);
+      ragErrors.push(
+        runResult.reason instanceof Error
+          ? runResult.reason.message
+          : "加载运行详情失败"
+      );
+    }
+
+    if (replayResult.status === "fulfilled") {
+      setRagReplay(replayResult.value);
+    } else {
+      setRagReplay(null);
+      ragErrors.push(
+        replayResult.reason instanceof Error
+          ? replayResult.reason.message
+          : "加载回放完整性失败"
+      );
+    }
+
+    setRagError(ragErrors.join("；"));
+    setRagLoading(false);
+  }, []);
+
   const load = useCallback(
     async (mode: "initial" | "refresh" = "refresh") => {
       if (mode === "initial") {
@@ -142,7 +337,10 @@ export default function SettingsPage() {
         ]);
         setView(settingsView);
         setSupportedProviders(providerOptions);
-        await loadWorkspaceOptions(settingsView.actor.role === "admin");
+        await Promise.all([
+          loadWorkspaceOptions(settingsView.actor.role === "admin"),
+          loadRagView()
+        ]);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : "加载设置数据失败");
       } finally {
@@ -153,7 +351,7 @@ export default function SettingsPage() {
         }
       }
     },
-    [loadWorkspaceOptions]
+    [loadRagView, loadWorkspaceOptions]
   );
 
   const refreshModels = async () => {
@@ -193,6 +391,12 @@ export default function SettingsPage() {
     void load("initial");
   }, [load]);
 
+  useEffect(() => {
+    if (ragRunId && !feedbackRunId) {
+      setFeedbackRunId(ragRunId);
+    }
+  }, [feedbackRunId, ragRunId]);
+
   const modelRows = useMemo(() => {
     const rows = view?.models ?? [];
     const keyword = query.trim().toLowerCase();
@@ -213,6 +417,10 @@ export default function SettingsPage() {
   const actorRole = view?.actor.role ?? "user";
   const availableTabs = actorRole === "admin" ? ADMIN_TABS : USER_TABS;
   const busy = initialLoading || refreshing;
+  const foundationSnapshot = useMemo(
+    () => extractRagFoundationSnapshot(ragHealth),
+    [ragHealth]
+  );
 
   const filteredView = useMemo(() => {
     if (!view) {
@@ -240,6 +448,124 @@ export default function SettingsPage() {
   }, [availableTabs, tab]);
 
   const governanceTab = actorRole === "admin" && tab === "users";
+  const semanticEvidence = ragRun?.delivery?.evidence;
+  const latestQualityRunId = resolveRagQualityLatestRunId(ragQuality);
+  const semanticVersionText =
+    semanticEvidence?.semanticVersion ?? "版本不可用（字段缺失）";
+  const semanticLockStatusText =
+    semanticEvidence?.semanticLockStatus ?? "锁状态不可用（字段缺失）";
+  const semanticDegradeReasonText =
+    semanticEvidence?.semanticDegradeReason ?? "未触发（字段缺失或未降级）";
+  const semanticDegradeTriggered = Boolean(semanticEvidence?.semanticDegradeReason);
+  const skillContextSummaryText = semanticEvidence?.skillContextSummary
+    ? `skills=${semanticEvidence.skillContextSummary.skillCount}, context=${semanticEvidence.skillContextSummary.contextCount}${
+        semanticEvidence.skillContextSummary.degradeReason
+          ? `, degradeReason=${semanticEvidence.skillContextSummary.degradeReason}`
+          : ", degradeReason=未上报"
+      }`
+    : "skills=0（字段缺失）, context=0（字段缺失）, degradeReason=不可用（字段缺失）";
+  const canSubmitFeedback = actorRole === "admin" && feedbackRunId.trim().length > 0;
+  const anchorCandidates = useMemo(
+    () =>
+      glossaryAnchors.filter(
+        (anchor) => anchor.anchorType === "release" || anchor.anchorType === "rollback"
+      ),
+    [glossaryAnchors]
+  );
+
+  const submitFeedback = async (): Promise<void> => {
+    if (!canSubmitFeedback) {
+      return;
+    }
+    setFeedbackSubmitting(true);
+    setFeedbackMessage("");
+    try {
+      const result = await submitRagMemoryFeedback({
+        runId: feedbackRunId.trim(),
+        targetStatus: feedbackStatus,
+        note: feedbackNote.trim() || undefined
+      });
+      setFeedbackMessage(
+        result.applied
+          ? `已更新记忆状态：${result.beforeStatus} -> ${result.afterStatus}`
+          : `状态未变化，当前为 ${result.afterStatus}`
+      );
+      await loadRagView();
+    } catch (submitError) {
+      setFeedbackMessage(
+        submitError instanceof Error ? submitError.message : "提交记忆反馈失败"
+      );
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
+  const submitCreateAnchor = async (): Promise<void> => {
+    if (actorRole !== "admin") {
+      setGovernanceActionMessage("当前账号无权创建锚点。");
+      return;
+    }
+    const version = Number.parseInt(anchorVersionInput.trim(), 10);
+    if (!Number.isFinite(version) || version <= 0) {
+      setGovernanceActionMessage("版本号必须是大于 0 的整数。");
+      return;
+    }
+
+    setAnchorSubmitting(true);
+    setGovernanceActionMessage("");
+    try {
+      const result = await createGlossaryAnchor({
+        scope: "global",
+        version,
+        summary: anchorSummaryInput.trim() || undefined
+      });
+      setGovernanceActionMessage(
+        result.replayed
+          ? `锚点已存在，复用 ${result.anchor.id}（v${result.anchor.version}）`
+          : `已创建锚点 ${result.anchor.id}（v${result.anchor.version}）`
+      );
+      setAnchorSummaryInput("");
+      await loadRagView();
+    } catch (submitError) {
+      setGovernanceActionMessage(formatGovernanceError(submitError));
+    } finally {
+      setAnchorSubmitting(false);
+    }
+  };
+
+  const submitRollbackAnchor = async (): Promise<void> => {
+    if (actorRole !== "admin") {
+      setGovernanceActionMessage("当前账号无权执行回滚。");
+      return;
+    }
+    const targetAnchorId = rollbackTargetAnchorId.trim();
+    if (!targetAnchorId) {
+      setGovernanceActionMessage("请先选择或输入要回滚到的锚点 ID。");
+      return;
+    }
+
+    setRollbackSubmitting(true);
+    setGovernanceActionMessage("");
+    try {
+      const result = await rollbackGlossaryAnchor({
+        scope: "global",
+        targetAnchorId,
+        rollbackReason: rollbackReasonInput.trim() || undefined
+      });
+      setLatestRollbackResult(result);
+      setGovernanceActionMessage(
+        result.replayed
+          ? `回滚目标已激活：${result.activeAnchor.id}`
+          : `回滚完成，当前锚点 ${result.activeAnchor.id}`
+      );
+      setRollbackReasonInput("");
+      await loadRagView();
+    } catch (submitError) {
+      setGovernanceActionMessage(formatGovernanceError(submitError));
+    } finally {
+      setRollbackSubmitting(false);
+    }
+  };
 
   return (
     <div className="relative flex h-[calc(100vh-4rem)] w-full flex-col gap-3 bg-[var(--surface-page)] px-4 py-3 sm:px-6 sm:py-4">
@@ -257,7 +583,11 @@ export default function SettingsPage() {
             </h2>
           </div>
           <span className="rounded-full border border-[rgba(148,163,184,0.45)] bg-[rgba(248,250,252,0.7)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
-            {tab === "models" ? "模型治理视图" : "组织治理视图"}
+            {tab === "models"
+              ? "模型治理视图"
+              : tab === "rag"
+                ? "RAG 运行视图"
+                : "组织治理视图"}
           </span>
         </div>
 
@@ -292,6 +622,13 @@ export default function SettingsPage() {
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 LLM 模型
+              </TabsTrigger>
+              <TabsTrigger
+                value="rag"
+                className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+              >
+                <Activity className="h-3.5 w-3.5" />
+                RAG 运行
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -334,6 +671,10 @@ export default function SettingsPage() {
                   当前账号不可管理治理配置
                 </p>
               )
+            ) : tab === "rag" ? (
+              <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                RAG 运行与记忆治理
+              </p>
             ) : (
               <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                 工作空间与成员管理
@@ -346,13 +687,18 @@ export default function SettingsPage() {
                   void load();
                   return;
                 }
+                if (tab === "rag") {
+                  void loadRagView();
+                  return;
+                }
                 if (actorRole === "admin") {
                   void loadWorkspaceOptions(true);
+                  void loadRagView();
                 }
                 setManagementRefreshToken((previous) => previous + 1);
               }}
             >
-              {refreshing || workspaceLoading ? "刷新中..." : "刷新"}
+              {refreshing || workspaceLoading || ragLoading ? "刷新中..." : "刷新"}
             </Button>
           </div>
         </div>
@@ -453,13 +799,264 @@ export default function SettingsPage() {
                 </StateBlock>
               )}
             </div>
+          ) : tab === "rag" ? (
+            <div className="space-y-4">
+              {ragLoading ? (
+                <StateBlock variant="loading">正在加载 RAG 运行看板...</StateBlock>
+              ) : null}
+              {ragError ? <StateBlock variant="error">{ragError}</StateBlock> : null}
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Foundation 状态
+                </h3>
+                <RagFoundationStatusCard
+                  foundation={foundationSnapshot}
+                  loading={ragLoading}
+                  error={ragFoundationError}
+                />
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  R2 Gate 报告
+                </h3>
+                {ragQuality ? (
+                  <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                    <p>sampleSize: {ragQuality.sampleSize}</p>
+                    <p>sampleReady: {ragQuality.sampleReady ? "true" : "false"}</p>
+                    <p>gatePass: {ragQuality.gatePass ? "true" : "false"}</p>
+                    <p>
+                      reasons:{" "}
+                      {ragQuality.reasons.length > 0
+                        ? ragQuality.reasons.join(", ")
+                        : "none"}
+                    </p>
+                  </div>
+                ) : (
+                  <StateBlock variant="idle">暂无 Gate 报告。</StateBlock>
+                )}
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  术语锚点治理
+                </h3>
+                {glossaryAnchorError ? (
+                  <StateBlock variant="error">{glossaryAnchorError}</StateBlock>
+                ) : null}
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>当前锚点：{activeGlossaryAnchorText}</p>
+                  <p>最近回滚：{latestRollbackAnchorText}</p>
+                </div>
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  语义与回放概览
+                </h3>
+                {ragRunId ? (
+                  <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p>runId: {ragRunId}</p>
+                      <Badge variant="outline">
+                        来源：
+                        {ragRunSource === "deep-link"
+                          ? "deep-link runId"
+                          : "latest run fallback"}
+                      </Badge>
+                    </div>
+                    {ragRunSource === "deep-link" ? (
+                      <p>latestRunId: {latestQualityRunId ?? "不可用（质量报告缺失）"}</p>
+                    ) : null}
+                    <p>语义版本：{semanticVersionText}</p>
+                    <p>语义锁状态：{semanticLockStatusText}</p>
+                    <p>语义降级原因：{semanticDegradeReasonText}</p>
+                    <StateBlock variant={semanticDegradeTriggered ? "error" : "idle"}>
+                      语义降级标识：
+                      {semanticDegradeTriggered ? "已触发（不阻断主链路）" : "未触发"}
+                    </StateBlock>
+                    <p>技能上下文（只读）：{skillContextSummaryText}</p>
+                    {ragReplay ? (
+                      <p>
+                        replay completeness: {Math.round(ragReplay.completeness * 100)}% · ready=
+                        {ragReplay.ready ? "true" : "false"}
+                      </p>
+                    ) : (
+                      <p>回放完整性：暂无数据。</p>
+                    )}
+                  </div>
+                ) : (
+                  <StateBlock variant="idle">暂无可用运行记录。</StateBlock>
+                )}
+              </section>
+
+              {actorRole === "admin" ? (
+                <section className="space-y-3 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                    记忆反馈（管理员）
+                  </h3>
+                  <Input
+                    value={feedbackRunId}
+                    onChange={(event) => setFeedbackRunId(event.target.value)}
+                    placeholder="输入 runId"
+                    aria-label="记忆反馈 runId"
+                  />
+                  <NativeSelect
+                    value={feedbackStatus}
+                    onChange={(event) =>
+                      setFeedbackStatus(event.target.value as RagMemoryStatus)
+                    }
+                    aria-label="记忆反馈目标状态"
+                  >
+                    <NativeSelectOption value="candidate">candidate</NativeSelectOption>
+                    <NativeSelectOption value="verified">verified</NativeSelectOption>
+                    <NativeSelectOption value="production">production</NativeSelectOption>
+                  </NativeSelect>
+                  <Input
+                    value={feedbackNote}
+                    onChange={(event) => setFeedbackNote(event.target.value)}
+                    placeholder="备注（可选）"
+                    aria-label="记忆反馈备注"
+                  />
+                  <Button
+                    onClick={() => {
+                      void submitFeedback();
+                    }}
+                    disabled={!canSubmitFeedback || feedbackSubmitting}
+                  >
+                    {feedbackSubmitting ? "提交中..." : "提交记忆反馈"}
+                  </Button>
+                  {feedbackMessage ? (
+                    <StateBlock
+                      variant={feedbackMessage.includes("失败") ? "error" : "success"}
+                    >
+                      {feedbackMessage}
+                    </StateBlock>
+                  ) : null}
+                </section>
+              ) : (
+                <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                    记忆反馈（只读）
+                  </h3>
+                  <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                    <p>runId: {feedbackRunId || ragRunId || "暂无运行记录"}</p>
+                    <p>目标状态（只读）：{feedbackStatus}</p>
+                    <p>备注（只读）：{feedbackNote.trim() || "未填写"}</p>
+                  </div>
+                  <StateBlock variant="idle">
+                    当前账号为只读视图，可查看记忆反馈上下文但不可提交。
+                  </StateBlock>
+                </section>
+              )}
+            </div>
           ) : tab === "users" ? (
-            <UsersManagementPanel
-              actorRole={actorRole}
-              workspaceScopeId={workspaceId}
-              workspaceScopeName={selectedWorkspace?.name}
-              refreshToken={managementRefreshToken}
-            />
+            <div className="space-y-4">
+              <section className="space-y-3 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  术语锚点治理
+                </h3>
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>当前锚点：{activeGlossaryAnchorText}</p>
+                  <p>
+                    最近回滚：
+                    {latestRollbackResult
+                      ? `${latestRollbackResult.activeAnchor.id}（replayed=${latestRollbackResult.replayed ? "true" : "false"}）`
+                      : latestRollbackAnchorText}
+                  </p>
+                </div>
+                {glossaryAnchorError ? (
+                  <StateBlock variant="error">{glossaryAnchorError}</StateBlock>
+                ) : null}
+
+                {actorRole === "admin" ? (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2 rounded-md border border-[var(--border-default)] bg-white/70 p-3">
+                      <p className="text-xs font-medium text-[var(--text-secondary)]">
+                        创建锚点（global）
+                      </p>
+                      <Input
+                        value={anchorVersionInput}
+                        onChange={(event) => setAnchorVersionInput(event.target.value)}
+                        placeholder="版本号，例如 2"
+                        aria-label="锚点版本号"
+                      />
+                      <Input
+                        value={anchorSummaryInput}
+                        onChange={(event) => setAnchorSummaryInput(event.target.value)}
+                        placeholder="摘要（可选）"
+                        aria-label="锚点摘要"
+                      />
+                      <Button
+                        onClick={() => {
+                          void submitCreateAnchor();
+                        }}
+                        disabled={anchorSubmitting}
+                      >
+                        {anchorSubmitting ? "创建中..." : "创建锚点"}
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2 rounded-md border border-[var(--border-default)] bg-white/70 p-3">
+                      <p className="text-xs font-medium text-[var(--text-secondary)]">
+                        执行回滚（global）
+                      </p>
+                      <NativeSelect
+                        value={rollbackTargetAnchorId}
+                        onChange={(event) => setRollbackTargetAnchorId(event.target.value)}
+                        aria-label="回滚目标锚点"
+                      >
+                        <NativeSelectOption value="">请选择回滚目标锚点</NativeSelectOption>
+                        {anchorCandidates.map((anchor) => (
+                          <NativeSelectOption key={anchor.id} value={anchor.id}>
+                            {`${anchor.id} · v${anchor.version} · ${anchor.anchorType}`}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                      <Input
+                        value={rollbackReasonInput}
+                        onChange={(event) => setRollbackReasonInput(event.target.value)}
+                        placeholder="回滚原因（可选）"
+                        aria-label="回滚原因"
+                      />
+                      <Button
+                        onClick={() => {
+                          void submitRollbackAnchor();
+                        }}
+                        disabled={rollbackSubmitting}
+                      >
+                        {rollbackSubmitting ? "回滚中..." : "执行回滚"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <StateBlock variant="idle">
+                    当前账号只读，可查看锚点状态，不可创建或回滚。
+                  </StateBlock>
+                )}
+
+                {governanceActionMessage ? (
+                  <StateBlock
+                    variant={
+                      governanceActionMessage.includes("无权限") ||
+                      governanceActionMessage.includes("失败")
+                        ? "error"
+                        : "success"
+                    }
+                  >
+                    {governanceActionMessage}
+                  </StateBlock>
+                ) : null}
+              </section>
+
+              <UsersManagementPanel
+                actorRole={actorRole}
+                workspaceScopeId={workspaceId}
+                workspaceScopeName={selectedWorkspace?.name}
+                refreshToken={managementRefreshToken}
+              />
+            </div>
           ) : (
             <div className="space-y-4">
               <StateBlock variant="idle">

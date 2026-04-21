@@ -1,10 +1,13 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
-import { PolicyEvaluatorService } from "../../src/modules/auth/policy-evaluator.service";
-import { DataModule } from "../../src/modules/data/data.module";
-import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
-import { WorkspaceDatasourcePolicyRepository } from "../../src/modules/data/persistence/workspace-datasource-policy.repository";
-import { WorkspaceRepository } from "../../src/modules/data/persistence/workspace.repository";
+import { GovernanceAccessModule } from "../../src/modules/governance/access/access.module";
+import { PolicyEvaluatorService } from "../../src/modules/governance/access/policy-evaluator.service";
+import { PlatformDataPersistenceModule } from "../../src/modules/platform/data/persistence.module";
+import {
+  DatasourceRepository,
+  WorkspaceDatasourcePolicyRepository,
+  WorkspaceRepository
+} from "../../src/modules/platform/data/persistence";
 
 describe("policy evaluator service", () => {
   beforeAll(() => {
@@ -20,7 +23,7 @@ describe("policy evaluator service", () => {
 
   it("resolves readable tables from workspace table-permission source", async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [DataModule]
+      imports: [PlatformDataPersistenceModule, GovernanceAccessModule]
     }).compile();
 
     const workspaceRepository = moduleRef.get(WorkspaceRepository);

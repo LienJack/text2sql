@@ -44,6 +44,23 @@ describe("LlmGatewayService", () => {
     expect(output.rawText.toLowerCase()).toContain("select");
   });
 
+  it("should return metadata sql in llm mock mode for metadata intent", async () => {
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: true
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+    const output = await service.generate(
+      {
+        systemPrompt: "sys",
+        userPrompt: "数据库有哪些表"
+      },
+      runtime
+    );
+    expect(output.rawText.toLowerCase()).toContain("sqlite_master");
+  });
+
   it("should map empty model output to LLM_EMPTY_RESPONSE", async () => {
     mockedGenerateText.mockResolvedValue({
       text: "   "
@@ -133,7 +150,7 @@ describe("LlmGatewayService", () => {
     expect(events).toEqual(["text-delta", "tool-call", "tool-result"]);
   });
 
-  it("should fallback to tool sql when stream has no text deltas", async () => {
+  it("should raise tool-call-only response when stream has no final text", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {
         yield {
@@ -158,16 +175,17 @@ describe("LlmGatewayService", () => {
       } as AppConfigService,
       new LlmModelFactory()
     );
-    const output = await service.stream(
-      {
-        systemPrompt: "sys",
-        userPrompt: "统计订单状态分布"
-      },
-      runtime
-    );
-
-    expect(output.rawText).toContain("```sql");
-    expect(output.rawText).toContain("SELECT status FROM orders");
+    await expect(
+      service.stream(
+        {
+          systemPrompt: "sys",
+          userPrompt: "统计订单状态分布"
+        },
+        runtime
+      )
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "LLM_TOOL_CALL_ONLY_RESPONSE"
+    });
   });
 
   it("should recover from stream timeout via non-stream retry", async () => {

@@ -29,7 +29,7 @@ export class SqlSafetyGuard {
     "pragma"
   ];
 
-  evaluate(sql: string): SqlSafetyDecision {
+  evaluate(sql: string, additionalRiskTags: string[] = []): SqlSafetyDecision {
     const normalized = sql.trim().toLowerCase();
     if (!normalized.startsWith("select") && !normalized.startsWith("with")) {
       return {
@@ -79,6 +79,12 @@ export class SqlSafetyGuard {
     }
     if (normalized.length > this.config.sqlSafetySoftWarnMaxLength) {
       riskTags.push("long_sql");
+    }
+    for (const tag of additionalRiskTags) {
+      const normalizedTag = tag.trim();
+      if (normalizedTag && !riskTags.includes(normalizedTag)) {
+        riskTags.push(normalizedTag);
+      }
     }
 
     if (riskTags.length > 0) {

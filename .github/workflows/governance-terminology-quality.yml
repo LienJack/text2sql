@@ -1,0 +1,49 @@
+name: governance-terminology-quality
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "docs/standards/**"
+      - "apps/backend/src/modules/governance/**"
+      - "apps/frontend/src/app/settings/**"
+      - "apps/frontend/src/components/settings/**"
+      - "scripts/check-governance-terminology.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/governance-terminology-quality.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+      - "docs/standards/**"
+      - "apps/backend/src/modules/governance/**"
+      - "apps/frontend/src/app/settings/**"
+      - "apps/frontend/src/components/settings/**"
+      - "scripts/check-governance-terminology.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/governance-terminology-quality.yml"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Governance terminology check
+        run: pnpm run governance:terminology:check

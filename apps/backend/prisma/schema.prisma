@@ -55,6 +55,13 @@ model Datasource {
   workspaceBindings WorkspaceDatasourceBinding[]
   workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   workspaceTablePermissions WorkspaceDatasourceTablePermission[]
+  ragDocuments       RagDocument[]        @relation("datasource_rag_documents")
+  ragChunks          RagChunk[]           @relation("datasource_rag_chunks")
+  ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
+  ragChunkIndexes    RagChunkIndexEntry[] @relation("datasource_rag_chunk_index_entries")
+  ragRunReplays      RagRunReplay[]       @relation("datasource_rag_run_replays")
+  glossaryTerms      GlossaryTerm[]       @relation("datasource_glossary_terms")
+  glossaryAnchors    GlossaryAnchor[]     @relation("datasource_glossary_anchors")
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -96,6 +103,12 @@ model SqlRun {
   graphSnapshots    GraphSnapshot[]
   semanticEdges     SemanticEdge[]
   semanticMemories  SemanticMemory[]
+  semanticRegistryVersionsPublished SemanticRegistryVersion[] @relation("semantic_registry_published_by_run")
+  semanticRegistryVersionsActivated SemanticRegistryVersion[] @relation("semantic_registry_activated_by_run")
+  ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
+  ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
+  ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
+  glossaryAnchorsCreated    GlossaryAnchor[]  @relation("glossary_anchor_created_by_run")
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
@@ -155,6 +168,151 @@ model SemanticEdge {
   @@index([datasource, predicate])
   @@index([sourceRunId])
   @@map("semantic_edges")
+}
+
+model SemanticRegistryVersion {
+  id               String   @id
+  domain           String
+  semanticVersion  Int
+  status           String   @default("active")
+  releaseSummary   String
+  auditSummary     String
+  publishedByRunId String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  riskTags         String[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  publishedByRun   SqlRun?  @relation("semantic_registry_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?  @relation("semantic_registry_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  terms            SemanticRegistryTerm[]
+
+  @@unique([domain, semanticVersion])
+  @@index([domain, status, semanticVersion])
+  @@index([publishedByRunId])
+  @@index([activatedByRunId])
+  @@map("semantic_registry_versions")
+}
+
+model SemanticRegistryTerm {
+  id           String   @id
+  versionId    String
+  domain       String
+  term         String
+  canonicalKey String
+  definition   String
+  binding      String
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      SemanticRegistryVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, term])
+  @@index([domain, term, versionId])
+  @@index([canonicalKey])
+  @@map("semantic_registry_terms")
+}
+
+enum PromptTemplateScene {
+  sql
+  analysis
+}
+
+enum PromptTemplateScope {
+  global
+  workspace
+  datasource
+}
+
+enum PromptTemplateStatus {
+  draft
+  active
+  archived
+}
+
+model PromptTemplate {
+  id              String               @id
+  name            String
+  scene           PromptTemplateScene
+  scope           PromptTemplateScope
+  scopeKey        String
+  content         String
+  status          PromptTemplateStatus @default(active)
+  version         Int                  @default(1)
+  createdByUserId String?
+  updatedByUserId String?
+  deletedAt       DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@unique([scene, scope, scopeKey, name])
+  @@index([scene, status, updatedAt])
+  @@index([scope, scopeKey, status, updatedAt])
+  @@index([deletedAt, updatedAt])
+  @@map("prompt_templates")
+}
+
+model GlossaryAnchor {
+  id                   String   @id
+  scope                String   @default("global")
+  scopeKey             String
+  datasourceId         String?
+  version              Int
+  anchorType           String   @default("release")
+  status               String   @default("active")
+  summary              String?
+  rollbackFromAnchorId String?
+  rollbackReason       String?
+  metadata             String?
+  createdByUserId      String?
+  createdByRunId       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  datasource           Datasource?   @relation("datasource_glossary_anchors", fields: [datasourceId], references: [id], onDelete: SetNull)
+  createdByRun         SqlRun?       @relation("glossary_anchor_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  rollbackFromAnchor   GlossaryAnchor? @relation("glossary_anchor_rollbacks", fields: [rollbackFromAnchorId], references: [id], onDelete: SetNull)
+  rollbackTargets      GlossaryAnchor[] @relation("glossary_anchor_rollbacks")
+  versionTerms         GlossaryTerm[]   @relation("glossary_terms_version_anchor")
+  rollbackTerms        GlossaryTerm[]   @relation("glossary_terms_rollback_anchor")
+
+  @@unique([scopeKey, version])
+  @@index([scope, scopeKey, status, createdAt])
+  @@index([datasourceId, createdAt])
+  @@index([createdByRunId])
+  @@index([rollbackFromAnchorId])
+  @@map("glossary_anchors")
+}
+
+model GlossaryTerm {
+  id                 String   @id
+  term               String
+  normalizedTerm     String
+  definition         String
+  synonyms           String[]
+  scope              String   @default("global")
+  scopeKey           String
+  datasourceId       String?
+  priority           Int      @default(50)
+  conflictResolution String   @default("priority_then_updated_at")
+  status             String   @default("active")
+  version            Int      @default(1)
+  versionAnchorId    String?
+  rollbackAnchorId   String?
+  metadata           String?
+  createdByUserId    String?
+  updatedByUserId    String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  datasource         Datasource?    @relation("datasource_glossary_terms", fields: [datasourceId], references: [id], onDelete: SetNull)
+  versionAnchor      GlossaryAnchor? @relation("glossary_terms_version_anchor", fields: [versionAnchorId], references: [id], onDelete: SetNull)
+  rollbackAnchor     GlossaryAnchor? @relation("glossary_terms_rollback_anchor", fields: [rollbackAnchorId], references: [id], onDelete: SetNull)
+
+  @@unique([version, scopeKey, normalizedTerm])
+  @@index([scope, scopeKey, status, priority])
+  @@index([datasourceId, updatedAt])
+  @@index([versionAnchorId])
+  @@index([rollbackAnchorId])
+  @@map("glossary_terms")
 }
 
 model AgentAuditLog {
@@ -343,3 +501,123 @@ model WorkspaceDatasourceTablePermission {
   @@map("workspace_datasource_table_permissions")
 }
 
+model RagDocument {
+  id              String   @id
+  datasourceId    String
+  domain          String
+  sourceType      String
+  sourceRef       String?
+  sourceVersion   String
+  contentChecksum String
+  title           String?
+  content         String
+  tableNames      String[]
+  columnNames     String[]
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  datasource      Datasource @relation("datasource_rag_documents", fields: [datasourceId], references: [id], onDelete: Restrict)
+  chunks          RagChunk[]
+  replayLogs      RagRunReplay[]
+
+  @@unique([datasourceId, sourceVersion, contentChecksum])
+  @@index([datasourceId, domain])
+  @@index([sourceType, sourceVersion])
+  @@index([tableNames])
+  @@index([columnNames])
+  @@map("rag_documents")
+}
+
+model RagChunk {
+  id              String   @id
+  documentId      String
+  datasourceId    String
+  domain          String
+  chunkProfile    String
+  chunkOrder      Int
+  content         String
+  contentChecksum String
+  tableNames      String[]
+  columnNames     String[]
+  metadata        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  document        RagDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  datasource      Datasource  @relation("datasource_rag_chunks", fields: [datasourceId], references: [id], onDelete: Restrict)
+  indexEntries    RagChunkIndexEntry[]
+  replayLogs      RagRunReplay[]
+
+  @@unique([documentId, chunkProfile, chunkOrder])
+  @@index([datasourceId, domain, chunkProfile])
+  @@index([tableNames])
+  @@index([columnNames])
+  @@map("rag_chunks")
+}
+
+model RagIndexVersion {
+  id               String   @id
+  datasourceId     String
+  status           String
+  buildReason      String?
+  sourceVersion    String
+  createdByRunId   String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  datasource       Datasource @relation("datasource_rag_index_versions", fields: [datasourceId], references: [id], onDelete: Restrict)
+  createdByRun     SqlRun?    @relation("rag_index_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?    @relation("rag_index_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  chunkEntries     RagChunkIndexEntry[]
+  replayLogs       RagRunReplay[]
+
+  @@index([datasourceId, status, createdAt])
+  @@index([createdByRunId])
+  @@index([activatedByRunId])
+  @@map("rag_index_versions")
+}
+
+model RagChunkIndexEntry {
+  id             String   @id
+  indexVersionId String
+  chunkId        String
+  datasourceId   String
+  domain         String
+  lexicalContent String
+  denseVector    String?
+  metadata       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  indexVersion   RagIndexVersion @relation(fields: [indexVersionId], references: [id], onDelete: Cascade)
+  chunk          RagChunk        @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  datasource     Datasource      @relation("datasource_rag_chunk_index_entries", fields: [datasourceId], references: [id], onDelete: Restrict)
+
+  @@unique([indexVersionId, chunkId])
+  @@index([datasourceId, domain])
+  @@index([chunkId])
+  @@map("rag_chunk_index_entries")
+}
+
+model RagRunReplay {
+  runId          String
+  replayKey      String
+  datasourceId   String
+  stage          String
+  indexVersionId String?
+  documentId     String?
+  chunkId        String?
+  payload        String
+  createdAt      DateTime @default(now())
+  run            SqlRun           @relation("rag_run_replays", fields: [runId], references: [runId], onDelete: Cascade)
+  datasource     Datasource       @relation("datasource_rag_run_replays", fields: [datasourceId], references: [id], onDelete: Restrict)
+  indexVersion   RagIndexVersion? @relation(fields: [indexVersionId], references: [id], onDelete: SetNull)
+  document       RagDocument?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  chunk          RagChunk?        @relation(fields: [chunkId], references: [id], onDelete: SetNull)
+
+  @@id([runId, replayKey])
+  @@index([datasourceId, stage, createdAt])
+  @@index([indexVersionId])
+  @@index([documentId])
+  @@index([chunkId])
+  @@map("rag_run_replays")
+}

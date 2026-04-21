@@ -2,21 +2,41 @@
 
 import { ComposerPrimitive } from "@assistant-ui/react";
 import { Play, Terminal } from "lucide-react";
+import {
+  ContextEnvelopePanel,
+  type ContextEnvelopeDraft
+} from "@/components/chat/context-envelope-panel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface AssistantComposerProps {
   disabled?: boolean;
   onOpenDetail?: () => void;
+  contextEnvelopeDraft: ContextEnvelopeDraft;
+  clearContextEnvelopeAfterSend: boolean;
+  onContextEnvelopeDraftChange: (next: ContextEnvelopeDraft) => void;
+  onClearContextEnvelopeAfterSendChange: (next: boolean) => void;
 }
 
 export function AssistantComposer({
   disabled = false,
-  onOpenDetail
+  onOpenDetail,
+  contextEnvelopeDraft,
+  clearContextEnvelopeAfterSend,
+  onContextEnvelopeDraftChange,
+  onClearContextEnvelopeAfterSendChange
 }: AssistantComposerProps) {
   return (
     <div className="bg-transparent px-2 pb-4 sm:px-6">
       <div className="mx-auto w-full max-w-4xl space-y-3">
+        <ContextEnvelopePanel
+          value={contextEnvelopeDraft}
+          clearAfterSend={clearContextEnvelopeAfterSend}
+          onValueChange={onContextEnvelopeDraftChange}
+          onClearAfterSendChange={onClearContextEnvelopeAfterSendChange}
+          disabled={disabled}
+        />
+
         <ComposerPrimitive.Root
           className={cn(
             "rounded-[16px] border border-[var(--border-strong)] bg-[var(--surface-panel)] p-2 shadow-[0_1px_3px_rgba(15,23,42,0.06)] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/30",

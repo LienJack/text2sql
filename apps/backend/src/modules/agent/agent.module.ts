@@ -1,9 +1,14 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
-import { DataModule } from "../data/data.module";
-import { DatasourceModule } from "../datasource/datasource.module";
+import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { PlatformDataQueryModule } from "../platform/data/query.module";
+import { DatasourceModule } from "../governance/datasource/datasource.module";
+import { GovernanceAccessModule } from "../governance/access/access.module";
 import { LlmModule } from "../llm/llm.module";
 import { ObservabilityModule } from "../observability/observability.module";
+import { RagModule } from "../rag/rag.module";
+import { SemanticRegistryModule } from "../semantic-registry/semantic-registry.module";
+import { SettingsModule } from "../governance/settings/settings.module";
 import { BuildIntentPlanNode } from "./nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
@@ -21,15 +26,30 @@ import { SqlPromptBuilder } from "./sql/sql-prompt.builder";
 import { SqlReadonlyTool } from "./sql/tools/sql-readonly.tool";
 import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
+import { PlannerVersionLockService } from "./planner/planner-version-lock.service";
+import { PlannerCacheService } from "./planner/planner-cache.service";
 
 @Module({
-  imports: [AppConfigModule, DataModule, DatasourceModule, LlmModule, ObservabilityModule],
+  imports: [
+    AppConfigModule,
+    PlatformDataPersistenceModule,
+    PlatformDataQueryModule,
+    GovernanceAccessModule,
+    DatasourceModule,
+    LlmModule,
+    SettingsModule,
+    ObservabilityModule,
+    RagModule,
+    SemanticRegistryModule
+  ],
   providers: [
     GraphBuilderService,
     LangGraphRuntimeService,
     ClarifyNode,
     RetrieveKnowledgeNode,
     BuildIntentPlanNode,
+    PlannerVersionLockService,
+    PlannerCacheService,
     BuildSemanticQueryNode,
     BuildPhysicalPlanNode,
     GenerateSqlNode,

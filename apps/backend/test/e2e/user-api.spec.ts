@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
-import { UserModule } from "../../src/modules/user/user.module";
+import { UserModule } from "../../src/modules/governance/user/user.module";
 
 type HeaderCarrier = {
   set: (field: string, value: string) => HeaderCarrier;

@@ -162,6 +162,17 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
+  it("keeps advanced context panel collapsed by default", async () => {
+    render(<ChatPanel />);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+
+    const advancedContextButton = screen.getByRole("button", {
+      name: "展开高级上下文"
+    });
+    expect(advancedContextButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("指标口径")).not.toBeInTheDocument();
+  });
+
   it("sends message and keeps sql preview available in chat flow", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
@@ -185,6 +196,9 @@ describe("ChatPanel", () => {
     expect(
       screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
   });
 
   it("does not render debug switch control", async () => {
@@ -261,5 +275,332 @@ describe("ChatPanel", () => {
     if (releaseFirstEvent) {
       releaseFirstEvent();
     }
+  });
+
+  it("handles stream error events without unhandled promise rejection", async () => {
+    const user = userEvent.setup();
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      unhandledRejections.push(event.reason);
+      event.preventDefault();
+    };
+
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    try {
+      mockStreamMessageEvents.mockImplementationOnce(async function* () {
+        yield {
+          type: "start",
+          runId: "run-1",
+          sessionId: "session-1",
+          at: "2026-04-10T00:00:00.000Z",
+          data: {
+            requestId: null
+          }
+        };
+        yield {
+          type: "error",
+          runId: "run-1",
+          sessionId: "session-1",
+          at: "2026-04-10T00:00:00.100Z",
+          data: {
+            message: "LLM 输出中未提取到可执行 SQL。"
+          }
+        };
+      });
+
+      render(<ChatPanel />);
+      await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+      const getMessagesCallsBeforeSend = mockGetMessages.mock.calls.length;
+
+      await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+
+      await waitFor(() => {
+        expect(mockGetMessages.mock.calls.length).toBeGreaterThan(
+          getMessagesCallsBeforeSend
+        );
+      });
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    }
+  });
+
+  it("keeps stream request payload unchanged when advanced context is not provided", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    const latestCall = mockStreamMessageEvents.mock.calls.at(-1);
+    expect(latestCall?.[0]).toBe("session-1");
+    expect(latestCall?.[1]).toBe("近30天支付方式分布");
+    expect(latestCall?.[3]).toBeUndefined();
+  });
+
+  it("injects advanced context envelope into stream request and clears it after send by default", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "展开高级上下文"
+      })
+    );
+
+    await user.type(
+      screen.getByLabelText("指标口径"),
+      "按支付成功口径统计订单"
+    );
+    await user.type(screen.getByLabelText("开始日期"), "2026-03-01");
+    await user.type(screen.getByLabelText("结束日期"), "2026-03-31");
+    await user.type(
+      screen.getByLabelText("实体映射"),
+      "华北大区=region_north"
+    );
+
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    const latestCall = mockStreamMessageEvents.mock.calls.at(-1);
+    expect(latestCall?.[3]).toEqual({
+      metricDefinition: "按支付成功口径统计订单",
+      timeRange: {
+        from: "2026-03-01",
+        to: "2026-03-31"
+      },
+      entityMappings: [
+        {
+          entity: "华北大区",
+          mappedTo: "region_north"
+        }
+      ]
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "展开高级上下文"
+      })
+    );
+    expect(screen.getByLabelText("指标口径")).toHaveValue("");
+  });
+
+  it("keeps run detail entry visible while run backfill is still loading", async () => {
+    const user = userEvent.setup();
+    let resolveRun: (() => void) | undefined;
+    const runBackfillGate = new Promise<void>((resolve) => {
+      resolveRun = resolve;
+    });
+    mockGetMessages
+      .mockResolvedValueOnce({
+        session,
+        messages: createMockMessages(),
+        latestRun: undefined
+      })
+      .mockResolvedValueOnce({
+        session,
+        messages: createMockMessages(),
+        latestRun: undefined
+      });
+    mockGetRun.mockImplementationOnce(async () => {
+      await runBackfillGate;
+      return createMockRun();
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await screen.findByText("已为你生成 SQL，并展示结果。");
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.getByText("运行详情回填中，请稍候...")).toBeInTheDocument();
+
+    if (resolveRun) {
+      resolveRun();
+    }
+  }, 15000);
+
+  it("shows phase-b retrieval stages and run detail summary signals for the same run", async () => {
+    const user = userEvent.setup();
+    const phaseBRun = createMockRun({
+      trace: {
+        runId: "run-1",
+        provider: "mock",
+        retryCount: 0,
+        steps: [
+          {
+            node: "retrieve_knowledge",
+            status: "success",
+            stepId: "run-1:retrieve_knowledge:1",
+            sequence: 1,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:00.000Z"
+          },
+          {
+            node: "build_intent_plan",
+            status: "success",
+            stepId: "run-1:build_intent_plan:2",
+            sequence: 2,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:01.000Z"
+          },
+          {
+            node: "build_semantic_query",
+            status: "success",
+            stepId: "run-1:build_semantic_query:3",
+            sequence: 3,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:02.000Z"
+          }
+        ]
+      },
+      delivery: {
+        answer: {
+          text: "已为你生成 SQL，并展示结果。",
+          status: "executionResult",
+          provider: "mock"
+        },
+        evidence: {
+          runId: "run-1",
+          retrievalStatus: "degraded",
+          degradeReasons: ["retrieval_timeout"],
+          selectedContext: {
+            count: 0
+          },
+          riskTags: ["semantic_registry_degraded"]
+        }
+      }
+    });
+
+    mockGetMessages.mockResolvedValue({
+      session,
+      messages: createMockMessages(),
+      latestRun: phaseBRun
+    });
+    mockGetRun.mockResolvedValue(phaseBRun);
+    mockStreamMessageEvents.mockImplementationOnce(async function* () {
+      yield {
+        type: "start",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: { requestId: null }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "retrieve_knowledge",
+          status: "success",
+          stepId: "run-1:retrieve_knowledge:1",
+          sequence: 1,
+          lifecycle: "completed",
+          detail: "hit=2"
+        }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:01.000Z",
+        data: {
+          node: "build_intent_plan",
+          status: "success",
+          stepId: "run-1:build_intent_plan:2",
+          sequence: 2,
+          lifecycle: "completed",
+          detail: "intent=payment_distribution"
+        }
+      };
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:02.000Z",
+        data: {
+          node: "build_semantic_query",
+          status: "success",
+          stepId: "run-1:build_semantic_query:3",
+          sequence: 3,
+          lifecycle: "completed",
+          detail: "semantic=orders.payment_method"
+        }
+      };
+      yield {
+        type: "text-delta",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:03.000Z",
+        data: {
+          text: "SELECT payment_method"
+        }
+      };
+      yield {
+        type: "finish",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:04.000Z",
+        data: {
+          status: "executionResult",
+          rowCount: 1,
+          delivery: {
+            answer: {
+              text: "已为你生成 SQL，并展示结果。",
+              status: "executionResult",
+              provider: "mock"
+            },
+            evidence: {
+              runId: "run-1",
+              retrievalStatus: "degraded",
+              degradeReasons: ["retrieval_timeout"],
+              selectedContext: {
+                count: 0
+              },
+              riskTags: ["semantic_registry_degraded"]
+            }
+          }
+        }
+      };
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("知识检索")).toBeInTheDocument();
+    expect(screen.getByText("意图规划")).toBeInTheDocument();
+    expect(screen.getByText("语义检索构建")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.getByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
+    expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
+    expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
   });
 });

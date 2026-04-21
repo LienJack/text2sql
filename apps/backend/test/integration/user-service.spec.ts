@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import { DomainError } from "../../src/common/domain-error";
-import { UserModule } from "../../src/modules/user/user.module";
-import { UserService } from "../../src/modules/user/user.service";
+import { UserModule } from "../../src/modules/governance/user/user.module";
+import { UserService } from "../../src/modules/governance/user/user.service";
 
 describe("user service", () => {
   beforeAll(() => {

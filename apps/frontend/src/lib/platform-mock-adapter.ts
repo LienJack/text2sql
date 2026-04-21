@@ -44,25 +44,6 @@ export interface DashboardCard {
   chartType: "line" | "bar" | "pie";
 }
 
-export interface GlossaryTerm {
-  id: string;
-  term: string;
-  synonyms: string[];
-  description: string;
-  scope: string;
-  enabled: boolean;
-}
-
-export interface PromptTemplate {
-  id: string;
-  name: string;
-  scene: "sql" | "analysis";
-  scope: string;
-  version: string;
-  updatedAt: string;
-  status: "active" | "draft";
-}
-
 export interface LlmModelConfig {
   id: string;
   alias: string;
@@ -220,63 +201,6 @@ const dashboards: DashboardCard[] = [
   }
 ];
 
-const glossaryTerms: GlossaryTerm[] = [
-  {
-    id: "term-dau",
-    term: "活跃用户(DAU)",
-    synonyms: ["日活", "日活跃人数", "每日登录用户"],
-    description: "过去 24 小时内至少发生一次登录行为的用户。",
-    scope: "全局",
-    enabled: true
-  },
-  {
-    id: "term-gmv",
-    term: "GMV",
-    synonyms: ["总交易额", "流水"],
-    description: "订单金额总和，含未支付和退款订单。",
-    scope: "业务核心库_MySQL",
-    enabled: true
-  },
-  {
-    id: "term-margin",
-    term: "毛利率",
-    synonyms: ["利润率", "盈利率"],
-    description: "(GMV - 成本) / GMV * 100%",
-    scope: "财务库_PostgreSQL",
-    enabled: false
-  }
-];
-
-const promptTemplates: PromptTemplate[] = [
-  {
-    id: "prompt-sql-main",
-    name: "MySQL 基础查询优化",
-    scene: "sql",
-    scope: "全局",
-    version: "v2.1",
-    updatedAt: "2026-04-08",
-    status: "active"
-  },
-  {
-    id: "prompt-analysis-sales",
-    name: "电商营收分析指引",
-    scene: "analysis",
-    scope: "业务核心库",
-    version: "v1.0",
-    updatedAt: "2026-04-06",
-    status: "active"
-  },
-  {
-    id: "prompt-clickhouse",
-    name: "ClickHouse 聚合语法增强",
-    scene: "sql",
-    scope: "历史归档库",
-    version: "v3.4",
-    updatedAt: "2026-04-10",
-    status: "draft"
-  }
-];
-
 const settingsView: PlatformSettingsView = {
   models: [
     {
@@ -359,16 +283,6 @@ export async function fetchDataSourcesView(): Promise<DataSourcesView> {
 export async function fetchDashboards(): Promise<DashboardCard[]> {
   await delay();
   return clone(dashboards);
-}
-
-export async function fetchGlossaryTerms(): Promise<GlossaryTerm[]> {
-  await delay();
-  return clone(glossaryTerms);
-}
-
-export async function fetchPromptTemplates(): Promise<PromptTemplate[]> {
-  await delay();
-  return clone(promptTemplates);
 }
 
 export async function fetchSettingsView(): Promise<PlatformSettingsView> {

@@ -41,7 +41,8 @@ describe("API base URL resolution", () => {
       .fn()
       .mockResolvedValueOnce(mockApiResponse([]))
       .mockResolvedValueOnce(mockApiResponse({ id: "ws-1", name: "Workspace A" }))
-      .mockResolvedValueOnce(mockApiResponse({ providers: [], models: [] }));
+      .mockResolvedValueOnce(mockApiResponse({ providers: [], models: [] }))
+      .mockResolvedValueOnce(mockApiResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { apiClient, adminApiClient, settingsApiClient } =
@@ -50,12 +51,14 @@ describe("API base URL resolution", () => {
     await apiClient.listDatasources();
     await adminApiClient.createWorkspace({ name: "Workspace A" });
     await settingsApiClient.fetchSettingsView();
+    await settingsApiClient.fetchBackendHealthSnapshot();
 
     const requestedUrls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(requestedUrls).toEqual([
       "/api/v1/datasources",
       "/api/v1/system/workspaces",
-      "/api/v1/settings/models"
+      "/api/v1/settings/models",
+      "/api/health"
     ]);
   });
 
@@ -64,7 +67,8 @@ describe("API base URL resolution", () => {
       .fn()
       .mockResolvedValueOnce(mockApiResponse([]))
       .mockResolvedValueOnce(mockApiResponse({ id: "ws-1", name: "Workspace A" }))
-      .mockResolvedValueOnce(mockApiResponse({ providers: [], models: [] }));
+      .mockResolvedValueOnce(mockApiResponse({ providers: [], models: [] }))
+      .mockResolvedValueOnce(mockApiResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
 
     const { apiClient, adminApiClient, settingsApiClient } =
@@ -73,12 +77,14 @@ describe("API base URL resolution", () => {
     await apiClient.listDatasources();
     await adminApiClient.createWorkspace({ name: "Workspace A" });
     await settingsApiClient.fetchSettingsView();
+    await settingsApiClient.fetchBackendHealthSnapshot();
 
     const requestedUrls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(requestedUrls).toEqual([
       "http://gateway.local/api/v1/datasources",
       "http://gateway.local/api/v1/system/workspaces",
-      "http://gateway.local/api/v1/settings/models"
+      "http://gateway.local/api/v1/settings/models",
+      "http://gateway.local/api/health"
     ]);
   });
 });

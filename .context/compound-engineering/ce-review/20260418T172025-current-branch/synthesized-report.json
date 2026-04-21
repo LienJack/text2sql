@@ -1,0 +1,156 @@
+{
+  "run_id": "20260418T172025-current-branch",
+  "mode": "interactive",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "untracked_excluded": true
+  },
+  "applied_fixes": [],
+  "findings": [
+    {
+      "title": "Prompt template listing endpoint is unguarded",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/settings/settings.controller.ts",
+      "line": 52,
+      "confidence": 0.95,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Add authz guard and actor-scoped filtering/redaction for template content."
+    },
+    {
+      "title": "RAG quality report/replay endpoints allow unauthenticated read/write",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.controller.ts",
+      "line": 25,
+      "confidence": 0.95,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Protect `/api/v1/rag/quality/*` endpoints with explicit authz and validate `runId` input."
+    },
+    {
+      "title": "Semantic promotion loop can overwrite active semantic snapshot term-by-term",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts",
+      "line": 282,
+      "confidence": 0.95,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Publish one semantic registry version per domain/scope per event from the full resolved winner set."
+    },
+    {
+      "title": "R6 gate uses synthetic hardcoded values for critical metrics",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 701,
+      "confidence": 0.96,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Source stale-cache/graph-fallback/security metrics from telemetry; mark as insufficient samples when unavailable."
+    },
+    {
+      "title": "Frontend evidence normalizer drops `promptTemplate` contract field",
+      "severity": "P1",
+      "file": "apps/frontend/src/components/chat/run-visibility-mapper.ts",
+      "line": 120,
+      "confidence": 0.88,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Preserve/normalize `promptTemplate` in `normalizeEvidence` and assert it in unit tests."
+    },
+    {
+      "title": "Build job can report failure after successful activation when replay write fails",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/jobs/build-rag-index.job.ts",
+      "line": 55,
+      "confidence": 0.86,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Separate activation success from best-effort replay persistence and avoid rethrowing telemetry-only failures."
+    },
+    {
+      "title": "Required-domain coverage is skipped when candidate limit is already full",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 590,
+      "confidence": 0.9,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Replace lower-ranked non-required candidates to enforce required-domain inclusion under saturation."
+    },
+    {
+      "title": "Event idempotency handling lacks in-flight deduplication and can double-process",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts",
+      "line": 90,
+      "confidence": 0.86,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Add per-idempotency in-flight lock and durable idempotency state boundary."
+    },
+    {
+      "title": "RAG schema allows cross-datasource FK mismatch for denormalized datasource IDs",
+      "severity": "P2",
+      "file": "apps/backend/prisma/schema.prisma",
+      "line": 531,
+      "confidence": 0.79,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Use composite FK/unique constraints tying child datasource IDs to parent records, or remove redundant datasource columns."
+    },
+    {
+      "title": "Queue wait metric uses 24h sample count against a 6h threshold spec",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 680,
+      "confidence": 0.9,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Track and report a dedicated 6h sample count for `orchestratorQueueWaitP95Ms`."
+    }
+  ],
+  "pre_existing": [
+    {
+      "title": "Admin role can be spoofed through request headers",
+      "severity": "P0",
+      "file": "apps/backend/src/modules/auth/request-actor.middleware.ts",
+      "line": 70,
+      "confidence": 0.92,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": true,
+      "suggested_fix": "Trust only verified auth claims and remove raw header role fallback in AdminOnlyGuard."
+    }
+  ],
+  "residual_actionable": [
+    "All non-pre-existing findings route to downstream-resolver (manual/gated)."
+  ],
+  "coverage": {
+    "suppressed_below_threshold": 0,
+    "malformed_compact_payloads_dropped": 10,
+    "failed_reviewers": [
+      "learnings-researcher (timeout)"
+    ]
+  }
+}

@@ -1,0 +1,90 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "title": "R6 gate metrics are hardcoded placeholders",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 701,
+      "why_it_matters": "The R6 gate contract presents these as operational guardrail metrics, but this implementation hardcodes them (0/0/true). That creates abstraction debt where future maintainers may assume real telemetry is wired while release decisions are effectively blind to stale-cache, graph-fallback, and security-check regressions.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Replace placeholder values with real counters sourced from cache read telemetry, graph-lane fallback telemetry, and an explicit security report signal. If telemetry is not ready, mark those metrics unavailable/insufficient and block gate pass per contract until wired.",
+      "confidence": 0.96,
+      "evidence": [
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:701-727 sets staleCacheReadRate=0, graphFallbackActivationRate=0, securityGatePass=true in metricValues.",
+        "Repo search only finds these metric names in this service and assertions, with no producer telemetry paths.",
+        "docs/standards/r6-scale-gate-spec.md:32-35 defines these as live quantitative gate metrics, not defaults/placeholders.",
+        "Fresh verification: backend integration test `test/integration/r6-gate-readiness.spec.ts` passed while only validating decision outputs, not proving these three metrics come from real telemetry."
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Queue P95 uses wrong sample window count",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 680,
+      "why_it_matters": "The metric value is computed from a 6h slice, but sample count is taken from a 24h slice. This coupling mismatch can incorrectly satisfy or fail min-sample gates, making release decisions harder to reason about and less trustworthy.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Split datasource orchestration report counters by window (for example queueWaitSampleSize6h and isolationSampleSize24h) and use the window-matching sample count for each metric in snapshotR6; add tests with divergent 6h vs 24h sample volumes.",
+      "confidence": 0.92,
+      "evidence": [
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:599-613 computes orchestratorQueueWaitP95Ms from last 6h but exposes sampleSize24h.",
+        "apps/backend/src/modules/rag/quality/rag-quality.service.ts:680-684 assigns orchestratorQueueWaitP95Ms metric samples from datasourceSamples (24h count)."
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Graph lane scoring duplicated across fallback paths",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 445,
+      "why_it_matters": "Two near-identical scoring implementations exist for graph retrieval (fallback heuristic and acceleration path) with different constants. This raises coupling and drift risk: behavior can diverge depending on whether acceleration/breaker fallback is active, making tuning and incident analysis harder.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Extract a shared graph-scoring strategy (single constants + scoring function) used by both RagRetrievalService fallback and GraphAccelerationAdapter, then add a parity test that verifies consistent ordering for identical inputs.",
+      "confidence": 0.88,
+      "evidence": [
+        "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:445-499 defines heuristic scoring for graph lane fallback.",
+        "apps/backend/src/modules/graph/adapter/graph-acceleration.adapter.ts:37-109 defines a second, very similar scoring pipeline with different weights.",
+        "apps/backend/src/modules/graph/graph.service.ts:38-47 and 85-105 switches between accelerated and fallback paths at runtime.",
+        "Fresh verification: integration tests `graph-acceleration-fallback.spec.ts` and `graph-acceleration-circuit-breaker.spec.ts` passed, confirming both paths are actively exercised and therefore drift-sensitive."
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Delivery normalization logic duplicated across clients",
+      "severity": "P2",
+      "file": "apps/frontend/src/components/chat/run-visibility-mapper.ts",
+      "line": 120,
+      "why_it_matters": "Contract-compat normalization now exists in multiple frontend modules with overlapping snake_case/camelCase fallback rules. This duplicates operational contract knowledge and increases drift risk when evidence fields evolve, causing inconsistent UI behavior by entry point.",
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Move delivery/evidence normalization into a shared frontend codec (or shared-types helper) and import it from run-visibility-mapper and api-client; keep one compatibility matrix and one test suite.",
+      "confidence": 0.8,
+      "evidence": [
+        "apps/frontend/src/components/chat/run-visibility-mapper.ts:120-205 normalizes run delivery evidence with dual naming compatibility.",
+        "apps/frontend/src/lib/api-client.ts:109-209 introduces overlapping semantic evidence compatibility normalization for run payloads.",
+        "Both modules maintain separate readString/readNumber/shape-fallback helpers, requiring synchronized edits for contract evolution.",
+        "Fresh verification: targeted tests `tests/unit/run-visibility-mapper.spec.ts` and `tests/unit/chat-rag-sync-stream-consistency.spec.tsx` pass, but they validate behavior per entry point rather than cross-module normalization parity."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [
+    "The R6 quality gate surface is broad and recently introduced; without unified metric provenance, future metric additions are likely to repeat placeholder/window-coupling debt.",
+    "Graph retrieval behavior remains sensitive to runtime mode transitions (accelerated vs fallback), so ranking drift risk persists until scoring logic is unified."
+  ],
+  "testing_gaps": [
+    "No parity test validates that accelerated graph scoring and fallback graph scoring produce consistent ordering for the same retrieval inputs.",
+    "No test asserts that each R6 metric sample count matches the metric's declared time window (for example 6h queue-wait metric using 6h sample count).",
+    "No test guards against placeholder metric values being used for gate-critical metrics (staleCacheReadRate, graphFallbackActivationRate, securityGatePass).",
+    "Frontend command `pnpm --filter @text2sql/frontend run test -- --runInBand tests/unit/chat-rag-sync-stream-consistency.spec.tsx` executes the full suite and currently fails at `tests/unit/chat-panel.spec.tsx` (missing role/name `展开思考过程`), indicating suite-level instability outside the targeted visibility-mapper checks.",
+    "Code-intel MCP diagnostics were unavailable in this session (Transport closed); type safety was validated via backend/frontend/shared-types build runs instead."
+  ]
+}

@@ -51,7 +51,7 @@ describe("SqlTableAccessGuardService", () => {
     expect(result.reason).toContain("无法穷尽引用表");
   });
 
-  it("returns ACL_PARSE_REJECTED for incomplete extraction", async () => {
+  it("returns TABLE_PERMISSIONS_PARSE_REJECTED for incomplete extraction", async () => {
     await expect(
       guard.assertTableAccess({
         sql: "SELECT * FROM (SELECT * FROM orders) o",
@@ -63,11 +63,11 @@ describe("SqlTableAccessGuardService", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_PARSE_REJECTED"
+      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
     } satisfies Partial<DomainError>);
   });
 
-  it("returns ACL_FORBIDDEN for unauthorized table", async () => {
+  it("returns TABLE_PERMISSIONS_FORBIDDEN for unauthorized table", async () => {
     await expect(
       guard.assertTableAccess({
         sql: "SELECT * FROM orders",
@@ -79,7 +79,7 @@ describe("SqlTableAccessGuardService", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_FORBIDDEN"
+      code: "TABLE_PERMISSIONS_FORBIDDEN"
     } satisfies Partial<DomainError>);
   });
 
@@ -136,7 +136,7 @@ describe("SqlTableAccessGuardService", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "ACL_PARSE_REJECTED"
+      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
     } satisfies Partial<DomainError>);
   });
 });

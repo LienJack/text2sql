@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import yaml from "js-yaml";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { GraphBuilderService } from "../../src/modules/agent/graph/graph.builder";
+import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 import type { RunStatus } from "@text2sql/shared-types";
 

@@ -101,6 +101,7 @@ CI 参考：
 - React 函数组件 + shadcn-ui 体系。
 - Tailwind CSS v4，不回退 v3 模式。
 - 保持核心演示链路可用（创建会话/发送消息/SQL 预览）。
+- 涉及 RAG 可见化改造时，必须覆盖 runId（sync/stream）一致性、`selected_context` 四态矩阵、terminal 不回退 loading、375px 与键盘可达性（`Enter/Space` + `aria-expanded`）验收。
 
 必跑门禁：
 - `pnpm --filter @text2sql/frontend run lint`
@@ -117,9 +118,46 @@ CI 参考：
 - 同步接口保持 `AgentRunResponse` 合同。
 - 流式事件字段必须完整（`type/runId/sessionId/at/data`）。
 - 工具调用走 allowlist，失败可追踪。
+- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致，且旧 run 缺字段可兼容读取。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
+
+### D. Governance 术语硬切规范
+来源：`docs/standards/governance-terminology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/governance/**`
+- `apps/frontend/src/lib/admin-api-client.ts`
+- `docs/standards/**`
+- `README.md`
+
+关键 MUST：
+- 治理主链路仅使用 `workspace datasource binding`、`table-permissions`、`policyVersion`。
+- 不得在治理主链路继续接受 legacy 路由/字段（`table-acl`、`acl`、`rule-group`）。
+- 历史术语只允许出现在明确迁移上下文（带迁移注记），不得作为 active narrative。
+
+必跑检查：
+- `pnpm run governance:terminology:check`
+
+### E. 后端业务能力拓扑规范
+来源：`docs/standards/backend-business-capability-topology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/**`
+- `apps/backend/src/app.module.ts`
+- `scripts/check-backend-capability-boundaries.ts`
+
+关键 MUST：
+- 后端一级能力域固定为 `conversation/governance/knowledge/platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- `platform` 禁止反向依赖业务域；跨域调用仅允许稳定入口（facade/public entry）。
+- 禁止新增“宽导出中枢”形态依赖。
+- 业务域及其兼容根模块（`chat/agent/memory/glossary/rag`）禁止直接 import `modules/data/**` 实现路径。
+- 业务域及其兼容根模块禁止依赖 `platform/data/data.module.ts`（`PlatformDataModule` 聚合入口）。
+
+必跑检查：
+- `pnpm run backend:capability-boundary:check`（落地后）
 
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。
@@ -166,3 +204,12 @@ CI 参考：
 
 例外：
 - 若用户明确指定其他设计方向或流程，以用户指令为最高优先级。
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

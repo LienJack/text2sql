@@ -1,6 +1,6 @@
 import type { ClarificationPrompt, ExecutionTrace } from "@text2sql/shared-types";
 import type { DatasourceType } from "@text2sql/shared-types";
-import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
+import type { SqlTableAccessContext } from "../../platform/data/query/index";
 
 export interface GraphTraceContext {
   source: "chat" | "evaluation";

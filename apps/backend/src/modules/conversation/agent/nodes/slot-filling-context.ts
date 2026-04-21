@@ -1,0 +1,196 @@
+import type { ContextEnvelope } from "@text2sql/shared-types";
+
+type SlotKey = "subject" | "metric" | "time" | "dimension" | "filter";
+
+interface SlotStatus {
+  key: SlotKey;
+  provided: boolean;
+  source?: "question" | "envelope";
+}
+
+export interface SlotFillingDecision {
+  shouldClarify: boolean;
+  missingCriticalSlots: SlotKey[];
+  reason: string;
+  question: string;
+}
+
+const METRIC_HINT_REGEX =
+  /(总数|数量|计数|count|金额|交易额|销售额|gmv|平均|均值|占比|比例|转化率|留存|退款率|分布|top|排行|环比|同比)/i;
+const SUBJECT_HINT_REGEX =
+  /(订单|用户|客户|商品|sku|门店|支付|退款|交易|会话|工单|发票|供应商|渠道|地区|市场|销售|商家|账单)/i;
+const TIME_HINT_REGEX =
+  /(今天|昨日|昨天|本周|上周|本月|上月|本季度|上季度|本年|去年|近\d+\s*(天|周|月|年)|最近|过去|between|from|to|日期|时间)/i;
+const DIMENSION_HINT_REGEX =
+  /(按|分组|group by|各|每个|top|排行|分布|分类|维度)/i;
+const FILTER_HINT_REGEX =
+  /(where|并且|且|条件|过滤|仅|排除|大于|小于|等于|>=|<=|!=|=|状态|地区|渠道|品类)/i;
+const METADATA_INTENT_REGEX =
+  /(有哪些表|哪些表|表结构|schema|字段|列名|describe|show\s+tables|sqlite_master|元数据|数据库结构)/i;
+const SQL_WRITE_INTENT_REGEX =
+  /^\s*(insert|update|delete|drop|alter|truncate|create|replace|merge|grant|revoke)\b/i;
+
+function hasNonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasTimeRangeEnvelope(timeRange: ContextEnvelope["timeRange"] | undefined): boolean {
+  if (!timeRange || typeof timeRange !== "object") {
+    return false;
+  }
+  return (
+    hasNonEmpty(timeRange.from) || hasNonEmpty(timeRange.to) || hasNonEmpty(timeRange.timezone)
+  );
+}
+
+function hasStringArray(values: string[] | undefined): boolean {
+  return Array.isArray(values) && values.some((value) => hasNonEmpty(value));
+}
+
+function hasEntityMappings(
+  entityMappings: ContextEnvelope["entityMappings"] | undefined
+): boolean {
+  if (!Array.isArray(entityMappings)) {
+    return false;
+  }
+  return entityMappings.some(
+    (item) => hasNonEmpty(item?.entity) || hasNonEmpty(item?.mappedTo)
+  );
+}
+
+function resolveSlots(question: string, contextEnvelope?: ContextEnvelope): SlotStatus[] {
+  const trimmedQuestion = question.trim();
+  const metricFromEnvelope = hasNonEmpty(contextEnvelope?.metricDefinition);
+  const timeFromEnvelope = hasTimeRangeEnvelope(contextEnvelope?.timeRange);
+  const dimensionFromEnvelope = hasEntityMappings(contextEnvelope?.entityMappings);
+  const filterFromEnvelope =
+    hasStringArray(contextEnvelope?.businessConstraints) ||
+    hasStringArray(contextEnvelope?.mustIncludeTables) ||
+    hasStringArray(contextEnvelope?.mustExcludeTables);
+  const subjectFromEnvelope = dimensionFromEnvelope;
+
+  const metricFromQuestion = METRIC_HINT_REGEX.test(trimmedQuestion);
+  const subjectFromQuestion = SUBJECT_HINT_REGEX.test(trimmedQuestion);
+  const timeFromQuestion = TIME_HINT_REGEX.test(trimmedQuestion);
+  const dimensionFromQuestion = DIMENSION_HINT_REGEX.test(trimmedQuestion);
+  const filterFromQuestion = FILTER_HINT_REGEX.test(trimmedQuestion);
+
+  return [
+    {
+      key: "subject",
+      provided: subjectFromEnvelope || subjectFromQuestion,
+      source: subjectFromEnvelope ? "envelope" : subjectFromQuestion ? "question" : undefined
+    },
+    {
+      key: "metric",
+      provided: metricFromEnvelope || metricFromQuestion,
+      source: metricFromEnvelope ? "envelope" : metricFromQuestion ? "question" : undefined
+    },
+    {
+      key: "time",
+      provided: timeFromEnvelope || timeFromQuestion,
+      source: timeFromEnvelope ? "envelope" : timeFromQuestion ? "question" : undefined
+    },
+    {
+      key: "dimension",
+      provided: dimensionFromEnvelope || dimensionFromQuestion,
+      source: dimensionFromEnvelope
+        ? "envelope"
+        : dimensionFromQuestion
+          ? "question"
+          : undefined
+    },
+    {
+      key: "filter",
+      provided: filterFromEnvelope || filterFromQuestion,
+      source: filterFromEnvelope ? "envelope" : filterFromQuestion ? "question" : undefined
+    }
+  ];
+}
+
+function resolveClarificationQuestion(missingCriticalSlots: SlotKey[]): string {
+  const missingSet = new Set(missingCriticalSlots);
+  if (missingSet.has("subject") && missingSet.has("metric")) {
+    return "请补充分析对象和指标口径，例如“近30天订单总数”或“按支付方式统计退款金额”。";
+  }
+  if (missingSet.has("subject")) {
+    return "请补充分析对象（例如订单、用户、商品或门店）。";
+  }
+  if (missingSet.has("metric")) {
+    return "请补充要统计的指标口径（例如订单数、退款金额、转化率）。";
+  }
+  if (missingSet.has("time")) {
+    return "请补充时间范围（例如近30天、本季度或具体起止日期）。";
+  }
+  return "请补充关键分析信息（对象、指标或时间范围）后我再继续生成 SQL。";
+}
+
+function resolveReason(missingCriticalSlots: SlotKey[]): string {
+  if (missingCriticalSlots.length === 0) {
+    return "问题信息充足";
+  }
+  const labels: Record<SlotKey, string> = {
+    subject: "分析对象",
+    metric: "指标口径",
+    time: "时间范围",
+    dimension: "维度",
+    filter: "过滤条件"
+  };
+  return `关键槽位缺失：${missingCriticalSlots.map((item) => labels[item]).join("、")}`;
+}
+
+export function decideSlotFilling(
+  question: string,
+  contextEnvelope?: ContextEnvelope
+): SlotFillingDecision {
+  const trimmedQuestion = question.trim();
+  if (SQL_WRITE_INTENT_REGEX.test(trimmedQuestion)) {
+    return {
+      shouldClarify: false,
+      missingCriticalSlots: [],
+      reason: "检测到写操作 SQL 意图，跳过槽位澄清",
+      question: ""
+    };
+  }
+  if (METADATA_INTENT_REGEX.test(trimmedQuestion)) {
+    return {
+      shouldClarify: false,
+      missingCriticalSlots: [],
+      reason: "元数据查询意图，无需业务槽位补全",
+      question: ""
+    };
+  }
+  if (trimmedQuestion.length < 6) {
+    const missingCriticalSlots: SlotKey[] = ["subject", "metric", "time"];
+    return {
+      shouldClarify: true,
+      missingCriticalSlots,
+      reason: resolveReason(missingCriticalSlots),
+      question: resolveClarificationQuestion(missingCriticalSlots)
+    };
+  }
+
+  const slots = resolveSlots(trimmedQuestion, contextEnvelope);
+  const missingSet = new Set<SlotKey>();
+  for (const slot of slots) {
+    if (slot.provided) {
+      continue;
+    }
+    if (slot.key === "subject" || slot.key === "metric") {
+      missingSet.add(slot.key);
+    }
+  }
+
+  const asksTrend = /(趋势|变化|对比|同比|环比|走势)/i.test(trimmedQuestion);
+  if (asksTrend && !slots.find((slot) => slot.key === "time")?.provided) {
+    missingSet.add("time");
+  }
+
+  const missingCriticalSlots = Array.from(missingSet);
+  return {
+    shouldClarify: missingCriticalSlots.length > 0,
+    missingCriticalSlots,
+    reason: resolveReason(missingCriticalSlots),
+    question: resolveClarificationQuestion(missingCriticalSlots)
+  };
+}

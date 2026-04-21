@@ -41,7 +41,7 @@ export type SqlPolicyLookupResolver = (
   request: SqlPolicyLookupRequest
 ) => Promise<Iterable<string> | null | undefined>;
 
-export interface SqlTableAclCheckInput {
+export interface SqlTableAccessCheckInput {
   sql: string;
   datasourceId: string;
   accessContext?: SqlTableAccessContext;
@@ -148,7 +148,7 @@ export class SqlTableAccessGuardService {
     };
   }
 
-  async assertTableAccess(input: SqlTableAclCheckInput): Promise<SqlTableGuardResult> {
+  async assertTableAccess(input: SqlTableAccessCheckInput): Promise<SqlTableGuardResult> {
     const accessContext = input.accessContext;
     if (!accessContext || accessContext.enforcementMode === "off") {
       return {
@@ -162,7 +162,7 @@ export class SqlTableAccessGuardService {
     const extraction = this.extractReferencedTables(input.sql);
     if (!extraction.complete) {
       throw new DomainError(
-        "ACL_PARSE_REJECTED",
+        "TABLE_PERMISSIONS_PARSE_REJECTED",
         extraction.reason ?? "无法确定 SQL 引用表集合，已拒绝执行。",
         400,
         {
@@ -202,7 +202,7 @@ export class SqlTableAccessGuardService {
 
     if (allowed.size === 0) {
       throw new DomainError(
-        "ACL_FORBIDDEN",
+        "TABLE_PERMISSIONS_FORBIDDEN",
         "当前工作空间未配置可用表授权策略，已拒绝执行。",
         403,
         {
@@ -220,7 +220,7 @@ export class SqlTableAccessGuardService {
 
     if (forbiddenTables.length > 0) {
       throw new DomainError(
-        "ACL_FORBIDDEN",
+        "TABLE_PERMISSIONS_FORBIDDEN",
         `当前工作空间无权访问表: ${forbiddenTables.join(", ")}`,
         403,
         {
@@ -239,7 +239,7 @@ export class SqlTableAccessGuardService {
     });
     if (columnHookTriggered && this.containsWildcardProjection(input.sql)) {
       throw new DomainError(
-        "ACL_PARSE_REJECTED",
+        "TABLE_PERMISSIONS_PARSE_REJECTED",
         "检测到列级权限策略与通配符查询组合，当前改写策略无法安全裁剪列集合。",
         400,
         {
@@ -255,10 +255,15 @@ export class SqlTableAccessGuardService {
       rowFiltersByTable: accessContext.rowFiltersByTable
     });
     if (!rowFilterRewrite.ok) {
-      throw new DomainError("ACL_PARSE_REJECTED", rowFilterRewrite.reason, 400, {
-        datasourceId: input.datasourceId,
-        workspaceId: accessContext.workspaceId
-      });
+      throw new DomainError(
+        "TABLE_PERMISSIONS_PARSE_REJECTED",
+        rowFilterRewrite.reason,
+        400,
+        {
+          datasourceId: input.datasourceId,
+          workspaceId: accessContext.workspaceId
+        }
+      );
     }
 
     return {

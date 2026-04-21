@@ -46,6 +46,10 @@ export class LlmGatewayService implements LlmGateway {
       const isWriteIntent = /\b(delete|update|insert|drop|alter|truncate)\b/i.test(
         prompt.userPrompt
       );
+      const isMetadataIntent =
+        /(有哪些表|哪些表|表结构|schema|字段|列名|describe|show\s+tables|sqlite_master|sqlite_schema|information_schema|pg_catalog|pragma|元数据|数据库结构)/i.test(
+          prompt.userPrompt
+        );
       return {
         provider: runtime.provider,
         model: runtime.model,
@@ -58,6 +62,14 @@ export class LlmGatewayService implements LlmGateway {
               "```",
               "该语句用于演示写操作意图。"
             ].join("\n")
+          : isMetadataIntent
+            ? [
+                "下面是元数据查询结果。",
+                "```sql",
+                "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+                "```",
+                "该查询用于枚举当前数据源中的表。"
+              ].join("\n")
           : [
               "下面是查询结果说明。",
               "```sql",
@@ -196,11 +208,19 @@ export class LlmGatewayService implements LlmGateway {
         }
       }
 
-      const fullText =
-        (await result.text).trim() ||
-        streamedText.trim() ||
-        this.buildToolFallbackText(toolCallSql);
+      const fullText = (await result.text).trim() || streamedText.trim();
       if (!fullText) {
+        if (toolCallSql) {
+          throw new DomainError(
+            "LLM_TOOL_CALL_ONLY_RESPONSE",
+            "LLM 仅返回工具调用中间结果，未生成最终 SQL。",
+            502,
+            {
+              provider: runtime.provider,
+              toolSql: toolCallSql.slice(0, 500)
+            }
+          );
+        }
         throw new DomainError(
           "LLM_EMPTY_RESPONSE",
           "LLM 返回为空，无法生成 SQL。",
@@ -220,23 +240,6 @@ export class LlmGatewayService implements LlmGateway {
     } catch (error) {
       if (error instanceof DomainError) {
         throw error;
-      }
-
-      const toolFallbackText = this.buildToolFallbackText(toolCallSql);
-      if (toolFallbackText) {
-        const delta = this.resolveFallbackDelta(streamedText, toolFallbackText);
-        if (delta) {
-          await options?.onEvent?.({
-            type: "text-delta",
-            text: delta
-          });
-        }
-        return {
-          provider: runtime.provider,
-          model: runtime.model,
-          prompt,
-          rawText: toolFallbackText
-        };
       }
 
       if (isTimeoutAbortError(error)) {
@@ -329,13 +332,6 @@ export class LlmGatewayService implements LlmGateway {
       }
     }
     return undefined;
-  }
-
-  private buildToolFallbackText(sql?: string): string {
-    if (!sql) {
-      return "";
-    }
-    return ["下面是工具调用生成的 SQL。", "```sql", sql, "```"].join("\n");
   }
 
   private resolveFallbackDelta(existingText: string, fallbackText: string): string {

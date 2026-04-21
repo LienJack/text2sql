@@ -37,6 +37,7 @@ const LangGraphStateAnnotation = Annotation.Root({
   model: Annotation<string | undefined>(),
   llmRaw: Annotation<LangGraphState["llmRaw"]>(),
   retrievedKnowledge: Annotation<LangGraphState["retrievedKnowledge"]>(),
+  retrievalBundle: Annotation<LangGraphState["retrievalBundle"]>(),
   intentPlan: Annotation<LangGraphState["intentPlan"]>(),
   semanticQueryPlan: Annotation<LangGraphState["semanticQueryPlan"]>(),
   physicalPlan: Annotation<LangGraphState["physicalPlan"]>(),
@@ -229,11 +230,20 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       }
 
       try {
-        const knowledge = deps.retrieveKnowledgeNode.run(state.question);
+        const knowledge = await deps.retrieveKnowledgeNode.run({
+          question: state.question,
+          datasourceId: state.datasourceId,
+          runId: state.runId,
+          modelCatalogId: state.modelCatalogId
+        });
         const endedAt = new Date().toISOString();
         const outputs = {
           status: knowledge.status,
-          snippets: knowledge.snippets
+          snippets: knowledge.snippets,
+          degradeReasons: knowledge.retrievalBundle?.degrade_reasons ?? [],
+          candidateCount: knowledge.retrievalBundle?.candidates.length ?? 0,
+          selectedContextCount:
+            knowledge.retrievalBundle?.selected_context?.length ?? 0
         };
         const trace = appendStep(state, {
           step: {
@@ -249,6 +259,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
         return {
           ...trace,
           retrievedKnowledge: knowledge,
+          retrievalBundle: knowledge.retrievalBundle,
           planningStatus: knowledge.status === "ready" ? "ready" : "degraded",
           planningWarnings:
             knowledge.status === "ready"
@@ -416,11 +427,20 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       }
 
       try {
-        const semanticQueryPlan = deps.buildSemanticQueryNode.run(state.intentPlan);
+        const semanticQueryPlan = await deps.buildSemanticQueryNode.run({
+          intentPlan: state.intentPlan,
+          question: state.question,
+          retrievalBundle: state.retrievalBundle
+        });
         const endedAt = new Date().toISOString();
         const outputs = {
           status: semanticQueryPlan.status,
-          semanticHints: semanticQueryPlan.semanticHints
+          semanticHints: semanticQueryPlan.semanticHints,
+          semanticVersion: semanticQueryPlan.semanticVersion,
+          lockStatus: semanticQueryPlan.lockStatus,
+          fallbackApplied: semanticQueryPlan.fallbackApplied,
+          degradeReason: semanticQueryPlan.degradeReason,
+          riskTags: semanticQueryPlan.riskTags
         };
         const trace = appendStep(state, {
           step: {
@@ -511,11 +531,21 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       }
 
       try {
-        const physicalPlan = deps.buildPhysicalPlanNode.run(state.semanticQueryPlan);
+        const physicalPlan = await deps.buildPhysicalPlanNode.run({
+          semanticPlan: state.semanticQueryPlan,
+          question: state.question,
+          datasourceId: state.datasourceId
+        });
         const endedAt = new Date().toISOString();
         const outputs = {
           status: physicalPlan.status,
-          strategy: physicalPlan.strategy
+          strategy: physicalPlan.strategy,
+          semanticVersion: physicalPlan.semanticVersion,
+          lockStatus: physicalPlan.lockStatus,
+          fallbackApplied: physicalPlan.fallbackApplied,
+          cacheStatus: physicalPlan.cacheStatus,
+          cacheKey: physicalPlan.cacheKey,
+          cacheReason: physicalPlan.cacheReason
         };
         const trace = appendStep(state, {
           step: {
@@ -574,31 +604,43 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
             ? {
                 stream: true,
                 tools: callbacks.tools,
-                onEvent: callbacks.onLlmEvent
+                onEvent: callbacks.onLlmEvent,
+                selectedContext: state.retrievalBundle?.selected_context,
+                datasourceId: state.datasourceId,
+                workspaceId: state.accessContext?.workspaceId
               }
-            : undefined
+            : {
+                selectedContext: state.retrievalBundle?.selected_context,
+                datasourceId: state.datasourceId,
+                workspaceId: state.accessContext?.workspaceId
+              }
         );
         const endedAt = new Date().toISOString();
         const inputs = {
           question: state.question,
           datasourceType: state.datasourceType,
+          selectedContextCount: state.retrievalBundle?.selected_context?.length ?? 0,
+          retrievalStatus: state.retrievalBundle?.status,
+          retrievalDegradeReasons: state.retrievalBundle?.degrade_reasons,
+          retrievalRiskTags: state.retrievalBundle?.risk_tags ?? [],
           modelCatalogId: state.modelCatalogId,
+          datasourceId: state.datasourceId,
+          workspaceId: state.accessContext?.workspaceId,
           planningScaffoldEnabled: state.planningScaffoldEnabled,
           planningStatus: state.planningStatus,
           planningWarnings: state.planningWarnings,
           retrieveSummary: state.retrievedKnowledge?.summary,
           intent: state.intentPlan?.intent,
           semanticHints: state.semanticQueryPlan?.semanticHints,
-          physicalStrategy: state.physicalPlan?.strategy,
-          systemPrompt: generated.prompt.systemPrompt,
-          userPrompt: generated.prompt.userPrompt
+          physicalStrategy: state.physicalPlan?.strategy
         };
         const outputs = {
           provider: generated.provider,
           model: generated.model,
           modelCatalogId: generated.modelCatalogId,
           sql: generated.sql,
-          rawText: generated.rawText
+          rawText: generated.rawText,
+          promptTemplate: generated.promptTemplate
         };
         const trace = appendStep(state, {
           step: {
@@ -618,7 +660,12 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
           ...trace,
           trace: {
             ...trace.trace,
-            provider: generated.provider
+            provider: generated.provider,
+            ...(generated.promptTemplate
+              ? {
+                  promptTemplate: generated.promptTemplate
+                }
+              : {})
           },
           provider: generated.provider,
           model: generated.model,
@@ -692,7 +739,8 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
       const safety = await deps.safetyNode.run({
         sql: state.sql,
         datasourceId: state.datasourceId,
-        accessContext: state.accessContext
+        accessContext: state.accessContext,
+        riskTags: state.retrievalBundle?.risk_tags
       });
       const endedAt = new Date().toISOString();
       const inputs = {

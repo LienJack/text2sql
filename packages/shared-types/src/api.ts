@@ -4,6 +4,9 @@ export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 export type StreamStatus = "in_progress" | "completed" | "failed";
 export type DatasourceType = "sqlite" | "mysql" | "postgresql" | "excel" | "csv";
 export type DatasourceStatus = "available" | "unavailable" | "deleted";
+export type PromptTemplateScene = "sql" | "analysis";
+export type PromptTemplateScope = "global" | "workspace" | "datasource";
+export type PromptTemplateStatus = "draft" | "active" | "archived";
 export type ReasoningStage =
   | "analysis"
   | "generation"
@@ -75,6 +78,50 @@ export interface ClarificationPrompt {
   reason: string;
 }
 
+export interface ContextEnvelopeTimeRange {
+  from?: string;
+  to?: string;
+  timezone?: string;
+}
+
+export interface ContextEnvelopeEntityMapping {
+  entity: string;
+  mappedTo: string;
+}
+
+export interface ContextEnvelope {
+  metricDefinition?: string;
+  timeRange?: ContextEnvelopeTimeRange;
+  entityMappings?: ContextEnvelopeEntityMapping[];
+  mustIncludeTables?: string[];
+  mustExcludeTables?: string[];
+  businessConstraints?: string[];
+}
+
+export interface SendMessageRequest {
+  message: string;
+  contextEnvelope?: ContextEnvelope;
+}
+
+export interface PromptTemplateTraceEvidence {
+  templateId?: string;
+  scene?: PromptTemplateScene;
+  scope?: PromptTemplateScope;
+  version?: number;
+  fallbackReason?: string;
+}
+
+export interface PromptTemplateTraceEvidenceCompat
+  extends PromptTemplateTraceEvidence {
+  template_id?: string;
+  scene_name?: string;
+  template_scene?: string;
+  scope_type?: PromptTemplateScope;
+  template_scope?: PromptTemplateScope;
+  template_version?: number;
+  fallback_reason?: string;
+}
+
 export interface ExecutionTraceStep {
   node: string;
   status: "success" | "failed" | "skipped";
@@ -104,6 +151,27 @@ export interface ExecutionTrace {
     detail?: string;
     at: string;
   }>;
+  promptTemplate?: PromptTemplateTraceEvidence;
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
+  };
 }
 
 export interface LlmRawOutput {
@@ -111,6 +179,129 @@ export interface LlmRawOutput {
   model: string;
   rawText: string;
   createdAt: string;
+}
+
+export interface DeliveryAnswerLayer {
+  text: string;
+  status: RunStatus;
+  provider: string;
+  model?: string;
+}
+
+export interface DeliveryEvidenceReplayLog {
+  replayKey: string;
+  stage: string;
+  indexVersionId?: string;
+  createdAt: string;
+}
+
+export interface DeliveryEvidenceLayer {
+  runId: string;
+  retrievalStatus?: "ready" | "degraded";
+  degradeReasons?: string[];
+  promptTemplate?: PromptTemplateTraceEvidence;
+  selectedContext?: {
+    count: number;
+    snippets?: string[];
+  };
+  retrievalLogs?: DeliveryEvidenceReplayLog[];
+  riskTags?: string[];
+  semanticVersion?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticDegradeReason?: string;
+  skillContextSummary?: {
+    skillCount: number;
+    contextCount: number;
+    degradeReason?: string;
+  };
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
+  };
+  evidenceStale?: boolean;
+}
+
+export interface DeliveryArtifactLayer {
+  sql?: string;
+  columns?: string[];
+  rowCount: number;
+  rowsPreview?: Array<Record<string, unknown>>;
+  hasError: boolean;
+}
+
+export interface DeliveryContract {
+  answer: DeliveryAnswerLayer;
+  evidence?: DeliveryEvidenceLayer;
+  artifact?: DeliveryArtifactLayer;
+}
+
+export interface RagQualityGateReport {
+  thresholds: {
+    recallAt20Min: number;
+    mrrAt10Min: number;
+    retrievalRerankP95MsMax: number;
+    degradeRateMax: number;
+    minSamples: number;
+  };
+  sampleSize: number;
+  sampleReady: boolean;
+  latest?: {
+    runId: string;
+    datasourceId: string;
+    recordedAt: string;
+    metrics: {
+      recallAt20: number;
+      mrrAt10: number;
+      retrievalRerankP95Ms: number;
+      degradeRate: number;
+    };
+  };
+  gatePass: boolean;
+  reasons: string[];
+  generatedAt: string;
+}
+
+export interface RagReplayCompletenessReport {
+  runId: string;
+  requiredStages: string[];
+  observedStages: string[];
+  missingStages: string[];
+  completeness: number;
+  ready: boolean;
+}
+
+export type RagMemoryStatus = "candidate" | "verified" | "production";
+
+export interface RagMemoryFeedbackRequest {
+  runId: string;
+  targetStatus: RagMemoryStatus;
+  note?: string;
+}
+
+export interface RagMemoryFeedbackResponse {
+  runId: string;
+  candidateId: string;
+  beforeStatus: RagMemoryStatus;
+  afterStatus: RagMemoryStatus;
+  applied: boolean;
+  note?: string;
+  updatedAt: string;
 }
 
 export interface SqlRun {
@@ -129,6 +320,7 @@ export interface SqlRun {
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
   llmRaw?: LlmRawOutput | null;
+  delivery?: DeliveryContract;
   createdAt: string;
 }
 
@@ -142,6 +334,7 @@ export interface AgentRunResponse {
   kind: "agent-run";
   outcome: RunStatus;
   run: SqlRun;
+  delivery?: DeliveryContract;
   agent: {
     provider: string;
     model?: string;
@@ -203,6 +396,7 @@ export type ChatStreamEventData =
   | {
       status: RunStatus;
       rowCount: number;
+      delivery?: DeliveryContract;
     }
   | {
       code?: string;
@@ -469,6 +663,176 @@ export interface ListWorkspaceDatasourceBindingsRequest extends PaginationReques
 
 export type ListWorkspaceDatasourceBindingsResponse =
   PaginatedResponse<WorkspaceDatasourceBindingListItem>;
+
+export interface PromptTemplateScopeRef {
+  scope: PromptTemplateScope;
+  scopeKey: string;
+}
+
+export interface PromptTemplate extends PromptTemplateScopeRef {
+  id: string;
+  name: string;
+  scene: PromptTemplateScene;
+  content: string;
+  status: PromptTemplateStatus;
+  version: number;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListPromptTemplatesRequest extends PaginationRequest {
+  scene?: PromptTemplateScene;
+  scope?: PromptTemplateScope;
+  scopeKey?: string;
+  status?: PromptTemplateStatus;
+  query?: string;
+  includeDeleted?: boolean;
+}
+
+export type ListPromptTemplatesResponse = PaginatedResponse<PromptTemplate>;
+
+export interface CreatePromptTemplateRequest extends PromptTemplateScopeRef {
+  name: string;
+  scene: PromptTemplateScene;
+  content: string;
+  status?: PromptTemplateStatus;
+}
+
+export interface UpdatePromptTemplateRequest {
+  name?: string;
+  content?: string;
+  status?: PromptTemplateStatus;
+}
+
+export type CreatePromptTemplateResponse = PromptTemplate;
+export type UpdatePromptTemplateResponse = PromptTemplate;
+
+export interface DeletePromptTemplateResponse {
+  id: string;
+  deletedAt: string;
+}
+
+export type GlossaryScope = "global" | "datasource";
+export type GlossaryTermStatus = "active" | "inactive";
+export type GlossaryConflictResolution = "priority_then_updated_at";
+export type GlossaryAnchorType = "release" | "rollback";
+export type GlossaryAnchorStatus = "active" | "superseded" | "rolled_back";
+export type GlossaryLinkageStatus = "success" | "empty" | "error" | "degraded";
+
+export interface GlossaryScopeRef {
+  scope: GlossaryScope;
+  scopeKey: string;
+  datasourceId?: string | null;
+}
+
+export interface GlossaryConflictDecision {
+  resolution: GlossaryConflictResolution;
+  winnerTermId: string;
+  loserTermIds: string[];
+  winnerPriority: number;
+  winnerUpdatedAt: string;
+}
+
+export interface GlossaryTerm extends GlossaryScopeRef {
+  id: string;
+  term: string;
+  normalizedTerm: string;
+  definition: string;
+  synonyms: string[];
+  priority: number;
+  conflictResolution: GlossaryConflictResolution;
+  status: GlossaryTermStatus;
+  version: number;
+  versionAnchorId?: string | null;
+  rollbackAnchorId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GlossaryAnchor extends GlossaryScopeRef {
+  id: string;
+  version: number;
+  anchorType: GlossaryAnchorType;
+  status: GlossaryAnchorStatus;
+  summary?: string | null;
+  rollbackFromAnchorId?: string | null;
+  rollbackReason?: string | null;
+  createdByRunId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListGlossaryTermsRequest extends PaginationRequest {
+  scope?: GlossaryScope;
+  datasourceId?: string;
+  status?: GlossaryTermStatus;
+  query?: string;
+  version?: number;
+}
+
+export type ListGlossaryTermsResponse = PaginatedResponse<GlossaryTerm>;
+
+export interface CreateGlossaryTermRequest {
+  term: string;
+  definition: string;
+  synonyms?: string[];
+  scope: GlossaryScope;
+  datasourceId?: string;
+  priority?: number;
+  conflictResolution?: GlossaryConflictResolution;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateGlossaryTermRequest {
+  definition?: string;
+  synonyms?: string[];
+  priority?: number;
+  status?: GlossaryTermStatus;
+  conflictResolution?: GlossaryConflictResolution;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpsertGlossaryTermResponse {
+  term: GlossaryTerm;
+  linkageStatus: GlossaryLinkageStatus;
+  conflictDecision?: GlossaryConflictDecision | null;
+  activeAnchor?: GlossaryAnchor | null;
+}
+
+export interface ListGlossaryAnchorsRequest extends PaginationRequest {
+  scope?: GlossaryScope;
+  datasourceId?: string;
+  anchorType?: GlossaryAnchorType;
+}
+
+export type ListGlossaryAnchorsResponse = PaginatedResponse<GlossaryAnchor>;
+
+export interface CreateGlossaryAnchorRequest {
+  scope: GlossaryScope;
+  datasourceId?: string;
+  version: number;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RollbackGlossaryAnchorRequest {
+  scope: GlossaryScope;
+  datasourceId?: string;
+  targetAnchorId: string;
+  rollbackReason?: string;
+}
+
+export interface RollbackGlossaryAnchorResponse {
+  activeAnchor: GlossaryAnchor;
+  previousAnchorId?: string | null;
+  replayed: boolean;
+  idempotencyKey: string;
+}
 
 export interface PaginationRequest {
   page?: number;

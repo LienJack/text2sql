@@ -5,12 +5,13 @@ import type {
   SqlRun
 } from "@text2sql/shared-types";
 import type { GraphInput, GraphTraceContext } from "./agent.types";
-import type { SqlTableAccessContext } from "../../data/query/sql-table-access-guard.service";
+import type { SqlTableAccessContext } from "../../platform/data/query/index";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { IntentPlan } from "../nodes/build-intent-plan.node";
 import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";
 import type { PhysicalPlan } from "../nodes/build-physical-plan.node";
 import type { SqlSafetyDecision } from "../sql/tools/sql-safety.guard";
+import type { RagRetrievalBundle } from "../../rag/retrieval/rag-retrieval.types";
 
 export interface LangGraphSpanEvent {
   step: ExecutionTraceStep;
@@ -26,6 +27,7 @@ export interface LangGraphState extends GraphInput {
   model?: string;
   llmRaw?: SqlRun["llmRaw"];
   retrievedKnowledge?: RetrievedKnowledge;
+  retrievalBundle?: RagRetrievalBundle;
   intentPlan?: IntentPlan;
   semanticQueryPlan?: SemanticQueryPlan;
   physicalPlan?: PhysicalPlan;

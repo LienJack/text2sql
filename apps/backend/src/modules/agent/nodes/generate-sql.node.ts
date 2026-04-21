@@ -1,10 +1,11 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType } from "@text2sql/shared-types";
+import type { DatasourceType, PromptTemplateTraceEvidence } from "@text2sql/shared-types";
 import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
 } from "../../llm/llm-gateway.interface";
 import { SqlGenerationService } from "../sql/sql-generation.service";
+import type { RagRetrievalChunkPayload } from "../../rag/retrieval/rag-retrieval.types";
 
 @Injectable()
 export class GenerateSqlNode {
@@ -18,6 +19,9 @@ export class GenerateSqlNode {
       stream?: boolean;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
+      selectedContext?: RagRetrievalChunkPayload[];
+      datasourceId?: string;
+      workspaceId?: string;
     }
   ): Promise<{
     provider: string;
@@ -30,13 +34,17 @@ export class GenerateSqlNode {
       systemPrompt: string;
       userPrompt: string;
     };
+    promptTemplate?: PromptTemplateTraceEvidence;
   }> {
     if (options?.stream) {
       return this.sqlGeneration.stream(
         question,
         {
+          datasourceId: options.datasourceId,
+          workspaceId: options.workspaceId,
           datasourceType,
-          modelCatalogId
+          modelCatalogId,
+          selectedContext: options.selectedContext
         },
         {
           tools: options.tools,
@@ -45,8 +53,11 @@ export class GenerateSqlNode {
       );
     }
     return this.sqlGeneration.generate(question, {
+      datasourceId: options?.datasourceId,
+      workspaceId: options?.workspaceId,
       datasourceType,
-      modelCatalogId
+      modelCatalogId,
+      selectedContext: options?.selectedContext
     });
   }
 }

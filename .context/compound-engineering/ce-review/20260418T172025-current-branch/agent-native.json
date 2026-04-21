@@ -1,0 +1,104 @@
+{
+  "reviewer": "agent-native-reviewer",
+  "scope": "tracked diff from d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+  "summary": "Core governance actions were added to user-facing UI (prompt templates, glossary lifecycle, RAG memory/anchor governance), but assistant runtime tooling still exposes only runReadOnlySql. This creates agent-native action parity gaps for newly introduced operational controls.",
+  "gaps": [
+    {
+      "id": "ANP-001",
+      "severity": "P1",
+      "title": "Prompt template lifecycle is user-operable but not assistant-tool operable",
+      "priority": "must-have",
+      "ui_actions": [
+        {
+          "action": "Create/update/delete prompt template",
+          "location": "apps/frontend/src/app/prompts/page.tsx",
+          "lines": [177, 211, 213, 225, 229, 249, 343, 356]
+        }
+      ],
+      "backend_user_surface": [
+        {
+          "route": "GET/POST/PATCH/DELETE /api/v1/settings/prompts",
+          "location": "apps/backend/src/modules/settings/settings.controller.ts",
+          "lines": [52, 65, 80, 100]
+        }
+      ],
+      "agent_surface": [
+        {
+          "location": "apps/backend/src/modules/agent/sql/tools/sql-tool-registry.service.ts",
+          "lines": [17, 22],
+          "details": "Only runReadOnlySql is registered; no prompt template management tool"
+        }
+      ],
+      "impact": "Users can change runtime prompt governance from UI, but the assistant cannot perform the same mutation workflow when asked.",
+      "suggested_fix": "Add assistant-callable tools for prompt template list/create/update/delete with admin guardrails and audit metadata, then expose capability hints in system/runtime context.",
+      "confidence": 0.95
+    },
+    {
+      "id": "ANP-002",
+      "severity": "P1",
+      "title": "Glossary term lifecycle (create/edit/toggle) lacks assistant action parity",
+      "priority": "must-have",
+      "ui_actions": [
+        {
+          "action": "Create/edit/toggle glossary terms and scoped datasource linkage",
+          "location": "apps/frontend/src/app/glossary/page.tsx",
+          "lines": [271, 295, 305, 330, 334, 373, 560, 631, 640]
+        }
+      ],
+      "agent_surface": [
+        {
+          "location": "apps/backend/src/modules/agent/sql/tools/sql-tool-registry.service.ts",
+          "lines": [17, 22],
+          "details": "No glossary management tool present"
+        }
+      ],
+      "impact": "Glossary controls directly influence semantic retrieval behavior, but assistant cannot execute the same glossary governance actions available to users.",
+      "suggested_fix": "Introduce primitive glossary tools (list_terms/create_term/update_term/toggle_term/list_anchors) scoped by auth and datasource, returning audit-friendly structured results.",
+      "confidence": 0.93
+    },
+    {
+      "id": "ANP-003",
+      "severity": "P2",
+      "title": "RAG governance actions (memory feedback, anchor create/rollback) are UI/API only",
+      "priority": "should-have",
+      "ui_actions": [
+        {
+          "action": "Submit memory feedback",
+          "location": "apps/frontend/src/app/settings/page.tsx",
+          "lines": [476, 483, 894, 923]
+        },
+        {
+          "action": "Create glossary anchor and rollback anchor",
+          "location": "apps/frontend/src/app/settings/page.tsx",
+          "lines": [503, 517, 536, 550, 977, 992, 1003, 1024]
+        }
+      ],
+      "backend_user_surface": [
+        {
+          "route": "POST /api/v1/rag/memory/feedback",
+          "location": "apps/backend/src/modules/memory/memory.controller.ts",
+          "lines": [10, 14]
+        }
+      ],
+      "agent_surface": [
+        {
+          "location": "apps/backend/src/modules/agent/sql/tools/sql-tool-registry.service.ts",
+          "lines": [17, 22],
+          "details": "No memory feedback or anchor governance tools"
+        }
+      ],
+      "impact": "Operators can run critical RAG governance operations via UI, but assistant cannot execute equivalent workflows in-band.",
+      "suggested_fix": "Add guarded assistant primitives for memory feedback and anchor governance (create_anchor/rollback_anchor) with idempotency + explicit confirmation fields.",
+      "confidence": 0.9
+    }
+  ],
+  "diagnostics": {
+    "lsp_diagnostics_directory": "unavailable (omx_code_intel transport closed)",
+    "fallback_checks": [
+      "pnpm --filter @text2sql/backend run build (pass)",
+      "pnpm --filter @text2sql/frontend run build (pass)",
+      "pattern scan: console.log / empty catch / hardcoded apiKey on tracked TS/JS diff (no matches)"
+    ]
+  },
+  "verdict": "NEEDS_WORK"
+}

@@ -14,7 +14,15 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
 - R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
+- 治理术语硬切规范：`docs/standards/governance-terminology-spec.md`
+- 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
+
+## 后端能力域拓扑（迁移中）
+- 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- 迁移阶段允许兼容入口（re-export/wrapper）短期存在，但禁止引入新的跨域实现细节直连。
+- 详细规则见：`docs/standards/backend-business-capability-topology-spec.md`。
 
 ### 数据库结构改动铁律（必须遵守）
 - 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。
@@ -127,6 +135,7 @@ pnpm dev
 - 如开启 LangSmith，`GET http://localhost:3002/health` 中 `dependencies.langsmith.ready` 为 `true`。
 - `GET http://localhost:3002/health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
 - `GET http://localhost:3002/health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
+- `GET http://localhost:3002/api/v1/rag/quality/report` 中 `glossarySelectedContext` 可查看术语 selected_context 门禁（sampleVersion/relativeLift/status）。
 - 前端能经 `http://localhost:3000` 成功创建会话并发送消息，无跨域报错。
 - 前端从 `/data-sources` 选择任一可用数据源后，可自动创建绑定会话并跳转 `/chat`。
 - `GET /api/v1/sessions?datasource=<id>` 返回的会话均属于指定数据源。
@@ -154,6 +163,17 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `POST /api/v1/sessions/:sessionId/messages/stream`（SSE 流式）
 - `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
 - `GET /api/v1/runs/:runId`
+- `GET /api/v1/glossary/terms`
+- `POST /api/v1/glossary/terms`（管理员）
+- `PATCH /api/v1/glossary/terms/:termId`（管理员）
+- `POST /api/v1/glossary/terms/:termId/toggle`（管理员）
+- `GET /api/v1/glossary/anchors`
+- `POST /api/v1/glossary/anchors`（管理员）
+- `POST /api/v1/glossary/anchors/rollback`（管理员）
+- `GET /api/v1/settings/prompts`
+- `POST /api/v1/settings/prompts`（管理员）
+- `PATCH /api/v1/settings/prompts/:templateId`（管理员）
+- `DELETE /api/v1/settings/prompts/:templateId`（管理员，软删除）
 - `GET /api/v1/datasources`
 - `POST /api/v1/datasources`
 - `POST /api/v1/datasources/upload`
@@ -197,10 +217,13 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
   - `kind`：固定为 `agent-run`
   - `outcome`：`clarification | executionResult | rejected | failed`
   - `run`：完整运行结果（含 `trace` 与可选 `llmRaw`）
+  - 请求体支持可选 `contextEnvelope`（`metricDefinition/timeRange/entityMappings/mustIncludeTables/mustExcludeTables/businessConstraints`）
   - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
 - SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
 - SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
+- SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
+- 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
 
 ## 测试
 ```bash
@@ -213,6 +236,7 @@ pnpm test:frontend
 - 依赖与生成：`pnpm --filter @text2sql/backend run prisma:generate`
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
+- 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
@@ -221,6 +245,14 @@ pnpm test:frontend
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
 - CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+
+## 前端术语联动（Wave A/B）验收边界
+- Wave A：术语写入后可影响 `selected_context` 命中，链路异常时前端可见降级但不阻断主回答。
+- Wave B：在保持“改动即生效”前提下补齐锚点创建/回滚治理能力，并在 `/settings` 提供最小可见入口。
+- 发布证据最小集：
+  - `pnpm -C apps/backend test -- glossary-release-rollback.spec.ts --runInBand`
+  - `pnpm -C apps/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
+  - `pnpm -C apps/frontend exec vitest run tests/unit/settings-page-governance-visibility.spec.tsx`
 
 ## 前端质量门禁
 ```bash
