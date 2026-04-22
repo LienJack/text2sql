@@ -205,6 +205,19 @@ CI 参考：
 例外：
 - 若用户明确指定其他设计方向或流程，以用户指令为最高优先级。
 
+## 9) Text2SQL + RAG 全流程理解文档入口
+
+当需求涉及“理解 Text2SQL 全链路（含 RAG）”时，优先阅读以下 canonical 文档，再进入实现/排障：
+
+- `docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`（主白皮书）
+- `docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`（runId 回放）
+- `docs/rag-understanding/text2sql-rag-local-learning-lab.md`（本地实验）
+
+维护护栏：
+
+- 文档合同检查：`node scripts/check-docs-rag-understanding.mjs`
+- smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
 ## graphify
 
 This project has a graphify knowledge graph at graphify-out/.

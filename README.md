@@ -18,6 +18,13 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
+## Text2SQL + RAG 全流程理解文档（2026-04-21 基线）
+- 主白皮书（请求到交付）：`docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`
+- runId 回放手册（trace/replay/delivery）：`docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`
+- 本地实验剧本（学习闭环）：`docs/rag-understanding/text2sql-rag-local-learning-lab.md`
+- 文档合同检查脚本：`node scripts/check-docs-rag-understanding.mjs`
+- 文档合同 smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
 ## 后端能力域拓扑（迁移中）
 - 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
 - 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
