@@ -74,7 +74,11 @@
       "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 node scripts/check-docs-rag-understanding.mjs 2\u003e\u00261 || true)",
       "Bash(file /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md \u0026\u0026 wc -l /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md)",
       "Bash(head -100 /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-local-learning-lab.md)",
-      "Bash(head -100 /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md)"
+      "Bash(head -100 /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md)",
+      "Bash(cat /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-local-learning-lab.md)",
+      "Bash(cat /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md)",
+      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md\" | head -50)",
+      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md\")"
     ]
   }
 }
