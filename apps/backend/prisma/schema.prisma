@@ -55,6 +55,7 @@ model Datasource {
   workspaceBindings WorkspaceDatasourceBinding[]
   workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   workspaceTablePermissions WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions WorkspaceModelingGraphRevision[]
   ragDocuments       RagDocument[]        @relation("datasource_rag_documents")
   ragChunks          RagChunk[]           @relation("datasource_rag_chunks")
   ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
@@ -459,6 +460,7 @@ model Workspace {
   datasourceBindings WorkspaceDatasourceBinding[]
   datasourceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   datasourceTablePermissions WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions WorkspaceModelingGraphRevision[]
 
   @@unique([name])
   @@index([status, deletedAt])
@@ -526,6 +528,28 @@ model WorkspaceDatasourceTablePermission {
   @@unique([workspaceId, datasourceId, tableName])
   @@index([workspaceId, datasourceId, createdAt])
   @@map("workspace_datasource_table_permissions")
+}
+
+model WorkspaceModelingGraphRevision {
+  id               String   @id
+  workspaceId      String
+  datasourceId     String
+  revision         Int
+  status           String   @default("draft")
+  graphHash        String
+  graphPayload     String
+  createdByActorId String?
+  activatedByActorId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource       Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId, revision])
+  @@index([workspaceId, datasourceId, status, revision], map: "workspace_modeling_graph_revisions_status_revision_idx")
+  @@index([workspaceId, datasourceId, updatedAt], map: "workspace_modeling_graph_revisions_updated_at_idx")
+  @@map("workspace_modeling_graph_revisions")
 }
 
 model RagDocument {

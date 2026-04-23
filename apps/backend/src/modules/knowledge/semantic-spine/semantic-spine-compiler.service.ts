@@ -12,6 +12,7 @@ export interface SemanticSpineCompileInput {
   domain: string;
   datasourceId?: string;
   semanticVersion?: number;
+  modelingRevision?: number;
 }
 
 export interface SemanticSpineCompileEvidence {
@@ -20,6 +21,7 @@ export interface SemanticSpineCompileEvidence {
   matchedObjectKeys: string[];
   missingObjectKeys: string[];
   degradeReason?: string;
+  modelingRevision?: number;
 }
 
 export interface SemanticSpineCompileOutput {
@@ -105,12 +107,14 @@ export class SemanticSpineCompilerService {
           matchedScope: resolved.matched_scope,
           matchedObjectKeys: [],
           missingObjectKeys: ["models", "relationships", "metrics", "calculatedFields"],
-          degradeReason: resolved.degrade_reason
+          degradeReason: resolved.degrade_reason,
+          modelingRevision: input.modelingRevision
         }
       };
     }
 
     return this.buildReadyOutput(resolved.snapshot, {
+      modelingRevision: input.modelingRevision,
       semanticVersion: resolved.semantic_version,
       matchedDomain: resolved.matched_domain,
       matchedScope: resolved.matched_scope,
@@ -121,6 +125,7 @@ export class SemanticSpineCompilerService {
   private buildReadyOutput(
     snapshot: SemanticSpineSnapshotDocument,
     meta: {
+      modelingRevision?: number;
       semanticVersion?: number;
       matchedDomain?: string;
       matchedScope?: "datasource" | "global";
@@ -203,7 +208,8 @@ export class SemanticSpineCompilerService {
         matchedDomain: meta.matchedDomain,
         matchedScope: meta.matchedScope,
         matchedObjectKeys,
-        missingObjectKeys
+        missingObjectKeys,
+        modelingRevision: meta.modelingRevision
       }
     };
   }

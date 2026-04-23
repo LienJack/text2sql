@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-22T16:51:31.006Z",
+  "generatedAt": "2026-04-23T09:41:07.962Z",
   "inputs": {
     "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/samples.json",
     "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/samples.json"
@@ -8,10 +8,12 @@
     "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/gate-summary.json",
     "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/gate-summary.json"
   },
+  "modelingWorkspaceInput": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/modeling-parity-shadow/samples.json",
   "gatePass": false,
   "reasons": [
     "relationship_platform:sample_not_ready",
-    "semantic_spine:sample_not_ready"
+    "semantic_spine:sample_not_ready",
+    "modeling_workspace:sample_not_ready"
   ],
   "relationshipPlatform": {
     "gatePass": false,
@@ -51,6 +53,24 @@
       "minSemanticConsistencyLift": 0.12,
       "maxLatencyOverheadMsP95": 180,
       "maxDegradeRate": 0.1
+    }
+  },
+  "modelingWorkspace": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "deployBlockRate": 0,
+      "schemaBacklogAvg": 0,
+      "saveAsViewSuccessRate": 0,
+      "runtimeRevisionMissingRate": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "maxDeployBlockRate": 0.4,
+      "maxSchemaBacklogAvg": 2,
+      "minSaveAsViewSuccessRate": 0.8,
+      "maxRuntimeRevisionMissingRate": 0.1
     }
   }
 }

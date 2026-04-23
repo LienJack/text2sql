@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import type { Datasource, DatasourceType } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
-import { DatasourceRepository } from "../../platform/data/persistence";
+import {
+  WorkspaceModelingSchemaChangeDetectorService,
+  type ModelingSchemaChangeGroup
+} from "./workspace-modeling-schema-change-detector.service";
+import type { ModelingGraphPayload } from "../../platform/data/persistence/modeling-graph.types";
+import { DatasourceRepository, ModelingGraphRepository } from "../../platform/data/persistence";
+import { ModelingSchemaChangeRepository } from "../../platform/data/persistence/modeling-schema-change.repository";
 import { QueryExecutorRouterService } from "../../platform/data/query";
+import type { DetectModelingSchemaChangeDto } from "./dto/detect-modeling-schema-change.dto";
+import type { UpsertModelingGraphDto } from "./dto/upsert-modeling-graph.dto";
 import type { UpsertModelingSetupDto } from "./dto/upsert-modeling-setup.dto";
+import type { ResolveModelingSchemaChangeDto } from "./dto/resolve-modeling-schema-change.dto";
+import { WorkspaceCalculatedFieldExpressionValidatorService } from "./workspace-calculated-field-expression-validator.service";
 import { WorkspaceDatasourceService } from "./workspace-datasource.service";
 import { WorkspaceRelationshipService } from "./workspace-relationship.service";
 
@@ -83,11 +93,94 @@ type CommitIdempotencyRecord = {
   expiresAt: number;
 };
 
+type ModelingGraphSnapshotResponse = {
+  workspaceId: string;
+  datasourceId: string;
+  activeRevision?: number;
+  draft: {
+    policyVersion: number;
+    revision: number;
+    graphHash: string;
+    updatedAt: string;
+    updatedByActorId?: string;
+    graphPayload: ModelingGraphPayload;
+  } | null;
+};
+
 type ForeignKeyConstraint = {
   sourceTable: string;
   sourceColumn: string;
   targetTable: string;
   targetColumn: string;
+};
+
+type ModelingSchemaChangeKind = "deleted_table" | "deleted_column" | "modified_column_type" | "other";
+
+type ModelingSchemaChangeStatus = "detected" | "resolved";
+
+type ModelingSchemaChangeImpact = {
+  models: string[];
+  relationships: string[];
+  calculatedFields: string[];
+  views: string[];
+};
+
+type ModelingSchemaChangeDetail = {
+  id: string;
+  kind: ModelingSchemaChangeKind;
+  status: ModelingSchemaChangeStatus;
+  summary: string;
+  tableName: string;
+  modelId?: string;
+  columnName?: string;
+  expectedDataType?: string;
+  currentDataType?: string | null;
+  impact: ModelingSchemaChangeImpact;
+};
+
+type ModelingSchemaChangeState = {
+  highRiskStatus: "low" | "high";
+  unresolvedHighRiskCount: number;
+  unresolvedSchemaChangeIds: string[];
+};
+
+type ModelingSchemaChangeDetectResponse = {
+  stage: "schema_change_detected";
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  highRiskStatus: "low" | "high";
+  unresolvedHighRiskCount: number;
+  summary: {
+    deletedTableCount: number;
+    deletedColumnCount: number;
+    modifiedColumnCount: number;
+    otherCount: number;
+    totalCount: number;
+  };
+  changes: ModelingSchemaChangeGroup;
+  draft: {
+    revision: number;
+    graphHash: string;
+    updatedAt: string;
+  } | null;
+};
+
+type ModelingSchemaChangeResolveResponse = {
+  stage: "schema_change_resolved";
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  schemaChangeId: string;
+  alreadyResolved: boolean;
+  highRiskStatus: "low" | "high";
+  unresolvedHighRiskCount: number;
+  schemaChange: ModelingSchemaChangeDetail;
+  draft: {
+    revision: number;
+    graphHash: string;
+    updatedAt: string;
+  };
 };
 
 const MAX_IDEMPOTENCY_KEY_LENGTH = 128;
@@ -98,12 +191,17 @@ const normalizeTableName = (value: string): string => value.trim().toLowerCase()
 @Injectable()
 export class WorkspaceModelingService {
   private readonly commitIdempotencyStore = new Map<string, CommitIdempotencyRecord>();
+  private readonly schemaChangeDetector = new WorkspaceModelingSchemaChangeDetectorService();
+  private readonly modelingSchemaChangeRepository = new ModelingSchemaChangeRepository();
 
   constructor(
     private readonly workspaceDatasourceService: WorkspaceDatasourceService,
     private readonly workspaceRelationshipService: WorkspaceRelationshipService,
     private readonly datasourceRepository: DatasourceRepository,
-    private readonly queryExecutorRouter: QueryExecutorRouterService
+    private readonly queryExecutorRouter: QueryExecutorRouterService,
+    private readonly calculatedFieldExpressionValidator: WorkspaceCalculatedFieldExpressionValidatorService =
+      new WorkspaceCalculatedFieldExpressionValidatorService(),
+    @Optional() private readonly modelingGraphRepository?: ModelingGraphRepository
   ) {}
 
   async listSetupTables(
@@ -337,17 +435,22 @@ export class WorkspaceModelingService {
     const committedRecommendations = selectedRecommendationIds
       .map((item) => recommendationMap.get(item)!)
       .sort((left, right) => left.id.localeCompare(right.id));
+    const committedEdges = committedRecommendations.map((item) => ({
+      id: item.id,
+      name: item.name,
+      bridge: item.bridge
+    }));
     const replaced = await this.workspaceRelationshipService.replaceDraft(
       actor,
       workspaceId,
       datasourceId,
       {
         policyVersion: preview.policyVersion,
-        edges: committedRecommendations.map((item) => ({
-          id: item.id,
-          name: item.name,
-          bridge: item.bridge
-        }))
+        edges: committedEdges,
+        modelingGraphPayload: this.buildSetupModelingGraphPayload(
+          preview.models,
+          committedRecommendations
+        )
       }
     );
 
@@ -377,6 +480,1331 @@ export class WorkspaceModelingService {
     }
 
     return response;
+  }
+
+  async getModelingGraph(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string
+  ): Promise<ModelingGraphSnapshotResponse> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const draftState = await this.workspaceRelationshipService.getDraft(
+      actor,
+      workspaceId,
+      datasourceId
+    );
+    const draft = draftState.draft;
+    if (!draft) {
+      return {
+        workspaceId,
+        datasourceId,
+        activeRevision: draftState.activeRevision,
+        draft: null
+      };
+    }
+    const graphPayload = await this.resolveGraphPayloadFromDraft({
+      workspaceId,
+      datasourceId,
+      revision: draft.revision,
+      edges: draft.edges
+    });
+    return {
+      workspaceId,
+      datasourceId,
+      activeRevision: draftState.activeRevision,
+      draft: {
+        policyVersion: draft.policyVersion,
+        revision: draft.revision,
+        graphHash: draft.graphHash,
+        updatedAt: draft.updatedAt,
+        updatedByActorId: draft.updatedByActorId,
+        graphPayload
+      }
+    };
+  }
+
+  async upsertModelingGraph(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: UpsertModelingGraphDto
+  ): Promise<ModelingGraphSnapshotResponse> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const current = await this.getModelingGraph(actor, workspaceId, datasourceId);
+    const permissionResult = await this.workspaceDatasourceService.listDatasourceTablePermissions(
+      actor,
+      workspaceId,
+      datasourceId
+    );
+    if (permissionResult.policyVersion !== body.policyVersion) {
+      throw new DomainError(
+        "WORKSPACE_DATASOURCE_POLICY_VERSION_CONFLICT",
+        "policyVersion 已过期，请刷新后重试。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          expectedPolicyVersion: permissionResult.policyVersion,
+          providedPolicyVersion: body.policyVersion
+        }
+      );
+    }
+    const basePayload = current.draft?.graphPayload ?? this.emptyModelingGraphPayload();
+    const patch = this.buildModelingGraphPatch(body, datasourceId);
+    const mergedPayload = this.mergeModelingGraphPayload(basePayload, patch);
+    this.assertModelsAllowed(mergedPayload, permissionResult.tableNames, workspaceId, datasourceId);
+    this.calculatedFieldExpressionValidator.validate(mergedPayload);
+    const edges = this.extractEdgesFromModelingPayload(mergedPayload);
+    const replaced = await this.workspaceRelationshipService.replaceDraft(
+      actor,
+      workspaceId,
+      datasourceId,
+      {
+        policyVersion: permissionResult.policyVersion,
+        edges,
+        modelingGraphPayload: mergedPayload
+      }
+    );
+    return {
+      workspaceId,
+      datasourceId,
+      activeRevision: current.activeRevision,
+      draft: {
+        policyVersion: replaced.draft.policyVersion,
+        revision: replaced.draft.revision,
+        graphHash: replaced.draft.graphHash,
+        updatedAt: replaced.draft.updatedAt,
+        updatedByActorId: replaced.draft.updatedByActorId,
+        graphPayload: mergedPayload
+      }
+    };
+  }
+
+  async describeModelingSchemaChangeState(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string
+  ): Promise<ModelingSchemaChangeState> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const snapshot = await this.getModelingGraph(actor, workspaceId, datasourceId);
+    return this.modelingSchemaChangeRepository.buildState(
+      snapshot.draft?.graphPayload.schemaChanges ?? []
+    );
+  }
+
+  async detectModelingSchemaChanges(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: DetectModelingSchemaChangeDto
+  ): Promise<ModelingSchemaChangeDetectResponse> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const context = await this.resolveModelingSchemaChangeContext(
+      actor,
+      workspaceId,
+      datasourceId,
+      body.policyVersion
+    );
+    const currentGraph = await this.getModelingGraph(actor, workspaceId, datasourceId);
+    const currentPayload = currentGraph.draft?.graphPayload ?? this.emptyModelingGraphPayload();
+    const detected = await this.schemaChangeDetector.detect({
+      currentPayload,
+      liveTableNames: context.liveTableNames,
+      loadLiveColumns: async (tableName: string) =>
+        this.loadTableColumns(context.datasource, tableName)
+    });
+    const mergedSchemaChanges = this.modelingSchemaChangeRepository.mergeDetected(
+      currentPayload.schemaChanges,
+      detected.items
+    );
+    const filteredSchemaChanges = body.includeResolved
+      ? mergedSchemaChanges
+      : mergedSchemaChanges.filter((item) => item.status === "detected");
+    const shouldPersist = currentGraph.draft
+      ? !this.modelingSchemaChangeRepository.areEqual(
+          currentPayload.schemaChanges,
+          mergedSchemaChanges
+        )
+      : mergedSchemaChanges.length > 0;
+    let draft = currentGraph.draft
+      ? {
+          revision: currentGraph.draft.revision,
+          graphHash: currentGraph.draft.graphHash,
+          updatedAt: currentGraph.draft.updatedAt
+        }
+      : null;
+
+    if (shouldPersist) {
+      const replaced = await this.workspaceRelationshipService.replaceDraft(
+        actor,
+        workspaceId,
+        datasourceId,
+        {
+          policyVersion: context.policyVersion,
+          edges: this.extractEdgesFromModelingPayload({
+            ...currentPayload,
+            schemaChanges: mergedSchemaChanges
+          }),
+          modelingGraphPayload: {
+            ...currentPayload,
+            schemaChanges: mergedSchemaChanges
+          }
+        }
+      );
+      draft = {
+        revision: replaced.draft.revision,
+        graphHash: replaced.draft.graphHash,
+        updatedAt: replaced.draft.updatedAt
+      };
+    }
+
+    const state = this.modelingSchemaChangeRepository.buildState(filteredSchemaChanges);
+    this.modelingSchemaChangeRepository.saveScopeRecords({
+      workspaceId,
+      datasourceId,
+      records: mergedSchemaChanges
+    });
+    this.modelingSchemaChangeRepository.appendAuditEvent({
+      workspaceId,
+      datasourceId,
+      event: {
+        action: "detect",
+        outcome: "detected",
+        policyVersion: context.policyVersion,
+        detectedCount: detected.items.length,
+        mergedCount: mergedSchemaChanges.length,
+        unresolvedHighRiskCount: state.unresolvedHighRiskCount,
+        persisted: shouldPersist
+      }
+    });
+    return {
+      stage: "schema_change_detected",
+      workspaceId,
+      datasourceId,
+      policyVersion: context.policyVersion,
+      highRiskStatus: state.highRiskStatus,
+      unresolvedHighRiskCount: state.unresolvedHighRiskCount,
+      summary: {
+        deletedTableCount: detected.grouped.deletedTables.length,
+        deletedColumnCount: detected.grouped.deletedColumns.length,
+        modifiedColumnCount: detected.grouped.modifiedColumns.length,
+        otherCount: detected.grouped.other.length,
+        totalCount: detected.grouped.deleted.length + detected.grouped.modified.length + detected.grouped.other.length
+      },
+      changes: {
+        ...detected.grouped,
+        deleted: detected.grouped.deleted.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        ),
+        modified: detected.grouped.modified.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        ),
+        deletedTables: detected.grouped.deletedTables.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        ),
+        deletedColumns: detected.grouped.deletedColumns.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        ),
+        modifiedColumns: detected.grouped.modifiedColumns.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        ),
+        other: detected.grouped.other.filter((item) =>
+          body.includeResolved ? true : item.status === "detected"
+        )
+      },
+      draft
+    };
+  }
+
+  async resolveModelingSchemaChange(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: ResolveModelingSchemaChangeDto
+  ): Promise<ModelingSchemaChangeResolveResponse> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const context = await this.resolveModelingSchemaChangeContext(
+      actor,
+      workspaceId,
+      datasourceId,
+      body.policyVersion
+    );
+    const currentGraph = await this.getModelingGraph(actor, workspaceId, datasourceId);
+    const currentPayload = currentGraph.draft?.graphPayload ?? this.emptyModelingGraphPayload();
+    const changeId = this.resolveSchemaChangeId(body);
+    const currentRecords = await this.schemaChangeDetector.detect({
+      currentPayload,
+      liveTableNames: context.liveTableNames,
+      loadLiveColumns: async (tableName: string) =>
+        this.loadTableColumns(context.datasource, tableName)
+    });
+    const mergedSchemaChanges = this.modelingSchemaChangeRepository.mergeDetected(
+      currentPayload.schemaChanges,
+      currentRecords.items
+    );
+    const target = currentRecords.items.find((item) => item.id === changeId);
+    const storedTarget = mergedSchemaChanges.find((item) => item.id === changeId);
+    if (!target && !storedTarget) {
+      this.modelingSchemaChangeRepository.appendAuditEvent({
+        workspaceId,
+        datasourceId,
+        event: {
+          action: "resolve",
+          outcome: "not_found",
+          changeId,
+          policyVersion: context.policyVersion
+        }
+      });
+      throw new DomainError(
+        "WORKSPACE_MODELING_SCHEMA_CHANGE_NOT_FOUND",
+        "未找到 modeling schema change。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          schemaChangeId: changeId
+        }
+      );
+    }
+
+    const resolvedItem =
+      target ??
+      this.schemaChangeDetector.buildSchemaChangeDetailFromStoredRecord({
+        record: storedTarget!,
+        currentPayload
+      }) ??
+      this.buildSchemaChangeDetailFromStoredRecord({
+        record: storedTarget!,
+        currentPayload
+      });
+    if (!resolvedItem) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_SCHEMA_CHANGE_NOT_FOUND",
+        "未找到 modeling schema change。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          schemaChangeId: changeId
+        }
+      );
+    }
+
+    const resolveResult = this.modelingSchemaChangeRepository.resolveByChangeId(
+      mergedSchemaChanges,
+      changeId
+    );
+    if (!resolveResult.found) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_SCHEMA_CHANGE_NOT_FOUND",
+        "未找到 modeling schema change。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          schemaChangeId: changeId
+        }
+      );
+    }
+
+    if (resolveResult.alreadyResolved) {
+      const draftSnapshot = currentGraph.draft;
+      if (!draftSnapshot) {
+        throw new DomainError(
+          "WORKSPACE_MODELING_SCHEMA_CHANGE_NOT_FOUND",
+          "未找到 modeling schema change。",
+          404,
+          {
+            workspaceId,
+            datasourceId,
+            schemaChangeId: changeId
+          }
+        );
+      }
+      const state = this.modelingSchemaChangeRepository.buildState(mergedSchemaChanges);
+      this.modelingSchemaChangeRepository.saveScopeRecords({
+        workspaceId,
+        datasourceId,
+        records: mergedSchemaChanges
+      });
+      this.modelingSchemaChangeRepository.appendAuditEvent({
+        workspaceId,
+        datasourceId,
+        event: {
+          action: "resolve",
+          outcome: "already_resolved",
+          changeId,
+          policyVersion: context.policyVersion,
+          unresolvedHighRiskCount: state.unresolvedHighRiskCount
+        }
+      });
+      return {
+        stage: "schema_change_resolved",
+        workspaceId,
+        datasourceId,
+        policyVersion: context.policyVersion,
+        schemaChangeId: changeId,
+        alreadyResolved: true,
+        highRiskStatus: state.highRiskStatus,
+        unresolvedHighRiskCount: state.unresolvedHighRiskCount,
+        schemaChange: resolvedItem,
+        draft: {
+          revision: draftSnapshot.revision,
+          graphHash: draftSnapshot.graphHash,
+          updatedAt: draftSnapshot.updatedAt
+        }
+      };
+    }
+
+    const updatedSchemaChanges = resolveResult.updatedRecords;
+    const replaced = await this.workspaceRelationshipService.replaceDraft(
+      actor,
+      workspaceId,
+      datasourceId,
+      {
+        policyVersion: context.policyVersion,
+        edges: this.extractEdgesFromModelingPayload({
+          ...currentPayload,
+          schemaChanges: updatedSchemaChanges
+        }),
+        modelingGraphPayload: {
+          ...currentPayload,
+          schemaChanges: updatedSchemaChanges
+        }
+      }
+    );
+    this.modelingSchemaChangeRepository.saveScopeRecords({
+      workspaceId,
+      datasourceId,
+      records: updatedSchemaChanges
+    });
+    const state = this.modelingSchemaChangeRepository.buildState(updatedSchemaChanges);
+    this.modelingSchemaChangeRepository.appendAuditEvent({
+      workspaceId,
+      datasourceId,
+      event: {
+        action: "resolve",
+        outcome: "resolved",
+        changeId,
+        policyVersion: context.policyVersion,
+        unresolvedHighRiskCount: state.unresolvedHighRiskCount
+      }
+    });
+    return {
+      stage: "schema_change_resolved",
+      workspaceId,
+      datasourceId,
+      policyVersion: context.policyVersion,
+      schemaChangeId: changeId,
+      alreadyResolved: false,
+      highRiskStatus: state.highRiskStatus,
+      unresolvedHighRiskCount: state.unresolvedHighRiskCount,
+      schemaChange: {
+        ...resolvedItem,
+        status: "resolved"
+      },
+      draft: {
+        revision: replaced.draft.revision,
+        graphHash: replaced.draft.graphHash,
+        updatedAt: replaced.draft.updatedAt
+      }
+    };
+  }
+
+  private emptyModelingGraphPayload(): ModelingGraphPayload {
+    return {
+      models: [],
+      relationships: [],
+      calculatedFields: [],
+      views: [],
+      schemaChanges: []
+    };
+  }
+
+  private buildModelingSchemaChangeState(
+    schemaChanges: Array<{
+      id: string;
+      status: ModelingSchemaChangeStatus;
+    }>
+  ): ModelingSchemaChangeState {
+    return this.modelingSchemaChangeRepository.buildState(schemaChanges);
+  }
+
+  private resolveSchemaChangeId(body: ResolveModelingSchemaChangeDto): string {
+    const rawId = body.changeId ?? body.schemaChangeId;
+    const normalized = rawId?.trim();
+    if (!normalized) {
+      throw new DomainError("VALIDATION_ERROR", "changeId 不能为空。", 400, {
+        field: "changeId"
+      });
+    }
+    return normalized;
+  }
+
+  private async resolveModelingSchemaChangeContext(
+    actor: Actor,
+    workspaceId: string,
+    datasourceId: string,
+    policyVersion?: number
+  ): Promise<{
+    policyVersion: number;
+    datasource: Datasource;
+    liveTableNames: string[];
+  }> {
+    const [permissionResult, datasource, tableResult] = await Promise.all([
+      this.workspaceDatasourceService.listDatasourceTablePermissions(
+        actor,
+        workspaceId,
+        datasourceId
+      ),
+      this.loadDatasourceOrThrow(datasourceId),
+      this.workspaceDatasourceService.listDatasourceTables(actor, workspaceId, datasourceId)
+    ]);
+
+    if (
+      policyVersion !== undefined &&
+      permissionResult.policyVersion !== policyVersion
+    ) {
+      throw new DomainError(
+        "WORKSPACE_DATASOURCE_POLICY_VERSION_CONFLICT",
+        "policyVersion 已过期，请刷新后重试。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          expectedPolicyVersion: permissionResult.policyVersion,
+          providedPolicyVersion: policyVersion
+        }
+      );
+    }
+
+    return {
+      policyVersion: permissionResult.policyVersion,
+      datasource,
+      liveTableNames: tableResult.items.map((item) => normalizeTableName(item))
+    };
+  }
+
+  private async collectModelingSchemaChangeDetection(input: {
+    workspaceId: string;
+    datasourceId: string;
+    datasource: Datasource;
+    liveTableNames: string[];
+    currentPayload: ModelingGraphPayload;
+  }): Promise<{
+    items: ModelingSchemaChangeDetail[];
+    grouped: ModelingSchemaChangeGroup;
+  }> {
+    const liveTableSet = new Set(
+      input.liveTableNames.map((item) => normalizeTableName(item))
+    );
+    const currentSchemaChangeById = new Map(
+      input.currentPayload.schemaChanges.map((item) => [item.id, item])
+    );
+    const items: ModelingSchemaChangeDetail[] = [];
+
+    for (const model of [...input.currentPayload.models].sort((left, right) =>
+      left.id.localeCompare(right.id)
+    )) {
+      const tableName = normalizeTableName(model.tableName);
+      const modelId = model.id;
+      const existingTableRecord = currentSchemaChangeById.get(
+        this.buildSchemaChangeId("deleted_table", tableName)
+      );
+
+      if (!liveTableSet.has(tableName)) {
+        items.push(
+          this.buildModelingSchemaChangeDetail({
+            kind: "deleted_table",
+            tableName,
+            modelId,
+            currentPayload: input.currentPayload,
+            existingRecord: existingTableRecord
+          })
+        );
+        continue;
+      }
+
+      const liveColumns = await this.loadTableColumns(input.datasource, tableName);
+      const liveColumnByName = new Map(
+        liveColumns.map((item) => [normalizeTableName(item.name), item])
+      );
+
+      for (const column of [...model.columns].sort((left, right) =>
+        left.name.localeCompare(right.name)
+      )) {
+        const columnName = normalizeTableName(column.name);
+        const liveColumn = liveColumnByName.get(columnName);
+        if (!liveColumn) {
+          items.push(
+            this.buildModelingSchemaChangeDetail({
+              kind: "deleted_column",
+              tableName,
+              modelId,
+              columnName,
+              expectedDataType: column.dataType,
+              currentDataType: null,
+              currentPayload: input.currentPayload,
+              existingRecord: currentSchemaChangeById.get(
+                this.buildSchemaChangeId("deleted_column", tableName, columnName)
+              )
+            })
+          );
+          continue;
+        }
+
+        const expectedDataType = column.dataType.toLowerCase();
+        const currentDataType = liveColumn.dataType.toLowerCase();
+        const columnChanged =
+          expectedDataType !== currentDataType ||
+          column.isNullable !== liveColumn.isNullable ||
+          column.isPrimaryKey !== liveColumn.isPrimaryKey;
+
+        if (columnChanged) {
+          items.push(
+            this.buildModelingSchemaChangeDetail({
+              kind: "modified_column_type",
+              tableName,
+              modelId,
+              columnName,
+              expectedDataType,
+              currentDataType,
+              currentPayload: input.currentPayload,
+              existingRecord: currentSchemaChangeById.get(
+                this.buildSchemaChangeId("modified_column_type", tableName, columnName)
+              )
+            })
+          );
+        }
+      }
+    }
+
+    const grouped: ModelingSchemaChangeGroup = {
+      deletedTables: items.filter((item) => item.kind === "deleted_table"),
+      deletedColumns: items.filter((item) => item.kind === "deleted_column"),
+      modifiedColumns: items.filter((item) => item.kind === "modified_column_type"),
+      other: items.filter((item) => item.kind === "other"),
+      deleted: items.filter(
+        (item) => item.kind === "deleted_table" || item.kind === "deleted_column"
+      ),
+      modified: items.filter((item) => item.kind === "modified_column_type")
+    };
+
+    return {
+      items,
+      grouped
+    };
+  }
+
+  private buildModelingSchemaChangeDetail(input: {
+    kind: ModelingSchemaChangeKind;
+    tableName: string;
+    modelId: string;
+    currentPayload: ModelingGraphPayload;
+    existingRecord?: ModelingGraphPayload["schemaChanges"][number];
+    columnName?: string;
+    expectedDataType?: string;
+    currentDataType?: string | null;
+  }): ModelingSchemaChangeDetail {
+    const id = this.buildSchemaChangeId(
+      input.kind,
+      input.tableName,
+      input.columnName
+    );
+    const status: ModelingSchemaChangeStatus =
+      input.existingRecord?.status === "resolved" ? "resolved" : "detected";
+    const impact = this.buildModelingSchemaChangeImpact({
+      currentPayload: input.currentPayload,
+      tableName: input.tableName,
+      modelId: input.modelId,
+      columnName: input.columnName
+    });
+    const tableLabel = input.tableName;
+    const columnLabel = input.columnName ? `.${input.columnName}` : "";
+    const summary =
+      input.kind === "deleted_table"
+        ? `数据表 ${tableLabel} 已删除。`
+        : input.kind === "deleted_column"
+          ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 已删除。`
+          : input.kind === "modified_column_type"
+            ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 类型或约束已变化。`
+            : `数据表 ${tableLabel}${columnLabel} 出现其他 schema change。`;
+
+    return {
+      id,
+      kind: input.kind,
+      status,
+      summary,
+      tableName: tableLabel,
+      modelId: input.modelId,
+      columnName: input.columnName,
+      expectedDataType: input.expectedDataType,
+      currentDataType: input.currentDataType,
+      impact
+    };
+  }
+
+  private buildSchemaChangeDetailFromStoredRecord(input: {
+    record: ModelingGraphPayload["schemaChanges"][number];
+    currentPayload: ModelingGraphPayload;
+  }): ModelingSchemaChangeDetail | null {
+    const parsed = this.parseSchemaChangeId(input.record.id);
+    if (!parsed?.tableName) {
+      return null;
+    }
+    const tableName = parsed.tableName;
+    const model = input.currentPayload.models.find(
+      (item) => normalizeTableName(item.tableName) === tableName
+    );
+    const modelId = model?.id ?? parsed.tableName;
+    return {
+      id: input.record.id,
+      kind: parsed.kind ?? input.record.kind,
+      status: input.record.status,
+      summary: input.record.summary,
+      tableName,
+      modelId,
+      columnName: parsed.columnName,
+      impact: this.buildModelingSchemaChangeImpact({
+        currentPayload: input.currentPayload,
+        tableName,
+        modelId,
+        columnName: parsed.columnName
+      })
+    };
+  }
+
+  private buildModelingSchemaChangeImpact(input: {
+    currentPayload: ModelingGraphPayload;
+    tableName: string;
+    modelId: string;
+    columnName?: string;
+  }): ModelingSchemaChangeImpact {
+    const tableName = normalizeTableName(input.tableName);
+    const columnName = input.columnName ? normalizeTableName(input.columnName) : undefined;
+    const models = new Set<string>();
+    const relationships = new Set<string>();
+    const calculatedFields = new Set<string>();
+    const views = new Set<string>();
+
+    for (const model of input.currentPayload.models) {
+      if (normalizeTableName(model.tableName) === tableName || model.id === input.modelId) {
+        models.add(model.id);
+      }
+    }
+
+    for (const relationship of input.currentPayload.relationships) {
+      const leftMatches =
+        normalizeTableName(relationship.bridge.left.table) === tableName &&
+        (!columnName || normalizeTableName(relationship.bridge.left.column) === columnName);
+      const rightMatches =
+        normalizeTableName(relationship.bridge.right.table) === tableName &&
+        (!columnName || normalizeTableName(relationship.bridge.right.column) === columnName);
+      if (leftMatches || rightMatches) {
+        relationships.add(relationship.id);
+      }
+    }
+
+    for (const field of input.currentPayload.calculatedFields) {
+      if (field.modelId === input.modelId) {
+        calculatedFields.add(field.id);
+      }
+    }
+
+    for (const view of input.currentPayload.views) {
+      const haystack = [view.name, view.displayName, view.description, view.sql]
+        .filter((value): value is string => typeof value === "string")
+        .join(" ")
+        .toLowerCase();
+      if (haystack.includes(tableName) || (columnName ? haystack.includes(columnName) : false)) {
+        views.add(view.id);
+      }
+    }
+
+    return {
+      models: Array.from(models).sort((left, right) => left.localeCompare(right)),
+      relationships: Array.from(relationships).sort((left, right) => left.localeCompare(right)),
+      calculatedFields: Array.from(calculatedFields).sort((left, right) =>
+        left.localeCompare(right)
+      ),
+      views: Array.from(views).sort((left, right) => left.localeCompare(right))
+    };
+  }
+
+  private mergeModelingSchemaChanges(
+    existing: ModelingGraphPayload["schemaChanges"],
+    detected: ModelingSchemaChangeDetail[]
+  ): ModelingGraphPayload["schemaChanges"] {
+    const merged = new Map<string, ModelingGraphPayload["schemaChanges"][number]>();
+    for (const item of existing) {
+      if (item.status === "resolved") {
+        merged.set(item.id, {
+          id: item.id,
+          status: item.status,
+          kind: item.kind,
+          summary: item.summary
+        });
+      }
+    }
+    for (const item of detected) {
+      merged.set(item.id, {
+        id: item.id,
+        status: item.status,
+        kind: item.kind === "other" ? "other" : item.kind,
+        summary: item.summary
+      });
+    }
+    return Array.from(merged.values()).sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  private areSchemaChangeRecordsEqual(
+    left: ModelingGraphPayload["schemaChanges"],
+    right: ModelingGraphPayload["schemaChanges"]
+  ): boolean {
+    if (left.length !== right.length) {
+      return false;
+    }
+    const normalizedLeft = [...left].sort((a, b) => a.id.localeCompare(b.id));
+    const normalizedRight = [...right].sort((a, b) => a.id.localeCompare(b.id));
+    return normalizedLeft.every((item, index) => {
+      const other = normalizedRight[index];
+      return (
+        other !== undefined &&
+        item.id === other.id &&
+        item.status === other.status &&
+        item.kind === other.kind &&
+        item.summary === other.summary
+      );
+    });
+  }
+
+  private buildSchemaChangeId(
+    kind: ModelingSchemaChangeKind,
+    tableName: string,
+    columnName?: string
+  ): string {
+    const normalizedTableName = normalizeTableName(tableName);
+    const normalizedColumnName = columnName ? normalizeTableName(columnName) : undefined;
+    return normalizedColumnName
+      ? `schema-change:${kind}:${normalizedTableName}:${normalizedColumnName}`
+      : `schema-change:${kind}:${normalizedTableName}`;
+  }
+
+  private parseSchemaChangeId(id: string): {
+    kind?: ModelingSchemaChangeKind;
+    tableName?: string;
+    columnName?: string;
+  } | null {
+    const parts = id.split(":");
+    if (parts.length < 3 || parts[0] !== "schema-change") {
+      return null;
+    }
+    const kindRaw = parts[1] as ModelingSchemaChangeKind | undefined;
+    const kind =
+      kindRaw === "deleted_table" ||
+      kindRaw === "deleted_column" ||
+      kindRaw === "modified_column_type" ||
+      kindRaw === "other"
+        ? kindRaw
+        : undefined;
+    const tableName = parts[2]?.trim().toLowerCase();
+    const columnName = parts[3]?.trim().toLowerCase();
+    if (!tableName) {
+      return null;
+    }
+    return {
+      kind,
+      tableName,
+      columnName
+    };
+  }
+
+  private async loadTableColumns(
+    datasource: Datasource,
+    tableName: string
+  ): Promise<
+    Array<{
+      name: string;
+      dataType: string;
+      isNullable: boolean;
+      isPrimaryKey: boolean;
+    }>
+  > {
+    const queryResult = await this.queryExecutorRouter.execute({
+      datasource,
+      sql: this.buildColumnDiscoverySql(datasource.type, tableName),
+      limit: 200
+    });
+    return queryResult.rows
+      .map((row) => this.readColumnDefinition(row))
+      .filter(
+        (
+          item
+        ): item is {
+          name: string;
+          dataType: string;
+          isNullable: boolean;
+          isPrimaryKey: boolean;
+        } => Boolean(item)
+      )
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  private async resolveGraphPayloadFromDraft(input: {
+    workspaceId: string;
+    datasourceId: string;
+    revision: number;
+    edges: Array<{
+      id: string;
+      name?: string;
+      bridge: {
+        left: {
+          dataset: string;
+          table: string;
+          column: string;
+        };
+        right: {
+          dataset: string;
+          table: string;
+          column: string;
+        };
+        operator: "eq";
+        confidence: number;
+      };
+    }>;
+  }): Promise<ModelingGraphPayload> {
+    if (!this.modelingGraphRepository) {
+      return this.buildPayloadFromEdges(input.edges);
+    }
+    const matched = await this.modelingGraphRepository.findRevision({
+      workspaceId: input.workspaceId,
+      datasourceId: input.datasourceId,
+      revision: input.revision
+    });
+    if (!matched) {
+      return this.buildPayloadFromEdges(input.edges);
+    }
+    return matched.graphPayload;
+  }
+
+  private buildPayloadFromEdges(
+    edges: Array<{
+      id: string;
+      name?: string;
+      bridge: {
+        left: {
+          dataset: string;
+          table: string;
+          column: string;
+        };
+        right: {
+          dataset: string;
+          table: string;
+          column: string;
+        };
+        operator: "eq";
+        confidence: number;
+      };
+    }>
+  ): ModelingGraphPayload {
+    return {
+      models: [],
+      relationships: edges
+        .map((edge) => ({
+          id: edge.id,
+          name: edge.name,
+          source: "manual" as const,
+          confidence: Number(edge.bridge.confidence.toFixed(4)),
+          bridge: {
+            left: {
+              dataset: edge.bridge.left.dataset,
+              table: edge.bridge.left.table,
+              column: edge.bridge.left.column
+            },
+            right: {
+              dataset: edge.bridge.right.dataset,
+              table: edge.bridge.right.table,
+              column: edge.bridge.right.column
+            },
+            operator: "eq" as const,
+            confidence: Number(edge.bridge.confidence.toFixed(4))
+          }
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      calculatedFields: [],
+      views: [],
+      schemaChanges: []
+    };
+  }
+
+  private buildModelingGraphPatch(
+    body: UpsertModelingGraphDto,
+    datasourceId: string
+  ): Partial<ModelingGraphPayload> {
+    const patch: Partial<ModelingGraphPayload> = {};
+    if (body.models) {
+      patch.models = body.models.map((item) => this.normalizeModel(item));
+    }
+    if (body.relationships) {
+      patch.relationships = body.relationships.map((item) =>
+        this.normalizeRelationship(item, datasourceId)
+      );
+    }
+    if (body.calculatedFields) {
+      patch.calculatedFields = body.calculatedFields.map((item) =>
+        this.normalizeCalculatedField(item)
+      );
+    }
+    if (body.views) {
+      patch.views = body.views.map((item) => this.normalizeView(item));
+    }
+    if (body.schemaChanges) {
+      patch.schemaChanges = body.schemaChanges.map((item) => this.normalizeSchemaChange(item));
+    }
+    return patch;
+  }
+
+  private mergeModelingGraphPayload(
+    base: ModelingGraphPayload,
+    patch: Partial<ModelingGraphPayload>
+  ): ModelingGraphPayload {
+    return {
+      models: (patch.models ?? base.models).sort((left, right) => left.id.localeCompare(right.id)),
+      relationships: (patch.relationships ?? base.relationships).sort((left, right) =>
+        left.id.localeCompare(right.id)
+      ),
+      calculatedFields: (patch.calculatedFields ?? base.calculatedFields).sort((left, right) =>
+        left.id.localeCompare(right.id)
+      ),
+      views: (patch.views ?? base.views).sort((left, right) => left.id.localeCompare(right.id)),
+      schemaChanges: (patch.schemaChanges ?? base.schemaChanges).sort((left, right) =>
+        left.id.localeCompare(right.id)
+      )
+    };
+  }
+
+  private assertModelsAllowed(
+    payload: ModelingGraphPayload,
+    allowedTables: string[],
+    workspaceId: string,
+    datasourceId: string
+  ): void {
+    const allowed = new Set(allowedTables.map((item) => item.toLowerCase()));
+    const forbiddenTables = payload.models
+      .map((item) => item.tableName.toLowerCase())
+      .filter((tableName) => !allowed.has(tableName));
+    if (forbiddenTables.length === 0) {
+      return;
+    }
+    throw new DomainError(
+      "WORKSPACE_MODELING_GRAPH_MODEL_FORBIDDEN",
+      "modeling graph 包含未授权数据表。",
+      403,
+      {
+        workspaceId,
+        datasourceId,
+        forbiddenTables: Array.from(new Set(forbiddenTables)).sort((left, right) =>
+          left.localeCompare(right)
+        )
+      }
+    );
+  }
+
+  private extractEdgesFromModelingPayload(
+    payload: ModelingGraphPayload
+  ): Array<{
+    id: string;
+    name?: string;
+    bridge: {
+      left: {
+        dataset: string;
+        table: string;
+        column: string;
+      };
+      right: {
+        dataset: string;
+        table: string;
+        column: string;
+      };
+      operator: "eq";
+      confidence: number;
+    };
+  }> {
+    return payload.relationships
+      .filter((item) => item.bridge.operator === "eq")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        bridge: {
+          left: {
+            dataset: item.bridge.left.dataset,
+            table: item.bridge.left.table.toLowerCase(),
+            column: item.bridge.left.column.toLowerCase()
+          },
+          right: {
+            dataset: item.bridge.right.dataset,
+            table: item.bridge.right.table.toLowerCase(),
+            column: item.bridge.right.column.toLowerCase()
+          },
+          operator: "eq" as const,
+          confidence: Number(item.bridge.confidence.toFixed(4))
+        }
+      }));
+  }
+
+  private normalizeModel(input: Record<string, unknown>): ModelingGraphPayload["models"][number] {
+    const tableName = this.requireStringField(input, "tableName").toLowerCase();
+    const id = this.readStringValue(input.id) ?? tableName;
+    const modelName = this.readStringValue(input.modelName) ?? this.toModelName(tableName);
+    const displayName = this.readNullableStringValue(input.displayName);
+    const description = this.readNullableStringValue(input.description);
+    const columnsRaw = Array.isArray(input.columns) ? input.columns : [];
+    const columns = columnsRaw
+      .map((item) => this.normalizeColumn(item))
+      .sort((left, right) => left.name.localeCompare(right.name));
+    return {
+      id,
+      tableName,
+      modelName,
+      displayName,
+      description,
+      columns
+    };
+  }
+
+  private normalizeColumn(input: unknown): ModelingGraphPayload["models"][number]["columns"][number] {
+    const record = this.asRecord(input);
+    const name = this.requireStringField(record, "name").toLowerCase();
+    const dataType = (this.readStringValue(record.dataType) ?? "unknown").toLowerCase();
+    return {
+      name,
+      dataType,
+      isNullable: this.readBooleanOrDefault(record.isNullable, true),
+      isPrimaryKey: this.readBooleanOrDefault(record.isPrimaryKey, false),
+      displayName: this.readNullableStringValue(record.displayName),
+      description: this.readNullableStringValue(record.description)
+    };
+  }
+
+  private normalizeRelationship(
+    input: Record<string, unknown>,
+    datasourceId: string
+  ): ModelingGraphPayload["relationships"][number] {
+    const id = this.requireStringField(input, "id");
+    const name = this.readStringValue(input.name);
+    const sourceRaw = this.readStringValue(input.source);
+    const source: ModelingGraphPayload["relationships"][number]["source"] =
+      sourceRaw === "inferred" || sourceRaw === "fk" || sourceRaw === "semantic"
+        ? sourceRaw
+        : "manual";
+    const bridge = this.normalizeRelationshipBridge(input.bridge, datasourceId);
+    const confidence = this.readNumberOrDefault(input.confidence, bridge.confidence);
+    return {
+      id,
+      name,
+      source,
+      confidence: Number(Math.max(0, Math.min(1, confidence)).toFixed(4)),
+      bridge
+    };
+  }
+
+  private normalizeRelationshipBridge(
+    value: unknown,
+    datasourceId: string
+  ): ModelingGraphPayload["relationships"][number]["bridge"] {
+    const record = this.asRecord(value);
+    const left = this.normalizeBridgeEndpoint(record.left, datasourceId);
+    const right = this.normalizeBridgeEndpoint(record.right, datasourceId);
+    const operatorRaw = this.readStringValue(record.operator);
+    const operator = operatorRaw === "eq" ? "eq" : "eq";
+    const confidence = Number(
+      Math.max(0, Math.min(1, this.readNumberOrDefault(record.confidence, 1))).toFixed(4)
+    );
+    return {
+      left,
+      right,
+      operator,
+      confidence
+    };
+  }
+
+  private normalizeBridgeEndpoint(
+    value: unknown,
+    datasourceId: string
+  ): ModelingGraphPayload["relationships"][number]["bridge"]["left"] {
+    const record = this.asRecord(value);
+    return {
+      dataset: this.readStringValue(record.dataset) ?? datasourceId,
+      table: this.requireStringField(record, "table").toLowerCase(),
+      column: this.requireStringField(record, "column").toLowerCase()
+    };
+  }
+
+  private normalizeCalculatedField(
+    input: Record<string, unknown>
+  ): ModelingGraphPayload["calculatedFields"][number] {
+    return {
+      id: this.requireStringField(input, "id"),
+      modelId: this.requireStringField(input, "modelId"),
+      name: this.requireStringField(input, "name"),
+      expression: this.requireStringField(input, "expression"),
+      dataType: this.requireStringField(input, "dataType")
+    };
+  }
+
+  private normalizeView(input: Record<string, unknown>): ModelingGraphPayload["views"][number] {
+    const name = this.requireStringField(input, "name");
+    return {
+      id: this.readStringValue(input.id) ?? name,
+      name,
+      sql: this.requireStringField(input, "sql"),
+      displayName: this.readNullableStringValue(input.displayName),
+      description: this.readNullableStringValue(input.description)
+    };
+  }
+
+  private normalizeSchemaChange(
+    input: Record<string, unknown>
+  ): ModelingGraphPayload["schemaChanges"][number] {
+    const statusRaw = this.readStringValue(input.status);
+    const kindRaw = this.readStringValue(input.kind);
+    return {
+      id: this.requireStringField(input, "id"),
+      status: statusRaw === "resolved" ? "resolved" : "detected",
+      kind:
+        kindRaw === "deleted_table" ||
+        kindRaw === "deleted_column" ||
+        kindRaw === "modified_column_type"
+          ? kindRaw
+          : "other",
+      summary: this.requireStringField(input, "summary")
+    };
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new DomainError("WORKSPACE_MODELING_GRAPH_INVALID", "modeling graph payload 非法。", 400);
+    }
+    return value as Record<string, unknown>;
+  }
+
+  private requireStringField(record: Record<string, unknown>, field: string): string {
+    const normalized = this.readStringValue(record[field]);
+    if (normalized) {
+      return normalized;
+    }
+    throw new DomainError("WORKSPACE_MODELING_GRAPH_INVALID", `${field} 不能为空。`, 400, {
+      field
+    });
+  }
+
+  private readStringValue(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private readNullableStringValue(value: unknown): string | null | undefined {
+    if (value === null) {
+      return null;
+    }
+    return this.readStringValue(value);
+  }
+
+  private readBooleanOrDefault(value: unknown, fallback: boolean): boolean {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number") {
+      if (value === 1) {
+        return true;
+      }
+      if (value === 0) {
+        return false;
+      }
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true" || normalized === "1" || normalized === "yes") {
+        return true;
+      }
+      if (normalized === "false" || normalized === "0" || normalized === "no") {
+        return false;
+      }
+    }
+    return fallback;
+  }
+
+  private readNumberOrDefault(value: unknown, fallback: number): number {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return fallback;
+  }
+
+  private buildSetupModelingGraphPayload(
+    models: ModelingSetupModel[],
+    relationships: ModelingRelationshipRecommendation[]
+  ): ModelingGraphPayload {
+    return {
+      models: models
+        .map((model) => ({
+          id: model.id,
+          tableName: model.tableName,
+          modelName: model.modelName,
+          columns: model.columns
+            .map((column) => ({
+              name: column.name,
+              dataType: column.dataType,
+              isNullable: column.isNullable,
+              isPrimaryKey: column.isPrimaryKey
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name))
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      relationships: relationships
+        .map((relationship) => {
+          const source: ModelingGraphPayload["relationships"][number]["source"] =
+            relationship.reason === "foreign_key_constraint" ? "fk" : "inferred";
+          return {
+            id: relationship.id,
+            name: relationship.name,
+            source,
+            confidence: Number(relationship.confidence.toFixed(4)),
+            bridge: {
+              left: {
+                dataset: relationship.bridge.left.dataset,
+                table: relationship.bridge.left.table,
+                column: relationship.bridge.left.column
+              },
+              right: {
+                dataset: relationship.bridge.right.dataset,
+                table: relationship.bridge.right.table,
+                column: relationship.bridge.right.column
+              },
+              operator: "eq" as const,
+              confidence: Number(relationship.bridge.confidence.toFixed(4))
+            }
+          };
+        })
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      calculatedFields: [],
+      views: [],
+      schemaChanges: []
+    };
   }
 
   private async resolveSetupContext(

@@ -4,7 +4,9 @@ import { PlatformDataPersistenceModule } from "../../platform/data/persistence.m
 import { PlatformDataQueryModule } from "../../platform/data/query.module";
 import { WorkspaceDatasourceController } from "./workspace-datasource.controller";
 import { WorkspaceDatasourceService } from "./workspace-datasource.service";
+import { WorkspaceCalculatedFieldExpressionValidatorService } from "./workspace-calculated-field-expression-validator.service";
 import { WorkspaceModelingController } from "./workspace-modeling.controller";
+import { WorkspaceModelingDeployService } from "./workspace-modeling-deploy.service";
 import { WorkspaceModelingService } from "./workspace-modeling.service";
 import { WorkspaceRelationshipController } from "./workspace-relationship.controller";
 import { WorkspaceRelationshipService } from "./workspace-relationship.service";
@@ -22,7 +24,9 @@ import { WorkspaceService } from "./workspace.service";
   providers: [
     WorkspaceService,
     WorkspaceDatasourceService,
+    WorkspaceCalculatedFieldExpressionValidatorService,
     WorkspaceModelingService,
+    WorkspaceModelingDeployService,
     WorkspaceRelationshipService,
     WorkspaceAdminGuard
   ],
@@ -30,6 +34,7 @@ import { WorkspaceService } from "./workspace.service";
     WorkspaceService,
     WorkspaceDatasourceService,
     WorkspaceModelingService,
+    WorkspaceModelingDeployService,
     WorkspaceRelationshipService
   ]
 })

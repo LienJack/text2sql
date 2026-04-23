@@ -198,6 +198,26 @@ describe("DeliveryContractMapper", () => {
     );
   });
 
+  it("maps modelingRevision from trace into delivery evidence", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        modelingRevision: 12,
+        steps: []
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.modelingRevision).toBe(12);
+  });
+
   it("keeps contract complete when artifact is absent", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

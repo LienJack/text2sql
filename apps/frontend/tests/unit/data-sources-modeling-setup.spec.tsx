@@ -147,7 +147,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
     mockSaveModelingSetupSelectedTables.mockResolvedValue({
       workspaceId: "ws-new",
       datasourceId: "ds-created",
-      selectedTableNames: ["customers", "orders"]
+      selectedTables: ["customers", "orders"]
     });
     mockRecommendModelingSetupRelationships.mockResolvedValue([
       {
@@ -176,8 +176,8 @@ describe("DataSourcesPage modeling setup wizard", () => {
 
     await waitFor(() => {
       expect(mockCommitModelingSetup).toHaveBeenCalledWith("ws-new", "ds-created", {
-        selectedTableNames: ["customers", "orders"],
-        acceptedSuggestionIds: ["rel-orders-customers"]
+        selectedTables: ["customers", "orders"],
+        selectedRecommendationIds: ["rel-orders-customers"]
       });
       expect(mockPush).toHaveBeenCalledWith(
         "/settings/modeling?workspaceId=ws-new&datasourceId=ds-created"
@@ -200,8 +200,8 @@ describe("DataSourcesPage modeling setup wizard", () => {
 
     await waitFor(() => {
       expect(mockCommitModelingSetup).toHaveBeenCalledWith("ws-new", "ds-created", {
-        selectedTableNames: ["customers", "orders"],
-        acceptedSuggestionIds: []
+        selectedTables: ["customers", "orders"],
+        selectedRecommendationIds: []
       });
       expect(mockPush).toHaveBeenCalledWith(
         "/settings/modeling?workspaceId=ws-new&datasourceId=ds-created"
@@ -216,7 +216,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
       .mockResolvedValue({
         workspaceId: "ws-new",
         datasourceId: "ds-created",
-        selectedTableNames: ["customers", "orders"]
+        selectedTables: ["customers", "orders"]
       });
     mockRecommendModelingSetupRelationships.mockResolvedValue([]);
 
@@ -239,8 +239,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
     });
 
     expect(mockSaveModelingSetupSelectedTables.mock.calls[1]?.[2]).toEqual({
-      selectedTableNames: ["customers", "orders"]
+      selectedTables: ["customers", "orders"]
     });
   });
 });
-

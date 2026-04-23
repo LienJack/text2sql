@@ -28,6 +28,19 @@ const buildService = (options?: {
     })
   };
   const workspaceRelationshipService = {
+    getDraft: jest.fn(async () => ({
+      workspaceId: "ws-1",
+      datasourceId: "ds-1",
+      activeRevision: 3,
+      draft: {
+        policyVersion: 7,
+        revision: 4,
+        graphHash: "graph-hash-v4",
+        edges: [],
+        updatedAt: "2026-04-23T11:00:00.000Z",
+        updatedByActorId: "user-admin"
+      }
+    })),
     replaceDraft: jest.fn(async (_actor, workspaceId, datasourceId, body) => ({
       workspaceId,
       datasourceId,
@@ -131,6 +144,31 @@ describe("workspace modeling setup integration", () => {
     expect(committed.committedRelationshipCount).toBe(1);
     expect(committed.draft.revision).toBe(5);
     expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(1);
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledWith(
+      actor,
+      "ws-1",
+      "ds-1",
+      expect.objectContaining({
+        policyVersion: 7,
+        edges: [
+          expect.objectContaining({
+            id: preview.relationshipRecommendations[0]!.id
+          })
+        ],
+        modelingGraphPayload: expect.objectContaining({
+          models: expect.arrayContaining([
+            expect.objectContaining({ id: "customers", modelName: "Customers" }),
+            expect.objectContaining({ id: "orders", modelName: "Orders" })
+          ]),
+          relationships: [
+            expect.objectContaining({
+              id: preview.relationshipRecommendations[0]!.id,
+              source: "fk"
+            })
+          ]
+        })
+      })
+    );
   });
 
   it("fails closed when workspace datasource binding is missing", async () => {
@@ -191,8 +229,117 @@ describe("workspace modeling setup integration", () => {
       "ws-1",
       "ds-1",
       expect.objectContaining({
-        edges: []
+        edges: [],
+        modelingGraphPayload: expect.objectContaining({
+          models: expect.arrayContaining([
+            expect.objectContaining({ id: "customers" }),
+            expect.objectContaining({ id: "orders" })
+          ]),
+          relationships: []
+        })
       })
     );
+  });
+
+  it("returns modeling graph snapshot with draft payload", async () => {
+    const { service } = buildService();
+
+    const snapshot = await service.getModelingGraph(actor, "ws-1", "ds-1");
+
+    expect(snapshot.workspaceId).toBe("ws-1");
+    expect(snapshot.datasourceId).toBe("ds-1");
+    expect(snapshot.activeRevision).toBe(3);
+    expect(snapshot.draft?.revision).toBe(4);
+    expect(snapshot.draft?.graphPayload).toEqual({
+      models: [],
+      relationships: [],
+      calculatedFields: [],
+      views: [],
+      schemaChanges: []
+    });
+  });
+
+  it("upserts modeling graph patch via unified draft replace flow", async () => {
+    const { service, workspaceRelationshipService } = buildService();
+
+    const upserted = await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 7,
+      models: [
+        {
+          id: "orders",
+          tableName: "orders",
+          modelName: "Orders",
+          columns: [
+            {
+              name: "id",
+              dataType: "integer",
+              isNullable: false,
+              isPrimaryKey: true
+            }
+          ]
+        }
+      ],
+      relationships: [
+        {
+          id: "rel-orders-customers",
+          source: "fk",
+          bridge: {
+            left: {
+              dataset: "ds-1",
+              table: "orders",
+              column: "customer_id"
+            },
+            right: {
+              dataset: "ds-1",
+              table: "customers",
+              column: "id"
+            },
+            operator: "eq",
+            confidence: 0.99
+          }
+        }
+      ]
+    });
+
+    expect(upserted.draft?.graphPayload.models).toHaveLength(1);
+    expect(upserted.draft?.graphPayload.relationships).toHaveLength(1);
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledWith(
+      actor,
+      "ws-1",
+      "ds-1",
+      expect.objectContaining({
+        policyVersion: 7,
+        edges: [
+          expect.objectContaining({
+            id: "rel-orders-customers"
+          })
+        ],
+        modelingGraphPayload: expect.objectContaining({
+          models: [expect.objectContaining({ id: "orders", tableName: "orders" })],
+          relationships: [expect.objectContaining({ id: "rel-orders-customers", source: "fk" })]
+        })
+      })
+    );
+  });
+
+  it("fails closed when modeling graph models include forbidden table", async () => {
+    const { service, workspaceRelationshipService } = buildService();
+
+    await expect(
+      service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+        policyVersion: 7,
+        models: [
+          {
+            id: "payments",
+            tableName: "payments",
+            modelName: "Payments",
+            columns: []
+          }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "WORKSPACE_MODELING_GRAPH_MODEL_FORBIDDEN"
+    });
+    expect(workspaceRelationshipService.replaceDraft).not.toHaveBeenCalled();
   });
 });

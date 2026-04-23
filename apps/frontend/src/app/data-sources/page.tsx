@@ -570,21 +570,21 @@ function DataSourcesPageContent() {
         setupWizard.workspaceId,
         setupWizard.datasourceId,
         {
-          selectedTableNames
+          selectedTables: selectedTableNames
         }
       );
 
+      const snapshotSelectedTables =
+        snapshot.selectedTables ?? snapshot.selectedTableNames ?? [];
       const persistedTableNames =
-        snapshot.selectedTableNames.length > 0
-          ? snapshot.selectedTableNames
-          : selectedTableNames;
+        snapshotSelectedTables.length > 0 ? snapshotSelectedTables : selectedTableNames;
 
       currentStage = "setup_recommend_failed";
       const suggestions = await recommendModelingSetupRelationships(
         setupWizard.workspaceId,
         setupWizard.datasourceId,
         {
-          selectedTableNames: persistedTableNames
+          selectedTables: persistedTableNames
         }
       );
       setSetupWizard((previous) => ({
@@ -616,8 +616,8 @@ function DataSourcesPageContent() {
     }));
     try {
       await commitModelingSetup(setupWizard.workspaceId, setupWizard.datasourceId, {
-        selectedTableNames: setupWizard.selectedTableNames,
-        acceptedSuggestionIds: normalizeSelectedIds(setupWizard.selectedSuggestionIds)
+        selectedTables: setupWizard.selectedTableNames,
+        selectedRecommendationIds: normalizeSelectedIds(setupWizard.selectedSuggestionIds)
       });
       const targetWorkspaceId = setupWizard.workspaceId;
       const targetDatasourceId = setupWizard.datasourceId;

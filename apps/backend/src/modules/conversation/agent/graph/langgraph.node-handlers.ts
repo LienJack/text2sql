@@ -209,6 +209,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         question: state.question,
         datasourceId: state.datasourceId,
         runId: state.runId,
+        workspaceId: state.accessContext?.workspaceId,
         modelCatalogId: state.modelCatalogId
       });
       const endedAt = new Date().toISOString();
@@ -662,6 +663,11 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
           ...trace.trace,
           provider: generated.provider,
           retryCount: generated.retryCount ?? trace.trace.retryCount ?? 0,
+          ...(state.semanticQueryPlan?.modelingRevision
+            ? {
+                modelingRevision: state.semanticQueryPlan.modelingRevision
+              }
+            : {}),
           ...(generated.promptTemplate
             ? {
                 promptTemplate: generated.promptTemplate

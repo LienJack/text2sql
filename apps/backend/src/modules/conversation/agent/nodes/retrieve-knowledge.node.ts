@@ -27,6 +27,7 @@ export class RetrieveKnowledgeNode {
     question: string;
     datasourceId: string;
     runId: string;
+    workspaceId?: string;
     modelCatalogId?: string;
   }): Promise<RetrievedKnowledge> {
     const question = input.question.trim();
@@ -104,6 +105,7 @@ export class RetrieveKnowledgeNode {
     const retrieved = await this.ragContract.retrieval.retrieve({
       query: normalized,
       datasourceId,
+      workspaceId: input.workspaceId,
       runId
     });
     const reranked = await this.ragContract.rerank.rerank({

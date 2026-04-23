@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 import { DomainError } from "../../../common/domain-error";
+import type { ModelingGraphPayload } from "../../platform/data/persistence/modeling-graph.types";
 import {
   AuditLogRepository,
   DatasourceRepository,
+  ModelingGraphRepository,
+  ModelingGraphValidator,
   WorkspaceDatasourcePolicyRepository,
   WorkspaceRepository
 } from "../../platform/data/persistence";
@@ -53,6 +56,10 @@ type RelationshipScopeState = {
   activeRevision?: number;
 };
 
+type ReplaceDraftInput = ReplaceWorkspaceRelationshipGraphDto & {
+  modelingGraphPayload?: ModelingGraphPayload;
+};
+
 const normalizeId = (value: string, field: string): string => {
   const normalized = value.trim();
   if (!normalized) {
@@ -72,7 +79,9 @@ export class WorkspaceRelationshipService {
     private readonly datasourceRepository: DatasourceRepository,
     private readonly policyRepository: WorkspaceDatasourcePolicyRepository,
     private readonly auditLogRepository: AuditLogRepository,
-    private readonly publishGateFacade: RelationshipPublishGateFacade
+    private readonly publishGateFacade: RelationshipPublishGateFacade,
+    @Optional() private readonly modelingGraphRepository?: ModelingGraphRepository,
+    @Optional() private readonly modelingGraphValidator?: ModelingGraphValidator
   ) {}
 
   async getDraft(
@@ -96,7 +105,7 @@ export class WorkspaceRelationshipService {
     });
     await this.assertDatasourceExists(datasourceId);
 
-    const scopeState = this.state.get(this.scopeKey(workspaceId, datasourceId));
+    const scopeState = await this.ensureScopeState(workspaceId, datasourceId);
     return {
       workspaceId,
       datasourceId,
@@ -109,7 +118,7 @@ export class WorkspaceRelationshipService {
     actor: Actor,
     workspaceIdRaw: string,
     datasourceIdRaw: string,
-    body: ReplaceWorkspaceRelationshipGraphDto
+    body: ReplaceDraftInput
   ): Promise<{
     workspaceId: string;
     datasourceId: string;
@@ -147,20 +156,34 @@ export class WorkspaceRelationshipService {
     const normalizedEdges = this.normalizeEdges(body.edges);
     this.assertEdgeTablesAllowed(normalizedEdges, tablePermissionSet.tableNames);
 
-    const state = this.ensureScopeState(workspaceId, datasourceId);
-    const revision = (state.drafts.at(-1)?.revision ?? 0) + 1;
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
     const now = new Date().toISOString();
+    const payload = this.buildModelingGraphPayload(normalizedEdges, body.modelingGraphPayload);
+    const validatedPayload = this.modelingGraphValidator
+      ? this.modelingGraphValidator.validate(payload)
+      : payload;
+    const graphHash = this.computeGraphHash(validatedPayload);
+    const persistedDraft = this.modelingGraphRepository
+      ? await this.modelingGraphRepository.appendDraftRevision({
+          workspaceId,
+          datasourceId,
+          graphHash,
+          graphPayload: validatedPayload,
+          actorId: actor.id
+        })
+      : null;
+    const revision = persistedDraft?.revision ?? (state.drafts.at(-1)?.revision ?? 0) + 1;
     const draft: RelationshipDraftRecord = {
       workspaceId,
       datasourceId,
       policyVersion: body.policyVersion,
       revision,
-      graphHash: this.computeGraphHash(normalizedEdges),
+      graphHash,
       edges: normalizedEdges,
-      updatedAt: now,
+      updatedAt: persistedDraft?.updatedAt ?? now,
       updatedByActorId: actor.id
     };
-    state.drafts.push(draft);
+    this.upsertScopeDraft(state, draft);
 
     await this.auditLogRepository.appendEvent({
       phase: "governance",
@@ -218,7 +241,7 @@ export class WorkspaceRelationshipService {
       blockingReasons.push("policy_version_conflict");
     }
 
-    const state = this.state.get(this.scopeKey(workspaceId, datasourceId));
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
     const draft = state?.drafts.find((item) => item.revision === body.draftRevision);
     if (!draft) {
       blockingReasons.push("draft_revision_not_found");
@@ -267,7 +290,7 @@ export class WorkspaceRelationshipService {
         }
       );
     }
-    const state = this.ensureScopeState(workspaceId, datasourceId);
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
     const draft = state.drafts.find((item) => item.revision === body.draftRevision);
     if (!draft) {
       throw new DomainError(
@@ -312,6 +335,14 @@ export class WorkspaceRelationshipService {
     }
 
     state.activeRevision = draft.revision;
+    if (this.modelingGraphRepository) {
+      await this.modelingGraphRepository.markActiveRevision({
+        workspaceId,
+        datasourceId,
+        revision: draft.revision,
+        actorId: actor.id
+      });
+    }
     await this.auditLogRepository.appendEvent({
       phase: "governance",
       eventType: "workspace.relationship.published",
@@ -358,7 +389,7 @@ export class WorkspaceRelationshipService {
     });
     await this.assertDatasourceExists(datasourceId);
     const targetRevision = body.rollbackToRevision ?? body.draftRevision;
-    const state = this.ensureScopeState(workspaceId, datasourceId);
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
     const matched = state.drafts.find((item) => item.revision === targetRevision);
     if (!matched) {
       throw new DomainError(
@@ -373,6 +404,14 @@ export class WorkspaceRelationshipService {
       );
     }
     state.activeRevision = matched.revision;
+    if (this.modelingGraphRepository) {
+      await this.modelingGraphRepository.markActiveRevision({
+        workspaceId,
+        datasourceId,
+        revision: matched.revision,
+        actorId: actor.id
+      });
+    }
     await this.auditLogRepository.appendEvent({
       phase: "governance",
       eventType: "workspace.relationship.rollback",
@@ -443,15 +482,9 @@ export class WorkspaceRelationshipService {
     );
   }
 
-  private computeGraphHash(edges: RelationshipEdgeRecord[]): string {
-    const normalized = edges
-      .map((edge) => ({
-        ...edge,
-        name: edge.name ?? null
-      }))
-      .sort((left, right) => left.id.localeCompare(right.id));
+  private computeGraphHash(payload: ModelingGraphPayload): string {
     return createHash("sha256")
-      .update(JSON.stringify(normalized))
+      .update(JSON.stringify(payload))
       .digest("hex");
   }
 
@@ -459,7 +492,10 @@ export class WorkspaceRelationshipService {
     return `${workspaceId}::${datasourceId}`;
   }
 
-  private ensureScopeState(workspaceId: string, datasourceId: string): RelationshipScopeState {
+  private async ensureScopeState(
+    workspaceId: string,
+    datasourceId: string
+  ): Promise<RelationshipScopeState> {
     const key = this.scopeKey(workspaceId, datasourceId);
     const existed = this.state.get(key);
     if (existed) {
@@ -468,8 +504,142 @@ export class WorkspaceRelationshipService {
     const created: RelationshipScopeState = {
       drafts: []
     };
+    if (this.modelingGraphRepository) {
+      const revisions = await this.modelingGraphRepository.listRevisions({
+        workspaceId,
+        datasourceId
+      });
+      for (const revision of revisions) {
+        created.drafts.push({
+          workspaceId: revision.workspaceId,
+          datasourceId: revision.datasourceId,
+          policyVersion: 0,
+          revision: revision.revision,
+          graphHash: revision.graphHash,
+          edges: this.extractRelationshipEdges(revision.graphPayload),
+          updatedAt: revision.updatedAt,
+          updatedByActorId: revision.createdByActorId ?? "system"
+        });
+      }
+      const active = revisions
+        .filter((item) => item.status === "active")
+        .sort((left, right) => left.revision - right.revision)
+        .at(-1);
+      created.activeRevision = active?.revision;
+    }
     this.state.set(key, created);
     return created;
+  }
+
+  private upsertScopeDraft(state: RelationshipScopeState, draft: RelationshipDraftRecord): void {
+    const withoutCurrent = state.drafts.filter((item) => item.revision !== draft.revision);
+    withoutCurrent.push(draft);
+    state.drafts = withoutCurrent.sort((left, right) => left.revision - right.revision);
+  }
+
+  private buildModelingGraphPayload(
+    edges: RelationshipEdgeRecord[],
+    basePayload?: ModelingGraphPayload
+  ): ModelingGraphPayload {
+    const relationshipSourceById = new Map(
+      (basePayload?.relationships ?? []).map((item) => [item.id, item.source])
+    );
+    return {
+      models: (basePayload?.models ?? [])
+        .map((model) => ({
+          id: model.id,
+          tableName: model.tableName,
+          modelName: model.modelName,
+          displayName: model.displayName,
+          description: model.description,
+          columns: model.columns
+            .map((column) => ({
+              name: column.name,
+              dataType: column.dataType,
+              isNullable: column.isNullable,
+              isPrimaryKey: column.isPrimaryKey,
+              displayName: column.displayName,
+              description: column.description
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name))
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      relationships: edges
+        .map((edge) => ({
+          id: edge.id,
+          name: edge.name,
+          source: relationshipSourceById.get(edge.id) ?? "manual",
+          confidence: Number(edge.bridge.confidence.toFixed(4)),
+          bridge: {
+            left: {
+              dataset: edge.bridge.left.dataset,
+              table: edge.bridge.left.table,
+              column: edge.bridge.left.column
+            },
+            right: {
+              dataset: edge.bridge.right.dataset,
+              table: edge.bridge.right.table,
+              column: edge.bridge.right.column
+            },
+            operator: "eq" as const,
+            confidence: Number(edge.bridge.confidence.toFixed(4))
+          }
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      calculatedFields: (basePayload?.calculatedFields ?? [])
+        .map((field) => ({
+          id: field.id,
+          modelId: field.modelId,
+          name: field.name,
+          expression: field.expression,
+          dataType: field.dataType
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      views: (basePayload?.views ?? [])
+        .map((view) => ({
+          id: view.id,
+          name: view.name,
+          sql: view.sql,
+          displayName: view.displayName,
+          description: view.description
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      schemaChanges: (basePayload?.schemaChanges ?? [])
+        .map((change) => ({
+          id: change.id,
+          status: change.status,
+          kind: change.kind,
+          summary: change.summary
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id))
+    };
+  }
+
+  private extractRelationshipEdges(payload: ModelingGraphPayload): RelationshipEdgeRecord[] {
+    if (!Array.isArray(payload.relationships)) {
+      return [];
+    }
+    return payload.relationships
+      .filter((item) => item.bridge.operator === "eq")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        bridge: {
+          left: {
+            dataset: item.bridge.left.dataset,
+            table: item.bridge.left.table.toLowerCase(),
+            column: item.bridge.left.column.toLowerCase()
+          },
+          right: {
+            dataset: item.bridge.right.dataset,
+            table: item.bridge.right.table.toLowerCase(),
+            column: item.bridge.right.column.toLowerCase()
+          },
+          operator: "eq" as const,
+          confidence: Number(item.bridge.confidence.toFixed(4))
+        }
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
   }
 
   private cloneDraft(draft: RelationshipDraftRecord): RelationshipDraftRecord {

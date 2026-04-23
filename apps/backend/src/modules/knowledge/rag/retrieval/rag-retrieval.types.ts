@@ -13,6 +13,7 @@ export interface RagRetrievalRequest {
   query: string;
   datasourceId: string;
   runId: string;
+  workspaceId?: string;
   activeIndexVersionId?: string;
   perLaneLimit?: number;
   finalCandidateLimit?: number;
@@ -107,6 +108,7 @@ export interface RagContextPackInstructionSummary {
 export interface RagContextPack {
   status: "ready" | "degraded";
   semantic_version?: number;
+  modeling_revision?: number;
   semantic_lock_status: "locked" | "fallback" | "degraded";
   semantic_bindings: RagContextPackBindingSummary;
   instruction_sets: RagContextPackInstructionSummary;

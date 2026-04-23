@@ -183,6 +183,7 @@ export class RagRerankService {
     responseBundle.context_pack = {
       status: responseBundle.status,
       semantic_version: existingContextPack?.semantic_version,
+      modeling_revision: existingContextPack?.modeling_revision,
       semantic_lock_status:
         responseBundle.status === "ready"
           ? existingContextPack?.semantic_lock_status ?? "locked"

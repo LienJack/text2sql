@@ -14,6 +14,7 @@ import type {
 } from "@text2sql/shared-types";
 import { Menu } from "lucide-react";
 import { AssistantThread } from "@/components/chat/assistant-thread";
+import { SaveAsViewDialog } from "@/components/chat/save-as-view-dialog";
 import {
   normalizeDeliveryContract,
   normalizeRunForVisibility,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/api-client";
 import {
   readActiveDatasourceId,
+  readActiveWorkspaceId,
   readChatRouteContext,
   replaceChatRouteContext,
   writeActiveDatasourceId
@@ -228,11 +230,22 @@ export function ChatPanel() {
   const [thinkingRequestPending, setThinkingRequestPending] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [sessionError, setSessionError] = useState("");
+  const [saveNotice, setSaveNotice] = useState("");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveTargetRunId, setSaveTargetRunId] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [threadVersion, setThreadVersion] = useState(0);
 
   const allSessions = dedupeSessions([...writableSessions, ...readonlySessions]);
   const activeSession = allSessions.find((session) => session.id === sessionId);
+  const latestSqlRun = Object.values(runsById)
+    .filter((item) => Boolean(item.sql?.trim()))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const saveWorkspaceId =
+    activeSession?.workspaceId?.trim() || readActiveWorkspaceId();
+  const canSaveAsView = Boolean(
+    latestSqlRun?.runId && datasourceId.trim() && saveWorkspaceId.trim()
+  );
 
   const refreshSessionBuckets = async (
     targetDatasourceId = datasourceId
@@ -285,6 +298,7 @@ export function ChatPanel() {
     setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
+    setSaveNotice("");
     setThreadVersion((previous) => previous + 1);
   };
 
@@ -671,6 +685,21 @@ export function ChatPanel() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={!canSaveAsView}
+                onClick={() => {
+                  if (!latestSqlRun?.runId) {
+                    return;
+                  }
+                  setSaveTargetRunId(latestSqlRun.runId);
+                  setSaveDialogOpen(true);
+                }}
+              >
+                Save as View
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 className="md:hidden"
                 onClick={() => setMobileSessionsOpen(true)}
               >
@@ -699,6 +728,7 @@ export function ChatPanel() {
               当前会话绑定的数据源不可用，历史消息可读，但请先返回数据源页重新选择后再发送。
             </StateBlock>
           ) : null}
+          {saveNotice ? <StateBlock variant="success">{saveNotice}</StateBlock> : null}
         </header>
 
         <AssistantThread
@@ -812,6 +842,20 @@ export function ChatPanel() {
             if (sessionId) {
               await loadMessages(sessionId, datasourceId).catch(() => undefined);
             }
+          }}
+        />
+        <SaveAsViewDialog
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          workspaceId={saveWorkspaceId}
+          datasourceId={datasourceId}
+          runId={saveTargetRunId}
+          onSaved={(result) => {
+            setSaveNotice(
+              result.replayed
+                ? `View 已存在（${result.view.name}），可直接前往 Modeling。`
+                : `已保存 View：${result.view.name}（draft revision=${result.draftRevision}）`
+            );
           }}
         />
       </section>

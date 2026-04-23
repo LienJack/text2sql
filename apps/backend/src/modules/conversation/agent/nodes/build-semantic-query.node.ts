@@ -8,12 +8,14 @@ type RagRetrievalBundle = NonNullable<RetrievedKnowledge["retrievalBundle"]>;
 export interface SemanticQueryPlan {
   status: "ready" | "degraded";
   semanticHints: string[];
+  modelingRevision?: number;
   semanticBindingSummary?: {
     modelBindingCount: number;
     relationshipBindingCount: number;
     metricBindingCount: number;
     calculatedFieldBindingCount: number;
     contextPackStatus?: "ready" | "degraded";
+    modelingRevision?: number;
   };
   semanticVersion?: number;
   lockStatus: "locked" | "fallback" | "degraded";
@@ -51,6 +53,13 @@ export class BuildSemanticQueryNode {
       requestedSemanticVersion: input.requestedSemanticVersion
     });
     const contextPack = input.retrievalBundle?.context_pack;
+    const contextPackRecord = contextPack as Record<string, unknown> | undefined;
+    const modelingRevisionRaw =
+      contextPackRecord?.modelingRevision ?? contextPackRecord?.modeling_revision;
+    const modelingRevision =
+      typeof modelingRevisionRaw === "number" && Number.isFinite(modelingRevisionRaw)
+        ? Math.floor(modelingRevisionRaw)
+        : undefined;
 
     const semanticHints =
       intentPlan.intent === "aggregate"
@@ -79,7 +88,8 @@ export class BuildSemanticQueryNode {
           metricBindingCount: contextPack.instruction_sets.metric_bindings.length,
           calculatedFieldBindingCount:
             contextPack.instruction_sets.calculated_field_bindings.length,
-          contextPackStatus: contextPack.status
+          contextPackStatus: contextPack.status,
+          modelingRevision
         }
       : undefined;
 
@@ -87,6 +97,7 @@ export class BuildSemanticQueryNode {
       return {
         status: "degraded",
         semanticHints,
+        modelingRevision,
         semanticBindingSummary,
         semanticVersion: versionLock.semanticVersion,
         lockStatus: "degraded",
@@ -101,6 +112,7 @@ export class BuildSemanticQueryNode {
       return {
         status: "degraded",
         semanticHints,
+        modelingRevision,
         semanticBindingSummary,
         semanticVersion: versionLock.semanticVersion,
         lockStatus: "fallback",
@@ -115,6 +127,7 @@ export class BuildSemanticQueryNode {
     return {
       status: "ready",
       semanticHints,
+      modelingRevision,
       semanticBindingSummary,
       semanticVersion: versionLock.semanticVersion,
       lockStatus: "locked",

@@ -11,6 +11,7 @@ import { RagBudgetPolicy } from "../perf/rag-budget-policy";
 import { RagCacheKeyFactory } from "../perf/rag-cache-key.factory";
 import { RagQueryCacheService } from "../perf/rag-query-cache.service";
 import { RagQualityService } from "../quality/rag-quality.service";
+import { ModelingGraphRepository } from "../../platform/data/persistence/modeling-graph.repository";
 import { fuseWithRrf } from "./fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
@@ -62,7 +63,8 @@ export class RagRetrievalService {
     private readonly cacheKeyFactory: RagCacheKeyFactory,
     private readonly queryCache: RagQueryCacheService,
     private readonly budgetPolicy: RagBudgetPolicy,
-    private readonly ragQualityService: RagQualityService
+    private readonly ragQualityService: RagQualityService,
+    private readonly modelingGraphRepository: ModelingGraphRepository
   ) {}
 
   async retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse> {
@@ -87,7 +89,9 @@ export class RagRetrievalService {
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "invalid_retrieval_input"),
           candidates: [],
-          context_pack: this.buildContextPack({
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
             status: "degraded",
             degradeReasons
           })
@@ -110,7 +114,9 @@ export class RagRetrievalService {
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "no_active_index"),
           candidates: [],
-          context_pack: this.buildContextPack({
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
             status: "degraded",
             degradeReasons
           })
@@ -150,10 +156,11 @@ export class RagRetrievalService {
     });
     const cacheRead = this.queryCache.get<RagRetrievalResponse["retrieval_bundle"]>(cacheKey);
     if (cacheRead.hit && cacheRead.value) {
-      const cachedBundle = this.hydrateCachedBundle({
+      const cachedBundle = await this.hydrateCachedBundle({
         cachedBundle: cacheRead.value,
         query,
         datasourceId,
+        workspaceId: input.workspaceId,
         runId,
         decisionReasons: budgetDecision.decisionReasons
       });
@@ -220,8 +227,10 @@ export class RagRetrievalService {
         decision_reasons: budgetDecision.decisionReasons
       }
     };
-    response.retrieval_bundle.context_pack = this.buildContextPack({
+    response.retrieval_bundle.context_pack = await this.buildContextPack({
       bundle: response.retrieval_bundle,
+      workspaceId: input.workspaceId,
+      datasourceId,
       status: response.retrieval_bundle.status,
       degradeReasons: uniqueDegradeReasons
     });
@@ -244,13 +253,14 @@ export class RagRetrievalService {
     return response;
   }
 
-  private hydrateCachedBundle(input: {
+  private async hydrateCachedBundle(input: {
     cachedBundle: RagRetrievalResponse["retrieval_bundle"];
     query: string;
     datasourceId: string;
+    workspaceId?: string;
     runId: string;
     decisionReasons: string[];
-  }): RagRetrievalResponse["retrieval_bundle"] {
+  }): Promise<RagRetrievalResponse["retrieval_bundle"]> {
     const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
@@ -266,8 +276,10 @@ export class RagRetrievalService {
         ...input.decisionReasons
       ])
     };
-    hydratedBundle.context_pack = this.buildContextPack({
+    hydratedBundle.context_pack = await this.buildContextPack({
       bundle: hydratedBundle,
+      workspaceId: input.workspaceId,
+      datasourceId: input.datasourceId,
       status: hydratedBundle.status,
       degradeReasons: hydratedBundle.degrade_reasons
     });
@@ -813,11 +825,13 @@ export class RagRetrievalService {
     return Array.from(new Set(values));
   }
 
-  private buildContextPack(input: {
+  private async buildContextPack(input: {
     bundle?: RagRetrievalResponse["retrieval_bundle"];
+    workspaceId?: string;
+    datasourceId: string;
     status: "ready" | "degraded";
     degradeReasons: string[];
-  }): RagContextPack {
+  }): Promise<RagContextPack> {
     const bundle = input.bundle;
     const semanticCandidates =
       bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
@@ -829,9 +843,14 @@ export class RagRetrievalService {
       bundle?.skill_context?.context.map((entry) => entry.term) ?? []
     );
     const selectedContext = bundle?.selected_context ?? [];
+    const modelingRevision = await this.resolveActiveModelingRevision(
+      input.workspaceId,
+      input.datasourceId
+    );
 
     return {
       status: input.status,
+      modeling_revision: modelingRevision,
       semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
       semantic_bindings: {
         model_keys: modelKeys,
@@ -856,6 +875,22 @@ export class RagRetrievalService {
           : bundle?.risk_tags ?? []
       )
     };
+  }
+
+  private async resolveActiveModelingRevision(
+    workspaceIdRaw: string | undefined,
+    datasourceIdRaw: string
+  ): Promise<number | undefined> {
+    const workspaceId = workspaceIdRaw?.trim();
+    const datasourceId = datasourceIdRaw.trim();
+    if (!workspaceId || !datasourceId) {
+      return undefined;
+    }
+    const scope = await this.modelingGraphRepository.getLatestScopeState({
+      workspaceId,
+      datasourceId
+    });
+    return scope.activeRevision;
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {

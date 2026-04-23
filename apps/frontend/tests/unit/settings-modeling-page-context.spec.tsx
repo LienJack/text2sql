@@ -1,23 +1,19 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import RelationshipModelingPage from "@/app/settings/modeling/page";
+import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import {
-  getWorkspaceRelationshipDraft,
+  getWorkspaceModelingGraph,
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces
 } from "@/lib/admin-api-client";
 
-vi.mock("@/components/settings/relationship-modeling-canvas", () => ({
-  RelationshipModelingCanvas: () => <div data-testid="mock-modeling-canvas" />
+vi.mock("@/components/settings/modeling/modeling-sidebar-tree", () => ({
+  ModelingSidebarTree: () => <div data-testid="mock-modeling-sidebar" />
 }));
 
-vi.mock("@/components/settings/relationship-edge-editor-dialog", () => ({
-  RelationshipEdgeEditorDialog: () => null
-}));
-
-vi.mock("@/components/settings/relationship-publish-panel", () => ({
-  RelationshipPublishPanel: () => null
+vi.mock("@/components/settings/modeling/modeling-details-panel", () => ({
+  ModelingDetailsPanel: () => <div data-testid="mock-modeling-details" />
 }));
 
 vi.mock("@/lib/admin-api-client", async (importOriginal) => {
@@ -27,7 +23,7 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     listWorkspaces: vi.fn(),
     listWorkspaceDatasourceBindings: vi.fn(),
     listWorkspaceDatasourceTablePermissions: vi.fn(),
-    getWorkspaceRelationshipDraft: vi.fn()
+    getWorkspaceModelingGraph: vi.fn()
   };
 });
 
@@ -36,9 +32,9 @@ const mockListWorkspaceDatasourceBindings = vi.mocked(listWorkspaceDatasourceBin
 const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
   listWorkspaceDatasourceTablePermissions
 );
-const mockGetWorkspaceRelationshipDraft = vi.mocked(getWorkspaceRelationshipDraft);
+const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
 
-describe("RelationshipModelingPage context hydrate", () => {
+describe("ModelingWorkspacePage context hydrate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState(
@@ -91,16 +87,28 @@ describe("RelationshipModelingPage context hydrate", () => {
       policyVersion: 1
     });
 
-    mockGetWorkspaceRelationshipDraft.mockResolvedValue({
+    mockGetWorkspaceModelingGraph.mockResolvedValue({
       workspaceId: "ws-2",
       datasourceId: "ds-2b",
-      draft: null,
+      draft: {
+        policyVersion: 1,
+        revision: 2,
+        graphHash: "hash-r2",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [],
+          relationships: [],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      },
       activeRevision: undefined
     });
   });
 
   it("prefers workspace/datasource from query context when available", async () => {
-    render(<RelationshipModelingPage />);
+    render(<ModelingWorkspacePage />);
 
     const workspaceSelect = await screen.findByRole("combobox", {
       name: "选择工作空间"
@@ -119,7 +127,7 @@ describe("RelationshipModelingPage context hydrate", () => {
       "ws-2",
       "ds-2b"
     );
-    expect(mockGetWorkspaceRelationshipDraft).toHaveBeenCalledWith("ws-2", "ds-2b");
+    expect(mockGetWorkspaceModelingGraph).toHaveBeenCalledWith("ws-2", "ds-2b");
     expect(window.sessionStorage.getItem("text2sql.activeWorkspaceId")).toBe("ws-2");
     expect(window.sessionStorage.getItem("text2sql.activeDatasourceId")).toBe("ds-2b");
   });

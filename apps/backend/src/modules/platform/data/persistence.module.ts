@@ -10,6 +10,8 @@ import { UserRepository } from "../../data/persistence/user.repository";
 import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../../data/persistence/workspace-datasource-policy.repository";
 import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
+import { ModelingGraphRepository } from "./persistence/modeling-graph.repository";
+import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
 
 @Module({
   imports: [AppConfigModule],
@@ -20,6 +22,8 @@ import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
     ChatRepository,
     DatasourceRepository,
     WorkspaceDatasourcePolicyRepository,
+    ModelingGraphRepository,
+    ModelingGraphValidator,
     AuditLogRepository,
     LlmConfigRepository,
     UserRepository,
@@ -32,6 +36,8 @@ import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
     ChatRepository,
     DatasourceRepository,
     WorkspaceDatasourcePolicyRepository,
+    ModelingGraphRepository,
+    ModelingGraphValidator,
     AuditLogRepository,
     LlmConfigRepository,
     UserRepository,

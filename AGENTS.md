@@ -70,6 +70,7 @@ CI 参考：
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
 - 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
+- 若本次改动涉及 modeling parity 指标：执行 `node apps/backend/scripts/collect-modeling-parity-shadow-gate.mjs`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
 
 ## 5) Standards 摘要（摘要 + 链接）
 

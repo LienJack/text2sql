@@ -30,10 +30,13 @@
   - `outcome: "clarification" | "executionResult" | "rejected" | "failed"`
   - `run: SqlRun`
   - `run.trace.promptTemplate?`：SQL 运行时模板命中证据（`templateId/scene/scope/version/fallbackReason`）
+  - `run.trace.modelingRevision?`：建模修订证据（推荐包含 `revisionId/version/updatedAt`，用于标识本次运行绑定的建模快照）
   - `run.trace.effectiveContextSummary?`：用户显式上下文生效摘要（来源优先级与槽位计数）
   - `run.trace.conflictHint?`：上下文冲突提示（`hasConflict/preferredSource/reasonCodes`）
   - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
+  - `run.delivery.evidence.modelingRevision?`：与 `run.trace.modelingRevision?` 同源镜像字段，语义必须一致
   - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
+  - backward compatibility：历史 run 缺失 `run.trace.modelingRevision?` 或 `run.delivery.evidence.modelingRevision?` 时，读取端必须按“字段可选”处理，不得因缺字段导致反序列化或回放失败
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
 ### Stream Contract (`/messages/stream`)
@@ -56,7 +59,7 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
-- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
+- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
 
 ## Tool Calling Baseline
 
@@ -86,3 +89,4 @@
 - Compare stream endpoint success rate against legacy endpoint baseline.
 - Verify trace persistence includes tool events when tools are called.
 - Verify `GET /api/v1/runs/:runId` 对历史 run（无模板字段）与新 run（含模板字段）都可稳定返回，且不会破坏反序列化。
+- Verify `GET /api/v1/runs/:runId` 对历史 run（无 `modelingRevision` 字段）与新 run（含 `run.trace.modelingRevision` + `run.delivery.evidence.modelingRevision`）均可稳定返回，且前端回放不因缺字段降级失败。

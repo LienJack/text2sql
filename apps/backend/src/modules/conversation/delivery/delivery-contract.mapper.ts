@@ -57,6 +57,7 @@ interface RetrievalFusedSnapshot {
 
 interface SemanticSnapshot {
   semanticVersion?: number;
+  modelingRevision?: number;
   semanticLockStatus?: "locked" | "fallback" | "degraded";
   semanticDegradeReason?: string;
 }
@@ -163,6 +164,7 @@ export class DeliveryContractMapper {
       retrievalLogs: replayLogs.length > 0 ? replayLogs : undefined,
       riskTags: evidenceRiskTags.length > 0 ? evidenceRiskTags : undefined,
       semanticVersion: semanticSnapshot.semanticVersion,
+      modelingRevision: semanticSnapshot.modelingRevision,
       semanticSpineVersion:
         finalSnapshot.semanticSpineVersion ?? semanticSnapshot.semanticVersion,
       semanticLockStatus:
@@ -469,6 +471,13 @@ export class DeliveryContractMapper {
   }
 
   private readSemanticSnapshot(run: SqlRun): SemanticSnapshot {
+    const modelingRevisionRaw = run.trace.modelingRevision;
+    const modelingRevision =
+      typeof modelingRevisionRaw === "number" &&
+      Number.isFinite(modelingRevisionRaw) &&
+      modelingRevisionRaw > 0
+        ? Math.floor(modelingRevisionRaw)
+        : undefined;
     const semanticSteps = [...(run.trace.steps ?? [])]
       .reverse()
       .filter(
@@ -497,6 +506,7 @@ export class DeliveryContractMapper {
 
       if (semanticVersion || semanticLockStatus || semanticDegradeReason) {
         return {
+          modelingRevision,
           semanticVersion,
           semanticLockStatus,
           semanticDegradeReason
@@ -504,7 +514,7 @@ export class DeliveryContractMapper {
       }
     }
 
-    return {};
+    return { modelingRevision };
   }
 
   private readTraceContextEvidence(run: SqlRun): TraceContextEvidence {
