@@ -2,12 +2,16 @@
 
 import "@xyflow/react/dist/style.css";
 import {
+  applyEdgeChanges,
+  applyNodeChanges,
   Background,
   Controls,
   MiniMap,
   ReactFlow,
+  type EdgeChange,
   type Edge,
   type EdgeTypes,
+  type NodeChange,
   type Node,
   type NodeTypes,
   type ReactFlowInstance
@@ -72,20 +76,24 @@ function normalizeTableKey(tableName: string): string {
   return tableName.trim().toLowerCase();
 }
 
+function resolveRelationshipLabel(
+  relationship: ModelingGraphPayload["relationships"][number]
+): string {
+  const bridge = relationship.bridge;
+  const leftTable = bridge?.left?.table ?? "unknown_left_table";
+  const leftColumn = bridge?.left?.column ?? "unknown_left_column";
+  const rightTable = bridge?.right?.table ?? "unknown_right_table";
+  const rightColumn = bridge?.right?.column ?? "unknown_right_column";
+  return `${leftTable}.${leftColumn} = ${rightTable}.${rightColumn}`;
+}
+
 function buildGraph(
-  graphPayload: ModelingGraphPayload,
-  selectedNode: ModelingSidebarNode | null
+  graphPayload: ModelingGraphPayload
 ): {
   nodes: Array<Node<ModelingFlowNodeData>>;
   edges: Array<Edge<ModelingFlowEdgeData>>;
   invalidRelationshipCount: number;
 } {
-  const selectedFlowNodeId =
-    selectedNode?.kind === "model" || selectedNode?.kind === "view"
-      ? toFlowNodeId(selectedNode)
-      : "";
-  const selectedRelationshipId = selectedNode?.kind === "relationship" ? selectedNode.id : "";
-
   const models = Array.isArray(graphPayload.models) ? graphPayload.models : [];
   const views = Array.isArray(graphPayload.views) ? graphPayload.views : [];
   const relationships = Array.isArray(graphPayload.relationships)
@@ -113,7 +121,6 @@ function buildGraph(
     return {
       id: nodeId,
       type: MODELING_FLOW_NODE_TYPE,
-      selected: nodeId === selectedFlowNodeId,
       data: {
         kind: "model",
         title: resolveModelLabel(model),
@@ -137,7 +144,6 @@ function buildGraph(
     return {
       id: nodeId,
       type: MODELING_FLOW_NODE_TYPE,
-      selected: nodeId === selectedFlowNodeId,
       data: {
         kind: "view",
         title: resolveViewLabel(view),
@@ -164,15 +170,34 @@ function buildGraph(
 
     const sourceNodeId = modelNodeIdByTable.get(normalizeTableKey(leftEndpoint.table));
     const targetNodeId = modelNodeIdByTable.get(normalizeTableKey(rightEndpoint.table));
-    if (!sourceNodeId || !targetNodeId) {
-      invalidRelationshipCount += 1;
-      return [];
-    }
-
     const relationshipId = relationship.id || `relationship:${index}`;
     const confidence = Number.isFinite(relationship.confidence)
       ? relationship.confidence
       : bridge.confidence;
+    const relationshipLabel = resolveRelationshipLabel(relationship);
+    const normalizedConfidence = Number.isFinite(confidence) ? confidence : 0;
+
+    if (!sourceNodeId || !targetNodeId) {
+      invalidRelationshipCount += 1;
+      const fallbackNodeId = sourceNodeId ?? targetNodeId ?? modelNodes[0]?.id;
+      if (!fallbackNodeId) {
+        return [];
+      }
+      return [
+        {
+          id: relationshipId,
+          source: sourceNodeId ?? fallbackNodeId,
+          target: targetNodeId ?? fallbackNodeId,
+          type: MODELING_FLOW_EDGE_TYPE,
+          data: {
+            label: relationshipLabel,
+            source: relationship.source,
+            confidence: normalizedConfidence,
+            invalid: true
+          }
+        }
+      ];
+    }
 
     return [
       {
@@ -181,11 +206,11 @@ function buildGraph(
         target: targetNodeId,
         type: MODELING_FLOW_EDGE_TYPE,
         animated: relationship.source === "inferred",
-        selected: relationshipId === selectedRelationshipId,
         data: {
-          label: `${leftEndpoint.table}.${leftEndpoint.column} = ${rightEndpoint.table}.${rightEndpoint.column}`,
+          label: relationshipLabel,
           source: relationship.source,
-          confidence: Number.isFinite(confidence) ? confidence : 0
+          confidence: normalizedConfidence,
+          invalid: false
         }
       }
     ];
@@ -211,23 +236,75 @@ export function ModelingFlowCanvas(props: {
     ReactFlowInstance<Node<ModelingFlowNodeData>, Edge<ModelingFlowEdgeData>> | null
   >(null);
   const [didAutoFit, setDidAutoFit] = useState(false);
+  const [flowNodes, setFlowNodes] = useState<Array<Node<ModelingFlowNodeData>>>([]);
+  const [flowEdges, setFlowEdges] = useState<Array<Edge<ModelingFlowEdgeData>>>([]);
 
-  const graph = useMemo(() => buildGraph(graphPayload, selectedNode), [graphPayload, selectedNode]);
+  const graph = useMemo(() => buildGraph(graphPayload), [graphPayload]);
+  const selectedFlowNodeId =
+    selectedNode?.kind === "model" || selectedNode?.kind === "view"
+      ? toFlowNodeId(selectedNode)
+      : "";
+  const selectedRelationshipId = selectedNode?.kind === "relationship" ? selectedNode.id : "";
+
+  useEffect(() => {
+    setFlowNodes((previousNodes) => {
+      const previousPositionById = new Map(
+        previousNodes.map((node) => [node.id, node.position] as const)
+      );
+      return graph.nodes.map((node) => ({
+        ...node,
+        position: previousPositionById.get(node.id) ?? node.position
+      }));
+    });
+    setFlowEdges(graph.edges);
+  }, [graph]);
+
+  useEffect(() => {
+    setFlowNodes((previousNodes) =>
+      previousNodes.map((node) => {
+        const isSelected = node.id === selectedFlowNodeId;
+        if (node.selected === isSelected) {
+          return node;
+        }
+        return {
+          ...node,
+          selected: isSelected
+        };
+      })
+    );
+    setFlowEdges((previousEdges) =>
+      previousEdges.map((edge) => {
+        const isSelected = edge.id === selectedRelationshipId;
+        if (edge.selected === isSelected) {
+          return edge;
+        }
+        return {
+          ...edge,
+          selected: isSelected
+        };
+      })
+    );
+  }, [selectedFlowNodeId, selectedRelationshipId]);
 
   useEffect(() => {
     setDidAutoFit(false);
   }, [autoLayoutKey]);
 
   useEffect(() => {
-    if (didAutoFit || !flowInstance || graph.nodes.length === 0) {
+    if (didAutoFit || !flowInstance || flowNodes.length === 0 || busy) {
       return;
     }
-    flowInstance.fitView({
-      padding: 0.2,
-      duration: 260
+    const rafId = window.requestAnimationFrame(() => {
+      flowInstance.fitView({
+        padding: 0.2,
+        duration: 260
+      });
+      setDidAutoFit(true);
     });
-    setDidAutoFit(true);
-  }, [didAutoFit, flowInstance, graph.nodes.length]);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [busy, didAutoFit, flowInstance, flowNodes.length]);
 
   const handleFitView = useCallback(() => {
     flowInstance?.fitView({
@@ -257,14 +334,28 @@ export function ModelingFlowCanvas(props: {
     [onSelectNode]
   );
 
+  const handleNodesChange = useCallback(
+    (changes: Array<NodeChange<Node<ModelingFlowNodeData>>>) => {
+      setFlowNodes((previousNodes) => applyNodeChanges(changes, previousNodes));
+    },
+    []
+  );
+
+  const handleEdgesChange = useCallback(
+    (changes: Array<EdgeChange<Edge<ModelingFlowEdgeData>>>) => {
+      setFlowEdges((previousEdges) => applyEdgeChanges(changes, previousEdges));
+    },
+    []
+  );
+
   const canRenderReactFlow =
     typeof window !== "undefined" && typeof window.ResizeObserver !== "undefined";
 
   return (
     <section className="space-y-3" data-testid="modeling-flow-canvas">
       <ModelingFlowToolbar
-        nodeCount={graph.nodes.length}
-        edgeCount={graph.edges.length}
+        nodeCount={flowNodes.length}
+        edgeCount={flowEdges.length}
         hasInvalidEdges={graph.invalidRelationshipCount > 0}
         selectedNode={selectedNode}
         busy={busy}
@@ -276,8 +367,7 @@ export function ModelingFlowCanvas(props: {
 
       {graph.invalidRelationshipCount > 0 ? (
         <StateBlock variant="error">
-          检测到 {graph.invalidRelationshipCount} 条 relationship 无法映射到 model 节点，请检查导入表与
-          graph 数据一致性。
+          检测到 {graph.invalidRelationshipCount} 条 relationship 无法完整映射到 model 节点，已在画布中以异常连线标注，请检查导入表与 graph 数据一致性。
         </StateBlock>
       ) : null}
 
@@ -286,7 +376,7 @@ export function ModelingFlowCanvas(props: {
           <div className="flex h-full items-center justify-center p-6">
             <StateBlock variant="loading">正在加载 modeling graph…</StateBlock>
           </div>
-        ) : graph.nodes.length === 0 ? (
+        ) : flowNodes.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">
             <StateBlock variant="idle">
               暂无可渲染节点。请先在数据源 setup 中导入表，或在建模页创建 model/view 资产。
@@ -294,10 +384,12 @@ export function ModelingFlowCanvas(props: {
           </div>
         ) : canRenderReactFlow ? (
           <ReactFlow
-            nodes={graph.nodes}
-            edges={graph.edges}
+            nodes={flowNodes}
+            edges={flowEdges}
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
             onNodeClick={handleNodeClick}
             onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
@@ -306,7 +398,9 @@ export function ModelingFlowCanvas(props: {
             onInit={(instance) => {
               setFlowInstance(instance);
             }}
-            fitView
+            onlyRenderVisibleElements
+            minZoom={0.2}
+            maxZoom={1.8}
           >
             <Background />
             <MiniMap pannable zoomable />
@@ -318,7 +412,7 @@ export function ModelingFlowCanvas(props: {
               当前环境不支持 Flow 渲染器，已切换为简化列表视图（仅用于低能力运行环境）。
             </StateBlock>
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-              {graph.nodes.map((node) => (
+              {flowNodes.map((node) => (
                 <button
                   key={node.id}
                   type="button"
@@ -335,10 +429,10 @@ export function ModelingFlowCanvas(props: {
                 </button>
               ))}
             </div>
-            {graph.edges.length > 0 ? (
+            {flowEdges.length > 0 ? (
               <div className="space-y-1 rounded-md border border-[var(--border-default)] bg-white p-3">
                 <p className="text-xs font-medium text-[var(--text-primary)]">Relationships</p>
-                {graph.edges.map((edge) => (
+                {flowEdges.map((edge) => (
                   <button
                     key={edge.id}
                     type="button"
@@ -356,7 +450,7 @@ export function ModelingFlowCanvas(props: {
         )}
       </div>
 
-      {graph.edges.length === 0 && graph.nodes.length > 0 ? (
+      {flowEdges.length === 0 && flowNodes.length > 0 ? (
         <StateBlock variant="idle">当前无 relationships 连线，可继续在 Relationship Editor 中补充。</StateBlock>
       ) : null}
     </section>

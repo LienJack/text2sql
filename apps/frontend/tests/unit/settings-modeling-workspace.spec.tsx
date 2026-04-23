@@ -7,6 +7,7 @@ import {
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces,
+  precheckWorkspaceModelingDeploy,
   upsertWorkspaceModelingGraph
 } from "@/lib/admin-api-client";
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     listWorkspaceDatasourceBindings: vi.fn(),
     listWorkspaceDatasourceTablePermissions: vi.fn(),
     getWorkspaceModelingGraph: vi.fn(),
+    precheckWorkspaceModelingDeploy: vi.fn(),
     upsertWorkspaceModelingGraph: vi.fn()
   };
 });
@@ -28,6 +30,7 @@ const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
   listWorkspaceDatasourceTablePermissions
 );
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
+const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
 const mockUpsertWorkspaceModelingGraph = vi.mocked(upsertWorkspaceModelingGraph);
 
 describe("ModelingWorkspacePage", () => {
@@ -103,6 +106,24 @@ describe("ModelingWorkspacePage", () => {
       }
     });
 
+    mockPrecheckWorkspaceModelingDeploy.mockResolvedValue({
+      pass: true,
+      riskLevel: "low",
+      blockingReasons: [],
+      draftRevision: 2,
+      activeRevision: 1,
+      dryRun: {
+        pass: true,
+        executedCount: 1,
+        failedSamples: []
+      },
+      schemaChange: {
+        highRiskStatus: "low",
+        unresolvedHighRiskCount: 0,
+        unresolvedSchemaChangeIds: []
+      }
+    });
+
     mockUpsertWorkspaceModelingGraph.mockImplementation(async (workspaceId, datasourceId, input) => ({
       workspaceId,
       datasourceId,
@@ -128,6 +149,7 @@ describe("ModelingWorkspacePage", () => {
     render(<ModelingWorkspacePage />);
 
     await screen.findByRole("button", { name: "选择 model Orders Model" });
+    expect(screen.getByTestId("modeling-mobile-quick-access")).toBeInTheDocument();
 
     await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
     await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型V2");
@@ -226,5 +248,23 @@ describe("ModelingWorkspacePage", () => {
       screen.getByText("Current Context: relationship · rel-orders-customers")
     ).toBeInTheDocument();
     expect(screen.getByText("Relationship Editor")).toBeInTheDocument();
+  });
+
+  it("blocks deploy precheck when graph has unsaved local edits", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await screen.findByRole("button", { name: "选择 model Orders Model" });
+
+    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
+    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型未保存");
+    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+
+    await user.click(screen.getByRole("button", { name: "Precheck" }));
+
+    expect(
+      await screen.findByText("检测到未保存的建模改动，请先点击“保存 Modeling Draft”后再执行 precheck。")
+    ).toBeInTheDocument();
+    expect(mockPrecheckWorkspaceModelingDeploy).not.toHaveBeenCalled();
   });
 });

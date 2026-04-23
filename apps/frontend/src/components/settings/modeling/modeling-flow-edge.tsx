@@ -13,6 +13,7 @@ export type ModelingFlowEdgeData = {
   label: string;
   source: "manual" | "inferred" | "fk" | "semantic";
   confidence: number;
+  invalid?: boolean;
 };
 
 export function ModelingFlowEdge({
@@ -28,8 +29,10 @@ export function ModelingFlowEdge({
 }: EdgeProps) {
   const edgeData = data as ModelingFlowEdgeData | undefined;
   const confidence = edgeData?.confidence ?? 1;
-  const isLowConfidence = confidence < 0.6;
-  const hasDash = !selected && (edgeData?.source === "inferred" || isLowConfidence);
+  const isInvalid = Boolean(edgeData?.invalid);
+  const isLowConfidence = !isInvalid && confidence < 0.6;
+  const hasDash = !selected && (isInvalid || edgeData?.source === "inferred" || isLowConfidence);
+  const confidenceBand = isInvalid ? "invalid" : isLowConfidence ? "low" : "normal";
 
   const [path, labelX, labelY] = getBezierPath({
     sourceX,
@@ -48,13 +51,19 @@ export function ModelingFlowEdge({
         className={cn(
           "transition-all",
           selected
-            ? "stroke-[var(--action-primary)]"
-            : isLowConfidence
-              ? "stroke-amber-600"
-              : "stroke-[var(--border-strong)]",
-          selected ? "stroke-[2.5]" : isLowConfidence ? "stroke-2" : "stroke-[1.6]",
+            ? isInvalid
+              ? "stroke-red-600 stroke-[2.8]"
+              : "stroke-[var(--action-primary)] stroke-[2.5]"
+            : isInvalid
+              ? "stroke-red-500 stroke-[2.2]"
+              : isLowConfidence
+              ? "stroke-amber-600 stroke-2"
+              : "stroke-[var(--border-strong)] stroke-[1.6]",
           hasDash ? "[stroke-dasharray:6_4]" : ""
         )}
+        data-confidence-band={confidenceBand}
+        data-selected={selected ? "true" : "false"}
+        data-testid="modeling-flow-edge-path"
       />
       {edgeData?.label ? (
         <text
@@ -62,10 +71,16 @@ export function ModelingFlowEdge({
           y={labelY}
           textAnchor="middle"
           dominantBaseline="middle"
-          className="fill-[var(--text-secondary)] text-[10px]"
+          className={cn(
+            "text-[10px]",
+            isInvalid ? "fill-red-700" : "fill-[var(--text-secondary)]"
+          )}
+          data-confidence-band={confidenceBand}
           data-testid="modeling-flow-edge-label"
         >
-          {`${edgeData.label} [${edgeData.source} · ${confidence.toFixed(2)}]`}
+          {`${edgeData.label} [${
+            isInvalid ? "invalid · " : ""
+          }${edgeData.source} · ${confidence.toFixed(2)}]`}
         </text>
       ) : null}
     </>

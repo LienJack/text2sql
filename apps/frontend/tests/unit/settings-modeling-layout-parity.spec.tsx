@@ -109,6 +109,15 @@ describe("Modeling layout parity", () => {
     const leftPane = within(layoutShell).getByTestId("modeling-layout-left-pane");
     const canvasPane = within(layoutShell).getByTestId("modeling-layout-canvas-pane");
     const contextPane = within(layoutShell).getByTestId("modeling-layout-context-pane");
+    const paneOrder = Array.from(layoutShell.children).map((element) =>
+      element.getAttribute("data-testid")
+    );
+
+    expect(paneOrder).toEqual([
+      "modeling-layout-left-pane",
+      "modeling-layout-canvas-pane",
+      "modeling-layout-context-pane"
+    ]);
 
     expect(within(leftPane).getByTestId("layout-mock-sidebar-tree")).toBeInTheDocument();
     expect(within(canvasPane).getByTestId("layout-mock-flow-canvas")).toBeInTheDocument();
@@ -128,6 +137,11 @@ describe("Modeling layout parity", () => {
     });
 
     expect(screen.getByTestId("modeling-top-status-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("modeling-mobile-quick-access")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "定位到画布" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "资产树" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "详情/部署" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存 Modeling Draft" })).toBeInTheDocument();
     expect(screen.getByTestId("modeling-layout-left-pane")).toBeInTheDocument();
     expect(screen.getByTestId("modeling-layout-canvas-pane")).toBeInTheDocument();
     expect(screen.getByTestId("modeling-layout-context-pane")).toBeInTheDocument();

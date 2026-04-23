@@ -1,6 +1,6 @@
 "use client";
 
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 
 export const MODELING_FLOW_NODE_TYPE = "modelingFlowNode";
@@ -12,18 +12,27 @@ export type ModelingFlowNodeData = {
   columnCount?: number;
 };
 
-export function ModelingFlowNode({ data, selected }: NodeProps) {
+export function ModelingFlowNode({
+  id,
+  data,
+  selected,
+  dragging
+}: NodeProps<Node<ModelingFlowNodeData>>) {
   const nodeData = data as ModelingFlowNodeData;
 
   return (
     <div
       className={cn(
-        "min-w-[220px] rounded-lg border bg-white px-3 py-2 shadow-sm transition-colors",
+        "min-w-[220px] cursor-grab rounded-lg border bg-white px-3 py-2 shadow-sm transition-[border-color,box-shadow] active:cursor-grabbing",
         selected
           ? "border-[var(--action-primary)] ring-1 ring-[var(--action-primary)]/35"
-          : "border-[var(--border-default)]"
+          : "border-[var(--border-default)]",
+        dragging ? "shadow-md ring-1 ring-[var(--action-primary)]/20" : ""
       )}
+      data-node-id={id}
       data-node-kind={nodeData.kind}
+      data-selected={selected ? "true" : "false"}
+      data-dragging={dragging ? "true" : "false"}
       data-testid="modeling-flow-node"
     >
       <Handle

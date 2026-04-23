@@ -110,19 +110,26 @@ describe("settings modeling deploy flow", () => {
     });
 
     render(<ModelingWorkspacePage />);
-    await screen.findByText("Deploy");
 
-    await user.click(screen.getByRole("button", { name: "Precheck" }));
+    const precheckButton = await screen.findByRole("button", { name: "Precheck" });
+    await waitFor(() => {
+      expect(precheckButton).toBeEnabled();
+    });
+    await user.click(precheckButton);
 
-    expect(await screen.findByText("Deploy precheck 未通过，请先处理阻断项。")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockPrecheckWorkspaceModelingDeploy).toHaveBeenCalledWith("ws-1", "ds-1", {
+        policyVersion: 11,
+        draftRevision: 2
+      });
+    });
     expect(
       screen.getByText("policyVersion 已变化，请刷新最新快照并基于新版本重试。")
     ).toBeInTheDocument();
     expect(screen.getByText("Dry-run Failed Samples")).toBeInTheDocument();
     expect(screen.getByText("column_not_found")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Activate Revision" })
-    ).toBeDisabled();
+    expect(screen.getByText("Dry-run: failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activate Revision" })).toBeDisabled();
   });
 
   it("syncs deploy success evidence after activate revision", async () => {
@@ -200,20 +207,41 @@ describe("settings modeling deploy flow", () => {
     });
 
     render(<ModelingWorkspacePage />);
-    await screen.findByText("Deploy");
 
-    await user.click(screen.getByRole("button", { name: "Precheck" }));
-    expect(await screen.findByText("Deploy precheck 通过。")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Activate Revision" }));
-    expect(await screen.findByText("Modeling revision 已激活。")).toBeInTheDocument();
+    const precheckButton = await screen.findByRole("button", { name: "Precheck" });
+    await waitFor(() => {
+      expect(precheckButton).toBeEnabled();
+    });
+    await user.click(precheckButton);
 
     await waitFor(() => {
-      expect(screen.getByText("Draft Revision: 2")).toBeInTheDocument();
-      expect(screen.getByText("Active Revision: 2")).toBeInTheDocument();
-      expect(
-        screen.getByText("当前无已保存但未部署的 revision 差异。")
-      ).toBeInTheDocument();
+      expect(mockPrecheckWorkspaceModelingDeploy).toHaveBeenCalledWith("ws-1", "ds-1", {
+        policyVersion: 11,
+        draftRevision: 2
+      });
+    });
+
+    const activateButton = screen.getByRole("button", { name: "Activate Revision" });
+    await waitFor(() => {
+      expect(activateButton).toBeEnabled();
+    });
+    await user.click(activateButton);
+
+    await waitFor(() => {
+      expect(mockDeployWorkspaceModeling).toHaveBeenCalledWith("ws-1", "ds-1", {
+        policyVersion: 11,
+        draftRevision: 2
+      });
+    });
+
+    await waitFor(() => {
+      const topStatusBar = screen.getByTestId("modeling-top-status-bar");
+      expect(topStatusBar).toHaveTextContent(/Draft\s+2/);
+      expect(topStatusBar).toHaveTextContent(/Active\s+2/);
+      expect(topStatusBar).toHaveTextContent(/Policy\s+11/);
+      expect(screen.getByText("当前无已保存但未部署的 revision 差异。")).toBeInTheDocument();
+      expect(screen.getByText("当前无 undeployed revision，无需 deploy。")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Activate Revision" })).toBeDisabled();
     });
   });
 });

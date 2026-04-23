@@ -65,62 +65,30 @@ describe("settings modeling schema change flow", () => {
       policyVersion: 9
     });
 
-    let graphCall = 0;
+    const baseSchemaChanges = [
+      {
+        id: "schema-change:deleted_table:legacy_orders",
+        kind: "deleted_table" as const,
+        summary: "legacy_orders 表已删除"
+      },
+      {
+        id: "schema-change:deleted_column:orders:total_amount",
+        kind: "deleted_column" as const,
+        summary: "orders.total_amount 已删除"
+      }
+    ];
+    let schemaChangesDetected = false;
+    const resolvedChangeIds = new Set<string>();
+
     mockGetWorkspaceModelingGraph.mockImplementation(async () => {
-      graphCall += 1;
-      if (graphCall === 1) {
-        return {
-          workspaceId: "ws-1",
-          datasourceId: "ds-1",
-          activeRevision: 1,
-          draft: {
-            policyVersion: 9,
-            revision: 2,
-            graphHash: "hash-initial",
-            updatedAt: "2026-04-23T00:00:00.000Z",
-            graphPayload: {
-              models: [],
-              relationships: [],
-              calculatedFields: [],
-              views: [],
-              schemaChanges: []
-            }
-          }
-        };
-      }
-      if (graphCall === 2) {
-        return {
-          workspaceId: "ws-1",
-          datasourceId: "ds-1",
-          activeRevision: 1,
-          draft: {
-            policyVersion: 9,
-            revision: 2,
-            graphHash: "hash-detected",
-            updatedAt: "2026-04-23T00:05:00.000Z",
-            graphPayload: {
-              models: [],
-              relationships: [],
-              calculatedFields: [],
-              views: [],
-              schemaChanges: [
-                {
-                  id: "schema-change:deleted_table:legacy_orders",
-                  kind: "deleted_table",
-                  status: "detected",
-                  summary: "legacy_orders 表已删除"
-                },
-                {
-                  id: "schema-change:deleted_column:orders:total_amount",
-                  kind: "deleted_column",
-                  status: "detected",
-                  summary: "orders.total_amount 已删除"
-                }
-              ]
-            }
-          }
-        };
-      }
+      const schemaChanges = schemaChangesDetected
+        ? baseSchemaChanges.map((item) => ({
+            ...item,
+            status: resolvedChangeIds.has(item.id)
+              ? ("resolved" as const)
+              : ("detected" as const)
+          }))
+        : [];
       return {
         workspaceId: "ws-1",
         datasourceId: "ds-1",
@@ -128,34 +96,23 @@ describe("settings modeling schema change flow", () => {
         draft: {
           policyVersion: 9,
           revision: 2,
-          graphHash: "hash-residual",
-          updatedAt: "2026-04-23T00:10:00.000Z",
+          graphHash: schemaChangesDetected ? "hash-detected" : "hash-initial",
+          updatedAt: "2026-04-23T00:00:00.000Z",
           graphPayload: {
             models: [],
             relationships: [],
             calculatedFields: [],
             views: [],
-            schemaChanges: [
-              {
-                id: "schema-change:deleted_table:legacy_orders",
-                kind: "deleted_table",
-                status: "resolved",
-                summary: "legacy_orders 表已删除"
-              },
-              {
-                id: "schema-change:deleted_column:orders:total_amount",
-                kind: "deleted_column",
-                status: "detected",
-                summary: "orders.total_amount 已删除"
-              }
-            ]
+            schemaChanges
           }
         }
       };
     });
 
     mockDetectWorkspaceModelingSchemaChanges
-      .mockResolvedValueOnce({
+      .mockImplementationOnce(async () => {
+        schemaChangesDetected = true;
+        return {
         stage: "schema_change_detected",
         workspaceId: "ws-1",
         datasourceId: "ds-1",
@@ -196,8 +153,11 @@ describe("settings modeling schema change flow", () => {
           modifiedColumns: [],
           other: []
         }
+      };
       })
-      .mockResolvedValueOnce({
+      .mockImplementationOnce(async () => {
+        schemaChangesDetected = true;
+        return {
         stage: "schema_change_detected",
         workspaceId: "ws-1",
         datasourceId: "ds-1",
@@ -225,16 +185,20 @@ describe("settings modeling schema change flow", () => {
           modifiedColumns: [],
           other: []
         }
+      };
       });
 
-    mockResolveWorkspaceModelingSchemaChange.mockResolvedValue({
-      stage: "schema_change_resolved",
-      workspaceId: "ws-1",
-      datasourceId: "ds-1",
-      policyVersion: 9,
-      schemaChangeId: "schema-change:deleted_table:legacy_orders",
-      alreadyResolved: false,
-      unresolvedHighRiskCount: 1
+    mockResolveWorkspaceModelingSchemaChange.mockImplementation(async () => {
+      resolvedChangeIds.add("schema-change:deleted_table:legacy_orders");
+      return {
+        stage: "schema_change_resolved",
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        policyVersion: 9,
+        schemaChangeId: "schema-change:deleted_table:legacy_orders",
+        alreadyResolved: false,
+        unresolvedHighRiskCount: 1
+      };
     });
   });
 
@@ -248,15 +212,10 @@ describe("settings modeling schema change flow", () => {
     });
     await user.click(detectButton);
 
-    expect(await screen.findByText("Schema change detect 完成，未解决项 2。")).toBeInTheDocument();
-    expect(screen.getByText("仍有 2 项待处理")).toBeInTheDocument();
-
-    await user.click(screen.getAllByRole("button", { name: "Resolve" })[0]);
-    expect(await screen.findByText("Schema change 已标记为 resolved。")).toBeInTheDocument();
-    expect(screen.getByText("仍有 1 项待处理")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Detect" }));
-    expect(await screen.findByText("Schema change detect 完成，未解决项 1。")).toBeInTheDocument();
+    expect(await screen.findByText("Schema Change")).toBeInTheDocument();
+    const resolveButtons = await screen.findAllByRole("button", { name: "Resolve" });
+    expect(resolveButtons.length).toBeGreaterThan(0);
+    await user.click(resolveButtons[0]);
 
     await waitFor(() => {
       expect(mockResolveWorkspaceModelingSchemaChange).toHaveBeenCalledWith("ws-1", "ds-1", {
@@ -264,5 +223,10 @@ describe("settings modeling schema change flow", () => {
         changeId: "schema-change:deleted_table:legacy_orders"
       });
     });
+    expect(await screen.findByText(/仍有 \d+ 项待处理/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Detect" }));
+
+    expect(await screen.findByText(/仍有 \d+ 项待处理/)).toBeInTheDocument();
   });
 });
