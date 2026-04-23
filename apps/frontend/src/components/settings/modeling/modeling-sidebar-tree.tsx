@@ -15,6 +15,10 @@ export type ModelingSidebarNode =
   | {
       kind: "view";
       id: string;
+    }
+  | {
+      kind: "relationship";
+      id: string;
     };
 
 function nodeKey(node: ModelingSidebarNode): string {
@@ -69,7 +73,10 @@ export function ModelingSidebarTree(props: {
   );
 
   return (
-    <aside className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-3">
+    <aside
+      className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-3"
+      data-testid="modeling-sidebar-tree"
+    >
       <div>
         <p className="text-sm font-semibold text-[var(--text-primary)]">Modeling Assets</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -77,7 +84,7 @@ export function ModelingSidebarTree(props: {
         </p>
       </div>
 
-      <div className="space-y-2" role="tree" aria-label="建模资产树">
+      <div className="space-y-2" role="tree" aria-label="建模资产树" data-testid="modeling-sidebar-tree-content">
         <div className="rounded-md border border-[var(--border-default)] bg-white">
           <button
             type="button"

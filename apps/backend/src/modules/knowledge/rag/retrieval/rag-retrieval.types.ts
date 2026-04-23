@@ -96,6 +96,10 @@ export interface RagContextPackBindingSummary {
   relationship_keys: string[];
   metric_keys: string[];
   calculated_field_keys: string[];
+  modelKeys?: string[];
+  relationshipKeys?: string[];
+  metricKeys?: string[];
+  calculatedFieldKeys?: string[];
 }
 
 export interface RagContextPackInstructionSummary {
@@ -103,6 +107,10 @@ export interface RagContextPackInstructionSummary {
   relationship_bindings: string[];
   metric_bindings: string[];
   calculated_field_bindings: string[];
+  modelBindings?: string[];
+  relationshipBindings?: string[];
+  metricBindings?: string[];
+  calculatedFieldBindings?: string[];
 }
 
 export interface RagContextPack {
@@ -115,9 +123,21 @@ export interface RagContextPack {
   selected_context_summary: {
     count: number;
     snippets: string[];
+    selectedContextCount?: number;
   };
   degrade_reasons: string[];
   risk_tags: string[];
+  semanticVersion?: number;
+  modelingRevision?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticBindings?: RagContextPackBindingSummary;
+  instructionSets?: RagContextPackInstructionSummary;
+  selectedContextSummary?: {
+    count: number;
+    snippets: string[];
+  };
+  degradeReasons?: string[];
+  riskTags?: string[];
 }
 
 export interface RagRetrievalBundle {

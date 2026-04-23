@@ -218,6 +218,164 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.modelingRevision).toBe(12);
   });
 
+  it("falls back to semantic step summary for revision and binding evidence", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [
+          {
+            node: "build-semantic-query",
+            status: "success",
+            at: "2026-04-18T00:00:00.500Z",
+            outputSummary: JSON.stringify({
+              semanticVersion: 13,
+              lockStatus: "locked",
+              modelingRevision: 21,
+              contextPackStatus: "ready",
+              semanticBindingSummary: {
+                modelBindingCount: 4,
+                relationshipBindingCount: 2,
+                metricBindingCount: 3,
+                calculatedFieldBindingCount: 1
+              }
+            })
+          }
+        ]
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.modelingRevision).toBe(21);
+    expect(delivery.evidence?.semanticVersion).toBe(13);
+    expect(delivery.evidence?.semanticLockStatus).toBe("locked");
+    expect(delivery.evidence?.contextPackStatus).toBe("ready");
+    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
+      modelBindingCount: 4,
+      relationshipBindingCount: 2,
+      metricBindingCount: 3,
+      calculatedFieldBindingCount: 1
+    });
+  });
+
+  it("keeps trace modelingRevision when step summary has a different revision", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        modelingRevision: 9,
+        steps: [
+          {
+            node: "build-semantic-query",
+            status: "success",
+            at: "2026-04-18T00:00:00.500Z",
+            outputSummary: JSON.stringify({
+              semanticVersion: 13,
+              lockStatus: "locked",
+              modelingRevision: 18
+            })
+          }
+        ]
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.modelingRevision).toBe(9);
+  });
+
+  it("parses snake_case replay payloads for modeling revision and semantic summaries", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: [
+        {
+          replayKey: "retrieval:fused",
+          stage: "retrieval_fused",
+          indexVersionId: "idx-v1",
+          payload: JSON.stringify({
+            status: "ready",
+            skill_context: {
+              skills: [{ id: "skill-1" }],
+              context: [{ term: "orders" }],
+              degradeReason: "compat_skill_context"
+            },
+            candidates: [
+              {
+                chunk_id: "chunk-camel-compat",
+                source_lane: "graph",
+                domain: "semantic_term"
+              }
+            ]
+          }),
+          createdAt: "2026-04-18T00:00:01.000Z"
+        },
+        {
+          replayKey: "rerank:final",
+          stage: "rerank_finalized",
+          indexVersionId: "idx-v1",
+          payload: JSON.stringify({
+            status: "ready",
+            context_pack: {
+              status: "ready",
+              semantic_version: "15",
+              semantic_lock_status: "locked",
+              modeling_revision: "42",
+              instruction_summary: {
+                model_binding_count: 3,
+                relationship_binding_count: 2,
+                metric_binding_count: 1,
+                calculated_field_binding_count: 4
+              },
+              degrade_reasons: ["compat_context_pack"]
+            }
+          }),
+          createdAt: "2026-04-18T00:00:02.000Z"
+        }
+      ]
+    });
+
+    expect(delivery.evidence?.modelingRevision).toBe(42);
+    expect(delivery.evidence?.semanticSpineVersion).toBe(15);
+    expect(delivery.evidence?.semanticLockStatus).toBe("locked");
+    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
+      modelBindingCount: 3,
+      relationshipBindingCount: 2,
+      metricBindingCount: 1,
+      calculatedFieldBindingCount: 4
+    });
+    expect(delivery.evidence?.skillContextSummary).toEqual({
+      skillCount: 1,
+      contextCount: 1,
+      degradeReason: "compat_skill_context"
+    });
+    expect(delivery.evidence?.selectedContext?.snippets).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("chunk:chunk-camel-compat")
+      ])
+    );
+  });
+
   it("keeps contract complete when artifact is absent", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

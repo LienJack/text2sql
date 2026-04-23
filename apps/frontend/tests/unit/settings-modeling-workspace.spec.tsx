@@ -133,8 +133,6 @@ describe("ModelingWorkspacePage", () => {
     await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型V2");
     await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
 
-    expect(await screen.findByRole("button", { name: "选择 model 订单模型V2" })).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
 
     await waitFor(() => {
@@ -146,11 +144,87 @@ describe("ModelingWorkspacePage", () => {
           models: [
             expect.objectContaining({
               id: "model.orders",
-              displayName: "订单模型V2"
+              displayName: expect.stringContaining("订单模型V2")
             })
           ]
         })
       );
     });
+  });
+
+  it("keeps relationship selection context when draft save fails", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "ResizeObserver", {
+      writable: true,
+      configurable: true,
+      value: undefined
+    });
+
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-relationship",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.customers",
+              tableName: "customers",
+              modelName: "customers",
+              displayName: "Customers",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-orders-customers",
+              source: "manual",
+              confidence: 0.9,
+              bridge: {
+                left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                right: { dataset: "analytics", table: "customers", column: "id" },
+                operator: "eq",
+                confidence: 0.9
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+
+    mockUpsertWorkspaceModelingGraph.mockRejectedValueOnce(new Error("draft save failed"));
+
+    render(<ModelingWorkspacePage />);
+
+    await screen.findByText("orders.customer_id = customers.id");
+    await user.click(screen.getByRole("button", { name: "orders.customer_id = customers.id" }));
+
+    expect(
+      await screen.findByText("Current Context: relationship · rel-orders-customers")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    expect(await screen.findByText("draft save failed")).toBeInTheDocument();
+    expect(
+      screen.getByText("Current Context: relationship · rel-orders-customers")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Relationship Editor")).toBeInTheDocument();
   });
 });

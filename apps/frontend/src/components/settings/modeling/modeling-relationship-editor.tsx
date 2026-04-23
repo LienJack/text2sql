@@ -40,11 +40,13 @@ function makeRelationshipId(form: RelationshipForm): string {
 
 export function ModelingRelationshipEditor(props: {
   relationships: ModelingGraphRelationship[];
+  selectedRelationshipId?: string | null;
   busy?: boolean;
   onSave: (relationships: ModelingGraphRelationship[]) => Promise<void> | void;
+  onSelectRelationship?: (relationshipId: string | null) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
-  const { relationships, busy, onSave, onDirtyChange } = props;
+  const { relationships, selectedRelationshipId, busy, onSave, onSelectRelationship, onDirtyChange } = props;
   const [workingRelationships, setWorkingRelationships] = useState(relationships);
   const [form, setForm] = useState<RelationshipForm>(toForm());
   const [editingRelationshipId, setEditingRelationshipId] = useState<string | null>(null);
@@ -57,6 +59,18 @@ export function ModelingRelationshipEditor(props: {
     setEditingRelationshipId(null);
     setError("");
   }, [relationships]);
+
+  useEffect(() => {
+    if (!selectedRelationshipId) {
+      return;
+    }
+    const matchedRelationship = relationships.find((item) => item.id === selectedRelationshipId);
+    if (!matchedRelationship) {
+      return;
+    }
+    setForm(toForm(matchedRelationship));
+    setEditingRelationshipId(matchedRelationship.id);
+  }, [relationships, selectedRelationshipId]);
 
   const dirty = useMemo(
     () => JSON.stringify(workingRelationships) !== JSON.stringify(relationships),
@@ -126,6 +140,7 @@ export function ModelingRelationshipEditor(props: {
     });
     setForm(toForm());
     setEditingRelationshipId(null);
+    onSelectRelationship?.(relationship.id);
     setError("");
   };
 
@@ -248,7 +263,12 @@ export function ModelingRelationshipEditor(props: {
           {workingRelationships.map((relationship) => (
             <div
               key={relationship.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border-default)] bg-white p-3"
+              className={`flex flex-wrap items-center justify-between gap-2 rounded-md border bg-white p-3 ${
+                selectedRelationshipId === relationship.id
+                  ? "border-[var(--action-primary)] ring-1 ring-[var(--action-primary)]/30"
+                  : "border-[var(--border-default)]"
+              }`}
+              data-testid={`modeling-relationship-item-${relationship.id}`}
             >
               <div>
                 <p className="text-sm font-medium text-[var(--text-primary)]">
@@ -266,6 +286,7 @@ export function ModelingRelationshipEditor(props: {
                   onClick={() => {
                     setForm(toForm(relationship));
                     setEditingRelationshipId(relationship.id);
+                    onSelectRelationship?.(relationship.id);
                     setError("");
                   }}
                 >
@@ -279,6 +300,9 @@ export function ModelingRelationshipEditor(props: {
                     setWorkingRelationships((previous) =>
                       previous.filter((item) => item.id !== relationship.id)
                     );
+                    if (selectedRelationshipId === relationship.id) {
+                      onSelectRelationship?.(null);
+                    }
                   }}
                 >
                   删除

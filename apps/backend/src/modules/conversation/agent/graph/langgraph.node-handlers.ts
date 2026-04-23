@@ -423,6 +423,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       const outputs = {
         status: semanticQueryPlan.status,
         semanticHints: semanticQueryPlan.semanticHints,
+        modelingRevision: semanticQueryPlan.modelingRevision,
+        semanticBindingSummary: semanticQueryPlan.semanticBindingSummary,
+        contextPackStatus: semanticQueryPlan.semanticBindingSummary?.contextPackStatus,
         semanticVersion: semanticQueryPlan.semanticVersion,
         lockStatus: semanticQueryPlan.lockStatus,
         fallbackApplied: semanticQueryPlan.fallbackApplied,
@@ -663,7 +666,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
           ...trace.trace,
           provider: generated.provider,
           retryCount: generated.retryCount ?? trace.trace.retryCount ?? 0,
-          ...(state.semanticQueryPlan?.modelingRevision
+          ...(state.semanticQueryPlan?.modelingRevision !== undefined
             ? {
                 modelingRevision: state.semanticQueryPlan.modelingRevision
               }

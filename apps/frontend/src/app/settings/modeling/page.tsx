@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import {
   deployWorkspaceModeling,
@@ -25,6 +25,7 @@ import {
 } from "@/lib/datasource-session-context";
 import { ModelingDetailsPanel } from "@/components/settings/modeling/modeling-details-panel";
 import { ModelingDeployPanel } from "@/components/settings/modeling/modeling-deploy-panel";
+import { ModelingFlowCanvas } from "@/components/settings/modeling/modeling-flow-canvas";
 import { ModelingSchemaChangePanel } from "@/components/settings/modeling/modeling-schema-change-panel";
 import {
   ModelingSidebarTree,
@@ -136,6 +137,17 @@ function resolveNextSelectedNode(
       };
     }
   }
+  if (previousNode?.kind === "relationship") {
+    const matchedRelationship = graphPayload.relationships.find(
+      (item) => item.id === previousNode.id
+    );
+    if (matchedRelationship) {
+      return {
+        kind: "relationship",
+        id: matchedRelationship.id
+      };
+    }
+  }
   if (graphPayload.models[0]) {
     return {
       kind: "model",
@@ -149,6 +161,16 @@ function resolveNextSelectedNode(
     };
   }
   return null;
+}
+
+function resolveSelectedNodeSummary(selectedNode: ModelingSidebarNode | null): string {
+  if (!selectedNode) {
+    return "未选择";
+  }
+  if (selectedNode.kind === "relationship") {
+    return `relationship · ${selectedNode.id}`;
+  }
+  return `${selectedNode.kind} · ${selectedNode.id}`;
 }
 
 export default function ModelingWorkspacePage() {
@@ -178,51 +200,44 @@ export default function ModelingWorkspacePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  const loadModelingSnapshot = async (
-    workspaceIdValue: string,
-    datasourceIdValue: string
-  ): Promise<void> => {
-    const [tablePermissionResult, graphResult] = await Promise.all([
-      listWorkspaceDatasourceTablePermissions(workspaceIdValue, datasourceIdValue),
-      getWorkspaceModelingGraph(workspaceIdValue, datasourceIdValue)
-    ]);
-    const nextGraphPayload = normalizeGraphPayload(graphResult.draft?.graphPayload);
-    const { viewIdFromQuery } = readModelingPageQueryContext();
-    const preferredViewIdFromSession =
-      typeof window !== "undefined"
-        ? window.sessionStorage
-            .getItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY)
-            ?.trim() ?? ""
-        : "";
-    const preferredViewIds = [viewIdFromQuery, preferredViewIdFromSession].filter(Boolean);
-    const nextSelectedNode = resolveNextSelectedNode(
-      nextGraphPayload,
-      selectedNode,
-      preferredViewIds
-    );
-    const nextPolicyVersion = graphResult.draft?.policyVersion ?? tablePermissionResult.policyVersion;
-    setPolicyVersion(nextPolicyVersion);
-    setSnapshot(graphResult);
-    setGraphPayload(nextGraphPayload);
-    setSelectedNode(nextSelectedNode);
-    if (
-      preferredViewIdFromSession &&
-      nextSelectedNode?.kind === "view" &&
-      nextSelectedNode.id === preferredViewIdFromSession &&
-      typeof window !== "undefined"
-    ) {
-      window.sessionStorage.removeItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY);
-    }
-    setSchemaChangeItems(
-      nextGraphPayload.schemaChanges.map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        status: item.status,
-        summary: item.summary
-      }))
-    );
-    setDetailsDirty(false);
-  };
+  const loadModelingSnapshot = useCallback(
+    async (workspaceIdValue: string, datasourceIdValue: string): Promise<void> => {
+      const [tablePermissionResult, graphResult] = await Promise.all([
+        listWorkspaceDatasourceTablePermissions(workspaceIdValue, datasourceIdValue),
+        getWorkspaceModelingGraph(workspaceIdValue, datasourceIdValue)
+      ]);
+      const nextGraphPayload = normalizeGraphPayload(graphResult.draft?.graphPayload);
+      const { viewIdFromQuery } = readModelingPageQueryContext();
+      const preferredViewIdFromSession =
+        typeof window !== "undefined"
+          ? window.sessionStorage
+              .getItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY)
+              ?.trim() ?? ""
+          : "";
+      const preferredViewIds = [viewIdFromQuery, preferredViewIdFromSession].filter(Boolean);
+      const nextPolicyVersion =
+        graphResult.draft?.policyVersion ?? tablePermissionResult.policyVersion;
+      setPolicyVersion(nextPolicyVersion);
+      setSnapshot(graphResult);
+      setGraphPayload(nextGraphPayload);
+      setSelectedNode((previous) =>
+        resolveNextSelectedNode(nextGraphPayload, previous, preferredViewIds)
+      );
+      if (preferredViewIdFromSession && typeof window !== "undefined") {
+        window.sessionStorage.removeItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY);
+      }
+      setSchemaChangeItems(
+        nextGraphPayload.schemaChanges.map((item) => ({
+          id: item.id,
+          kind: item.kind,
+          status: item.status,
+          summary: item.summary
+        }))
+      );
+      setDetailsDirty(false);
+    },
+    []
+  );
 
   useEffect(() => {
     void (async () => {
@@ -303,7 +318,7 @@ export default function ModelingWorkspacePage() {
         setBusy(false);
       }
     })();
-  }, [workspaceId, datasourceId]);
+  }, [datasourceId, loadModelingSnapshot, workspaceId]);
 
   const hasUndeployedChanges = useMemo(() => {
     if (!snapshot?.draft) {
@@ -311,6 +326,11 @@ export default function ModelingWorkspacePage() {
     }
     return snapshot.draft.revision !== snapshot.activeRevision;
   }, [snapshot]);
+
+  const flowAutoLayoutKey = useMemo(
+    () => `${workspaceId}:${datasourceId}:${snapshot?.draft?.revision ?? "none"}`,
+    [datasourceId, snapshot?.draft?.revision, workspaceId]
+  );
 
   const saveModelingGraph = async (): Promise<void> => {
     if (!workspaceId || !datasourceId) {
@@ -430,14 +450,25 @@ export default function ModelingWorkspacePage() {
     }
   };
 
-  const selectNodeWithDirtyGuard = (nextNode: ModelingSidebarNode): void => {
+  const selectNodeWithDirtyGuard = (nextNode: ModelingSidebarNode | null): void => {
+    if (!nextNode) {
+      if (detailsDirty && typeof window !== "undefined") {
+        const confirmed = window.confirm("当前详情面板有未保存改动，确认清除选中吗？");
+        if (!confirmed) {
+          return;
+        }
+      }
+      setSelectedNode(null);
+      setDetailsDirty(false);
+      return;
+    }
     const isSame =
       selectedNode?.kind === nextNode.kind && selectedNode?.id === nextNode.id;
     if (isSame) {
       return;
     }
     if (detailsDirty && typeof window !== "undefined") {
-      const confirmed = window.confirm("当前详情面板有未保存改动，确认切换对象吗？");
+      const confirmed = window.confirm("当前详情面板有未保存改动，确认切换对象/关系吗？");
       if (!confirmed) {
         return;
       }
@@ -450,7 +481,10 @@ export default function ModelingWorkspacePage() {
     <div className="space-y-4 px-4 py-4 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
-          <Link href="/settings" className="inline-flex items-center gap-1 text-sm text-[var(--action-primary)]">
+          <Link
+            href="/settings"
+            className="inline-flex items-center gap-1 text-sm text-[var(--action-primary)]"
+          >
             <ArrowLeft className="h-4 w-4" />
             返回设置
           </Link>
@@ -501,79 +535,96 @@ export default function ModelingWorkspacePage() {
       {error ? <StateBlock variant="error">{error}</StateBlock> : null}
       {message ? <StateBlock variant="success">{message}</StateBlock> : null}
 
-      <div className="rounded-lg border border-[var(--border-default)] bg-white/90 p-4">
-        <div className="grid grid-cols-1 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3">
-          <div>Draft Revision: {snapshot?.draft?.revision ?? "-"}</div>
-          <div>Active Revision: {snapshot?.activeRevision ?? "-"}</div>
-          <div>Policy Version: {policyVersion}</div>
-          <div>Model Count: {graphPayload.models.length}</div>
-          <div>View Count: {graphPayload.views.length}</div>
-          <div>Relationship Count: {graphPayload.relationships.length}</div>
+      <section
+        className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4"
+        data-testid="modeling-top-status-bar"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="grid grid-cols-1 gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3">
+            <div>Draft Revision: {snapshot?.draft?.revision ?? "-"}</div>
+            <div>Active Revision: {snapshot?.activeRevision ?? "-"}</div>
+            <div>Policy Version: {policyVersion}</div>
+            <div>Model Count: {graphPayload.models.length}</div>
+            <div>View Count: {graphPayload.views.length}</div>
+            <div>Relationship Count: {graphPayload.relationships.length}</div>
+            <div>Current Context: {resolveSelectedNodeSummary(selectedNode)}</div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={() => {
+                void saveModelingGraph();
+              }}
+              disabled={busy || saving || deploying || !workspaceId || !datasourceId}
+            >
+              保存 Modeling Draft
+            </Button>
+          </div>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            onClick={() => {
-              void saveModelingGraph();
+        {hasUndeployedChanges ? (
+          <StateBlock variant="idle">
+            检测到 undeployed draft（draft revision 与 active revision 不一致）。
+          </StateBlock>
+        ) : (
+          <StateBlock variant="idle">当前无已保存但未部署的 revision 差异。</StateBlock>
+        )}
+        {detailsDirty ? (
+          <StateBlock variant="idle">详情面板存在未保存改动，切换对象前会进行确认。</StateBlock>
+        ) : null}
+      </section>
+
+      <section
+        className="grid grid-cols-1 gap-4 xl:grid-cols-[300px_minmax(0,1fr)_360px]"
+        data-testid="modeling-layout-parity-shell"
+      >
+        <div data-testid="modeling-layout-left-pane">
+          <ModelingSidebarTree
+            models={graphPayload.models}
+            views={graphPayload.views}
+            selectedNode={selectedNode}
+            onSelectNode={(node) => {
+              selectNodeWithDirtyGuard(node);
             }}
-            disabled={busy || saving || deploying || !workspaceId || !datasourceId}
-          >
-            保存 Modeling Draft
-          </Button>
+          />
         </div>
-        <div className="mt-3">
-          {hasUndeployedChanges ? (
-            <StateBlock variant="idle">
-              检测到 undeployed draft（draft revision 与 active revision 不一致）。
-            </StateBlock>
-          ) : (
-            <StateBlock variant="idle">当前无已保存但未部署的 revision 差异。</StateBlock>
-          )}
-          {detailsDirty ? (
-            <StateBlock variant="idle">详情面板存在未保存改动，切换对象前会进行确认。</StateBlock>
-          ) : null}
+
+        <div data-testid="modeling-layout-canvas-pane">
+          <ModelingFlowCanvas
+            graphPayload={graphPayload}
+            selectedNode={selectedNode}
+            busy={busy || saving}
+            autoLayoutKey={flowAutoLayoutKey}
+            onSelectNode={selectNodeWithDirtyGuard}
+          />
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ModelingSchemaChangePanel
-          busy={busy || saving || deploying}
-          items={schemaChangeItems}
-          unresolvedCount={
-            schemaChangeItems.filter((item) => item.status === "detected").length
-          }
-          onDetect={detectSchemaChanges}
-          onResolve={resolveSchemaChange}
-        />
-        <ModelingDeployPanel
-          busy={busy || saving || deploying}
-          hasUndeployedChanges={hasUndeployedChanges}
-          precheck={deployPrecheck}
-          onPrecheck={runDeployPrecheck}
-          onDeploy={deployRevision}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <ModelingSidebarTree
-          models={graphPayload.models}
-          views={graphPayload.views}
-          selectedNode={selectedNode}
-          onSelectNode={selectNodeWithDirtyGuard}
-        />
-        <ModelingDetailsPanel
-          selectedNode={selectedNode}
-          models={graphPayload.models}
-          views={graphPayload.views}
-          calculatedFields={graphPayload.calculatedFields}
-          relationships={graphPayload.relationships}
-          busy={busy || saving}
-          onDirtyChange={setDetailsDirty}
-          onMetadataSave={async (input, node) => {
-            setGraphPayload((previous) => {
-              if (node.kind === "model") {
+        <div className="space-y-4" data-testid="modeling-layout-context-pane">
+          <ModelingDetailsPanel
+            selectedNode={selectedNode}
+            models={graphPayload.models}
+            views={graphPayload.views}
+            calculatedFields={graphPayload.calculatedFields}
+            relationships={graphPayload.relationships}
+            busy={busy || saving}
+            onDirtyChange={setDetailsDirty}
+            onMetadataSave={async (input, node) => {
+              setGraphPayload((previous) => {
+                if (node.kind === "model") {
+                  return {
+                    ...previous,
+                    models: previous.models.map((item) =>
+                      item.id === node.id
+                        ? {
+                            ...item,
+                            displayName: input.displayName,
+                            description: input.description
+                          }
+                        : item
+                    )
+                  };
+                }
                 return {
                   ...previous,
-                  models: previous.models.map((item) =>
+                  views: previous.views.map((item) =>
                     item.id === node.id
                       ? {
                           ...item,
@@ -583,38 +634,60 @@ export default function ModelingWorkspacePage() {
                       : item
                   )
                 };
-              }
-              return {
+              });
+              setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
+            }}
+            onCalculatedFieldsSave={async (fields) => {
+              setGraphPayload((previous) => ({
                 ...previous,
-                views: previous.views.map((item) =>
-                  item.id === node.id
-                    ? {
-                        ...item,
-                        displayName: input.displayName,
-                        description: input.description
-                      }
-                    : item
-                )
-              };
-            });
-            setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
-          }}
-          onCalculatedFieldsSave={async (fields) => {
-            setGraphPayload((previous) => ({
-              ...previous,
-              calculatedFields: fields
-            }));
-            setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
-          }}
-          onRelationshipsSave={async (relationships) => {
-            setGraphPayload((previous) => ({
-              ...previous,
-              relationships
-            }));
-            setMessage("Relationships 已更新，点击“保存 Modeling Draft”后提交。");
-          }}
-        />
-      </div>
+                calculatedFields: fields
+              }));
+              setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
+            }}
+            onRelationshipsSave={async (relationships) => {
+              setGraphPayload((previous) => ({
+                ...previous,
+                relationships
+              }));
+              setSelectedNode((previous) => {
+                if (previous?.kind !== "relationship") {
+                  return previous;
+                }
+                return relationships.some((item) => item.id === previous.id) ? previous : null;
+              });
+              setMessage("Relationships 已更新，点击“保存 Modeling Draft”后提交。");
+            }}
+            onSelectRelationship={(relationshipId) => {
+              if (!relationshipId) {
+                setSelectedNode((previous) =>
+                  previous?.kind === "relationship" ? null : previous
+                );
+                return;
+              }
+              setSelectedNode({
+                kind: "relationship",
+                id: relationshipId
+              });
+            }}
+          />
+
+          <ModelingSchemaChangePanel
+            busy={busy || saving || deploying}
+            items={schemaChangeItems}
+            unresolvedCount={schemaChangeItems.filter((item) => item.status === "detected").length}
+            onDetect={detectSchemaChanges}
+            onResolve={resolveSchemaChange}
+          />
+
+          <ModelingDeployPanel
+            busy={busy || saving || deploying}
+            hasUndeployedChanges={hasUndeployedChanges}
+            precheck={deployPrecheck}
+            onPrecheck={runDeployPrecheck}
+            onDeploy={deployRevision}
+          />
+        </div>
+      </section>
     </div>
   );
 }

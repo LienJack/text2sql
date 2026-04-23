@@ -39,6 +39,7 @@ const DEFAULT_LANE_TIMEOUT_MS: Record<RagRetrievalLane, number> = {
 };
 const REQUIRED_DOMAIN_COVERAGE = ["schema", "sql_example", "semantic_term"];
 const SEMANTIC_PROMOTED_DEGRADED_REASON = "semantic_promoted_linkage_degraded";
+const MODELING_REVISION_MISSING_RISK_TAG = "modeling_revision_missing";
 
 class LaneTimeoutError extends Error {
   constructor(public readonly lane: RagRetrievalLane) {
@@ -833,64 +834,148 @@ export class RagRetrievalService {
     degradeReasons: string[];
   }): Promise<RagContextPack> {
     const bundle = input.bundle;
+    const activeModeling = await this.resolveActiveModelingSnapshot(
+      input.workspaceId,
+      input.datasourceId
+    );
     const semanticCandidates =
       bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
       [];
-    const modelKeys = this.unique(
+    const retrievalModelKeys = this.unique(
       semanticCandidates.flatMap((candidate) => candidate.chunk.metadata.tableNames)
     );
+    const modelKeys = this.unique([
+      ...activeModeling.modelKeys,
+      ...retrievalModelKeys
+    ]);
+    const relationshipKeys = this.unique(activeModeling.relationshipKeys);
+    const calculatedFieldKeys = this.unique(activeModeling.calculatedFieldKeys);
     const metricKeys = this.unique(
       bundle?.skill_context?.context.map((entry) => entry.term) ?? []
     );
     const selectedContext = bundle?.selected_context ?? [];
-    const modelingRevision = await this.resolveActiveModelingRevision(
-      input.workspaceId,
-      input.datasourceId
-    );
+    const modelingRevision = activeModeling.modelingRevision;
+    const semanticBindings = {
+      model_keys: modelKeys,
+      relationship_keys: relationshipKeys,
+      metric_keys: metricKeys,
+      calculated_field_keys: calculatedFieldKeys,
+      modelKeys,
+      relationshipKeys,
+      metricKeys,
+      calculatedFieldKeys
+    };
+    const instructionSets = {
+      model_bindings: modelKeys,
+      relationship_bindings: relationshipKeys,
+      metric_bindings: metricKeys,
+      calculated_field_bindings: calculatedFieldKeys,
+      modelBindings: modelKeys,
+      relationshipBindings: relationshipKeys,
+      metricBindings: metricKeys,
+      calculatedFieldBindings: calculatedFieldKeys
+    };
+    const selectedContextSummary = {
+      count: selectedContext.length,
+      snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5),
+      selectedContextCount: selectedContext.length
+    };
+    const degradeReasons = this.unique(input.degradeReasons);
+    const riskTags = this.unique([
+      ...(input.status === "degraded"
+        ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+        : bundle?.risk_tags ?? []),
+      ...(input.workspaceId && modelingRevision === undefined
+        ? [MODELING_REVISION_MISSING_RISK_TAG]
+        : [])
+    ]);
 
     return {
       status: input.status,
       modeling_revision: modelingRevision,
+      modelingRevision,
       semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
-      semantic_bindings: {
-        model_keys: modelKeys,
-        relationship_keys: [],
-        metric_keys: metricKeys,
-        calculated_field_keys: []
-      },
-      instruction_sets: {
-        model_bindings: modelKeys,
-        relationship_bindings: [],
-        metric_bindings: metricKeys,
-        calculated_field_bindings: []
-      },
-      selected_context_summary: {
-        count: selectedContext.length,
-        snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5)
-      },
-      degrade_reasons: this.unique(input.degradeReasons),
-      risk_tags: this.unique(
-        input.status === "degraded"
-          ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
-          : bundle?.risk_tags ?? []
-      )
+      semanticLockStatus: input.status === "ready" ? "locked" : "degraded",
+      semantic_bindings: semanticBindings,
+      semanticBindings,
+      instruction_sets: instructionSets,
+      instructionSets,
+      selected_context_summary: selectedContextSummary,
+      selectedContextSummary,
+      degrade_reasons: degradeReasons,
+      degradeReasons,
+      risk_tags: riskTags,
+      riskTags
     };
   }
 
-  private async resolveActiveModelingRevision(
+  private async resolveActiveModelingSnapshot(
     workspaceIdRaw: string | undefined,
     datasourceIdRaw: string
-  ): Promise<number | undefined> {
+  ): Promise<{
+    modelingRevision?: number;
+    modelKeys: string[];
+    relationshipKeys: string[];
+    calculatedFieldKeys: string[];
+  }> {
     const workspaceId = workspaceIdRaw?.trim();
     const datasourceId = datasourceIdRaw.trim();
     if (!workspaceId || !datasourceId) {
-      return undefined;
+      return {
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
     }
     const scope = await this.modelingGraphRepository.getLatestScopeState({
       workspaceId,
       datasourceId
     });
-    return scope.activeRevision;
+    if (!scope.activeRevision) {
+      return {
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
+    }
+    const activeRevision = await this.modelingGraphRepository.findRevision({
+      workspaceId,
+      datasourceId,
+      revision: scope.activeRevision
+    });
+    if (!activeRevision) {
+      return {
+        modelingRevision: scope.activeRevision,
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
+    }
+
+    const modelKeys = this.unique(
+      (activeRevision.graphPayload.models ?? [])
+        .map((model) => this.readString(model.modelName ?? model.id ?? model.tableName))
+        .filter((model): model is string => Boolean(model))
+    );
+    const relationshipKeys = this.unique(
+      (activeRevision.graphPayload.relationships ?? [])
+        .map((relationship) =>
+          this.readString(relationship.id ?? relationship.name)
+        )
+        .filter((relationship): relationship is string => Boolean(relationship))
+    );
+    const calculatedFieldKeys = this.unique(
+      (activeRevision.graphPayload.calculatedFields ?? [])
+        .map((field) => this.readString(field.id ?? field.name))
+        .filter((field): field is string => Boolean(field))
+    );
+
+    return {
+      modelingRevision: scope.activeRevision,
+      modelKeys,
+      relationshipKeys,
+      calculatedFieldKeys
+    };
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {

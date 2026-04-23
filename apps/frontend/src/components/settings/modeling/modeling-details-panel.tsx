@@ -69,6 +69,7 @@ export function ModelingDetailsPanel(props: {
   onRelationshipsSave: (
     relationships: ModelingGraphRelationship[]
   ) => Promise<void> | void;
+  onSelectRelationship?: (relationshipId: string | null) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const {
@@ -81,13 +82,18 @@ export function ModelingDetailsPanel(props: {
     onMetadataSave,
     onCalculatedFieldsSave,
     onRelationshipsSave,
+    onSelectRelationship,
     onDirtyChange
   } = props;
   const [tab, setTab] = useState<DetailsTab>("metadata");
   const [editorDirty, setEditorDirty] = useState(false);
 
   useEffect(() => {
-    setTab("metadata");
+    if (selectedNode?.kind === "relationship") {
+      setTab("relationship");
+    } else {
+      setTab("metadata");
+    }
     setEditorDirty(false);
   }, [selectedNode?.kind, selectedNode?.id]);
 
@@ -107,6 +113,9 @@ export function ModelingDetailsPanel(props: {
     [models, selectedNode, views]
   );
 
+  const selectedRelationshipId =
+    selectedNode?.kind === "relationship" ? selectedNode.id : null;
+
   const switchTab = (nextTab: DetailsTab): void => {
     if (tab === nextTab) {
       return;
@@ -122,7 +131,10 @@ export function ModelingDetailsPanel(props: {
   };
 
   return (
-    <section className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4">
+    <section
+      className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4"
+      data-testid="modeling-details-panel"
+    >
       <div>
         <p className="text-sm font-semibold text-[var(--text-primary)]">Details Panel</p>
         <p className="text-xs text-[var(--text-secondary)]">
@@ -163,18 +175,22 @@ export function ModelingDetailsPanel(props: {
       </div>
 
       {tab === "metadata" ? (
-        <ModelingMetadataEditor
-          target={metadataTarget}
-          busy={busy}
-          onDirtyChange={setEditorDirty}
-          onSave={async (input) => {
-            if (!selectedNode) {
-              return;
-            }
-            await onMetadataSave(input, selectedNode);
-            setEditorDirty(false);
-          }}
-        />
+        metadataTarget ? (
+          <ModelingMetadataEditor
+            target={metadataTarget}
+            busy={busy}
+            onDirtyChange={setEditorDirty}
+            onSave={async (input) => {
+              if (!selectedNode || selectedNode.kind === "relationship") {
+                return;
+              }
+              await onMetadataSave(input, selectedNode);
+              setEditorDirty(false);
+            }}
+          />
+        ) : (
+          <StateBlock variant="idle">当前选中对象不支持 Metadata 编辑，请切换到 model/view。</StateBlock>
+        )
       ) : null}
 
       {tab === "calculatedField" ? (
@@ -193,6 +209,8 @@ export function ModelingDetailsPanel(props: {
       {tab === "relationship" ? (
         <ModelingRelationshipEditor
           relationships={relationships}
+          selectedRelationshipId={selectedRelationshipId}
+          onSelectRelationship={onSelectRelationship}
           busy={busy}
           onDirtyChange={setEditorDirty}
           onSave={async (relationships) => {

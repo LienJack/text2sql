@@ -52,6 +52,17 @@ const buildReadySnapshot = () => ({
   ]
 });
 
+const buildSnakeCaseSnapshot = () => {
+  const base = buildReadySnapshot();
+  const calculated = base.calculatedFields;
+  return {
+    ...base,
+    calculatedFields: undefined,
+    calculated_fields: calculated,
+    modeling_revision: "23"
+  };
+};
+
 describe("semantic spine compiler", () => {
   it("compiles snapshot into bindings + instruction sets with evidence", async () => {
     const compiler = new SemanticSpineCompilerService(
@@ -111,5 +122,35 @@ describe("semantic spine compiler", () => {
     expect(result.evidence.degradeReason).toBe("semantic_spine_snapshot_not_found");
     expect(result.riskTags).toEqual(expect.arrayContaining(["semantic_spine_degraded"]));
     expect(result.confidence.score).toBe(0);
+  });
+
+  it("reads top-level snake_case modeling revision and calculated_fields", async () => {
+    const compiler = new SemanticSpineCompilerService(
+      new SemanticSpineRepositoryStub(async () => ({
+        matched_domain: "semantic_term::datasource::ds1",
+        matched_scope: "datasource",
+        risk_tags: [],
+        semantic_version: 8,
+        snapshot: buildSnakeCaseSnapshot() as never,
+        status: "ready"
+      })) as never
+    );
+
+    const result = await compiler.compile({
+      datasourceId: "ds1",
+      domain: "semantic_term"
+    });
+
+    expect(result.status).toBe("ready");
+    expect(result.evidence.modelingRevision).toBe(23);
+    expect(result.semanticBindings.calculatedFields["cf.net_amount"]).toBeDefined();
+    expect(result.instructionSets.calculatedFieldBindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "cf.net_amount"
+        })
+      ])
+    );
+    expect(result.riskTags).not.toContain("modeling_revision_missing");
   });
 });
