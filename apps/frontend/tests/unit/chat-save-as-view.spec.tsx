@@ -116,6 +116,31 @@ describe("chat save-as-view dialog", () => {
     expect(screen.getByText(/保存成功：orders_recent_10_v2/)).toBeInTheDocument();
   });
 
+  it("shows invalid run error and keeps input for retry", async () => {
+    const user = userEvent.setup();
+    mockSaveModelingViewFromRun.mockRejectedValueOnce(
+      new Error("运行记录不存在")
+    );
+
+    render(
+      <SaveAsViewDialog
+        open
+        onOpenChange={() => undefined}
+        workspaceId="ws-1"
+        datasourceId="ds-1"
+        runId="run-missing"
+      />
+    );
+
+    const nameInput = screen.getByLabelText("View 名称");
+    await user.clear(nameInput);
+    await user.type(nameInput, "orders_recent_10");
+    await user.click(screen.getByRole("button", { name: "保存为 View" }));
+
+    expect(await screen.findByText("运行记录不存在")).toBeInTheDocument();
+    expect(screen.getByLabelText("View 名称")).toHaveValue("orders_recent_10");
+  });
+
   it("syncs modeling selection signal when navigating after save", async () => {
     const user = userEvent.setup();
     const originalLocation = window.location;

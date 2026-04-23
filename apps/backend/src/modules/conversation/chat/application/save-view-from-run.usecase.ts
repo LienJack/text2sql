@@ -78,6 +78,19 @@ export class SaveViewFromRunUsecase {
     const basePayload = current.draft?.graphPayload ?? this.createEmptyPayload();
     const viewId = this.buildViewId(runId);
     const existingById = basePayload.views.find((item) => item.id === viewId);
+    if (existingById) {
+      return {
+        stage: "chat_run_view_saved",
+        workspaceId,
+        datasourceId,
+        runId,
+        replayed: true,
+        activeRevision: current.activeRevision,
+        draftRevision: current.draft?.revision ?? 0,
+        view: existingById
+      };
+    }
+
     const nameConflict = basePayload.views.find(
       (item) => item.id !== viewId && item.name.toLowerCase() === viewName.toLowerCase()
     );
@@ -92,19 +105,6 @@ export class SaveViewFromRunUsecase {
           existingViewId: nameConflict.id
         }
       );
-    }
-
-    if (existingById) {
-      return {
-        stage: "chat_run_view_saved",
-        workspaceId,
-        datasourceId,
-        runId,
-        replayed: true,
-        activeRevision: current.activeRevision,
-        draftRevision: current.draft?.revision ?? 0,
-        view: existingById
-      };
     }
 
     const normalizedView: ModelingGraphView = {

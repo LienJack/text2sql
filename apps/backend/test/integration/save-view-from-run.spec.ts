@@ -115,6 +115,68 @@ describe("save view from run integration", () => {
     expect(second.view.id).toBe("view.chat_run.run-1");
   });
 
+  it("keeps replay idempotency for an already-saved run before name conflict checks", async () => {
+    const { usecase, chatRepository } = buildUsecase();
+    await chatRepository.createSession({
+      id: "session-1",
+      datasource: "ds-1",
+      workspaceId: "ws-1",
+      title: "test",
+      createdAt: "2026-04-23T00:00:00.000Z"
+    });
+    await chatRepository.persistRun({
+      runId: "run-1",
+      sessionId: "session-1",
+      question: "recent orders",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT * FROM orders LIMIT 10",
+      trace: {
+        runId: "run-1",
+        provider: "openai",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-23T01:00:00.000Z"
+    });
+    await chatRepository.persistRun({
+      runId: "run-2",
+      sessionId: "session-1",
+      question: "recent customers",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT * FROM customers LIMIT 10",
+      trace: {
+        runId: "run-2",
+        provider: "openai",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-23T01:10:00.000Z"
+    });
+
+    await usecase.execute({
+      runId: "run-1",
+      name: "orders_recent_10",
+      actorId: "user-admin"
+    });
+    await usecase.execute({
+      runId: "run-2",
+      name: "customers_recent_10",
+      actorId: "user-admin"
+    });
+
+    const replayed = await usecase.execute({
+      runId: "run-1",
+      name: "customers_recent_10",
+      actorId: "user-admin"
+    });
+
+    expect(replayed.replayed).toBe(true);
+    expect(replayed.view.id).toBe("view.chat_run.run-1");
+    expect(replayed.view.name).toBe("orders_recent_10");
+  });
+
   it("rejects duplicate view name and invalid run id", async () => {
     const { usecase, chatRepository } = buildUsecase();
     await chatRepository.createSession({
