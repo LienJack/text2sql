@@ -80,6 +80,14 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function parseBoolean(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
 function clampRatio(value) {
   return Math.min(1, Math.max(0, toNumber(value, 0)));
 }
@@ -91,10 +99,19 @@ function avg(values) {
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(6));
 }
 
+function metricCoverage(samples, fieldName) {
+  if (samples.length === 0) {
+    return 0;
+  }
+  const validCount = samples.filter((item) => Number.isFinite(Number(item?.[fieldName]))).length;
+  return Number((validCount / samples.length).toFixed(6));
+}
+
 function readModelingThresholds() {
   return {
     minSamples: toNumber(process.env.MODELING_PARITY_MIN_SAMPLES, 30),
     maxDeployBlockRate: toNumber(process.env.MODELING_PARITY_MAX_DEPLOY_BLOCK_RATE, 0.4),
+    maxRollbackRate: toNumber(process.env.MODELING_PARITY_MAX_ROLLBACK_RATE, 0.15),
     maxSchemaBacklogAvg: toNumber(process.env.MODELING_PARITY_MAX_SCHEMA_BACKLOG_AVG, 2),
     minSaveAsViewSuccessRate: toNumber(
       process.env.MODELING_PARITY_MIN_SAVE_AS_VIEW_SUCCESS_RATE,
@@ -103,7 +120,8 @@ function readModelingThresholds() {
     maxRuntimeRevisionMissingRate: toNumber(
       process.env.MODELING_PARITY_MAX_RUNTIME_REVISION_MISSING_RATE,
       0.1
-    )
+    ),
+    minSignalCoverageRate: toNumber(process.env.MODELING_PARITY_MIN_SIGNAL_COVERAGE_RATE, 0.7)
   };
 }
 
@@ -111,6 +129,7 @@ function evaluateModelingWorkspace(samples, thresholds) {
   const sampleSize = samples.length;
   const sampleReady = sampleSize >= thresholds.minSamples;
   const deployBlockRate = avg(samples.map((item) => clampRatio(item.deployBlockRate)));
+  const rollbackRate = avg(samples.map((item) => clampRatio(item.rollbackRate)));
   const schemaBacklogAvg = avg(samples.map((item) => Math.max(0, toNumber(item.schemaBacklog))));
   const saveAsViewSuccessRate = avg(
     samples.map((item) => clampRatio(item.saveAsViewSuccessRate))
@@ -118,13 +137,47 @@ function evaluateModelingWorkspace(samples, thresholds) {
   const runtimeRevisionMissingRate = avg(
     samples.map((item) => clampRatio(item.runtimeRevisionMissingRate))
   );
+  const signalCoverage = {
+    deployBlockRate: metricCoverage(samples, "deployBlockRate"),
+    rollbackRate: metricCoverage(samples, "rollbackRate"),
+    schemaBacklog: metricCoverage(samples, "schemaBacklog"),
+    saveAsViewSuccessRate: metricCoverage(samples, "saveAsViewSuccessRate"),
+    runtimeRevisionMissingRate: metricCoverage(samples, "runtimeRevisionMissingRate")
+  };
 
   const reasons = [];
   if (!sampleReady) {
     reasons.push("sample_not_ready");
   }
+  if (
+    sampleReady &&
+    signalCoverage.deployBlockRate < thresholds.minSignalCoverageRate
+  ) {
+    reasons.push("deploy_block_rate_signal_coverage_below_threshold");
+  }
+  if (sampleReady && signalCoverage.rollbackRate < thresholds.minSignalCoverageRate) {
+    reasons.push("rollback_rate_signal_coverage_below_threshold");
+  }
+  if (sampleReady && signalCoverage.schemaBacklog < thresholds.minSignalCoverageRate) {
+    reasons.push("schema_backlog_signal_coverage_below_threshold");
+  }
+  if (
+    sampleReady &&
+    signalCoverage.saveAsViewSuccessRate < thresholds.minSignalCoverageRate
+  ) {
+    reasons.push("save_as_view_signal_coverage_below_threshold");
+  }
+  if (
+    sampleReady &&
+    signalCoverage.runtimeRevisionMissingRate < thresholds.minSignalCoverageRate
+  ) {
+    reasons.push("runtime_revision_missing_signal_coverage_below_threshold");
+  }
   if (sampleReady && deployBlockRate > thresholds.maxDeployBlockRate) {
     reasons.push("deploy_block_rate_exceeded");
+  }
+  if (sampleReady && rollbackRate > thresholds.maxRollbackRate) {
+    reasons.push("rollback_rate_exceeded");
   }
   if (sampleReady && schemaBacklogAvg > thresholds.maxSchemaBacklogAvg) {
     reasons.push("schema_backlog_exceeded");
@@ -143,8 +196,10 @@ function evaluateModelingWorkspace(samples, thresholds) {
     gatePass: sampleReady && reasons.length === 0,
     reasons,
     thresholds,
+    signalCoverage,
     metrics: {
       deployBlockRate,
+      rollbackRate,
       schemaBacklogAvg,
       saveAsViewSuccessRate,
       runtimeRevisionMissingRate
@@ -156,6 +211,7 @@ function evaluateModelingWorkspace(samples, thresholds) {
           recordedAt: latest.recordedAt ?? new Date().toISOString(),
           metrics: {
             deployBlockRate: clampRatio(latest.deployBlockRate),
+            rollbackRate: clampRatio(latest.rollbackRate),
             schemaBacklog: Math.max(0, toNumber(latest.schemaBacklog)),
             saveAsViewSuccessRate: clampRatio(latest.saveAsViewSuccessRate),
             runtimeRevisionMissingRate: clampRatio(latest.runtimeRevisionMissingRate)
@@ -165,13 +221,53 @@ function evaluateModelingWorkspace(samples, thresholds) {
   };
 }
 
+function evaluateRolloutDecision(gatePass, reasons) {
+  const normalizedReasons = Array.isArray(reasons) ? reasons : [];
+  const hasSampleNotReady = normalizedReasons.some((reason) =>
+    reason.endsWith(":sample_not_ready")
+  );
+  const rollbackRiskReasons = normalizedReasons.filter((reason) =>
+    reason.includes("rollback_rate_exceeded") ||
+    reason.includes("runtime_revision_missing_rate_exceeded") ||
+    reason.includes("deploy_block_rate_exceeded")
+  );
+  const rollbackSuggested = rollbackRiskReasons.length > 0;
+  const recommendedStage = hasSampleNotReady
+    ? "shadow_only"
+    : rollbackSuggested
+      ? "rollback_or_hold"
+      : gatePass
+        ? "canary_ready"
+        : "hold";
+
+  return {
+    recommendedStage,
+    canaryEligible: gatePass,
+    rollbackSuggested,
+    rollbackRiskReasons,
+    runbook: {
+      rollout: "README.md#modeling-parity-shadow-gate-rollout-runbook",
+      rollback: "README.md#modeling-parity-shadow-gate-rollout-runbook"
+    }
+  };
+}
+
+function parseCliArgs(argv) {
+  const args = argv.slice(2);
+  const failOnGateByArg = args.includes("--fail-on-gate");
+  const positional = args.filter((item) => item !== "--fail-on-gate");
+  const failOnGate = failOnGateByArg || parseBoolean(process.env.MODELING_PARITY_FAIL_ON_GATE);
+  return { positional, failOnGate };
+}
+
 async function main() {
-  const relInput = resolve(process.argv[2] ?? DEFAULT_REL_INPUT);
-  const relOutput = resolve(process.argv[3] ?? DEFAULT_REL_OUTPUT);
-  const spineInput = resolve(process.argv[4] ?? DEFAULT_SPINE_INPUT);
-  const spineOutput = resolve(process.argv[5] ?? DEFAULT_SPINE_OUTPUT);
-  const modelingInput = resolve(process.argv[6] ?? DEFAULT_MODELING_INPUT);
-  const outputPath = resolve(process.argv[7] ?? DEFAULT_OUTPUT);
+  const { positional, failOnGate } = parseCliArgs(process.argv);
+  const relInput = resolve(positional[0] ?? DEFAULT_REL_INPUT);
+  const relOutput = resolve(positional[1] ?? DEFAULT_REL_OUTPUT);
+  const spineInput = resolve(positional[2] ?? DEFAULT_SPINE_INPUT);
+  const spineOutput = resolve(positional[3] ?? DEFAULT_SPINE_OUTPUT);
+  const modelingInput = resolve(positional[4] ?? DEFAULT_MODELING_INPUT);
+  const outputPath = resolve(positional[5] ?? DEFAULT_OUTPUT);
 
   runScript(RELATIONSHIP_SCRIPT, [relInput, relOutput]);
   runScript(SEMANTIC_SPINE_SCRIPT, [spineInput, spineOutput]);
@@ -198,20 +294,24 @@ async function main() {
     ...normalizeReasons("semantic_spine", semanticSpine.reasons),
     ...normalizeReasons("modeling_workspace", modelingWorkspace.reasons)
   ]);
+  const rollout = evaluateRolloutDecision(gatePass, reasons);
 
   const report = {
     generatedAt: new Date().toISOString(),
     inputs: {
       relationshipPlatform: relInput,
-      semanticSpine: spineInput
+      semanticSpine: spineInput,
+      modelingWorkspace: modelingInput
     },
     outputs: {
       relationshipPlatform: relOutput,
-      semanticSpine: spineOutput
+      semanticSpine: spineOutput,
+      modelingWorkspace: outputPath
     },
-    modelingWorkspaceInput: modelingInput,
+    strictMode: failOnGate,
     gatePass,
     reasons,
+    rollout,
     relationshipPlatform: {
       gatePass: relationshipPass,
       sampleSize:
@@ -237,6 +337,7 @@ async function main() {
       sampleSize: modelingWorkspace.sampleSize,
       sampleReady: modelingWorkspace.sampleReady,
       metrics: modelingWorkspace.metrics,
+      signalCoverage: modelingWorkspace.signalCoverage,
       thresholds: modelingWorkspace.thresholds,
       latest: modelingWorkspace.latest
     }
@@ -245,6 +346,15 @@ async function main() {
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, JSON.stringify(report, null, 2), "utf8");
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+
+  if (failOnGate && !gatePass) {
+    process.stderr.write(
+      `modeling parity gate failed under --fail-on-gate mode: ${
+        reasons.join(", ") || "unknown_reason"
+      }\n`
+    );
+    process.exitCode = 2;
+  }
 }
 
 main().catch((error) => {

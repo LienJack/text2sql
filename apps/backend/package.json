@@ -18,7 +18,8 @@
     "prisma:migrate": "node scripts/prisma-with-database-url.cjs migrate dev",
     "prisma:studio": "node scripts/prisma-with-database-url.cjs studio",
     "prisma:verify-empty-db": "node scripts/prisma-verify-empty-db.cjs",
-    "collect:modeling-parity-shadow-gate": "node scripts/collect-modeling-parity-shadow-gate.mjs"
+    "collect:modeling-parity-shadow-gate": "node scripts/collect-modeling-parity-shadow-gate.mjs",
+    "collect:modeling-parity-shadow-gate:strict": "node scripts/collect-modeling-parity-shadow-gate.mjs --fail-on-gate"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",
