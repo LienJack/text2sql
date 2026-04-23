@@ -70,7 +70,8 @@ CI 参考：
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
 - 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
-- 若本次改动涉及 modeling parity 指标：执行 `node apps/backend/scripts/collect-modeling-parity-shadow-gate.mjs`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
+- 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
+- 若本次改动需要发布门禁（go/no-go）：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`，并检查 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 
 ## 5) Standards 摘要（摘要 + 链接）
 
@@ -123,6 +124,7 @@ CI 参考：
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
+- `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
 
 ### D. Governance 术语硬切规范
 来源：`docs/standards/governance-terminology-spec.md`

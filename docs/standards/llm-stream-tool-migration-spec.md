@@ -76,6 +76,12 @@
   - sustained stream failure ratio above agreed threshold
   - sustained tool execution failure ratio above agreed threshold
   - severe regression in run persistence consistency
+- Modeling parity shadow gate（发布前执行）：
+  - `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
+  - 若需要在发布门禁中强制失败：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
+  - 结果读取：
+    - `gatePass=true` 且 `rollout.recommendedStage=canary_ready` 才可进入灰度放量。
+    - `rollout.recommendedStage=rollback_or_hold` 或 `rollout.rollbackSuggested=true` 时，必须先执行回滚/止损手册。
 
 ## Monitoring Checklist
 
@@ -90,3 +96,7 @@
 - Verify trace persistence includes tool events when tools are called.
 - Verify `GET /api/v1/runs/:runId` 对历史 run（无模板字段）与新 run（含模板字段）都可稳定返回，且不会破坏反序列化。
 - Verify `GET /api/v1/runs/:runId` 对历史 run（无 `modelingRevision` 字段）与新 run（含 `run.trace.modelingRevision` + `run.delivery.evidence.modelingRevision`）均可稳定返回，且前端回放不因缺字段降级失败。
+- Verify modeling parity shadow gate report includes:
+  - `modelingWorkspace.metrics.deployBlockRate / rollbackRate / schemaBacklogAvg`
+  - `modelingWorkspace.signalCoverage.*`（样本信号覆盖率）
+  - `rollout.recommendedStage` 与 `rollout.rollbackSuggested`

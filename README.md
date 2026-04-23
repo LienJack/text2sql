@@ -252,7 +252,9 @@ pnpm test:frontend
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
 - 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
-- modeling parity shadow gate：`node apps/backend/scripts/collect-modeling-parity-shadow-gate.mjs`
+- modeling parity shadow gate：
+  - 观测模式：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
+  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
   - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
@@ -262,6 +264,32 @@ pnpm test:frontend
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
 - CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+
+## Modeling Parity Shadow Gate Rollout Runbook
+
+1. 采集并生成报告（观测模式）：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
+```
+2. 发布门禁（CI 或人工 go/no-go）使用严格模式：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict
+```
+3. 解读核心字段（`data/reports/modeling-parity-shadow/gate-summary.json`）：
+  - `gatePass`：三维聚合总门禁（relationshipPlatform + semanticSpine + modelingWorkspace）。
+  - `modelingWorkspace.metrics.deployBlockRate`、`rollbackRate`、`schemaBacklogAvg`：核心风险指标。
+  - `modelingWorkspace.signalCoverage.*`：指标信号覆盖率，避免“样本缺字段导致误判”。
+  - `rollout.recommendedStage`：
+    - `shadow_only`：样本不足，仅允许 shadow 观测。
+    - `canary_ready`：可进入灰度。
+    - `hold`：维持当前发布面，先修复指标。
+    - `rollback_or_hold`：建议优先回滚或冻结发布。
+4. 触发回滚条件（任一命中即执行）：
+  - `rollout.rollbackSuggested=true`
+  - `rollout.recommendedStage=rollback_or_hold`
+5. 回滚入口（管理员）：
+  - `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
+  - 回滚后需重跑 shadow gate，确认 `rollout.recommendedStage` 不再为 `rollback_or_hold`。
 
 ## 前端术语联动（Wave A/B）验收边界
 - Wave A：术语写入后可影响 `selected_context` 命中，链路异常时前端可见降级但不阻断主回答。
