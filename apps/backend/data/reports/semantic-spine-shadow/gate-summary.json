@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-23T14:32:36.262Z",
+  "generatedAt": "2026-04-23T15:25:01.866Z",
   "inputPath": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/samples.json",
   "thresholds": {
     "minSamples": 30,
