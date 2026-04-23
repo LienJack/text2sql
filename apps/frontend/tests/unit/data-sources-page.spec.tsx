@@ -9,7 +9,14 @@ import {
   listDatasources,
   submitDatasourceWorkflow
 } from "@/lib/api-client";
-import { createWorkspace, listWorkspaces } from "@/lib/admin-api-client";
+import {
+  commitModelingSetup,
+  createWorkspace,
+  listModelingSetupTables,
+  listWorkspaces,
+  recommendModelingSetupRelationships,
+  saveModelingSetupSelectedTables
+} from "@/lib/admin-api-client";
 
 const mockPush = vi.fn();
 
@@ -37,7 +44,11 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   return {
     ...actual,
     listWorkspaces: vi.fn(),
-    createWorkspace: vi.fn()
+    createWorkspace: vi.fn(),
+    listModelingSetupTables: vi.fn(),
+    saveModelingSetupSelectedTables: vi.fn(),
+    recommendModelingSetupRelationships: vi.fn(),
+    commitModelingSetup: vi.fn()
   };
 });
 
@@ -46,6 +57,12 @@ const mockSubmitDatasourceWorkflow = vi.mocked(submitDatasourceWorkflow);
 const mockCreateSession = vi.mocked(createSession);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
 const mockCreateWorkspace = vi.mocked(createWorkspace);
+const mockListModelingSetupTables = vi.mocked(listModelingSetupTables);
+const mockSaveModelingSetupSelectedTables = vi.mocked(saveModelingSetupSelectedTables);
+const mockRecommendModelingSetupRelationships = vi.mocked(
+  recommendModelingSetupRelationships
+);
+const mockCommitModelingSetup = vi.mocked(commitModelingSetup);
 
 const MYSQL_DS: Datasource = {
   id: "mysql_main",
@@ -100,6 +117,20 @@ describe("DataSourcesPage workflow closure", () => {
       name: "增长分析",
       isDefault: false,
       createdAt: "2026-04-15T00:00:00.000Z"
+    });
+    mockListModelingSetupTables.mockResolvedValue([
+      { id: "orders", tableName: "orders" },
+      { id: "customers", tableName: "customers" }
+    ]);
+    mockSaveModelingSetupSelectedTables.mockResolvedValue({
+      workspaceId: "ws-new",
+      datasourceId: "ds-created",
+      selectedTableNames: ["orders", "customers"]
+    });
+    mockRecommendModelingSetupRelationships.mockResolvedValue([]);
+    mockCommitModelingSetup.mockResolvedValue({
+      workspaceId: "ws-new",
+      datasourceId: "ds-created"
     });
     mockSubmitDatasourceWorkflow.mockResolvedValue({
       mode: "create",

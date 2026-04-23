@@ -4,6 +4,7 @@ import { TraceService } from "./trace.service";
 import { LangsmithTraceService } from "./langsmith-trace.service";
 import { GateMetricsService } from "./gate-metrics.service";
 import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
+import { SemanticSpineShadowGateService } from "./semantic-spine-shadow-gate.service";
 
 @Module({
   imports: [AppConfigModule],
@@ -11,13 +12,15 @@ import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-m
     TraceService,
     LangsmithTraceService,
     GateMetricsService,
-    RagIngestionMetricsService
+    RagIngestionMetricsService,
+    SemanticSpineShadowGateService
   ],
   exports: [
     TraceService,
     LangsmithTraceService,
     GateMetricsService,
-    RagIngestionMetricsService
+    RagIngestionMetricsService,
+    SemanticSpineShadowGateService
   ]
 })
 export class ObservabilityModule {}

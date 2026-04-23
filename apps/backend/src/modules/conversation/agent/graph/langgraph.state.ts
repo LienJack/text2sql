@@ -11,7 +11,10 @@ import type { IntentPlan } from "../nodes/build-intent-plan.node";
 import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";
 import type { PhysicalPlan } from "../nodes/build-physical-plan.node";
 import type { SqlSafetyDecision } from "../sql/tools/sql-safety.guard";
-import type { RagRetrievalBundle } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type {
+  RagContextPack,
+  RagRetrievalBundle
+} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 
 export interface LangGraphSpanEvent {
   step: ExecutionTraceStep;
@@ -28,6 +31,7 @@ export interface LangGraphState extends GraphInput {
   llmRaw?: SqlRun["llmRaw"];
   retrievedKnowledge?: RetrievedKnowledge;
   retrievalBundle?: RagRetrievalBundle;
+  contextPack?: RagContextPack;
   intentPlan?: IntentPlan;
   semanticQueryPlan?: SemanticQueryPlan;
   physicalPlan?: PhysicalPlan;
@@ -43,9 +47,37 @@ export interface LangGraphState extends GraphInput {
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
   spanEvents: LangGraphSpanEvent[];
+  relationCorrectionRetryCount?: number;
   terminalStatus?: SqlRun["status"];
   fatalError?: unknown;
 }
+
+export const MAX_RELATIONSHIP_CORRECTION_RETRY = 2;
+export const RELATIONSHIP_CORRECTION_ERROR_MARKERS = [
+  "missing_relation_path",
+  "join_key_mismatch",
+  "ambiguous_join_path",
+  "join path",
+  "relationship",
+  "relation"
+] as const;
+
+export const shouldRetryRelationshipCorrection = (input: {
+  error?: string;
+  retryCount?: number;
+}): boolean => {
+  const retryCount = input.retryCount ?? 0;
+  if (retryCount >= MAX_RELATIONSHIP_CORRECTION_RETRY) {
+    return false;
+  }
+  const error = input.error?.trim().toLowerCase();
+  if (!error) {
+    return false;
+  }
+  return RELATIONSHIP_CORRECTION_ERROR_MARKERS.some((marker) =>
+    error.includes(marker)
+  );
+};
 
 export const normalizeTraceContext = (context?: GraphTraceContext): GraphTraceContext => {
   if (context) {
@@ -100,7 +132,8 @@ export const createInitialLangGraphState = (
       retryCount: 0,
       steps: []
     },
-    spanEvents: []
+    spanEvents: [],
+    relationCorrectionRetryCount: 0
   };
 };
 

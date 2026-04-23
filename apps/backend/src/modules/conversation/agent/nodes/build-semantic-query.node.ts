@@ -8,6 +8,13 @@ type RagRetrievalBundle = NonNullable<RetrievedKnowledge["retrievalBundle"]>;
 export interface SemanticQueryPlan {
   status: "ready" | "degraded";
   semanticHints: string[];
+  semanticBindingSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+    contextPackStatus?: "ready" | "degraded";
+  };
   semanticVersion?: number;
   lockStatus: "locked" | "fallback" | "degraded";
   fallbackApplied: boolean;
@@ -43,6 +50,7 @@ export class BuildSemanticQueryNode {
       retrievalBundle: input.retrievalBundle,
       requestedSemanticVersion: input.requestedSemanticVersion
     });
+    const contextPack = input.retrievalBundle?.context_pack;
 
     const semanticHints =
       intentPlan.intent === "aggregate"
@@ -53,11 +61,33 @@ export class BuildSemanticQueryNode {
     if (intentPlan.constraints.includes("must_use_selected_context")) {
       semanticHints.push("must_consume_selected_context");
     }
+    if (contextPack?.instruction_sets.metric_bindings.length) {
+      semanticHints.push("prefer_structured_metric_bindings");
+    }
+    if (contextPack?.instruction_sets.relationship_bindings.length) {
+      semanticHints.push("prefer_structured_relationship_bindings");
+    }
+    if (contextPack?.status === "degraded") {
+      semanticHints.push("semantic_context_pack_degraded");
+    }
+
+    const semanticBindingSummary = contextPack
+      ? {
+          modelBindingCount: contextPack.instruction_sets.model_bindings.length,
+          relationshipBindingCount:
+            contextPack.instruction_sets.relationship_bindings.length,
+          metricBindingCount: contextPack.instruction_sets.metric_bindings.length,
+          calculatedFieldBindingCount:
+            contextPack.instruction_sets.calculated_field_bindings.length,
+          contextPackStatus: contextPack.status
+        }
+      : undefined;
 
     if (versionLock.lockStatus === "degraded") {
       return {
         status: "degraded",
         semanticHints,
+        semanticBindingSummary,
         semanticVersion: versionLock.semanticVersion,
         lockStatus: "degraded",
         fallbackApplied: false,
@@ -71,6 +101,7 @@ export class BuildSemanticQueryNode {
       return {
         status: "degraded",
         semanticHints,
+        semanticBindingSummary,
         semanticVersion: versionLock.semanticVersion,
         lockStatus: "fallback",
         fallbackApplied: true,
@@ -84,6 +115,7 @@ export class BuildSemanticQueryNode {
     return {
       status: "ready",
       semanticHints,
+      semanticBindingSummary,
       semanticVersion: versionLock.semanticVersion,
       lockStatus: "locked",
       fallbackApplied: false,

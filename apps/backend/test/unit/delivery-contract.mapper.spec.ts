@@ -87,7 +87,19 @@ describe("DeliveryContractMapper", () => {
             status: "degraded",
             degradeReasons: ["secondary_rerank_timeout"],
             selectedContextCount: 1,
-            riskTags: ["rag_secondary_timeout"]
+            riskTags: ["rag_secondary_timeout"],
+            contextPack: {
+              status: "degraded",
+              semanticVersion: 7,
+              semanticLockStatus: "locked",
+              instructionSummary: {
+                modelBindingCount: 2,
+                relationshipBindingCount: 1,
+                metricBindingCount: 3,
+                calculatedFieldBindingCount: 1
+              },
+              degradeReasons: ["semantic_spine_snapshot_not_found"]
+            }
           }),
           createdAt: "2026-04-18T00:00:02.000Z"
         }
@@ -106,7 +118,15 @@ describe("DeliveryContractMapper", () => {
       expect.arrayContaining(["rag_secondary_timeout"])
     );
     expect(delivery.evidence?.semanticVersion).toBe(7);
+    expect(delivery.evidence?.semanticSpineVersion).toBe(7);
     expect(delivery.evidence?.semanticLockStatus).toBe("locked");
+    expect(delivery.evidence?.contextPackStatus).toBe("degraded");
+    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
+      modelBindingCount: 2,
+      relationshipBindingCount: 1,
+      metricBindingCount: 3,
+      calculatedFieldBindingCount: 1
+    });
     expect(delivery.evidence?.skillContextSummary).toEqual({
       skillCount: 2,
       contextCount: 1,

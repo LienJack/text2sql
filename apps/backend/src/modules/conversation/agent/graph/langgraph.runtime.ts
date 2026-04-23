@@ -20,7 +20,10 @@ import {
   createLangGraphNodeHandlers,
   type LangGraphNodeDependencies
 } from "./langgraph.node-handlers";
-import type { LangGraphState } from "./langgraph.state";
+import {
+  shouldRetryRelationshipCorrection,
+  type LangGraphState
+} from "./langgraph.state";
 
 const LangGraphStateAnnotation = Annotation.Root({
   runId: Annotation<string>(),
@@ -53,6 +56,7 @@ const LangGraphStateAnnotation = Annotation.Root({
   clarification: Annotation<LangGraphState["clarification"] | undefined>(),
   trace: Annotation<LangGraphState["trace"]>(),
   spanEvents: Annotation<LangGraphState["spanEvents"]>(),
+  relationCorrectionRetryCount: Annotation<number | undefined>(),
   terminalStatus: Annotation<LangGraphState["terminalStatus"] | undefined>(),
   fatalError: Annotation<unknown>()
 });
@@ -68,6 +72,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     .addNode("generate-sql", handlers.generateSql)
     .addNode("safety-check", handlers.safetyCheck)
     .addNode("execute-sql", handlers.executeSql)
+    .addNode("relationship-correction", handlers.relationshipCorrection)
     .addNode("format-answer", handlers.formatAnswer)
     .addEdge(START, "clarify")
     .addConditionalEdges(
@@ -100,12 +105,27 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     )
     .addConditionalEdges(
       "execute-sql",
-      (state) => (state.terminalStatus === "failed" ? "failed" : "continue"),
+      (state) => {
+        if (state.terminalStatus !== "failed") {
+          return "continue";
+        }
+        if (
+          shouldRetryRelationshipCorrection({
+            error: state.error,
+            retryCount: state.relationCorrectionRetryCount
+          })
+        ) {
+          return "retry-relationship";
+        }
+        return "failed";
+      },
       {
+        "retry-relationship": "relationship-correction",
         failed: END,
         continue: "format-answer"
       }
     )
+    .addEdge("relationship-correction", "generate-sql")
     .addEdge("format-answer", END)
     .compile();
 };

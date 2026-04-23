@@ -15,6 +15,7 @@ import {
 } from "./sql-prompt.builder";
 import { PromptTemplateService } from "../../../governance/settings/prompt-template.service";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
+import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
 
 type RagRetrievalChunkPayload = NonNullable<
   NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
@@ -26,6 +27,7 @@ interface SqlGenerationSelection {
   datasourceType?: DatasourceType;
   modelCatalogId?: string;
   selectedContext?: RagRetrievalChunkPayload[];
+  semanticContextPack?: RagContextPack;
   semanticIntent?: SqlSemanticIntent;
 }
 
@@ -153,7 +155,8 @@ export class SqlGenerationService {
         semanticGuardrail: {
           intent: semanticIntent,
           retryReason
-        }
+        },
+        semanticContextPack: selection?.semanticContextPack
       }
     );
   }

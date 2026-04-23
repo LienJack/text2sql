@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Activity,
   Building2,
@@ -1062,6 +1063,13 @@ export default function SettingsPage() {
               <StateBlock variant="idle">
                 在此维护工作空间、成员与数据源绑定关系。
               </StateBlock>
+              {actorRole === "admin" ? (
+                <div className="flex justify-end">
+                  <Button asChild variant="outline">
+                    <Link href="/settings/modeling">进入 Relationship Modeling</Link>
+                  </Button>
+                </div>
+              ) : null}
               <WorkspaceManagementPanel
                 actorRole={actorRole}
                 refreshToken={managementRefreshToken}

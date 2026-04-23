@@ -6,7 +6,10 @@ import type {
 } from "../../../llm/llm-gateway.interface";
 import { SqlGenerationService } from "../sql/sql-generation.service";
 import type { SqlSemanticIntent } from "../sql/sql-prompt.builder";
-import type { RagRetrievalChunkPayload } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type {
+  RagContextPack,
+  RagRetrievalChunkPayload
+} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 
 @Injectable()
 export class GenerateSqlNode {
@@ -21,6 +24,7 @@ export class GenerateSqlNode {
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
       selectedContext?: RagRetrievalChunkPayload[];
+      semanticContextPack?: RagContextPack;
       datasourceId?: string;
       workspaceId?: string;
       semanticIntent?: SqlSemanticIntent;
@@ -49,6 +53,7 @@ export class GenerateSqlNode {
           datasourceType,
           modelCatalogId,
           selectedContext: options.selectedContext,
+          semanticContextPack: options.semanticContextPack,
           semanticIntent: options.semanticIntent
         },
         {
@@ -63,6 +68,7 @@ export class GenerateSqlNode {
       datasourceType,
       modelCatalogId,
       selectedContext: options?.selectedContext,
+      semanticContextPack: options?.semanticContextPack,
       semanticIntent: options?.semanticIntent
     });
   }

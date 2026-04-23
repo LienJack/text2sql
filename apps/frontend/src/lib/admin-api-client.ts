@@ -124,6 +124,99 @@ export interface ReplaceWorkspaceDatasourceTablePermissionsResult {
   removedTables: string[];
 }
 
+export interface RelationshipBridgeEndpoint {
+  dataset: string;
+  table: string;
+  column: string;
+}
+
+export interface WorkspaceRelationshipEdge {
+  id: string;
+  name?: string;
+  bridge: {
+    left: RelationshipBridgeEndpoint;
+    right: RelationshipBridgeEndpoint;
+    operator: "eq";
+    confidence: number;
+  };
+}
+
+export interface WorkspaceRelationshipDraft {
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  revision: number;
+  graphHash: string;
+  edges: WorkspaceRelationshipEdge[];
+  updatedAt: string;
+  updatedByActorId?: string;
+}
+
+export interface WorkspaceRelationshipPublishPrecheck {
+  workspaceId: string;
+  datasourceId: string;
+  draftRevision: number;
+  publish_precheck_passed: boolean;
+  blockingReasons: string[];
+  policyVersion: number;
+}
+
+export interface ModelingSetupTableOption {
+  id: string;
+  tableName: string;
+  schemaName?: string;
+  rowCount?: number;
+}
+
+export interface ModelingSetupTablesSnapshot {
+  workspaceId: string;
+  datasourceId: string;
+  selectedTableNames: string[];
+  policyVersion?: number;
+  impactSummary?: {
+    beforeCount: number;
+    afterCount: number;
+    addedCount: number;
+    removedCount: number;
+    retainedCount: number;
+  };
+}
+
+export interface SaveModelingSetupTablesInput {
+  selectedTableNames: string[];
+  idempotencyKey?: string;
+}
+
+export interface ModelingSetupRelationshipSuggestion {
+  id: string;
+  name: string;
+  confidence: number;
+  left: RelationshipBridgeEndpoint;
+  right: RelationshipBridgeEndpoint;
+  reason?: string;
+}
+
+export interface RecommendModelingSetupRelationshipsInput {
+  selectedTableNames?: string[];
+  limit?: number;
+}
+
+export interface CommitModelingSetupInput {
+  selectedTableNames?: string[];
+  acceptedSuggestionIds?: string[];
+  rejectedSuggestionIds?: string[];
+  idempotencyKey?: string;
+}
+
+export interface CommitModelingSetupResult {
+  workspaceId: string;
+  datasourceId: string;
+  revision?: number;
+  graphHash?: string;
+  modeledTableCount?: number;
+  relationshipCount?: number;
+}
+
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -282,6 +375,186 @@ function normalizeTableNames(value: unknown): string[] {
     deduped.add(normalized);
   }
   return Array.from(deduped).sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeRelationshipBridgeEndpoint(value: unknown): RelationshipBridgeEndpoint {
+  const record = isRecord(value) ? value : {};
+  return {
+    dataset: String(record.dataset ?? ""),
+    table: String(record.table ?? "").toLowerCase(),
+    column: String(record.column ?? "").toLowerCase()
+  };
+}
+
+function normalizeWorkspaceRelationshipEdge(value: unknown): WorkspaceRelationshipEdge {
+  const record = isRecord(value) ? value : {};
+  const bridge = isRecord(record.bridge) ? record.bridge : {};
+  return {
+    id: String(record.id ?? ""),
+    name: typeof record.name === "string" ? record.name : undefined,
+    bridge: {
+      left: normalizeRelationshipBridgeEndpoint(bridge.left),
+      right: normalizeRelationshipBridgeEndpoint(bridge.right),
+      operator: "eq",
+      confidence: Math.max(0, Math.min(1, readNumber(bridge.confidence, 0)))
+    }
+  };
+}
+
+function normalizeWorkspaceRelationshipDraft(value: unknown): WorkspaceRelationshipDraft | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const edges = Array.isArray(value.edges) ? value.edges : [];
+  return {
+    workspaceId: String(value.workspaceId ?? ""),
+    datasourceId: String(value.datasourceId ?? ""),
+    policyVersion: readNumber(value.policyVersion, 0),
+    revision: readNumber(value.revision, 0),
+    graphHash: String(value.graphHash ?? ""),
+    edges: edges.map((edge) => normalizeWorkspaceRelationshipEdge(edge)),
+    updatedAt: String(value.updatedAt ?? ""),
+    updatedByActorId:
+      typeof value.updatedByActorId === "string" ? value.updatedByActorId : undefined
+  };
+}
+
+function normalizeModelingSetupTableOption(value: unknown): ModelingSetupTableOption | null {
+  if (typeof value === "string") {
+    const tableName = value.trim().toLowerCase();
+    if (!tableName) {
+      return null;
+    }
+    return {
+      id: tableName,
+      tableName
+    };
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const tableNameRaw =
+    typeof value.tableName === "string"
+      ? value.tableName
+      : typeof value.name === "string"
+        ? value.name
+        : typeof value.table === "string"
+          ? value.table
+          : "";
+  const tableName = tableNameRaw.trim().toLowerCase();
+  if (!tableName) {
+    return null;
+  }
+
+  const schemaName =
+    typeof value.schemaName === "string"
+      ? value.schemaName.trim()
+      : typeof value.schema === "string"
+        ? value.schema.trim()
+        : undefined;
+  const id =
+    typeof value.id === "string" && value.id.trim()
+      ? value.id.trim()
+      : schemaName
+        ? `${schemaName}.${tableName}`
+        : tableName;
+
+  return {
+    id,
+    tableName,
+    schemaName: schemaName || undefined,
+    rowCount:
+      typeof value.rowCount === "number" && Number.isFinite(value.rowCount)
+        ? value.rowCount
+        : undefined
+  };
+}
+
+function normalizeModelingSetupTableOptions(value: unknown): ModelingSetupTableOption[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const deduped = new Map<string, ModelingSetupTableOption>();
+  for (const item of value) {
+    const normalized = normalizeModelingSetupTableOption(item);
+    if (!normalized) {
+      continue;
+    }
+    deduped.set(normalized.tableName, normalized);
+  }
+  return Array.from(deduped.values()).sort((left, right) =>
+    left.tableName.localeCompare(right.tableName)
+  );
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const deduped = new Set<string>();
+  for (const item of value) {
+    const normalized = String(item ?? "").trim();
+    if (!normalized) {
+      continue;
+    }
+    deduped.add(normalized);
+  }
+  return Array.from(deduped);
+}
+
+function normalizeModelingSetupRelationshipSuggestion(
+  value: unknown
+): ModelingSetupRelationshipSuggestion | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const bridge = isRecord(value.bridge) ? value.bridge : {};
+  const left = normalizeRelationshipBridgeEndpoint(bridge.left ?? value.left);
+  const right = normalizeRelationshipBridgeEndpoint(bridge.right ?? value.right);
+  if (!left.table || !left.column || !right.table || !right.column) {
+    return null;
+  }
+  const fallbackId = `${left.dataset}.${left.table}.${left.column}:${right.dataset}.${right.table}.${right.column}`;
+  const id =
+    typeof value.id === "string" && value.id.trim() ? value.id.trim() : fallbackId;
+  const name =
+    typeof value.name === "string" && value.name.trim()
+      ? value.name.trim()
+      : `${left.table}.${left.column} = ${right.table}.${right.column}`;
+  return {
+    id,
+    name,
+    confidence: Math.max(
+      0,
+      Math.min(1, readNumber(value.confidence ?? bridge.confidence, 0))
+    ),
+    left,
+    right,
+    reason:
+      typeof value.reason === "string"
+        ? value.reason
+        : typeof value.reasonCode === "string"
+          ? value.reasonCode
+          : undefined
+  };
+}
+
+function normalizeModelingSetupRelationshipSuggestions(
+  value: unknown
+): ModelingSetupRelationshipSuggestion[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const deduped = new Map<string, ModelingSetupRelationshipSuggestion>();
+  for (const item of value) {
+    const normalized = normalizeModelingSetupRelationshipSuggestion(item);
+    if (!normalized) {
+      continue;
+    }
+    deduped.set(normalized.id, normalized);
+  }
+  return Array.from(deduped.values());
 }
 
 function normalizeWorkspaceSummary(value: unknown): WorkspaceSummary {
@@ -1247,6 +1520,319 @@ export async function replaceWorkspaceDatasourceTablePermissions(
       retainedCount,
       addedTables,
       removedTables
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function listModelingSetupTables(
+  workspaceId: string,
+  datasourceId: string
+): Promise<ModelingSetupTableOption[]> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/setup/tables`
+    );
+    const record = isRecord(data) ? data : {};
+    const items = normalizeModelingSetupTableOptions(
+      record.items ?? record.tables ?? record.tableOptions
+    );
+    if (items.length > 0) {
+      return items;
+    }
+    const selected = normalizeTableNames(record.selectedTableNames ?? record.tableNames);
+    return selected.map((tableName) => ({
+      id: tableName,
+      tableName
+    }));
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function saveModelingSetupSelectedTables(
+  workspaceId: string,
+  datasourceId: string,
+  input: SaveModelingSetupTablesInput
+): Promise<ModelingSetupTablesSnapshot> {
+  try {
+    const selectedTableNames = normalizeTableNames(input.selectedTableNames);
+    const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/setup/tables`,
+      {
+        method: "PUT",
+        headers: idempotencyKey ? { "x-idempotency-key": idempotencyKey } : undefined,
+        body: JSON.stringify({
+          selectedTableNames
+        })
+      }
+    );
+
+    const record = isRecord(data) ? data : {};
+    const impactSummary = isRecord(record.impactSummary) ? record.impactSummary : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      selectedTableNames: normalizeTableNames(
+        record.selectedTableNames ?? record.tableNames ?? selectedTableNames
+      ),
+      policyVersion:
+        typeof record.policyVersion === "number" ? record.policyVersion : undefined,
+      impactSummary:
+        Object.keys(impactSummary).length > 0
+          ? {
+              beforeCount: readNumber(impactSummary.beforeCount, 0),
+              afterCount: readNumber(impactSummary.afterCount, 0),
+              addedCount: readNumber(impactSummary.addedCount, 0),
+              removedCount: readNumber(impactSummary.removedCount, 0),
+              retainedCount: readNumber(impactSummary.retainedCount, 0)
+            }
+          : undefined
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function recommendModelingSetupRelationships(
+  workspaceId: string,
+  datasourceId: string,
+  input: RecommendModelingSetupRelationshipsInput = {}
+): Promise<ModelingSetupRelationshipSuggestion[]> {
+  try {
+    const selectedTableNames = normalizeTableNames(input.selectedTableNames ?? []);
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/setup/relationships/recommend`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          selectedTableNames: selectedTableNames.length > 0 ? selectedTableNames : undefined,
+          limit:
+            typeof input.limit === "number" && Number.isFinite(input.limit)
+              ? Math.max(1, Math.floor(input.limit))
+              : undefined
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return normalizeModelingSetupRelationshipSuggestions(
+      record.suggestions ?? record.relationshipSuggestions ?? record.items ?? record.edges
+    );
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function commitModelingSetup(
+  workspaceId: string,
+  datasourceId: string,
+  input: CommitModelingSetupInput = {}
+): Promise<CommitModelingSetupResult> {
+  try {
+    const idempotencyKey = input.idempotencyKey?.trim() || undefined;
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/setup/commit`,
+      {
+        method: "POST",
+        headers: idempotencyKey ? { "x-idempotency-key": idempotencyKey } : undefined,
+        body: JSON.stringify({
+          selectedTableNames:
+            input.selectedTableNames && input.selectedTableNames.length > 0
+              ? normalizeTableNames(input.selectedTableNames)
+              : undefined,
+          acceptedSuggestionIds: normalizeStringList(input.acceptedSuggestionIds),
+          rejectedSuggestionIds: normalizeStringList(input.rejectedSuggestionIds)
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      revision:
+        typeof record.revision === "number"
+          ? record.revision
+          : typeof record.draftRevision === "number"
+            ? record.draftRevision
+            : undefined,
+      graphHash: typeof record.graphHash === "string" ? record.graphHash : undefined,
+      modeledTableCount:
+        typeof record.modeledTableCount === "number" ? record.modeledTableCount : undefined,
+      relationshipCount:
+        typeof record.relationshipCount === "number"
+          ? record.relationshipCount
+          : typeof record.acceptedRelationshipCount === "number"
+            ? record.acceptedRelationshipCount
+            : undefined
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function getWorkspaceRelationshipDraft(
+  workspaceId: string,
+  datasourceId: string
+): Promise<{
+  workspaceId: string;
+  datasourceId: string;
+  draft: WorkspaceRelationshipDraft | null;
+  activeRevision?: number;
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/relationships/draft`
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      draft: normalizeWorkspaceRelationshipDraft(record.draft),
+      activeRevision:
+        typeof record.activeRevision === "number" ? record.activeRevision : undefined
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function replaceWorkspaceRelationshipDraft(
+  workspaceId: string,
+  datasourceId: string,
+  input: {
+    policyVersion: number;
+    edges: WorkspaceRelationshipEdge[];
+  }
+): Promise<WorkspaceRelationshipDraft> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/relationships/draft`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          policyVersion: Math.max(0, Math.floor(input.policyVersion)),
+          edges: input.edges
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    const draft = normalizeWorkspaceRelationshipDraft(record.draft);
+    if (!draft) {
+      throw new AdminApiError("关系图保存响应缺少 draft。", {
+        code: "WORKSPACE_RELATIONSHIP_DRAFT_MISSING"
+      });
+    }
+    return draft;
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function precheckWorkspaceRelationshipPublish(
+  workspaceId: string,
+  datasourceId: string,
+  input: {
+    policyVersion: number;
+    draftRevision: number;
+  }
+): Promise<WorkspaceRelationshipPublishPrecheck> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/relationships/publish/precheck`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          policyVersion: Math.max(0, Math.floor(input.policyVersion)),
+          draftRevision: Math.max(1, Math.floor(input.draftRevision))
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      draftRevision: readNumber(record.draftRevision, input.draftRevision),
+      publish_precheck_passed: Boolean(record.publish_precheck_passed),
+      blockingReasons: Array.isArray(record.blockingReasons)
+        ? record.blockingReasons.map((item) => String(item))
+        : [],
+      policyVersion: readNumber(record.policyVersion, input.policyVersion)
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function publishWorkspaceRelationshipDraft(
+  workspaceId: string,
+  datasourceId: string,
+  input: {
+    policyVersion: number;
+    draftRevision: number;
+    representativeSqlSamples?: string[];
+  }
+): Promise<{
+  workspaceId: string;
+  datasourceId: string;
+  activeRevision: number;
+  graphHash: string;
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/relationships/publish`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          policyVersion: Math.max(0, Math.floor(input.policyVersion)),
+          draftRevision: Math.max(1, Math.floor(input.draftRevision)),
+          representativeSqlSamples: input.representativeSqlSamples ?? []
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      activeRevision: readNumber(record.activeRevision, input.draftRevision),
+      graphHash: String(record.graphHash ?? "")
+    };
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function rollbackWorkspaceRelationshipDraft(
+  workspaceId: string,
+  datasourceId: string,
+  input: {
+    policyVersion: number;
+    draftRevision: number;
+    rollbackToRevision: number;
+  }
+): Promise<{
+  workspaceId: string;
+  datasourceId: string;
+  activeRevision: number;
+}> {
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/relationships/rollback`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          policyVersion: Math.max(0, Math.floor(input.policyVersion)),
+          draftRevision: Math.max(1, Math.floor(input.draftRevision)),
+          rollbackToRevision: Math.max(1, Math.floor(input.rollbackToRevision))
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    return {
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      activeRevision: readNumber(record.activeRevision, input.rollbackToRevision)
     };
   } catch (error) {
     throw toAdminApiError(error);

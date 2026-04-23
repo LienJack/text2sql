@@ -3,13 +3,17 @@ import {
   KNOWLEDGE_RAG_CONTRACT,
   type KnowledgeRagContract
 } from "../../../knowledge/contracts/knowledge-rag.contract";
-import type { RagRetrievalBundle } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type {
+  RagContextPack,
+  RagRetrievalBundle
+} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
 
 export interface RetrievedKnowledge {
   status: "ready" | "degraded";
   snippets: string[];
   summary: string;
   retrievalBundle?: RagRetrievalBundle;
+  contextPack?: RagContextPack;
 }
 
 @Injectable()
@@ -70,7 +74,29 @@ export class RetrieveKnowledgeNode {
           candidates: [],
           reranked: [],
           selected_context: [],
-          risk_tags: ["rag_zero_recall"]
+          risk_tags: ["rag_zero_recall"],
+          context_pack: {
+            status: "degraded",
+            semantic_lock_status: "degraded",
+            semantic_bindings: {
+              model_keys: [],
+              relationship_keys: [],
+              metric_keys: [],
+              calculated_field_keys: []
+            },
+            instruction_sets: {
+              model_bindings: [],
+              relationship_bindings: [],
+              metric_bindings: [],
+              calculated_field_bindings: []
+            },
+            selected_context_summary: {
+              count: 0,
+              snippets: []
+            },
+            degrade_reasons: ["empty_question"],
+            risk_tags: ["semantic_spine_degraded"]
+          }
         }
       };
     }
@@ -96,7 +122,8 @@ export class RetrieveKnowledgeNode {
         bundle.status === "ready"
           ? `检索与重排完成，候选=${bundle.candidates.length}，上下文=${bundle.selected_context?.length ?? 0}。`
           : `检索链路降级执行，原因=${bundle.degrade_reasons.join(", ") || "unknown"}。`,
-      retrievalBundle: bundle
+      retrievalBundle: bundle,
+      contextPack: bundle.context_pack
     };
   }
 }

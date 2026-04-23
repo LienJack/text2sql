@@ -96,10 +96,19 @@ describe("rag quality gate integration", () => {
         ragQuality: {
           gate: ReturnType<RagQualityService["snapshot"]>;
         };
+        semanticSpineShadow: {
+          gate: {
+            sampleSize: number;
+            sampleReady: boolean;
+            gatePass: boolean;
+          };
+        };
       };
     };
     expect(payload.dependencies.ragQuality.gate.sampleReady).toBe(true);
     expect(payload.dependencies.ragQuality.gate.gatePass).toBe(true);
+    expect(payload.dependencies.semanticSpineShadow.gate).toBeDefined();
+    expect(typeof payload.dependencies.semanticSpineShadow.gate.sampleSize).toBe("number");
 
     await moduleRef.close();
   });

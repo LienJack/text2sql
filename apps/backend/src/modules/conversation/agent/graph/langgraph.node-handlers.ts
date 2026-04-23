@@ -13,7 +13,11 @@ import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
 } from "../../../llm/llm-gateway.interface";
-import { appendStep, type LangGraphState } from "./langgraph.state";
+import {
+  MAX_RELATIONSHIP_CORRECTION_RETRY,
+  appendStep,
+  type LangGraphState
+} from "./langgraph.state";
 
 interface RuntimeCallbacks {
   streamMode?: boolean;
@@ -214,7 +218,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         degradeReasons: knowledge.retrievalBundle?.degrade_reasons ?? [],
         candidateCount: knowledge.retrievalBundle?.candidates.length ?? 0,
         selectedContextCount:
-          knowledge.retrievalBundle?.selected_context?.length ?? 0
+          knowledge.retrievalBundle?.selected_context?.length ?? 0,
+        contextPackStatus: knowledge.contextPack?.status,
+        semanticLockStatus: knowledge.contextPack?.semantic_lock_status
       };
       const trace = appendStep(state, {
         step: {
@@ -231,6 +237,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         ...trace,
         retrievedKnowledge: knowledge,
         retrievalBundle: knowledge.retrievalBundle,
+        contextPack: knowledge.contextPack,
         planningStatus: knowledge.status === "ready" ? "ready" : "degraded",
         planningWarnings:
           knowledge.status === "ready"
@@ -593,11 +600,13 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
               tools: callbacks.tools,
               onEvent: callbacks.onLlmEvent,
               selectedContext: state.retrievalBundle?.selected_context,
+              semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
               workspaceId: state.accessContext?.workspaceId
             }
           : {
               selectedContext: state.retrievalBundle?.selected_context,
+              semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
               workspaceId: state.accessContext?.workspaceId
             }
@@ -619,7 +628,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         retrieveSummary: state.retrievedKnowledge?.summary,
         intent: state.intentPlan?.intent,
         semanticHints: state.semanticQueryPlan?.semanticHints,
-        physicalStrategy: state.physicalPlan?.strategy
+        physicalStrategy: state.physicalPlan?.strategy,
+        semanticConstraintMode: state.physicalPlan?.semanticConstraintMode,
+        contextPackStatus: state.contextPack?.status ?? state.retrievalBundle?.context_pack?.status
       };
       const outputs = {
         provider: generated.provider,
@@ -897,6 +908,38 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     }
   };
 
+  const relationshipCorrection = async (
+    state: LangGraphState,
+    config?: LangGraphRunnableConfig
+  ) => {
+    const startedAt = new Date().toISOString();
+    const runtime = createNodeRuntime(config);
+    await runtime.emitStep(
+      buildRunningStep(
+        state,
+        "relationship-correction",
+        startedAt,
+        "正在执行关系路径纠错重试"
+      )
+    );
+    const retryCount = (state.relationCorrectionRetryCount ?? 0) + 1;
+    const endedAt = new Date().toISOString();
+    const trace = appendStep(state, {
+      step: {
+        node: "relationship-correction",
+        status: "success",
+        detail: `relationship correction retry ${retryCount}/${MAX_RELATIONSHIP_CORRECTION_RETRY}`,
+        ...withTiming(startedAt, endedAt)
+      }
+    });
+    await runtime.emitStep(latestStep(trace));
+    return {
+      ...trace,
+      relationCorrectionRetryCount: retryCount,
+      terminalStatus: undefined
+    };
+  };
+
   const formatAnswer = async (
     state: LangGraphState,
     config?: LangGraphRunnableConfig
@@ -938,6 +981,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     generateSql,
     safetyCheck,
     executeSql,
+    relationshipCorrection,
     formatAnswer
   };
 };

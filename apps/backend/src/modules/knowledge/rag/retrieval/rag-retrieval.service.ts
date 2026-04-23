@@ -23,6 +23,7 @@ import {
   type RagRetrievalLaneResult,
   type RagRetrievalRequest,
   type RagRetrievalResponse,
+  type RagContextPack,
   type RagSkillContext
 } from "../../../rag/retrieval/rag-retrieval.types";
 
@@ -85,7 +86,11 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "invalid_retrieval_input"),
-          candidates: []
+          candidates: [],
+          context_pack: this.buildContextPack({
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
     }
@@ -104,7 +109,11 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "no_active_index"),
-          candidates: []
+          candidates: [],
+          context_pack: this.buildContextPack({
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
       await this.persistReplay(response.retrieval_bundle);
@@ -211,6 +220,11 @@ export class RagRetrievalService {
         decision_reasons: budgetDecision.decisionReasons
       }
     };
+    response.retrieval_bundle.context_pack = this.buildContextPack({
+      bundle: response.retrieval_bundle,
+      status: response.retrieval_bundle.status,
+      degradeReasons: uniqueDegradeReasons
+    });
 
     this.queryCache.set({
       key: cacheKey,
@@ -237,7 +251,7 @@ export class RagRetrievalService {
     runId: string;
     decisionReasons: string[];
   }): RagRetrievalResponse["retrieval_bundle"] {
-    return {
+    const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
       datasource_id: input.datasourceId,
@@ -252,6 +266,12 @@ export class RagRetrievalService {
         ...input.decisionReasons
       ])
     };
+    hydratedBundle.context_pack = this.buildContextPack({
+      bundle: hydratedBundle,
+      status: hydratedBundle.status,
+      degradeReasons: hydratedBundle.degrade_reasons
+    });
+    return hydratedBundle;
   }
 
   private async collectLaneResults(input: {
@@ -791,6 +811,51 @@ export class RagRetrievalService {
 
   private unique(values: string[]): string[] {
     return Array.from(new Set(values));
+  }
+
+  private buildContextPack(input: {
+    bundle?: RagRetrievalResponse["retrieval_bundle"];
+    status: "ready" | "degraded";
+    degradeReasons: string[];
+  }): RagContextPack {
+    const bundle = input.bundle;
+    const semanticCandidates =
+      bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
+      [];
+    const modelKeys = this.unique(
+      semanticCandidates.flatMap((candidate) => candidate.chunk.metadata.tableNames)
+    );
+    const metricKeys = this.unique(
+      bundle?.skill_context?.context.map((entry) => entry.term) ?? []
+    );
+    const selectedContext = bundle?.selected_context ?? [];
+
+    return {
+      status: input.status,
+      semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
+      semantic_bindings: {
+        model_keys: modelKeys,
+        relationship_keys: [],
+        metric_keys: metricKeys,
+        calculated_field_keys: []
+      },
+      instruction_sets: {
+        model_bindings: modelKeys,
+        relationship_bindings: [],
+        metric_bindings: metricKeys,
+        calculated_field_bindings: []
+      },
+      selected_context_summary: {
+        count: selectedContext.length,
+        snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5)
+      },
+      degrade_reasons: this.unique(input.degradeReasons),
+      risk_tags: this.unique(
+        input.status === "degraded"
+          ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+          : bundle?.risk_tags ?? []
+      )
+    };
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {

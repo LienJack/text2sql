@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-04-22T16:51:31.006Z",
+  "inputs": {
+    "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/samples.json",
+    "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/samples.json"
+  },
+  "outputs": {
+    "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/gate-summary.json",
+    "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/gate-summary.json"
+  },
+  "gatePass": false,
+  "reasons": [
+    "relationship_platform:sample_not_ready",
+    "semantic_spine:sample_not_ready"
+  ],
+  "relationshipPlatform": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "multiTableSuccessRate": 0,
+      "relationshipPublishSuccessRate": 0,
+      "publishBlockRate": 0,
+      "rollbackRate": 0,
+      "crossDbRelationshipCoverageRate": 0,
+      "correctionSuccessRate": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "minMultiTableSuccessRate": 0.85,
+      "minRelationshipPublishSuccessRate": 0.95,
+      "maxPublishBlockRate": 0.35,
+      "maxRollbackRate": 0.1,
+      "minCrossDbCoverageRate": 0.2,
+      "minCorrectionSuccessRate": 0.5
+    }
+  },
+  "semanticSpine": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "accuracyLiftAvg": 0,
+      "semanticConsistencyLiftAvg": 0,
+      "latencyP95OverheadMs": 0,
+      "degradeRateAvg": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "minAccuracyLift": 0.12,
+      "minSemanticConsistencyLift": 0.12,
+      "maxLatencyOverheadMsP95": 180,
+      "maxDegradeRate": 0.1
+    }
+  }
+}

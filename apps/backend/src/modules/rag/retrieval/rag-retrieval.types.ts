@@ -90,6 +90,34 @@ export interface RagSkillContext {
   degrade_reason?: string;
 }
 
+export interface RagContextPackBindingSummary {
+  model_keys: string[];
+  relationship_keys: string[];
+  metric_keys: string[];
+  calculated_field_keys: string[];
+}
+
+export interface RagContextPackInstructionSummary {
+  model_bindings: string[];
+  relationship_bindings: string[];
+  metric_bindings: string[];
+  calculated_field_bindings: string[];
+}
+
+export interface RagContextPack {
+  status: "ready" | "degraded";
+  semantic_version?: number;
+  semantic_lock_status: "locked" | "fallback" | "degraded";
+  semantic_bindings: RagContextPackBindingSummary;
+  instruction_sets: RagContextPackInstructionSummary;
+  selected_context_summary: {
+    count: number;
+    snippets: string[];
+  };
+  degrade_reasons: string[];
+  risk_tags: string[];
+}
+
 export interface RagRetrievalBundle {
   query: string;
   run_id: string;
@@ -103,6 +131,7 @@ export interface RagRetrievalBundle {
   selected_context?: RagRetrievalChunkPayload[];
   risk_tags?: string[];
   skill_context?: RagSkillContext;
+  context_pack?: RagContextPack;
   decision_reasons?: string[];
 }
 

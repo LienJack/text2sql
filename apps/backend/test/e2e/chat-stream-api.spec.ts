@@ -164,10 +164,19 @@ describe("chat stream api (e2e)", () => {
     const finishData = (finishEvent?.data ?? {}) as {
       status: unknown;
       rowCount: unknown;
+      delivery?: {
+        evidence?: {
+          contextPackStatus?: string;
+        };
+      };
     };
     expect(typeof finishData.status).toBe("string");
     expect(typeof finishData.rowCount).toBe("number");
     expect(finishData.rowCount as number).toBeGreaterThanOrEqual(0);
+    const contextPackStatus = finishData.delivery?.evidence?.contextPackStatus;
+    if (contextPackStatus !== undefined) {
+      expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
 
     const messagesRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)

@@ -207,7 +207,15 @@ export interface DeliveryEvidenceLayer {
   retrievalLogs?: DeliveryEvidenceReplayLog[];
   riskTags?: string[];
   semanticVersion?: number;
+  semanticSpineVersion?: number;
   semanticLockStatus?: "locked" | "fallback" | "degraded";
+  contextPackStatus?: "ready" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
   semanticDegradeReason?: string;
   skillContextSummary?: {
     skillCount: number;
@@ -912,3 +920,5 @@ export interface ApiFailure {
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export type * from "./semantic-spine";

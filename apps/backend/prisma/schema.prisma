@@ -105,6 +105,8 @@ model SqlRun {
   semanticMemories  SemanticMemory[]
   semanticRegistryVersionsPublished SemanticRegistryVersion[] @relation("semantic_registry_published_by_run")
   semanticRegistryVersionsActivated SemanticRegistryVersion[] @relation("semantic_registry_activated_by_run")
+  semanticSpineSnapshotsPublished SemanticSpineSnapshot[] @relation("semantic_spine_published_by_run")
+  semanticSpineSnapshotsActivated SemanticSpineSnapshot[] @relation("semantic_spine_activated_by_run")
   ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
   ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
   ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
@@ -211,6 +213,31 @@ model SemanticRegistryTerm {
   @@index([domain, term, versionId])
   @@index([canonicalKey])
   @@map("semantic_registry_terms")
+}
+
+model SemanticSpineSnapshot {
+  id               String   @id
+  domain           String
+  semanticVersion  Int
+  status           String   @default("active")
+  releaseSummary   String
+  auditSummary     String
+  riskTags         String[]
+  snapshot         String
+  checksum         String?
+  publishedByRunId String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  publishedByRun   SqlRun?  @relation("semantic_spine_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?  @relation("semantic_spine_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([domain, semanticVersion])
+  @@index([domain, status, semanticVersion])
+  @@index([publishedByRunId])
+  @@index([activatedByRunId])
+  @@map("semantic_spine_snapshots")
 }
 
 enum PromptTemplateScene {

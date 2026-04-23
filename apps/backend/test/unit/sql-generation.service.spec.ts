@@ -124,4 +124,47 @@ describe("SqlGenerationService semantic guardrails", () => {
     });
     expect(providerRouter.generate).toHaveBeenCalledTimes(2);
   });
+
+  it("prioritizes structured semantic instructions when context pack is provided", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT SUM(amount) AS gmv FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.generate("按 GMV 汇总订单", {
+      semanticContextPack: {
+        status: "ready",
+        semantic_lock_status: "locked",
+        semantic_bindings: {
+          model_keys: ["model.orders"],
+          relationship_keys: [],
+          metric_keys: ["metric.gmv"],
+          calculated_field_keys: []
+        },
+        instruction_sets: {
+          model_bindings: ["model.orders"],
+          relationship_bindings: [],
+          metric_bindings: ["metric.gmv"],
+          calculated_field_bindings: []
+        },
+        selected_context_summary: {
+          count: 0,
+          snippets: []
+        },
+        degrade_reasons: [],
+        risk_tags: []
+      }
+    });
+
+    expect(draft.sql).toContain("SUM(amount)");
+    expect(providerRouter.generate).toHaveBeenCalledTimes(1);
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.systemPrompt).toContain("Structured semantic instruction set");
+    expect(prompt.systemPrompt).toContain("Metric bindings: metric.gmv");
+  });
 });

@@ -97,6 +97,11 @@ describe("rag retrieval service integration", () => {
     expect(first.retrieval_bundle.lane_results.lexical.status).toBe("ok");
     expect(first.retrieval_bundle.lane_results.dense.status).toBe("ok");
     expect(first.retrieval_bundle.lane_results.graph.status).toBe("ok");
+    expect(first.retrieval_bundle.context_pack).toBeDefined();
+    expect(first.retrieval_bundle.context_pack?.status).toBe(first.retrieval_bundle.status);
+    expect(first.retrieval_bundle.context_pack?.semantic_lock_status).toBe(
+      first.retrieval_bundle.status === "ready" ? "locked" : "degraded"
+    );
     expect(firstIds.length).toBeGreaterThan(0);
     expect(firstIds).toEqual(secondIds);
     expect(coveredDomains.has("schema")).toBe(true);
@@ -165,6 +170,10 @@ describe("rag retrieval service integration", () => {
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["dense_timeout"])
     );
+    expect(response.retrieval_bundle.context_pack?.status).toBe("degraded");
+    expect(response.retrieval_bundle.context_pack?.degrade_reasons).toEqual(
+      expect.arrayContaining(["dense_timeout"])
+    );
     expect(response.retrieval_bundle.candidates.length).toBeGreaterThan(0);
 
     await moduleRef.close();
@@ -186,6 +195,7 @@ describe("rag retrieval service integration", () => {
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["no_active_index"])
     );
+    expect(response.retrieval_bundle.context_pack?.status).toBe("degraded");
     expect(response.retrieval_bundle.candidates).toHaveLength(0);
 
     await moduleRef.close();

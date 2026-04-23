@@ -29,6 +29,16 @@ interface RerankFinalSnapshot {
   degradeReasons: string[];
   selectedContextCount?: number;
   riskTags: string[];
+  contextPackStatus?: "ready" | "degraded";
+  semanticSpineVersion?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
+  contextPackDegradeReasons?: string[];
 }
 
 interface RetrievalFusedSnapshot {
@@ -153,8 +163,15 @@ export class DeliveryContractMapper {
       retrievalLogs: replayLogs.length > 0 ? replayLogs : undefined,
       riskTags: evidenceRiskTags.length > 0 ? evidenceRiskTags : undefined,
       semanticVersion: semanticSnapshot.semanticVersion,
-      semanticLockStatus: semanticSnapshot.semanticLockStatus,
-      semanticDegradeReason: semanticSnapshot.semanticDegradeReason,
+      semanticSpineVersion:
+        finalSnapshot.semanticSpineVersion ?? semanticSnapshot.semanticVersion,
+      semanticLockStatus:
+        finalSnapshot.semanticLockStatus ?? semanticSnapshot.semanticLockStatus,
+      contextPackStatus: finalSnapshot.contextPackStatus,
+      semanticInstructionSummary: finalSnapshot.semanticInstructionSummary,
+      semanticDegradeReason:
+        semanticSnapshot.semanticDegradeReason ??
+        finalSnapshot.contextPackDegradeReasons?.at(0),
       skillContextSummary: fusedSnapshot.skillContextSummary,
       evidenceStale: evidenceStale || undefined,
       effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
@@ -350,12 +367,66 @@ export class DeliveryContractMapper {
       selectedContextCountRaw >= 0
         ? Math.floor(selectedContextCountRaw)
         : undefined;
+    const contextPackRaw = this.isRecord(payload.contextPack)
+      ? payload.contextPack
+      : undefined;
+    const contextPackStatusRaw = contextPackRaw
+      ? this.readString(contextPackRaw.status)
+      : undefined;
+    const contextPackStatus =
+      contextPackStatusRaw === "degraded" ? "degraded" : contextPackStatusRaw === "ready" ? "ready" : undefined;
+    const semanticSpineVersionRaw = contextPackRaw
+      ? contextPackRaw.semanticVersion
+      : undefined;
+    const semanticSpineVersion =
+      typeof semanticSpineVersionRaw === "number" &&
+      Number.isFinite(semanticSpineVersionRaw) &&
+      semanticSpineVersionRaw > 0
+        ? Math.floor(semanticSpineVersionRaw)
+        : undefined;
+    const semanticLockStatusRaw = contextPackRaw
+      ? this.readString(contextPackRaw.semanticLockStatus)
+      : undefined;
+    const semanticLockStatus =
+      semanticLockStatusRaw === "locked" ||
+      semanticLockStatusRaw === "fallback" ||
+      semanticLockStatusRaw === "degraded"
+        ? semanticLockStatusRaw
+        : undefined;
+    const instructionSummaryRaw =
+      contextPackRaw && this.isRecord(contextPackRaw.instructionSummary)
+        ? contextPackRaw.instructionSummary
+        : undefined;
+    const semanticInstructionSummary = instructionSummaryRaw
+      ? {
+          modelBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.modelBindingCount
+          ),
+          relationshipBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.relationshipBindingCount
+          ),
+          metricBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.metricBindingCount
+          ),
+          calculatedFieldBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.calculatedFieldBindingCount
+          )
+        }
+      : undefined;
+    const contextPackDegradeReasons = contextPackRaw
+      ? this.readStringArray(contextPackRaw.degradeReasons)
+      : [];
 
     return {
       status,
       degradeReasons,
       selectedContextCount,
-      riskTags
+      riskTags,
+      contextPackStatus,
+      semanticSpineVersion,
+      semanticLockStatus,
+      semanticInstructionSummary,
+      contextPackDegradeReasons
     };
   }
 
@@ -621,6 +692,13 @@ export class DeliveryContractMapper {
     }
     const normalized = value.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private readNonNegativeInt(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+    return 0;
   }
 
   private readNonNegativeInteger(value: unknown): number | undefined {
