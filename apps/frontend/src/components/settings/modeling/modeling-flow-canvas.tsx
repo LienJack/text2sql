@@ -183,22 +183,29 @@ function buildGraph(
       if (!fallbackNodeId) {
         return [];
       }
+      const edgeData: ModelingFlowEdgeData = {
+        label: relationshipLabel,
+        source: relationship.source,
+        confidence: normalizedConfidence,
+        invalid: true
+      };
       return [
         {
           id: relationshipId,
           source: sourceNodeId ?? fallbackNodeId,
           target: targetNodeId ?? fallbackNodeId,
           type: MODELING_FLOW_EDGE_TYPE,
-          data: {
-            label: relationshipLabel,
-            source: relationship.source,
-            confidence: normalizedConfidence,
-            invalid: true
-          }
+          data: edgeData
         }
       ];
     }
 
+    const edgeData: ModelingFlowEdgeData = {
+      label: relationshipLabel,
+      source: relationship.source,
+      confidence: normalizedConfidence,
+      invalid: false
+    };
     return [
       {
         id: relationshipId,
@@ -206,12 +213,7 @@ function buildGraph(
         target: targetNodeId,
         type: MODELING_FLOW_EDGE_TYPE,
         animated: relationship.source === "inferred",
-        data: {
-          label: relationshipLabel,
-          source: relationship.source,
-          confidence: normalizedConfidence,
-          invalid: false
-        }
+        data: edgeData
       }
     ];
   });
