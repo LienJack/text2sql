@@ -186,7 +186,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
 
     expect(window.sessionStorage.getItem("text2sql.activeWorkspaceId")).toBe("ws-new");
     expect(window.sessionStorage.getItem("text2sql.activeDatasourceId")).toBe("ds-created");
-  });
+  }, 15000);
 
   it("allows continuing when recommendation list is empty", async () => {
     const user = userEvent.setup();

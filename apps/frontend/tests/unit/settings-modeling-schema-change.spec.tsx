@@ -206,6 +206,11 @@ describe("settings modeling schema change flow", () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
+    await waitFor(() => {
+      expect(screen.getByLabelText("选择工作空间")).toHaveValue("ws-1");
+      expect(screen.getByLabelText("选择数据源")).toHaveValue("ds-1");
+    });
+
     const detectButton = await screen.findByRole("button", { name: "Detect" });
     await waitFor(() => {
       expect(detectButton).toBeEnabled();

@@ -33,6 +33,13 @@ const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
 const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
 const mockUpsertWorkspaceModelingGraph = vi.mocked(upsertWorkspaceModelingGraph);
 
+async function waitForWorkspaceDatasourceReady(): Promise<void> {
+  await waitFor(() => {
+    expect(screen.getByLabelText("选择工作空间")).toHaveValue("ws-2");
+    expect(screen.getByLabelText("选择数据源")).toHaveValue("ds-2b");
+  });
+}
+
 describe("ModelingWorkspacePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -107,6 +114,10 @@ describe("ModelingWorkspacePage", () => {
     });
 
     mockPrecheckWorkspaceModelingDeploy.mockResolvedValue({
+      stage: "modeling_deploy_precheck_completed",
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      policyVersion: 7,
       pass: true,
       riskLevel: "low",
       blockingReasons: [],
@@ -148,6 +159,7 @@ describe("ModelingWorkspacePage", () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
+    await waitForWorkspaceDatasourceReady();
     await screen.findByRole("button", { name: "选择 model Orders Model" });
     expect(screen.getByTestId("modeling-mobile-quick-access")).toBeInTheDocument();
 
@@ -234,6 +246,7 @@ describe("ModelingWorkspacePage", () => {
 
     render(<ModelingWorkspacePage />);
 
+    await waitForWorkspaceDatasourceReady();
     await screen.findByText("orders.customer_id = customers.id");
     await user.click(screen.getByRole("button", { name: "orders.customer_id = customers.id" }));
 
@@ -254,6 +267,7 @@ describe("ModelingWorkspacePage", () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
+    await waitForWorkspaceDatasourceReady();
     await screen.findByRole("button", { name: "选择 model Orders Model" });
 
     await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
