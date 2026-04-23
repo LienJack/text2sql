@@ -114,6 +114,43 @@ export class WorkspaceRelationshipService {
     };
   }
 
+  async getDraftRevision(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    revisionRaw: number
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    draft: RelationshipDraftRecord | null;
+    activeRevision?: number;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    if (!Number.isInteger(revisionRaw) || revisionRaw < 1) {
+      throw new DomainError("VALIDATION_ERROR", "revision 必须是大于 0 的整数。", 400, {
+        field: "revision"
+      });
+    }
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "getDraftRevision"
+    });
+    await this.assertDatasourceExists(datasourceId);
+
+    const scopeState = await this.ensureScopeState(workspaceId, datasourceId);
+    const draft = scopeState?.drafts.find((item) => item.revision === revisionRaw) ?? null;
+    return {
+      workspaceId,
+      datasourceId,
+      draft: draft ? this.cloneDraft(draft) : null,
+      activeRevision: scopeState?.activeRevision
+    };
+  }
+
   async replaceDraft(
     actor: Actor,
     workspaceIdRaw: string,
@@ -301,6 +338,20 @@ export class WorkspaceRelationshipService {
           workspaceId,
           datasourceId,
           draftRevision: body.draftRevision
+        }
+      );
+    }
+    if (state.activeRevision === draft.revision) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_PUBLISH_ALREADY_ACTIVE",
+        "目标 revision 已经处于 active 状态。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          draftRevision: draft.revision,
+          activeRevision: state.activeRevision,
+          blockingReasons: ["revision_already_active"]
         }
       );
     }

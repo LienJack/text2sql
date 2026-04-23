@@ -131,6 +131,7 @@ describe("workspace modeling schema change integration", () => {
     expect(detected.summary.deletedColumnCount).toBe(1);
     expect(detected.summary.modifiedColumnCount).toBe(1);
     expect(detected.unresolvedHighRiskCount).toBeGreaterThanOrEqual(1);
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(1);
     expect(appendAuditEventSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "ws-1",
@@ -168,6 +169,24 @@ describe("workspace modeling schema change integration", () => {
           action: "resolve",
           outcome: "already_resolved",
           changeId: firstChangeId
+        })
+      })
+    );
+
+    const replayDetected = await service.detectModelingSchemaChanges(actor, "ws-1", "ds-1", {
+      policyVersion: 7
+    });
+    expect(replayDetected.unresolvedHighRiskCount).toBe(resolved.unresolvedHighRiskCount);
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(2);
+    expect(appendAuditEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        event: expect.objectContaining({
+          action: "detect",
+          outcome: "detected",
+          policyVersion: 7,
+          persisted: false
         })
       })
     );

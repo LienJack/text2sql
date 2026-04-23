@@ -22,6 +22,19 @@ describe("workspace modeling deploy integration", () => {
           updatedByActorId: actor.id
         }
       })),
+      getDraftRevision: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 1,
+        draft: {
+          policyVersion: 7,
+          revision: 2,
+          graphHash: "hash-v2",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
       publishPrecheck: jest.fn(async () => ({
         workspaceId: "ws-1",
         datasourceId: "ds-1",
@@ -77,18 +90,51 @@ describe("workspace modeling deploy integration", () => {
     });
     expect(precheck.pass).toBe(false);
     expect(precheck.blockingReasons).toContain("unresolved_schema_changes");
+    expect(precheck.blockingReasonDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "unresolved_schema_changes",
+          stage: "schema_change"
+        })
+      ])
+    );
 
     await expect(
       service.deploy(actor, "ws-1", "ds-1", {
         policyVersion: 7,
         draftRevision: 2
       })
-    ).rejects.toBeInstanceOf(DomainError);
+    ).rejects.toMatchObject({
+      code: "WORKSPACE_MODELING_DEPLOY_BLOCKED",
+      details: expect.objectContaining({
+        stage: "modeling_deploy_precheck_completed",
+        blockingReasons: expect.arrayContaining(["unresolved_schema_changes"]),
+        blockingReasonDetails: expect.arrayContaining([
+          expect.objectContaining({
+            code: "unresolved_schema_changes",
+            stage: "schema_change"
+          })
+        ])
+      })
+    });
   });
 
   it("deploys successfully when precheck and dry-run pass", async () => {
     const workspaceRelationshipService = {
       getDraft: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 1,
+        draft: {
+          policyVersion: 7,
+          revision: 2,
+          graphHash: "hash-v2",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
+      getDraftRevision: jest.fn(async () => ({
         workspaceId: "ws-1",
         datasourceId: "ds-1",
         activeRevision: 1,
@@ -164,12 +210,26 @@ describe("workspace modeling deploy integration", () => {
     });
     expect(result.stage).toBe("modeling_deployed");
     expect(result.activeRevision).toBe(2);
+    expect(result.blockingReasonDetails).toEqual([]);
     expect(workspaceRelationshipService.publishDraft).toHaveBeenCalledTimes(1);
   });
 
   it("blocks deploy for concurrent publish when draft revision is already active", async () => {
     const workspaceRelationshipService = {
       getDraft: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 2,
+        draft: {
+          policyVersion: 7,
+          revision: 2,
+          graphHash: "hash-v2",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
+      getDraftRevision: jest.fn(async () => ({
         workspaceId: "ws-1",
         datasourceId: "ds-1",
         activeRevision: 2,
@@ -261,6 +321,19 @@ describe("workspace modeling deploy integration", () => {
           updatedByActorId: actor.id
         }
       })),
+      getDraftRevision: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 1,
+        draft: {
+          policyVersion: 7,
+          revision: 2,
+          graphHash: "hash-v2",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
       publishPrecheck: jest.fn(async () => ({
         workspaceId: "ws-1",
         datasourceId: "ds-1",
@@ -316,6 +389,14 @@ describe("workspace modeling deploy integration", () => {
     });
     expect(precheck.pass).toBe(false);
     expect(precheck.dryRun.pass).toBe(false);
+    expect(precheck.blockingReasonDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "dry_run_failed",
+          stage: "publish_gate_dry_run"
+        })
+      ])
+    );
     await expect(
       service.deploy(actor, "ws-1", "ds-1", {
         policyVersion: 7,
