@@ -376,6 +376,54 @@ describe("DeliveryContractMapper", () => {
     );
   });
 
+  it("reads active_revision + context_pack_status compatibility fields from replay payloads", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: [
+        {
+          replayKey: "rerank:final",
+          stage: "rerank_finalized",
+          indexVersionId: "idx-v2",
+          payload: JSON.stringify({
+            status: "degraded",
+            context_pack: {
+              context_pack_status: "degraded",
+              active_revision: "27",
+              semantic_lock_status: "fallback",
+              instruction_summary: {
+                model_binding_count: "2",
+                relationship_binding_count: "1",
+                metric_binding_count: "3",
+                calculated_field_binding_count: "0"
+              }
+            }
+          }),
+          createdAt: "2026-04-18T00:00:02.000Z"
+        }
+      ]
+    });
+
+    expect(delivery.evidence?.modelingRevision).toBe(27);
+    expect(delivery.evidence?.contextPackStatus).toBe("degraded");
+    expect(delivery.evidence?.semanticLockStatus).toBe("fallback");
+    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
+      modelBindingCount: 2,
+      relationshipBindingCount: 1,
+      metricBindingCount: 3,
+      calculatedFieldBindingCount: 0
+    });
+  });
+
   it("keeps contract complete when artifact is absent", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

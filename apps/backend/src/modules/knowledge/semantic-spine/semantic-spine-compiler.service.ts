@@ -9,6 +9,8 @@ import type {
 } from "./semantic-spine.types";
 
 const MODELING_REVISION_MISSING_RISK_TAG = "modeling_revision_missing";
+const SEMANTIC_SPINE_DEGRADED_RISK_TAG = "semantic_spine_degraded";
+const DEFAULT_SEMANTIC_SPINE_DEGRADE_REASON = "semantic_spine_snapshot_unavailable";
 
 export interface SemanticSpineCompileInput {
   domain: string;
@@ -85,6 +87,8 @@ export class SemanticSpineCompilerService {
 
     if (resolved.status !== "ready" || !resolved.snapshot) {
       const modelingRevision = this.resolveModelingRevision(input.modelingRevision);
+      const degradeReason =
+        resolved.degrade_reason ?? DEFAULT_SEMANTIC_SPINE_DEGRADE_REASON;
       return {
         status: "degraded",
         semanticVersion: resolved.semantic_version,
@@ -105,7 +109,7 @@ export class SemanticSpineCompilerService {
           degraded: true
         },
         riskTags: this.withModelingRevisionRiskTag(
-          resolved.risk_tags ?? [],
+          [SEMANTIC_SPINE_DEGRADED_RISK_TAG, ...(resolved.risk_tags ?? [])],
           modelingRevision
         ),
         evidence: {
@@ -113,7 +117,7 @@ export class SemanticSpineCompilerService {
           matchedScope: resolved.matched_scope,
           matchedObjectKeys: [],
           missingObjectKeys: ["models", "relationships", "metrics", "calculatedFields"],
-          degradeReason: resolved.degrade_reason,
+          degradeReason,
           modelingRevision
         }
       };

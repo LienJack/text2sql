@@ -124,6 +124,26 @@ describe("semantic spine compiler", () => {
     expect(result.confidence.score).toBe(0);
   });
 
+  it("emits observable fallback tags when degraded snapshot omits reason", async () => {
+    const compiler = new SemanticSpineCompilerService(
+      new SemanticSpineRepositoryStub(async () => ({
+        status: "degraded",
+        risk_tags: []
+      })) as never
+    );
+
+    const result = await compiler.compile({
+      datasourceId: "ds-missing",
+      domain: "semantic_term"
+    });
+
+    expect(result.status).toBe("degraded");
+    expect(result.evidence.degradeReason).toBe("semantic_spine_snapshot_unavailable");
+    expect(result.riskTags).toEqual(
+      expect.arrayContaining(["semantic_spine_degraded", "modeling_revision_missing"])
+    );
+  });
+
   it("reads top-level snake_case modeling revision and calculated_fields", async () => {
     const compiler = new SemanticSpineCompilerService(
       new SemanticSpineRepositoryStub(async () => ({

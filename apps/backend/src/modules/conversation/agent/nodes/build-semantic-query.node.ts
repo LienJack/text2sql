@@ -61,6 +61,12 @@ export class BuildSemanticQueryNode {
     const metricBindingCount = instructionSets.metricBindings.length;
     const calculatedFieldBindingCount = instructionSets.calculatedFieldBindings.length;
     const contextPackStatus = this.readContextPackStatus(contextPackRecord);
+    const contextualRiskTags = this.buildContextualRiskTags({
+      relationshipBindingCount,
+      modelingRevision,
+      contextPackStatus
+    });
+    const riskTags = this.unique([...versionLock.riskTags, ...contextualRiskTags]);
 
     const semanticHints =
       intentPlan.intent === "aggregate"
@@ -119,7 +125,7 @@ export class BuildSemanticQueryNode {
         lockStatus: "degraded",
         fallbackApplied: false,
         degradeReason: versionLock.degradeReason,
-        riskTags: versionLock.riskTags,
+        riskTags,
         summary
       };
     }
@@ -139,7 +145,7 @@ export class BuildSemanticQueryNode {
         lockStatus: "fallback",
         fallbackApplied: true,
         degradeReason: versionLock.degradeReason,
-        riskTags: versionLock.riskTags,
+        riskTags,
         summary
       };
     }
@@ -157,7 +163,7 @@ export class BuildSemanticQueryNode {
       semanticVersion: versionLock.semanticVersion,
       lockStatus: "locked",
       fallbackApplied: false,
-      riskTags: versionLock.riskTags,
+      riskTags,
       summary
     };
   }
@@ -265,8 +271,25 @@ export class BuildSemanticQueryNode {
     contextPackRecord: Record<string, unknown> | undefined
   ): "ready" | "degraded" | undefined {
     const status =
-      contextPackRecord?.status ?? contextPackRecord?.contextPackStatus;
+      contextPackRecord?.status ??
+      contextPackRecord?.contextPackStatus ??
+      contextPackRecord?.context_pack_status;
     return status === "ready" || status === "degraded" ? status : undefined;
+  }
+
+  private buildContextualRiskTags(input: {
+    relationshipBindingCount: number;
+    modelingRevision: number | undefined;
+    contextPackStatus: "ready" | "degraded" | undefined;
+  }): string[] {
+    const riskTags: string[] = [];
+    if (input.relationshipBindingCount > 0 && input.modelingRevision === undefined) {
+      riskTags.push("modeling_revision_context_missing");
+    }
+    if (input.contextPackStatus === "degraded") {
+      riskTags.push("semantic_context_pack_degraded");
+    }
+    return riskTags;
   }
 
   private readBindingArray(value: unknown): string[] {
@@ -317,5 +340,9 @@ export class BuildSemanticQueryNode {
       }
     }
     return undefined;
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values.filter((item) => item.trim().length > 0)));
   }
 }

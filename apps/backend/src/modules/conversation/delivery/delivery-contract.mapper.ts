@@ -384,7 +384,11 @@ export class DeliveryContractMapper {
       payload.contextPack ?? payload.context_pack
     );
     const contextPackStatusRaw = contextPackRaw
-      ? this.readString(contextPackRaw.status ?? contextPackRaw.contextPackStatus)
+      ? this.readString(
+          contextPackRaw.status ??
+            contextPackRaw.contextPackStatus ??
+            contextPackRaw.context_pack_status
+        )
       : undefined;
     const contextPackStatus =
       contextPackStatusRaw === "degraded" ? "degraded" : contextPackStatusRaw === "ready" ? "ready" : undefined;
@@ -404,7 +408,10 @@ export class DeliveryContractMapper {
         ? semanticLockStatusRaw
         : undefined;
     const modelingRevision = this.readPositiveInteger(
-      contextPackRaw?.modelingRevision ?? contextPackRaw?.modeling_revision
+      contextPackRaw?.modelingRevision ??
+        contextPackRaw?.modeling_revision ??
+        contextPackRaw?.activeRevision ??
+        contextPackRaw?.active_revision
     );
     const instructionSummaryRaw =
       this.readRecord(
@@ -519,17 +526,27 @@ export class DeliveryContractMapper {
           ? lockStatus
           : undefined;
       const modelingRevision = this.readPositiveInteger(
-        output.modelingRevision ?? output.modeling_revision
+        output.modelingRevision ??
+          output.modeling_revision ??
+          output.activeRevision ??
+          output.active_revision
       );
+      const contextPack = this.readRecord(output.contextPack ?? output.context_pack);
       const contextPackStatusRaw = this.readString(
-        output.contextPackStatus ?? output.context_pack_status
+        output.contextPackStatus ??
+          output.context_pack_status ??
+          contextPack?.status ??
+          contextPack?.context_pack_status
       );
       const contextPackStatus =
         contextPackStatusRaw === "ready" || contextPackStatusRaw === "degraded"
           ? contextPackStatusRaw
           : undefined;
       const semanticInstructionSummary = this.readSemanticInstructionSummary(
-        output.semanticBindingSummary ?? output.semantic_binding_summary
+        output.semanticBindingSummary ??
+          output.semantic_binding_summary ??
+          output.semanticInstructionSummary ??
+          output.semantic_instruction_summary
       );
       const semanticDegradeReason = this.readString(output.degradeReason);
       const semanticDegradeReasonCompat =
@@ -753,6 +770,12 @@ export class DeliveryContractMapper {
   private readNonNegativeInt(value: unknown): number {
     if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
       return Math.floor(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
     }
     return 0;
   }

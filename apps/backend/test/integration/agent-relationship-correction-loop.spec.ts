@@ -175,4 +175,56 @@ describe("agent relationship correction loop", () => {
     });
     expect(semanticPlan.summary).toContain("contextPackStatus=ready");
   });
+
+  it("keeps fallback explainable for degraded context with unpinned relationship retries", async () => {
+    const node = new BuildSemanticQueryNode({
+      resolve: jest.fn().mockResolvedValue({
+        lockStatus: "fallback",
+        semanticVersion: 13,
+        fallbackApplied: true,
+        degradeReason: "semantic_version_not_found",
+        riskTags: ["semantic_registry_degraded"],
+        domain: "semantic_term",
+        term: "orders"
+      })
+    } as never);
+
+    const semanticPlan = await node.run({
+      intentPlan: {
+        status: "ready",
+        intent: "aggregate",
+        constraints: [],
+        summary: "ok"
+      },
+      question: "orders",
+      retrievalBundle: {
+        context_pack: {
+          context_pack_status: "degraded",
+          instruction_sets: {
+            relationship_bindings: ["rel.orders_customers"]
+          }
+        }
+      } as never
+    });
+
+    expect(semanticPlan.status).toBe("degraded");
+    expect(semanticPlan.lockStatus).toBe("fallback");
+    expect(semanticPlan.fallbackApplied).toBe(true);
+    expect(semanticPlan.riskTags).toEqual(
+      expect.arrayContaining([
+        "semantic_registry_degraded",
+        "modeling_revision_context_missing",
+        "semantic_context_pack_degraded"
+      ])
+    );
+    expect(semanticPlan.semanticHints).toEqual(
+      expect.arrayContaining([
+        "relationship_retry_revision_unpinned",
+        "modeling_revision_context_missing",
+        "semantic_context_pack_degraded"
+      ])
+    );
+    expect(semanticPlan.summary).toContain("modelingRevision=missing");
+    expect(semanticPlan.summary).toContain("contextPackStatus=degraded");
+  });
 });
