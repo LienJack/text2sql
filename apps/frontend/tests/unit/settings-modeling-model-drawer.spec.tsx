@@ -67,4 +67,47 @@ describe("ModelingModelDrawer", () => {
     });
     expect(await screen.findByText("abc-1")).toBeInTheDocument();
   });
+
+  it("opens metadata dialog and submits edited model metadata", async () => {
+    const user = userEvent.setup();
+    const onSaveMetadata = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ModelingModelDrawer
+        open
+        model={MODEL}
+        relationships={[]}
+        onOpenChange={vi.fn()}
+        onSaveMetadata={onSaveMetadata}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "编辑 metadata" }));
+
+    await user.clear(screen.getByLabelText("Model alias"));
+    await user.type(screen.getByLabelText("Model alias"), "Customers");
+    await user.clear(screen.getByLabelText("customer_unique_id alias"));
+    await user.type(screen.getByLabelText("customer_unique_id alias"), "Customer ID");
+    await user.clear(screen.getByLabelText("customer_unique_id description"));
+    await user.type(
+      screen.getByLabelText("customer_unique_id description"),
+      "Primary business customer id"
+    );
+
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(onSaveMetadata).toHaveBeenCalledWith({
+        modelId: "model.customers",
+        displayName: "Customers",
+        description: "Customer base table",
+        columns: [
+          {
+            index: 0,
+            displayName: "Customer ID",
+            description: "Primary business customer id"
+          }
+        ]
+      });
+    });
+  });
 });

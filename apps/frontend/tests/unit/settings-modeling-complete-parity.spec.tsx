@@ -93,6 +93,7 @@ describe("settings modeling complete parity", () => {
                   modelName: "orders",
                   displayName: "Orders Model",
                   description: null,
+                  position: { x: 120, y: 96 },
                   columns: []
                 }
               ],
@@ -104,7 +105,8 @@ describe("settings modeling complete parity", () => {
                   name: "orders_recent",
                   sql: "SELECT id, total_amount FROM orders ORDER BY id DESC",
                   displayName: "Recent Orders",
-                  description: "saved from chat"
+                  description: "saved from chat",
+                  position: { x: 580, y: 260 }
                 }
               ],
               schemaChanges: []
@@ -129,6 +131,7 @@ describe("settings modeling complete parity", () => {
                 modelName: "orders",
                 displayName: "Orders Model",
                 description: null,
+                position: { x: 120, y: 96 },
                 columns: []
               }
             ],
@@ -242,6 +245,7 @@ describe("settings modeling complete parity", () => {
         "ds-2b",
         expect.objectContaining({
           policyVersion: 11,
+          models: [expect.objectContaining({ id: "model.orders", position: { x: 120, y: 96 } })],
           views: []
         })
       );
@@ -274,6 +278,49 @@ describe("settings modeling complete parity", () => {
     await waitFor(() => {
       expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent("Deploy State synced");
       expect(screen.getByText(/Deploy State: synced。当前无 undeployed revision。/)).toBeInTheDocument();
+    });
+  });
+
+  it("publishes from top action after draft save and precheck", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State synced"
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "删除 view Recent Orders" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State undeployed"
+      );
+    });
+
+    const publishButton = screen.getByRole("button", { name: "发布" });
+    await waitFor(() => {
+      expect(publishButton).toBeEnabled();
+    });
+    await user.click(publishButton);
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          policyVersion: 11,
+          views: []
+        })
+      );
+      expect(mockPrecheckWorkspaceModelingDeploy).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        policyVersion: 11,
+        draftRevision: 3
+      });
+      expect(mockDeployWorkspaceModeling).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        policyVersion: 11,
+        draftRevision: 3
+      });
     });
   });
 });

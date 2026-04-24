@@ -216,6 +216,76 @@ function buildNextModelDraftName(existingTableNames: string[]): string {
 }
 
 type ModelingDeployState = "undeployed" | "synced";
+type SaveModelingGraphOptions = {
+  suppressSuccessMessage?: boolean;
+};
+
+type ModelingPositionPatch = {
+  models: Record<string, { x: number; y: number }>;
+  views: Record<string, { x: number; y: number }>;
+};
+
+function isFiniteNodePosition(value: unknown): value is { x: number; y: number } {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.x === "number" &&
+    Number.isFinite(record.x) &&
+    typeof record.y === "number" &&
+    Number.isFinite(record.y)
+  );
+}
+
+function mergePositionPatchIntoGraphPayload(
+  payload: ModelingGraphPayload,
+  patch: ModelingPositionPatch
+): { nextPayload: ModelingGraphPayload; changed: boolean } {
+  let changed = false;
+  const nextModels = payload.models.map((model) => {
+    const nextPosition = patch.models[model.id];
+    if (!isFiniteNodePosition(nextPosition)) {
+      return model;
+    }
+    if (model.position?.x === nextPosition.x && model.position?.y === nextPosition.y) {
+      return model;
+    }
+    changed = true;
+    return {
+      ...model,
+      position: nextPosition
+    };
+  });
+  const nextViews = payload.views.map((view) => {
+    const nextPosition = patch.views[view.id];
+    if (!isFiniteNodePosition(nextPosition)) {
+      return view;
+    }
+    if (view.position?.x === nextPosition.x && view.position?.y === nextPosition.y) {
+      return view;
+    }
+    changed = true;
+    return {
+      ...view,
+      position: nextPosition
+    };
+  });
+  if (!changed) {
+    return {
+      nextPayload: payload,
+      changed
+    };
+  }
+  return {
+    nextPayload: {
+      ...payload,
+      models: nextModels,
+      views: nextViews
+    },
+    changed
+  };
+}
 
 export default function ModelingWorkspacePage() {
   const [workspaceId, setWorkspaceId] = useState("");
@@ -246,6 +316,7 @@ export default function ModelingWorkspacePage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const latestSnapshotLoadTokenRef = useRef(0);
+  const positionPatchChangedRef = useRef(false);
 
   const scrollToLayoutPane = useCallback((paneId: string): void => {
     if (typeof window === "undefined") {
@@ -281,6 +352,7 @@ export default function ModelingWorkspacePage() {
       const nextPolicyVersion =
         graphResult.draft?.policyVersion ?? tablePermissionResult.policyVersion;
       setPolicyVersion(nextPolicyVersion);
+      positionPatchChangedRef.current = false;
       setSnapshot(graphResult);
       setGraphPayload(nextGraphPayload);
       setSelectedNode((previous) =>
@@ -366,6 +438,7 @@ export default function ModelingWorkspacePage() {
     if (!workspaceId || !datasourceId) {
       latestSnapshotLoadTokenRef.current += 1;
       setSnapshot(null);
+      positionPatchChangedRef.current = false;
       setGraphPayload(createEmptyGraphPayload());
       setSelectedNode(null);
       setModelDrawerOpen(false);
@@ -395,6 +468,27 @@ export default function ModelingWorkspacePage() {
     setModelDrawerOpen(false);
   }, [selectedNode]);
 
+  useEffect(() => {
+    if (!positionPatchChangedRef.current) {
+      return;
+    }
+    positionPatchChangedRef.current = false;
+    setHasPendingDraftChanges(true);
+    setDeployPrecheck(null);
+  }, [graphPayload]);
+
+  useEffect(() => {
+    if (!message) {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      setMessage("");
+    }, 2800);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [message]);
+
   const hasSavedUndeployedChanges = useMemo(() => {
     if (!snapshot?.draft) {
       return false;
@@ -413,6 +507,12 @@ export default function ModelingWorkspacePage() {
   const canRunDeployPrecheck = hasSavedUndeployedChanges && !hasPendingDraftChanges;
   const canActivateRevision =
     canRunDeployPrecheck && isPrecheckForCurrentDraft && Boolean(deployPrecheck?.pass);
+  const canPublishDraft =
+    Boolean(workspaceId && datasourceId) &&
+    !busy &&
+    !saving &&
+    !deploying &&
+    (hasPendingDraftChanges || hasSavedUndeployedChanges);
 
   const flowAutoLayoutKey = useMemo(
     () => `${workspaceId}:${datasourceId}`,
@@ -431,10 +531,12 @@ export default function ModelingWorkspacePage() {
     return graphPayload.models.find((model) => model.id === selectedNode.id) ?? null;
   }, [graphPayload.models, selectedNode]);
 
-  const saveModelingGraph = async (): Promise<void> => {
+  const saveModelingGraph = async (
+    options: SaveModelingGraphOptions = {}
+  ): Promise<WorkspaceModelingGraphSnapshot | null> => {
     if (!workspaceId || !datasourceId) {
       setError("请先选择工作空间与数据源。");
-      return;
+      return null;
     }
     const graphPayloadToSave = {
       models: graphPayload.models,
@@ -448,6 +550,7 @@ export default function ModelingWorkspacePage() {
       fallbackPolicyVersion: number
     ): void => {
       const nextGraphPayload = normalizeGraphPayload(nextSnapshot.draft?.graphPayload);
+      positionPatchChangedRef.current = false;
       setSnapshot(nextSnapshot);
       setGraphPayload(nextGraphPayload);
       setPolicyVersion(nextSnapshot.draft?.policyVersion ?? fallbackPolicyVersion);
@@ -465,7 +568,10 @@ export default function ModelingWorkspacePage() {
         ...graphPayloadToSave
       });
       applySavedSnapshot(nextSnapshot, policyVersion);
-      setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
+      if (!options.suppressSuccessMessage) {
+        setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
+      }
+      return nextSnapshot;
     } catch (submitError) {
       if (isPolicyVersionConflictError(submitError)) {
         try {
@@ -484,10 +590,12 @@ export default function ModelingWorkspacePage() {
               }
             );
             applySavedSnapshot(retriedSnapshot, latestPolicyVersion);
-            setMessage(
-              `policyVersion 已从 ${policyVersion} 更新为 ${latestPolicyVersion}，已自动重试并保存成功（revision=${retriedSnapshot.draft?.revision ?? "-"}）。`
-            );
-            return;
+            if (!options.suppressSuccessMessage) {
+              setMessage(
+                `policyVersion 已从 ${policyVersion} 更新为 ${latestPolicyVersion}，已自动重试并保存成功（revision=${retriedSnapshot.draft?.revision ?? "-"}）。`
+              );
+            }
+            return retriedSnapshot;
           }
         } catch (retryError) {
           setError(
@@ -495,12 +603,59 @@ export default function ModelingWorkspacePage() {
               ? `policyVersion 自动刷新重试失败：${retryError.message}`
               : "policyVersion 自动刷新重试失败，请刷新后重试。"
           );
-          return;
+          return null;
         }
       }
       setError(submitError instanceof Error ? submitError.message : "保存建模图失败");
+      return null;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const publishModelingDraft = async (): Promise<void> => {
+    if (!workspaceId || !datasourceId) {
+      setError("请先选择工作空间与数据源。");
+      return;
+    }
+    setDeploying(true);
+    setError("");
+    setMessage("");
+    try {
+      let targetSnapshot = snapshot;
+      if (hasPendingDraftChanges || !targetSnapshot?.draft) {
+        const savedSnapshot = await saveModelingGraph({ suppressSuccessMessage: true });
+        if (!savedSnapshot?.draft) {
+          return;
+        }
+        targetSnapshot = savedSnapshot;
+      }
+      const targetDraftRevision = targetSnapshot?.draft?.revision;
+      if (typeof targetDraftRevision !== "number") {
+        setError("未找到可发布的 draft revision，请先保存 Modeling Draft。");
+        return;
+      }
+      const targetPolicyVersion = targetSnapshot?.draft?.policyVersion ?? policyVersion;
+      const precheck = await precheckWorkspaceModelingDeploy(workspaceId, datasourceId, {
+        policyVersion: targetPolicyVersion,
+        draftRevision: targetDraftRevision
+      });
+      setDeployPrecheck(precheck);
+      if (!precheck.pass) {
+        setError("发布预检未通过，请先处理阻断项后重试。");
+        return;
+      }
+      await deployWorkspaceModeling(workspaceId, datasourceId, {
+        policyVersion: targetPolicyVersion,
+        draftRevision: targetDraftRevision
+      });
+      await loadModelingSnapshot(workspaceId, datasourceId);
+      setDeployPrecheck(null);
+      setMessage(`Modeling Draft 已发布（active revision=${targetDraftRevision}）。`);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "发布失败");
+    } finally {
+      setDeploying(false);
     }
   };
 
@@ -822,14 +977,25 @@ export default function ModelingWorkspacePage() {
               Deploy State {deployState}
             </span>
           </div>
-          <Button
-            onClick={() => {
-              void saveModelingGraph();
-            }}
-            disabled={busy || saving || deploying || !workspaceId || !datasourceId}
-          >
-            保存 Modeling Draft
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                void saveModelingGraph();
+              }}
+              disabled={busy || saving || deploying || !workspaceId || !datasourceId}
+            >
+              保存 Modeling Draft
+            </Button>
+            <Button
+              onClick={() => {
+                void publishModelingDraft();
+              }}
+              disabled={!canPublishDraft}
+            >
+              发布
+            </Button>
+          </div>
         </div>
         <div className="sr-only">
           <p>Draft {snapshot?.draft?.revision ?? "-"}</p>
@@ -894,17 +1060,20 @@ export default function ModelingWorkspacePage() {
               Assets
             </p>
           </header>
-          <ModelingSidebarTree
-            models={graphPayload.models}
-            views={graphPayload.views}
-            selectedNode={selectedNode}
-            onSelectNode={(node) => {
-              selectNodeWithDirtyGuard(node);
-            }}
-            onCreateModel={createModelFromSidebar}
-            onDeleteModel={deleteModelFromSidebar}
-            onDeleteView={deleteViewFromSidebar}
-          />
+          <div className="h-[620px] xl:h-[700px]">
+            <ModelingSidebarTree
+              className="h-full"
+              models={graphPayload.models}
+              views={graphPayload.views}
+              selectedNode={selectedNode}
+              onSelectNode={(node) => {
+                selectNodeWithDirtyGuard(node);
+              }}
+              onCreateModel={createModelFromSidebar}
+              onDeleteModel={deleteModelFromSidebar}
+              onDeleteView={deleteViewFromSidebar}
+            />
+          </div>
         </div>
 
         <div
@@ -923,6 +1092,15 @@ export default function ModelingWorkspacePage() {
             busy={busy || saving}
             autoLayoutKey={flowAutoLayoutKey}
             onSelectNode={selectNodeWithDirtyGuard}
+            onNodePositionsChange={(patch) => {
+              setGraphPayload((previous) => {
+                const merged = mergePositionPatchIntoGraphPayload(previous, patch);
+                if (merged.changed) {
+                  positionPatchChangedRef.current = true;
+                }
+                return merged.nextPayload;
+              });
+            }}
           />
         </div>
 
@@ -1054,6 +1232,44 @@ export default function ModelingWorkspacePage() {
             return;
           }
           selectNodeWithDirtyGuard(null);
+        }}
+        onSaveMetadata={async (input) => {
+          setGraphPayload((previous) => ({
+            ...previous,
+            models: previous.models.map((model) => {
+              if (model.id !== input.modelId) {
+                return model;
+              }
+              const columnUpdates = new Map(
+                input.columns.map((column) => [
+                  column.index,
+                  {
+                    displayName: column.displayName,
+                    description: column.description
+                  }
+                ])
+              );
+              return {
+                ...model,
+                displayName: input.displayName,
+                description: input.description,
+                columns: model.columns.map((column, index) => {
+                  const patch = columnUpdates.get(index);
+                  if (!patch) {
+                    return column;
+                  }
+                  return {
+                    ...column,
+                    displayName: patch.displayName,
+                    description: patch.description
+                  };
+                })
+              };
+            })
+          }));
+          setHasPendingDraftChanges(true);
+          setDeployPrecheck(null);
+          setMessage("Model metadata 已更新，点击“保存 Modeling Draft”后提交。");
         }}
         onLoadPreview={loadPreviewForDetails}
       />

@@ -14,6 +14,55 @@ import {
   upsertWorkspaceModelingGraph
 } from "@/lib/admin-api-client";
 
+vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
+  ModelingFlowCanvas: (props: {
+    graphPayload: {
+      relationships: Array<{
+        id: string;
+        bridge: {
+          left: { table: string; column: string };
+          right: { table: string; column: string };
+        };
+      }>;
+    };
+    onSelectNode: (node: { kind: "relationship"; id: string } | null) => void;
+    onNodePositionsChange?: (patch: {
+      models: Record<string, { x: number; y: number }>;
+      views: Record<string, { x: number; y: number }>;
+    }) => void;
+  }) => (
+    <div data-testid="mock-modeling-flow-canvas">
+      {props.graphPayload.relationships.map((relationship) => (
+        <button
+          key={relationship.id}
+          type="button"
+          onClick={() => {
+            props.onSelectNode({
+              kind: "relationship",
+              id: relationship.id
+            });
+          }}
+        >
+          {`${relationship.bridge.left.table}.${relationship.bridge.left.column} = ${relationship.bridge.right.table}.${relationship.bridge.right.column}`}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodePositionsChange?.({
+            models: {
+              "model.orders": { x: 500, y: 320 }
+            },
+            views: {}
+          });
+        }}
+      >
+        trigger-position-change
+      </button>
+    </div>
+  )
+}));
+
 vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin-api-client")>();
   return {
@@ -358,6 +407,36 @@ describe("ModelingWorkspacePage", () => {
       screen.getByText("Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。")
     ).toBeInTheDocument();
     expect(mockPrecheckWorkspaceModelingDeploy).not.toHaveBeenCalled();
+  });
+
+  it("treats position-only updates as pending draft changes and persists coordinates on save", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "trigger-position-change" }));
+
+    expect(
+      screen.getByText("Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          policyVersion: 7,
+          models: [
+            expect.objectContaining({
+              id: "model.orders",
+              position: { x: 500, y: 320 }
+            })
+          ]
+        })
+      );
+    });
   });
 
   it("shows grouped calculated-field function hints and persists aggregate expression into draft", async () => {

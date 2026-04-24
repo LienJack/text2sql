@@ -40,6 +40,7 @@ describe("admin-api-client modeling contract parity", () => {
                     id: "model.orders",
                     tableName: "orders",
                     modelName: "orders",
+                    position: { x: 120, y: 80 },
                     columns: [{ name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true }]
                   }
                 ],
@@ -65,7 +66,17 @@ describe("admin-api-client modeling contract parity", () => {
                     dataType: "numeric"
                   }
                 ],
-                views: [],
+                views: [
+                  {
+                    id: "view.daily_orders",
+                    name: "daily_orders",
+                    sql: "select * from orders",
+                    position: {
+                      x: "invalid",
+                      y: 220
+                    }
+                  }
+                ],
                 schemaChanges: []
               }
             }
@@ -89,6 +100,11 @@ describe("admin-api-client modeling contract parity", () => {
       calculatedFields: ["cf-total"],
       relationships: ["rel-orders-customers"]
     });
+    expect(snapshot.draft?.graphPayload.models[0]?.position).toEqual({
+      x: 120,
+      y: 80
+    });
+    expect(snapshot.draft?.graphPayload.views[0]?.position).toBeUndefined();
   });
 
   it("accepts targetRevision alias for deploy precheck payload parity", async () => {

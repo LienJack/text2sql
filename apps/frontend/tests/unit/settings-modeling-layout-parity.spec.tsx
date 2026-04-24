@@ -64,7 +64,12 @@ vi.mock("@xyflow/react", () => {
       const onInit =
         props.onInit as ((instance: { fitView: typeof fitViewMock }) => void) | undefined;
       const nodes =
-        (props.nodes as Array<{ id: string; data?: { title?: string }; selected?: boolean }> | undefined) ??
+        (props.nodes as Array<{
+          id: string;
+          data?: { title?: string };
+          selected?: boolean;
+          position?: { x: number; y: number };
+        }> | undefined) ??
         [];
       const initOnceRef = React.useRef(false);
 
@@ -79,7 +84,12 @@ vi.mock("@xyflow/react", () => {
       return (
         <div data-testid="layout-parity-react-flow">
           <p data-testid="layout-parity-react-flow-nodes">
-            {nodes.map((node) => `${node.id}:${node.data?.title ?? "-"}`).join("|")}
+            {nodes
+              .map(
+                (node) =>
+                  `${node.id}:${node.data?.title ?? "-"}@${node.position?.x ?? "?"},${node.position?.y ?? "?"}`
+              )
+              .join("|")}
           </p>
           <p data-testid="layout-parity-react-flow-selected">
             {nodes
@@ -198,6 +208,7 @@ describe("Modeling layout parity", () => {
               modelName: "orders",
               displayName: "Orders Model",
               description: null,
+              position: { x: 220, y: 140 },
               columns: [{ name: "id", dataType: "int", isNullable: false, isPrimaryKey: true }]
             },
             {
@@ -206,6 +217,7 @@ describe("Modeling layout parity", () => {
               modelName: "customers",
               displayName: "Customers Model",
               description: null,
+              position: { x: 40, y: 80 },
               columns: [{ name: "id", dataType: "int", isNullable: false, isPrimaryKey: true }]
             }
           ],
@@ -243,6 +255,9 @@ describe("Modeling layout parity", () => {
       "modeling-layout-context-pane"
     ]);
     await screen.findByTestId("layout-parity-react-flow");
+    expect(screen.getByTestId("layout-parity-react-flow-nodes")).toHaveTextContent(
+      "model:model.customers:Customers Model@40,80"
+    );
     expect(within(leftPane).getByTestId("modeling-sidebar-tree")).toBeInTheDocument();
     expect(within(canvasPane).getByTestId("modeling-flow-canvas")).toBeInTheDocument();
     expect(within(canvasPane).getByRole("button", { name: "自动布局画布" })).toBeInTheDocument();

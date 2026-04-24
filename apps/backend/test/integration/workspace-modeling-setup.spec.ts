@@ -325,6 +325,50 @@ describe("workspace modeling setup integration", () => {
     );
   });
 
+  it("passes through model/view positions in modeling graph payload", async () => {
+    const { service, workspaceRelationshipService } = buildService();
+
+    await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 7,
+      models: [
+        {
+          id: "orders",
+          tableName: "orders",
+          modelName: "Orders",
+          position: { x: 140, y: 96 },
+          columns: [
+            {
+              name: "id",
+              dataType: "integer",
+              isNullable: false,
+              isPrimaryKey: true
+            }
+          ]
+        }
+      ],
+      views: [
+        {
+          id: "view_orders",
+          name: "orders_view",
+          sql: "select id from orders",
+          position: { x: 520, y: 280 }
+        }
+      ]
+    });
+
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledWith(
+      actor,
+      "ws-1",
+      "ds-1",
+      expect.objectContaining({
+        modelingGraphPayload: expect.objectContaining({
+          models: [expect.objectContaining({ id: "orders", position: { x: 140, y: 96 } })],
+          views: [expect.objectContaining({ id: "view_orders", position: { x: 520, y: 280 } })]
+        })
+      })
+    );
+  });
+
   it("fails closed when modeling graph models include forbidden table", async () => {
     const { service, workspaceRelationshipService } = buildService();
 

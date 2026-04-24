@@ -730,6 +730,23 @@ function normalizeWorkspaceModelingSchemaChangeGroup(
   return Array.from(deduped.values());
 }
 
+function normalizeModelingNodePosition(
+  value: unknown
+): { x: number; y: number } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const x = value.x;
+  const y = value.y;
+  if (typeof x !== "number" || !Number.isFinite(x)) {
+    return undefined;
+  }
+  if (typeof y !== "number" || !Number.isFinite(y)) {
+    return undefined;
+  }
+  return { x, y };
+}
+
 function normalizeModelingRevisionSummary(
   value: unknown,
   fallback: { draftRevision?: number; activeRevision?: number }
@@ -853,6 +870,7 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
           description:
             typeof item.description === "string" ? item.description : null,
           columns,
+          position: normalizeModelingNodePosition(item.position),
           nodeSections: {
             columns: columns.map((column) => column.name),
             calculatedFields: calculatedFieldIds,
@@ -871,7 +889,8 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
         displayName:
           typeof item.displayName === "string" ? item.displayName : null,
         description:
-          typeof item.description === "string" ? item.description : null
+          typeof item.description === "string" ? item.description : null,
+        position: normalizeModelingNodePosition(item.position)
       })),
     schemaChanges: schemaChanges
       .filter((item): item is Record<string, unknown> => isRecord(item))

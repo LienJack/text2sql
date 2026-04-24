@@ -6,6 +6,7 @@ import type { ModelingGraphModel, ModelingGraphView } from "@text2sql/shared-typ
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StateBlock } from "@/components/ui/state-block";
+import { cn } from "@/lib/utils";
 
 export type ModelingSidebarNode =
   | {
@@ -51,6 +52,7 @@ export function ModelingSidebarTree(props: {
   onCreateModel?: () => void;
   onDeleteModel?: (modelId: string) => void;
   onDeleteView?: (viewId: string) => void;
+  className?: string;
 }) {
   const [modelExpanded, setModelExpanded] = useState(true);
   const [viewExpanded, setViewExpanded] = useState(true);
@@ -78,7 +80,10 @@ export function ModelingSidebarTree(props: {
 
   return (
     <aside
-      className="space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-3"
+      className={cn(
+        "flex h-full min-h-0 flex-col space-y-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-3",
+        props.className
+      )}
       data-testid="modeling-sidebar-tree"
     >
       <div>
@@ -103,7 +108,12 @@ export function ModelingSidebarTree(props: {
         </div>
       </div>
 
-      <div className="space-y-2" role="tree" aria-label="建模资产树" data-testid="modeling-sidebar-tree-content">
+      <div
+        className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1"
+        role="tree"
+        aria-label="建模资产树"
+        data-testid="modeling-sidebar-tree-content"
+      >
         <div className="rounded-md border border-[var(--border-default)] bg-white">
           <button
             type="button"

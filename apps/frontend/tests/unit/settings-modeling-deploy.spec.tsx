@@ -11,6 +11,31 @@ import {
   precheckWorkspaceModelingDeploy
 } from "@/lib/admin-api-client";
 
+vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
+  ModelingFlowCanvas: (props: {
+    onNodePositionsChange?: (patch: {
+      models: Record<string, { x: number; y: number }>;
+      views: Record<string, { x: number; y: number }>;
+    }) => void;
+  }) => (
+    <div data-testid="mock-modeling-flow-canvas">
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodePositionsChange?.({
+            models: {
+              "model-orders": { x: 260, y: 140 }
+            },
+            views: {}
+          });
+        }}
+      >
+        trigger-position-change
+      </button>
+    </div>
+  )
+}));
+
 vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin-api-client")>();
   return {
@@ -291,5 +316,47 @@ describe("settings modeling deploy flow", () => {
     expect(screen.getByText("当前存在未保存的建模改动，请先保存 Modeling Draft。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Activate Revision" })).toBeDisabled();
+  });
+
+  it("blocks deploy precheck when only node position changed and draft not saved", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValue({
+      workspaceId: "ws-1",
+      datasourceId: "ds-1",
+      activeRevision: 2,
+      draft: {
+        policyVersion: 11,
+        revision: 2,
+        graphHash: "hash-r2",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model-orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders Model",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await screen.findByRole("button", { name: "trigger-position-change" });
+    await user.click(screen.getByRole("button", { name: "trigger-position-change" }));
+
+    expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
+    expect(
+      screen.getByText("Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。")
+    ).toBeInTheDocument();
+    expect(mockPrecheckWorkspaceModelingDeploy).not.toHaveBeenCalled();
   });
 });

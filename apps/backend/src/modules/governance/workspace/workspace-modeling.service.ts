@@ -1820,6 +1820,7 @@ export class WorkspaceModelingService {
     const modelName = this.readStringValue(input.modelName) ?? this.toModelName(tableName);
     const displayName = this.readNullableStringValue(input.displayName);
     const description = this.readNullableStringValue(input.description);
+    const position = this.readNodePosition(input.position);
     const columnsRaw = Array.isArray(input.columns) ? input.columns : [];
     const columns = columnsRaw
       .map((item) => this.normalizeColumn(item))
@@ -1830,6 +1831,7 @@ export class WorkspaceModelingService {
       modelName,
       displayName,
       description,
+      position,
       columns
     };
   }
@@ -1939,7 +1941,8 @@ export class WorkspaceModelingService {
       name,
       sql: this.requireStringField(input, "sql"),
       displayName: this.readNullableStringValue(input.displayName),
-      description: this.readNullableStringValue(input.description)
+      description: this.readNullableStringValue(input.description),
+      position: this.readNodePosition(input.position)
     };
   }
 
@@ -1991,6 +1994,37 @@ export class WorkspaceModelingService {
       return null;
     }
     return this.readStringValue(value);
+  }
+
+  private readNodePosition(value: unknown): { x: number; y: number } | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    const record = this.asRecord(value);
+    return {
+      x: this.requireFiniteNumberField(record, "x", "position.x"),
+      y: this.requireFiniteNumberField(record, "y", "position.y")
+    };
+  }
+
+  private requireFiniteNumberField(
+    record: Record<string, unknown>,
+    key: string,
+    field: string
+  ): number {
+    const raw = record[key];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      return raw;
+    }
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    throw new DomainError("WORKSPACE_MODELING_GRAPH_INVALID", `${field} 必须是有限数值。`, 400, {
+      field
+    });
   }
 
   private readBooleanOrDefault(value: unknown, fallback: boolean): boolean {

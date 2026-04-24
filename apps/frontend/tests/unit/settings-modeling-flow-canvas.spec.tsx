@@ -211,6 +211,19 @@ const baseGraphPayload: ModelingGraphPayload = {
   schemaChanges: []
 };
 
+const positionedGraphPayload: ModelingGraphPayload = {
+  ...baseGraphPayload,
+  models: baseGraphPayload.models.map((model) =>
+    model.id === "model.customers"
+      ? { ...model, position: { x: 132, y: 264 } }
+      : { ...model, position: { x: 420, y: 280 } }
+  ),
+  views: baseGraphPayload.views.map((view) => ({
+    ...view,
+    position: { x: 720, y: 360 }
+  }))
+};
+
 describe("ModelingFlowCanvas", () => {
   beforeEach(() => {
     fitViewMock.mockClear();
@@ -302,6 +315,64 @@ describe("ModelingFlowCanvas", () => {
 
     await user.click(screen.getByRole("button", { name: "trigger-node-click" }));
     expect(onSelectNode).toHaveBeenCalledWith({ kind: "model", id: "model.customers" });
+  });
+
+  it("prefers persisted payload positions over default grid fallback", async () => {
+    render(
+      <ModelingFlowCanvas
+        graphPayload={positionedGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:positioned"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("132,264");
+    });
+  });
+
+  it("emits latest model/view positions after auto layout and drag", async () => {
+    const user = userEvent.setup();
+    const onNodePositionsChange = vi.fn();
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:emit"
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "自动布局画布" }));
+
+    await waitFor(() => {
+      expect(onNodePositionsChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          models: expect.objectContaining({
+            "model.customers": { x: 360, y: 220 },
+            "model.orders": { x: 40, y: 20 }
+          }),
+          views: expect.objectContaining({
+            "view.daily_orders": { x: 720, y: 340 }
+          })
+        })
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-drag" }));
+
+    await waitFor(() => {
+      expect(onNodePositionsChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          models: expect.objectContaining({
+            "model.customers": { x: 999, y: 888 }
+          })
+        })
+      );
+    });
   });
 
   it("keeps previous positions and shows non-blocking warning when auto layout fails", async () => {

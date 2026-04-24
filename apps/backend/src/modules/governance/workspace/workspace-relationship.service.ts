@@ -618,6 +618,7 @@ export class WorkspaceRelationshipService {
           modelName: model.modelName,
           displayName: model.displayName,
           description: model.description,
+          position: model.position,
           columns: model.columns
             .map((column) => ({
               name: column.name,
@@ -676,7 +677,8 @@ export class WorkspaceRelationshipService {
           name: view.name,
           sql: view.sql,
           displayName: view.displayName,
-          description: view.description
+          description: view.description,
+          position: view.position
         }))
         .sort((left, right) => left.id.localeCompare(right.id)),
       schemaChanges: (basePayload?.schemaChanges ?? [])

@@ -47,6 +47,16 @@ const FLOW_NODE_X_GAP = 280;
 const FLOW_NODE_Y_GAP = 170;
 const AUTO_LAYOUT_TIMEOUT_MS = 2000;
 
+type ModelingFlowNodePosition = {
+  x: number;
+  y: number;
+};
+
+type ModelingFlowPositionPatch = {
+  models: Record<string, ModelingFlowNodePosition>;
+  views: Record<string, ModelingFlowNodePosition>;
+};
+
 function resolveModelLabel(model: ModelingGraphPayload["models"][number]): string {
   return model.displayName?.trim() || model.modelName?.trim() || model.tableName;
 }
@@ -77,6 +87,59 @@ function fromFlowNodeId(nodeId: string): ModelingSidebarNode | null {
 
 function normalizeTableKey(tableName: string): string {
   return tableName.trim().toLowerCase();
+}
+
+function isFinitePosition(value: unknown): value is ModelingFlowNodePosition {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.x === "number" &&
+    Number.isFinite(record.x) &&
+    typeof record.y === "number" &&
+    Number.isFinite(record.y)
+  );
+}
+
+function collectPersistedPositionByFlowNodeId(
+  graphPayload: ModelingGraphPayload
+): Map<string, ModelingFlowNodePosition> {
+  const positionByNodeId = new Map<string, ModelingFlowNodePosition>();
+  for (const model of graphPayload.models) {
+    if (!isFinitePosition(model.position)) {
+      continue;
+    }
+    positionByNodeId.set(toFlowNodeId({ kind: "model", id: model.id }), model.position);
+  }
+  for (const view of graphPayload.views) {
+    if (!isFinitePosition(view.position)) {
+      continue;
+    }
+    positionByNodeId.set(toFlowNodeId({ kind: "view", id: view.id }), view.position);
+  }
+  return positionByNodeId;
+}
+
+function collectPositionPatchFromFlowNodes(
+  flowNodes: Array<Node<ModelingFlowNodeData>>
+): ModelingFlowPositionPatch {
+  const patch: ModelingFlowPositionPatch = {
+    models: {},
+    views: {}
+  };
+  for (const node of flowNodes) {
+    const parsedNode = fromFlowNodeId(node.id);
+    if (!parsedNode || !isFinitePosition(node.position)) {
+      continue;
+    }
+    if (parsedNode.kind === "model") {
+      patch.models[parsedNode.id] = node.position;
+      continue;
+    }
+    patch.views[parsedNode.id] = node.position;
+  }
+  return patch;
 }
 
 function resolveRelationshipLabel(
@@ -193,6 +256,10 @@ function buildGraph(
           ? model.nodeSections.relationships
           : fallbackRelationships
     };
+    const fallbackPosition = {
+      x: (index % FLOW_COLUMNS) * FLOW_NODE_X_GAP,
+      y: Math.floor(index / FLOW_COLUMNS) * FLOW_NODE_Y_GAP
+    };
     return {
       id: nodeId,
       type: MODELING_FLOW_NODE_TYPE,
@@ -203,10 +270,7 @@ function buildGraph(
         columnCount: sections.columns.length,
         sections
       },
-      position: {
-        x: (index % FLOW_COLUMNS) * FLOW_NODE_X_GAP,
-        y: Math.floor(index / FLOW_COLUMNS) * FLOW_NODE_Y_GAP
-      }
+      position: isFinitePosition(model.position) ? model.position : fallbackPosition
     };
   });
 
@@ -217,6 +281,10 @@ function buildGraph(
       kind: "view",
       id: view.id
     });
+    const fallbackPosition = {
+      x: (index % FLOW_COLUMNS) * FLOW_NODE_X_GAP,
+      y: modelRows * FLOW_NODE_Y_GAP + 90 + Math.floor(index / FLOW_COLUMNS) * FLOW_NODE_Y_GAP
+    };
     return {
       id: nodeId,
       type: MODELING_FLOW_NODE_TYPE,
@@ -225,10 +293,7 @@ function buildGraph(
         title: resolveViewLabel(view),
         subtitle: view.name
       },
-      position: {
-        x: (index % FLOW_COLUMNS) * FLOW_NODE_X_GAP,
-        y: modelRows * FLOW_NODE_Y_GAP + 90 + Math.floor(index / FLOW_COLUMNS) * FLOW_NODE_Y_GAP
-      }
+      position: isFinitePosition(view.position) ? view.position : fallbackPosition
     };
   });
 
@@ -321,8 +386,16 @@ export function ModelingFlowCanvas(props: {
   busy?: boolean;
   autoLayoutKey: string;
   onSelectNode: (node: ModelingSidebarNode | null) => void;
+  onNodePositionsChange?: (patch: ModelingFlowPositionPatch) => void;
 }) {
-  const { graphPayload, selectedNode, busy, autoLayoutKey, onSelectNode } = props;
+  const {
+    graphPayload,
+    selectedNode,
+    busy,
+    autoLayoutKey,
+    onSelectNode,
+    onNodePositionsChange
+  } = props;
 
   const [flowInstance, setFlowInstance] = useState<
     ReactFlowInstance<Node<ModelingFlowNodeData>, Edge<ModelingFlowEdgeData>> | null
@@ -352,6 +425,10 @@ export function ModelingFlowCanvas(props: {
       };
     }
   }, [graphPayload]);
+  const persistedPositionByNodeId = useMemo(
+    () => collectPersistedPositionByFlowNodeId(graphPayload),
+    [graphPayload]
+  );
   const selectedFlowNodeId =
     selectedNode?.kind === "model" || selectedNode?.kind === "view"
       ? toFlowNodeId(selectedNode)
@@ -365,11 +442,12 @@ export function ModelingFlowCanvas(props: {
       );
       return graph.nodes.map((node) => ({
         ...node,
-        position: previousPositionById.get(node.id) ?? node.position
+        position:
+          persistedPositionByNodeId.get(node.id) ?? previousPositionById.get(node.id) ?? node.position
       }));
     });
     setFlowEdges(graph.edges);
-  }, [graph]);
+  }, [graph, persistedPositionByNodeId]);
 
   useEffect(() => {
     setFlowNodes((previousNodes) =>
@@ -405,6 +483,18 @@ export function ModelingFlowCanvas(props: {
     setLayoutBusy(false);
     setLayoutMessage("");
   }, [autoLayoutKey]);
+
+  useEffect(() => {
+    if (!layoutMessage || layoutMessageVariant !== "success") {
+      return;
+    }
+    const timerId = window.setTimeout(() => {
+      setLayoutMessage("");
+    }, 2400);
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [layoutMessage, layoutMessageVariant]);
 
   useEffect(() => {
     if (didAutoFit || !flowInstance || flowNodes.length === 0 || busy) {
@@ -496,8 +586,8 @@ export function ModelingFlowCanvas(props: {
       return;
     }
 
-    setFlowNodes((previousNodes) =>
-      previousNodes.map((node) => {
+    setFlowNodes((previousNodes) => {
+      const nextNodes = previousNodes.map((node) => {
         const nextPosition = layoutResult.positions[node.id];
         if (!nextPosition) {
           return node;
@@ -506,8 +596,10 @@ export function ModelingFlowCanvas(props: {
           ...node,
           position: nextPosition
         };
-      })
-    );
+      });
+      onNodePositionsChange?.(collectPositionPatchFromFlowNodes(nextNodes));
+      return nextNodes;
+    });
     setLayoutBusy(false);
     setLayoutMessageVariant("success");
     setLayoutMessage(`Auto Layout 完成（${layoutResult.elapsedMs}ms）。`);
@@ -520,7 +612,7 @@ export function ModelingFlowCanvas(props: {
         });
       });
     }
-  }, [busy, flowEdges, flowInstance, flowNodes, layoutBusy]);
+  }, [busy, flowEdges, flowInstance, flowNodes, layoutBusy, onNodePositionsChange]);
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node<ModelingFlowNodeData>) => {
@@ -545,9 +637,16 @@ export function ModelingFlowCanvas(props: {
 
   const handleNodesChange = useCallback(
     (changes: Array<NodeChange<Node<ModelingFlowNodeData>>>) => {
-      setFlowNodes((previousNodes) => applyNodeChanges(changes, previousNodes));
+      const hasPositionChange = changes.some((change) => change.type === "position");
+      setFlowNodes((previousNodes) => {
+        const nextNodes = applyNodeChanges(changes, previousNodes);
+        if (hasPositionChange) {
+          onNodePositionsChange?.(collectPositionPatchFromFlowNodes(nextNodes));
+        }
+        return nextNodes;
+      });
     },
-    []
+    [onNodePositionsChange]
   );
 
   const handleEdgesChange = useCallback(
