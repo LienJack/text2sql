@@ -478,17 +478,29 @@ function estimateLayoutNodeSize(node: Node<ModelingFlowNodeData>): { width: numb
   const columnsCount = node.data.sections?.columns.length ?? 0;
   const calculatedFieldsCount = node.data.sections?.calculatedFields.length ?? 0;
   const relationshipsCount = node.data.sections?.relationships.length ?? 0;
-  const sectionCount = [columnsCount, calculatedFieldsCount, relationshipsCount].filter(
-    (count) => count > 0
+  const nonEmptySections = [columnsCount, calculatedFieldsCount, relationshipsCount].filter(
+    (c) => c > 0
   ).length;
+  const emptySections = 3 - nonEmptySections;
+  /*
+   * Header:           py-[5px] + text-[15px]       ≈ 31 px
+   * Section title ×3: py-1.5  + text-[13px]        ≈ 30 px each  (+ 1 px border-top, first excluded)
+   * Column row:       py-1    + text-[15px] + icon  ≈ 29 px
+   * Relationship row: py-1    + text-[15px] + icon  ≈ 29 px
+   * Empty "—":        pb-1    + text-[15px]         ≈ 25 px
+   * List bottom pad:  pb-1                          ≈  4 px  per non-empty section
+   */
   return {
     width: 280,
     height:
-      136 +
-      columnsCount * 22 +
-      calculatedFieldsCount * 20 +
-      relationshipsCount * 20 +
-      sectionCount * 14
+      31 +
+      3 * 30 +
+      2 +
+      columnsCount * 29 +
+      calculatedFieldsCount * 29 +
+      relationshipsCount * 29 +
+      nonEmptySections * 4 +
+      emptySections * 25
   };
 }
 

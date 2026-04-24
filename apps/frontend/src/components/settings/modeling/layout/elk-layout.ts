@@ -121,7 +121,11 @@ export async function computeElkLayout(
       "elk.spacing.nodeNode": String(nodeSpacing),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
       "elk.spacing.edgeNode": String(edgeSpacing),
-      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX"
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.crossingMinimization.greedySwitch.type": "TWO_SIDED",
+      "elk.separateConnectedComponents": "true",
+      "elk.layered.mergeEdges": "true"
     },
     children: nodes.map((node) => ({
       id: node.id,

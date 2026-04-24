@@ -2,8 +2,8 @@ export const DEFAULT_ELK_DIRECTION = "RIGHT";
 export const DEFAULT_ELK_NODE_WIDTH = 260;
 export const DEFAULT_ELK_NODE_HEIGHT = 140;
 export const DEFAULT_ELK_NODE_SPACING = 80;
-export const DEFAULT_ELK_LAYER_SPACING = 140;
-export const DEFAULT_ELK_EDGE_SPACING = 40;
+export const DEFAULT_ELK_LAYER_SPACING = 120;
+export const DEFAULT_ELK_EDGE_SPACING = 30;
 export const DEFAULT_ELK_TIMEOUT_MS = 1800;
 
 export type ElkLayoutDirection = "RIGHT" | "DOWN";
