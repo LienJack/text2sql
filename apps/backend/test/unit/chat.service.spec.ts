@@ -11,6 +11,7 @@ describe("ChatService", () => {
       {} as never,
       { executeMessage } as never,
       { streamMessage } as never,
+      {} as never,
       {} as never
     );
     const contextEnvelope: ContextEnvelope = {
@@ -45,6 +46,7 @@ describe("ChatService", () => {
       {} as never,
       { executeMessage } as never,
       { streamMessage } as never,
+      {} as never,
       {} as never
     );
     const contextEnvelope: ContextEnvelope = {

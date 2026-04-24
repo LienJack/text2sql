@@ -55,6 +55,7 @@ model Datasource {
   workspaceBindings WorkspaceDatasourceBinding[]
   workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   workspaceTablePermissions WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions WorkspaceModelingGraphRevision[]
   ragDocuments       RagDocument[]        @relation("datasource_rag_documents")
   ragChunks          RagChunk[]           @relation("datasource_rag_chunks")
   ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
@@ -105,6 +106,8 @@ model SqlRun {
   semanticMemories  SemanticMemory[]
   semanticRegistryVersionsPublished SemanticRegistryVersion[] @relation("semantic_registry_published_by_run")
   semanticRegistryVersionsActivated SemanticRegistryVersion[] @relation("semantic_registry_activated_by_run")
+  semanticSpineSnapshotsPublished SemanticSpineSnapshot[] @relation("semantic_spine_published_by_run")
+  semanticSpineSnapshotsActivated SemanticSpineSnapshot[] @relation("semantic_spine_activated_by_run")
   ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
   ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
   ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
@@ -211,6 +214,31 @@ model SemanticRegistryTerm {
   @@index([domain, term, versionId])
   @@index([canonicalKey])
   @@map("semantic_registry_terms")
+}
+
+model SemanticSpineSnapshot {
+  id               String   @id
+  domain           String
+  semanticVersion  Int
+  status           String   @default("active")
+  releaseSummary   String
+  auditSummary     String
+  riskTags         String[]
+  snapshot         String
+  checksum         String?
+  publishedByRunId String?
+  activatedByRunId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  publishedByRun   SqlRun?  @relation("semantic_spine_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?  @relation("semantic_spine_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+
+  @@unique([domain, semanticVersion])
+  @@index([domain, status, semanticVersion])
+  @@index([publishedByRunId])
+  @@index([activatedByRunId])
+  @@map("semantic_spine_snapshots")
 }
 
 enum PromptTemplateScene {
@@ -432,6 +460,7 @@ model Workspace {
   datasourceBindings WorkspaceDatasourceBinding[]
   datasourceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
   datasourceTablePermissions WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions WorkspaceModelingGraphRevision[]
 
   @@unique([name])
   @@index([status, deletedAt])
@@ -499,6 +528,29 @@ model WorkspaceDatasourceTablePermission {
   @@unique([workspaceId, datasourceId, tableName])
   @@index([workspaceId, datasourceId, createdAt])
   @@map("workspace_datasource_table_permissions")
+}
+
+model WorkspaceModelingGraphRevision {
+  id               String   @id
+  workspaceId      String
+  datasourceId     String
+  revision         Int
+  status           String   @default("draft")
+  graphHash        String
+  graphPayload     String
+  graphPayloadVersion Int  @default(2)
+  createdByActorId String?
+  activatedByActorId String?
+  activatedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource       Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, datasourceId, revision])
+  @@index([workspaceId, datasourceId, status, revision], map: "workspace_modeling_graph_revisions_status_revision_idx")
+  @@index([workspaceId, datasourceId, updatedAt], map: "workspace_modeling_graph_revisions_updated_at_idx")
+  @@map("workspace_modeling_graph_revisions")
 }
 
 model RagDocument {

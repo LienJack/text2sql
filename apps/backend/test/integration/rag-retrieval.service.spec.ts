@@ -5,6 +5,7 @@ import { RagIndexBuilderService } from "../../src/modules/rag/index/rag-index-bu
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
 import { RagReplayRepository } from "../../src/modules/knowledge/rag/observability/rag-replay.repository";
 import { RagRetrievalService } from "../../src/modules/knowledge/rag/retrieval/rag-retrieval.service";
+import { ModelingGraphRepository } from "../../src/modules/platform/data/persistence/modeling-graph.repository";
 
 describe("rag retrieval service integration", () => {
   beforeAll(() => {
@@ -97,6 +98,11 @@ describe("rag retrieval service integration", () => {
     expect(first.retrieval_bundle.lane_results.lexical.status).toBe("ok");
     expect(first.retrieval_bundle.lane_results.dense.status).toBe("ok");
     expect(first.retrieval_bundle.lane_results.graph.status).toBe("ok");
+    expect(first.retrieval_bundle.context_pack).toBeDefined();
+    expect(first.retrieval_bundle.context_pack?.status).toBe(first.retrieval_bundle.status);
+    expect(first.retrieval_bundle.context_pack?.semantic_lock_status).toBe(
+      first.retrieval_bundle.status === "ready" ? "locked" : "degraded"
+    );
     expect(firstIds.length).toBeGreaterThan(0);
     expect(firstIds).toEqual(secondIds);
     expect(coveredDomains.has("schema")).toBe(true);
@@ -165,6 +171,10 @@ describe("rag retrieval service integration", () => {
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["dense_timeout"])
     );
+    expect(response.retrieval_bundle.context_pack?.status).toBe("degraded");
+    expect(response.retrieval_bundle.context_pack?.degrade_reasons).toEqual(
+      expect.arrayContaining(["dense_timeout"])
+    );
     expect(response.retrieval_bundle.candidates.length).toBeGreaterThan(0);
 
     await moduleRef.close();
@@ -186,8 +196,70 @@ describe("rag retrieval service integration", () => {
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["no_active_index"])
     );
+    expect(response.retrieval_bundle.context_pack?.status).toBe("degraded");
     expect(response.retrieval_bundle.candidates).toHaveLength(0);
 
+    await moduleRef.close();
+  });
+
+  it("injects active modeling revision into context pack when workspace scope exists", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+    const modelingGraphRepository = moduleRef.get(ModelingGraphRepository);
+
+    const datasourceId = "ds-rag-retrieval-modeling-revision";
+    const workspaceId = "ws-rag-retrieval-modeling-revision";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-schema-revision",
+        datasourceId,
+        domain: "schema",
+        content: "table payments(id, amount)",
+        metadata: JSON.stringify({
+          tableNames: ["payments"],
+          columnNames: ["id", "amount"]
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-modeling-revision-v1",
+      createdByRunId: "run-rag-retrieval-modeling-revision-build-v1",
+      activatedByRunId: "run-rag-retrieval-modeling-revision-build-v1"
+    });
+
+    const revision = await modelingGraphRepository.appendDraftRevision({
+      workspaceId,
+      datasourceId,
+      graphHash: "graph-hash-modeling-revision-v1",
+      graphPayload: {
+        models: [],
+        relationships: [],
+        calculatedFields: [],
+        views: [],
+        schemaChanges: []
+      },
+      actorId: "system"
+    });
+    await modelingGraphRepository.markActiveRevision({
+      workspaceId,
+      datasourceId,
+      revision: revision.revision,
+      actorId: "system"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "payments amount",
+      datasourceId,
+      workspaceId,
+      runId: "run-rag-retrieval-modeling-revision-v1"
+    });
+
+    expect(response.retrieval_bundle.context_pack?.modeling_revision).toBe(revision.revision);
     await moduleRef.close();
   });
 });

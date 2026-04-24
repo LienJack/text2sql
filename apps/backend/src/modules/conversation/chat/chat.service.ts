@@ -10,6 +10,7 @@ import type {
 } from "@text2sql/shared-types";
 import { ExecuteMessageUsecase } from "./application/execute-message.usecase";
 import { RunViewUsecase } from "./application/run-view.usecase";
+import { SaveViewFromRunUsecase } from "./application/save-view-from-run.usecase";
 import { SessionLifecycleUsecase } from "./application/session-lifecycle.usecase";
 import { StreamMessageUsecase } from "./application/stream-message.usecase";
 import type { SessionListView } from "./dto/list-sessions.dto";
@@ -20,7 +21,8 @@ export class ChatService {
     private readonly sessionLifecycleUsecase: SessionLifecycleUsecase,
     private readonly executeMessageUsecase: ExecuteMessageUsecase,
     private readonly streamMessageUsecase: StreamMessageUsecase,
-    private readonly runViewUsecase: RunViewUsecase
+    private readonly runViewUsecase: RunViewUsecase,
+    private readonly saveViewFromRunUsecase: SaveViewFromRunUsecase
   ) {}
 
   createSession(
@@ -145,5 +147,30 @@ export class ChatService {
 
   getRunById(runId: string): Promise<SqlRun> {
     return this.runViewUsecase.getRunById(runId);
+  }
+
+  saveViewFromRun(input: {
+    runId: string;
+    name: string;
+    displayName?: string;
+    description?: string;
+    actorId?: string;
+  }): Promise<{
+    stage: "chat_run_view_saved";
+    workspaceId: string;
+    datasourceId: string;
+    runId: string;
+    replayed: boolean;
+    activeRevision?: number;
+    draftRevision: number;
+    view: {
+      id: string;
+      name: string;
+      sql: string;
+      displayName?: string | null;
+      description?: string | null;
+    };
+  }> {
+    return this.saveViewFromRunUsecase.execute(input);
   }
 }

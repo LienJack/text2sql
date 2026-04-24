@@ -44,6 +44,7 @@ describe("langgraph runtime", () => {
         run: async () => ({
           status: "ready",
           strategy: "direct_sql",
+          semanticConstraintMode: "structured" as const,
           semanticVersion: 1,
           lockStatus: "locked" as const,
           fallbackApplied: false,
@@ -134,6 +135,7 @@ describe("langgraph runtime", () => {
         run: async () => ({
           status: "ready",
           strategy: "direct_sql",
+          semanticConstraintMode: "structured" as const,
           semanticVersion: 1,
           lockStatus: "locked" as const,
           fallbackApplied: false,
@@ -245,6 +247,7 @@ describe("langgraph runtime", () => {
         run: async () => ({
           status: "ready",
           strategy: "direct_sql",
+          semanticConstraintMode: "structured" as const,
           semanticVersion: 1,
           lockStatus: "locked" as const,
           fallbackApplied: false,

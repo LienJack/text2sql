@@ -18,6 +18,13 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
 
+## Text2SQL + RAG 全流程理解文档（2026-04-21 基线）
+- 主白皮书（请求到交付）：`docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`
+- runId 回放手册（trace/replay/delivery）：`docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`
+- 本地实验剧本（学习闭环）：`docs/rag-understanding/text2sql-rag-local-learning-lab.md`
+- 文档合同检查脚本：`node scripts/check-docs-rag-understanding.mjs`
+- 文档合同 smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
 ## 后端能力域拓扑（迁移中）
 - 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
 - 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
@@ -163,6 +170,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `POST /api/v1/sessions/:sessionId/messages/stream`（SSE 流式）
 - `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
 - `GET /api/v1/runs/:runId`
+- `POST /api/v1/runs/:runId/save-as-view`
 - `GET /api/v1/glossary/terms`
 - `POST /api/v1/glossary/terms`（管理员）
 - `PATCH /api/v1/glossary/terms/:termId`（管理员）
@@ -199,6 +207,13 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/tables`
 - `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
 - `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
+- `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/detect`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/resolve`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/precheck`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
 - `POST /api/v1/evaluations/run`
 - `GET /api/v1/evaluations/:jobId`
 - `GET /health`
@@ -237,6 +252,10 @@ pnpm test:frontend
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
 - 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
+- modeling parity shadow gate：
+  - 观测模式：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
+  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
+  - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
@@ -245,6 +264,32 @@ pnpm test:frontend
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
 - CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+
+## Modeling Parity Shadow Gate Rollout Runbook
+
+1. 采集并生成报告（观测模式）：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
+```
+2. 发布门禁（CI 或人工 go/no-go）使用严格模式：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict
+```
+3. 解读核心字段（`data/reports/modeling-parity-shadow/gate-summary.json`）：
+  - `gatePass`：三维聚合总门禁（relationshipPlatform + semanticSpine + modelingWorkspace）。
+  - `modelingWorkspace.metrics.deployBlockRate`、`rollbackRate`、`schemaBacklogAvg`：核心风险指标。
+  - `modelingWorkspace.signalCoverage.*`：指标信号覆盖率，避免“样本缺字段导致误判”。
+  - `rollout.recommendedStage`：
+    - `shadow_only`：样本不足，仅允许 shadow 观测。
+    - `canary_ready`：可进入灰度。
+    - `hold`：维持当前发布面，先修复指标。
+    - `rollback_or_hold`：建议优先回滚或冻结发布。
+4. 触发回滚条件（任一命中即执行）：
+  - `rollout.rollbackSuggested=true`
+  - `rollout.recommendedStage=rollback_or_hold`
+5. 回滚入口（管理员）：
+  - `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
+  - 回滚后需重跑 shadow gate，确认 `rollout.recommendedStage` 不再为 `rollback_or_hold`。
 
 ## 前端术语联动（Wave A/B）验收边界
 - Wave A：术语写入后可影响 `selected_context` 命中，链路异常时前端可见降级但不阻断主回答。

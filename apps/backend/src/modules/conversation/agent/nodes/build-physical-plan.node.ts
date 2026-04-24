@@ -5,6 +5,7 @@ import { PlannerCacheService, type PlannerCacheStatus } from "../planner/planner
 export interface PhysicalPlan {
   status: "ready" | "degraded";
   strategy: "direct_sql" | "fallback_sql";
+  semanticConstraintMode: "structured" | "fallback_text";
   semanticVersion?: number;
   lockStatus: "locked" | "fallback" | "degraded";
   fallbackApplied: boolean;
@@ -28,6 +29,7 @@ export class BuildPhysicalPlanNode {
       return {
         status: "degraded",
         strategy: "fallback_sql",
+        semanticConstraintMode: "fallback_text",
         semanticVersion: undefined,
         lockStatus: semanticPlan.lockStatus,
         fallbackApplied: semanticPlan.fallbackApplied,
@@ -46,6 +48,12 @@ export class BuildPhysicalPlanNode {
       return {
         status: semanticPlan.status,
         strategy: cacheLookup.entry.strategy,
+        semanticConstraintMode:
+          semanticPlan.semanticBindingSummary?.metricBindingCount ||
+          semanticPlan.semanticBindingSummary?.relationshipBindingCount ||
+          semanticPlan.semanticBindingSummary?.calculatedFieldBindingCount
+            ? "structured"
+            : "fallback_text",
         semanticVersion: semanticPlan.semanticVersion,
         lockStatus: semanticPlan.lockStatus,
         fallbackApplied: semanticPlan.fallbackApplied,
@@ -59,6 +67,12 @@ export class BuildPhysicalPlanNode {
       semanticPlan.status === "ready" && semanticPlan.lockStatus === "locked"
         ? "direct_sql"
         : "fallback_sql";
+    const semanticConstraintMode =
+      semanticPlan.semanticBindingSummary?.metricBindingCount ||
+      semanticPlan.semanticBindingSummary?.relationshipBindingCount ||
+      semanticPlan.semanticBindingSummary?.calculatedFieldBindingCount
+        ? "structured"
+        : "fallback_text";
     const summary =
       strategy === "direct_sql"
         ? "已生成最小物理执行计划。"
@@ -81,6 +95,7 @@ export class BuildPhysicalPlanNode {
     return {
       status: strategy === "direct_sql" ? "ready" : "degraded",
       strategy,
+      semanticConstraintMode,
       semanticVersion: semanticPlan.semanticVersion,
       lockStatus: semanticPlan.lockStatus,
       fallbackApplied: semanticPlan.fallbackApplied,

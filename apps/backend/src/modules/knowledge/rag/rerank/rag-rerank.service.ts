@@ -179,6 +179,40 @@ export class RagRerankService {
         ...budgetDecision.decisionReasons
       ])
     };
+    const existingContextPack = bundle.context_pack;
+    responseBundle.context_pack = {
+      status: responseBundle.status,
+      semantic_version: existingContextPack?.semantic_version,
+      modeling_revision: existingContextPack?.modeling_revision,
+      semantic_lock_status:
+        responseBundle.status === "ready"
+          ? existingContextPack?.semantic_lock_status ?? "locked"
+          : "degraded",
+      semantic_bindings: existingContextPack?.semantic_bindings ?? {
+        model_keys: [],
+        relationship_keys: [],
+        metric_keys: [],
+        calculated_field_keys: []
+      },
+      instruction_sets: existingContextPack?.instruction_sets ?? {
+        model_bindings: [],
+        relationship_bindings: [],
+        metric_bindings: [],
+        calculated_field_bindings: []
+      },
+      selected_context_summary: {
+        count: selectedContext.length,
+        snippets: selectedContext.map((chunk) => chunk.content.slice(0, 160)).slice(0, 5)
+      },
+      degrade_reasons: this.unique([
+        ...(existingContextPack?.degrade_reasons ?? []),
+        ...degradeReasons
+      ]),
+      risk_tags: this.unique([
+        ...(existingContextPack?.risk_tags ?? []),
+        ...(responseBundle.risk_tags ?? [])
+      ])
+    };
     await this.writeBudgetReplay(responseBundle, {
       decisionReasons: budgetDecision.decisionReasons,
       secondaryEnabled: budgetDecision.secondaryEnabled,
@@ -395,7 +429,25 @@ export class RagRerankService {
         decisionReasons: bundle.decision_reasons ?? [],
         rerankedCount: bundle.reranked?.length ?? 0,
         selectedContextCount: bundle.selected_context?.length ?? 0,
-        riskTags: bundle.risk_tags ?? []
+        riskTags: bundle.risk_tags ?? [],
+        contextPack: bundle.context_pack
+          ? {
+              status: bundle.context_pack.status,
+              semanticVersion: bundle.context_pack.semantic_version,
+              semanticLockStatus: bundle.context_pack.semantic_lock_status,
+              instructionSummary: {
+                modelBindingCount:
+                  bundle.context_pack.instruction_sets.model_bindings.length,
+                relationshipBindingCount:
+                  bundle.context_pack.instruction_sets.relationship_bindings.length,
+                metricBindingCount:
+                  bundle.context_pack.instruction_sets.metric_bindings.length,
+                calculatedFieldBindingCount:
+                  bundle.context_pack.instruction_sets.calculated_field_bindings.length
+              },
+              degradeReasons: bundle.context_pack.degrade_reasons
+            }
+          : undefined
       }
     });
   }

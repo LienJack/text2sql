@@ -23,6 +23,7 @@ import { DomainError } from "../../../common/domain-error";
 import { CreateSessionDto } from "./dto/create-session.dto";
 import { ListSessionsDto } from "./dto/list-sessions.dto";
 import { RenameSessionDto } from "./dto/rename-session.dto";
+import { SaveViewFromRunDto } from "./dto/save-view-from-run.dto";
 import { SendMessageDto } from "./dto/send-message.dto";
 import { ChatService } from "./chat.service";
 
@@ -268,6 +269,27 @@ export class ChatController {
     try {
       const run = await this.chatService.getRunById(runId);
       return ok(req.requestId, run);
+    } catch (error) {
+      return this.toError(req.requestId, error, res);
+    }
+  }
+
+  @Post("/runs/:runId/save-as-view")
+  async saveViewFromRun(
+    @Param("runId") runId: string,
+    @Body() body: SaveViewFromRunDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.chatService.saveViewFromRun({
+        runId,
+        name: body.name,
+        displayName: body.displayName,
+        description: body.description,
+        actorId: req.actor?.id
+      });
+      return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error, res);
     }

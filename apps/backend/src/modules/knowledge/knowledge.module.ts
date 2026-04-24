@@ -23,10 +23,17 @@ import { GlossaryModule } from "./glossary/glossary.module";
 import { KnowledgeChatSupportFacade } from "./knowledge-chat-support.facade";
 import { MemoryModule } from "./memory/memory.module";
 import { RagModule } from "./rag/rag.module";
+import { SemanticSpineModule } from "./semantic-spine/semantic-spine.module";
 import { SemanticRegistryModule } from "./semantic-registry/semantic-registry.module";
 
 @Module({
-  imports: [RagModule, SemanticRegistryModule, GlossaryModule, MemoryModule],
+  imports: [
+    RagModule,
+    SemanticRegistryModule,
+    SemanticSpineModule,
+    GlossaryModule,
+    MemoryModule
+  ],
   providers: [
     KnowledgeChatSupportFacade,
     {
@@ -68,7 +75,8 @@ import { SemanticRegistryModule } from "./semantic-registry/semantic-registry.mo
     KNOWLEDGE_RAG_CONTRACT,
     KNOWLEDGE_GLOSSARY_CONTRACT,
     KNOWLEDGE_SEMANTIC_REGISTRY_CONTRACT,
-    KNOWLEDGE_MEMORY_CONTRACT
+    KNOWLEDGE_MEMORY_CONTRACT,
+    SemanticSpineModule
   ]
 })
 export class KnowledgeModule {}

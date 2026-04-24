@@ -3,12 +3,16 @@ import type {
   ChatMessage,
   ContextEnvelope,
   ChatStreamEvent,
-  ReasoningStage,
   SqlRun
 } from "@text2sql/shared-types";
 import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../../../common/domain-error";
 import { GraphBuilderService } from "../../agent/graph/graph.builder";
+import {
+  resolveAgentReasoningStage,
+  resolveAgentReasoningTitle,
+  resolveAgentStepLifecycle
+} from "../../agent/graph/agent-step-metadata";
 import { SqlToolRegistryService } from "../../agent/sql/tools/sql-tool-registry.service";
 import { DatasourceRegistryService } from "../../../governance/datasource/datasource-registry.service";
 import { DatasourceService } from "../../../governance/datasource/datasource.service";
@@ -174,10 +178,10 @@ export class StreamMessageUsecase {
               status: step.status,
               stepId: step.stepId ?? `${runId}:${step.node}:${streamSequence}`,
               sequence: streamSequence,
-              lifecycle: step.lifecycle ?? this.resolveStepLifecycle(step.status),
+              lifecycle: step.lifecycle ?? resolveAgentStepLifecycle(step.status),
               detail: step.detail ?? "",
-              stage: this.resolveReasoningStage(step.node),
-              title: this.resolveReasoningTitle(step.node),
+              stage: resolveAgentReasoningStage(step.node),
+              title: resolveAgentReasoningTitle(step.node),
               at: stepTimestamp,
               startedAt: step.startedAt,
               endedAt: step.endedAt,
@@ -277,63 +281,5 @@ export class StreamMessageUsecase {
       answer:
         "请求触发了只读安全策略，本次未执行 SQL。你可以改为查询统计口径或时间范围，我会继续协助。"
     };
-  }
-
-  private resolveReasoningStage(node: string): ReasoningStage {
-    switch (node) {
-      case "clarify":
-      case "retrieve-knowledge":
-      case "build-intent-plan":
-      case "build-semantic-query":
-      case "build-physical-plan":
-        return "analysis";
-      case "generate-sql":
-        return "generation";
-      case "safety-check":
-        return "validation";
-      case "execute-sql":
-        return "execution";
-      case "format-answer":
-        return "response";
-      default:
-        return "unknown";
-    }
-  }
-
-  private resolveReasoningTitle(node: string): string {
-    switch (node) {
-      case "clarify":
-        return "理解问题";
-      case "retrieve-knowledge":
-        return "检索上下文";
-      case "build-intent-plan":
-        return "意图规划";
-      case "build-semantic-query":
-        return "语义规划";
-      case "build-physical-plan":
-        return "物理规划";
-      case "generate-sql":
-        return "生成 SQL";
-      case "safety-check":
-        return "安全校验";
-      case "execute-sql":
-        return "执行查询";
-      case "format-answer":
-        return "整理回答";
-      default:
-        return node;
-    }
-  }
-
-  private resolveStepLifecycle(
-    status: "success" | "failed" | "skipped"
-  ): "completed" | "failed" | "skipped" {
-    if (status === "failed") {
-      return "failed";
-    }
-    if (status === "skipped") {
-      return "skipped";
-    }
-    return "completed";
   }
 }

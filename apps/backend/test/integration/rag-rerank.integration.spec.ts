@@ -83,6 +83,10 @@ describe("rag rerank integration", () => {
     expect(reranked.retrieval_bundle.reranked?.length).toBeGreaterThan(0);
     expect(reranked.retrieval_bundle.selected_context?.length).toBeGreaterThan(0);
     expect(reranked.retrieval_bundle.risk_tags).toBeDefined();
+    expect(reranked.retrieval_bundle.context_pack).toBeDefined();
+    expect(reranked.retrieval_bundle.context_pack?.selected_context_summary.count).toBe(
+      reranked.retrieval_bundle.selected_context?.length ?? 0
+    );
 
     const replayEvents = await replayRepository.listByRunId("run-rag-rerank-v1");
     expect(replayEvents.some((item) => item.replayKey === "rerank:primary")).toBe(true);
@@ -159,6 +163,7 @@ describe("rag rerank integration", () => {
     expect(reranked.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["secondary_rerank_timeout"])
     );
+    expect(reranked.retrieval_bundle.context_pack?.status).toBe("degraded");
     expect(reranked.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
       true
     );
