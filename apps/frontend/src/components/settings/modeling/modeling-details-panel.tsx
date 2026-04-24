@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ModelingGraphCalculatedField,
   ModelingGraphModel,
@@ -15,6 +15,11 @@ import { ModelingRelationshipEditor } from "@/components/settings/modeling/model
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
 
 type DetailsTab = "metadata" | "calculatedField" | "relationship";
+export type ModelingDetailsEditorIntent = {
+  tab: DetailsTab;
+  relationshipId?: string | null;
+  requestId: number;
+};
 type PreviewResult = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
@@ -86,6 +91,7 @@ export function ModelingDetailsPanel(props: {
   }) => Promise<void> | void;
   onSelectRelationship?: (relationshipId: string | null) => void;
   onDirtyChange?: (dirty: boolean) => void;
+  requestedEditorIntent?: ModelingDetailsEditorIntent | null;
 }) {
   const {
     selectedNode,
@@ -100,13 +106,19 @@ export function ModelingDetailsPanel(props: {
     onLoadPreview,
     onDeleteTarget,
     onSelectRelationship,
-    onDirtyChange
+    onDirtyChange,
+    requestedEditorIntent
   } = props;
   const [tab, setTab] = useState<DetailsTab>("metadata");
   const [editorDirty, setEditorDirty] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
+  const onSelectRelationshipRef = useRef(onSelectRelationship);
+  const requestedIntentTab = requestedEditorIntent?.tab;
+  const requestedIntentRelationshipId = requestedEditorIntent?.relationshipId ?? null;
+  const requestedIntentRequestId = requestedEditorIntent?.requestId ?? -1;
+  const tabSwitchDisabled = Boolean(busy);
 
   useEffect(() => {
     if (selectedNode?.kind === "relationship") {
@@ -122,6 +134,36 @@ export function ModelingDetailsPanel(props: {
   useEffect(() => {
     onDirtyChange?.(editorDirty);
   }, [editorDirty, onDirtyChange]);
+
+  useEffect(() => {
+    onSelectRelationshipRef.current = onSelectRelationship;
+  }, [onSelectRelationship]);
+
+  useEffect(() => {
+    if (!requestedIntentTab || tabSwitchDisabled) {
+      return;
+    }
+    if (tab !== requestedIntentTab) {
+      if (editorDirty && typeof window !== "undefined") {
+        const confirmed = window.confirm("当前编辑器有未保存改动，确认切换 Tab 吗？");
+        if (!confirmed) {
+          return;
+        }
+      }
+      setEditorDirty(false);
+      setTab(requestedIntentTab);
+    }
+    if (requestedIntentTab === "relationship") {
+      onSelectRelationshipRef.current?.(requestedIntentRelationshipId);
+    }
+  }, [
+    editorDirty,
+    requestedIntentRelationshipId,
+    requestedIntentRequestId,
+    requestedIntentTab,
+    tabSwitchDisabled,
+    tab
+  ]);
 
   const selectedModel = useMemo(() => {
     if (selectedNode?.kind !== "model") {
@@ -139,6 +181,9 @@ export function ModelingDetailsPanel(props: {
     selectedNode?.kind === "relationship" ? selectedNode.id : null;
 
   const switchTab = (nextTab: DetailsTab): void => {
+    if (tabSwitchDisabled) {
+      return;
+    }
     if (tab === nextTab) {
       return;
     }
@@ -210,6 +255,7 @@ export function ModelingDetailsPanel(props: {
           onClick={() => {
             switchTab("metadata");
           }}
+          disabled={tabSwitchDisabled}
         >
           Metadata
         </Button>
@@ -219,7 +265,7 @@ export function ModelingDetailsPanel(props: {
           onClick={() => {
             switchTab("calculatedField");
           }}
-          disabled={!selectedModel}
+          disabled={tabSwitchDisabled || !selectedModel}
         >
           Calculated Field
         </Button>
@@ -229,6 +275,7 @@ export function ModelingDetailsPanel(props: {
           onClick={() => {
             switchTab("relationship");
           }}
+          disabled={tabSwitchDisabled}
         >
           Relationship
         </Button>
@@ -329,8 +376,18 @@ export function ModelingDetailsPanel(props: {
 
       {tab === "relationship" ? (
         <ModelingRelationshipEditor
+          models={models}
           relationships={relationships}
           selectedRelationshipId={selectedRelationshipId}
+          defaultFromTable={selectedModel?.tableName}
+          requestedEditorIntent={
+            requestedIntentTab === "relationship"
+              ? {
+                  relationshipId: requestedIntentRelationshipId,
+                  requestId: requestedIntentRequestId
+                }
+              : null
+          }
           onSelectRelationship={onSelectRelationship}
           busy={busy}
           onDirtyChange={setEditorDirty}

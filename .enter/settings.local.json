@@ -78,7 +78,13 @@
       "Bash(cat /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-local-learning-lab.md)",
       "Bash(cat /Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md)",
       "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md\" | head -50)",
-      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md\")"
+      "Bash(cat \"/Users/lienli/Documents/GitHub/text2sql/docs/rag-understanding/text2sql-rag-runid-replay-handbook.md\")",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 cat .tmp-modeling-graph-response.network-response | python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); rels=d['data']['draft']['graphPayload']['relationships']; [print\\(json.dumps\\(r, indent=2\\)\\) for r in rels]\" 2\u003e/dev/null | head -500)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test -- --reporter=verbose --run apps/frontend/tests/unit/settings-modeling-flow-canvas.spec.tsx 2\u003e\u00261 | tail -60)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test -- --reporter=verbose --run apps/frontend/tests/unit/settings-modeling-flow-canvas.spec.tsx 2\u003e\u00261 | grep -E \"\\(PASS|FAIL|✓|✗|×|❯|❌\\)\" | head -40)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test -- --reporter=verbose --run apps/frontend/tests/unit/settings-modeling-flow-canvas.spec.tsx 2\u003e\u00261 | grep -A 30 \"FAIL\\\\|AssertionError\\\\|Expected\\\\|Received\\\\|expect\\(\" | head -120)",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test -- --reporter=verbose --run apps/frontend/tests/unit/settings-modeling-flow-canvas.spec.tsx 2\u003e\u00261 | grep -B 2 -A 10 \"falls back per endpoint\" )",
+      "Bash(cd /Users/lienli/Documents/GitHub/text2sql \u0026\u0026 pnpm --filter @text2sql/frontend run test -- --reporter=verbose --run apps/frontend/tests/unit/settings-modeling-flow-canvas.spec.tsx 2\u003e\u00261 | grep -E \"✓|×|❯|Tests|FAIL|PASS\" | head -30)"
     ]
   }
 }

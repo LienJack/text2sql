@@ -26,6 +26,13 @@ vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
       }>;
     };
     onSelectNode: (node: { kind: "relationship"; id: string } | null) => void;
+    onNodeAction?: (input: {
+      modelId: string;
+      action:
+        | { type: "addCalculatedField" }
+        | { type: "addRelationship" }
+        | { type: "editRelationship"; relationshipId: string };
+    }) => void;
     onNodePositionsChange?: (patch: {
       models: Record<string, { x: number; y: number }>;
       views: Record<string, { x: number; y: number }>;
@@ -58,6 +65,56 @@ vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
         }}
       >
         trigger-position-change
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodeAction?.({
+            modelId: "model.orders",
+            action: { type: "addCalculatedField" }
+          });
+        }}
+      >
+        trigger-node-action-add-calculated-field
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodeAction?.({
+            modelId: "model.orders",
+            action: { type: "addRelationship" }
+          });
+        }}
+      >
+        trigger-node-action-add-relationship
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodeAction?.({
+            modelId: "model.orders",
+            action: {
+              type: "editRelationship",
+              relationshipId: "rel-orders-customers"
+            }
+          });
+        }}
+      >
+        trigger-node-action-edit-relationship
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          props.onNodeAction?.({
+            modelId: "model.orders",
+            action: {
+              type: "editRelationship",
+              relationshipId: "rel-missing"
+            }
+          });
+        }}
+      >
+        trigger-node-action-edit-relationship-missing
       </button>
     </div>
   )
@@ -226,12 +283,13 @@ describe("ModelingWorkspacePage", () => {
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
-    await screen.findByRole("button", { name: "选择 model Orders Model" });
+    await user.click(await screen.findByRole("button", { name: "选择 model Orders Model" }));
     expect(screen.getByTestId("modeling-mobile-quick-access")).toBeInTheDocument();
 
-    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
-    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型V2");
-    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+    await user.click(await screen.findByRole("button", { name: "编辑 metadata" }));
+    await user.clear(screen.getByRole("textbox", { name: "Model alias" }));
+    await user.type(screen.getByRole("textbox", { name: "Model alias" }), "订单模型V2");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
 
     await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
 
@@ -378,17 +436,21 @@ describe("ModelingWorkspacePage", () => {
     await screen.findByText("orders.customer_id = customers.id");
     await user.click(screen.getByRole("button", { name: "orders.customer_id = customers.id" }));
 
-    expect(
-      await screen.findByText("Current Context: relationship · rel-orders-customers")
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Current Context: relationship · rel-orders-customers"
+      );
+    });
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "true");
 
     await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
 
     expect(await screen.findByText("draft save failed")).toBeInTheDocument();
-    expect(
-      screen.getByText("Current Context: relationship · rel-orders-customers")
-    ).toBeInTheDocument();
-    expect(screen.getByText("Relationship Editor")).toBeInTheDocument();
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: relationship · rel-orders-customers"
+    );
+    expect(screen.queryByText("Relationship Editor")).not.toBeInTheDocument();
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "true");
   });
 
   it("blocks deploy precheck when graph has unsaved local edits", async () => {
@@ -396,11 +458,12 @@ describe("ModelingWorkspacePage", () => {
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
-    await screen.findByRole("button", { name: "选择 model Orders Model" });
+    await user.click(await screen.findByRole("button", { name: "选择 model Orders Model" }));
 
-    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
-    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型未保存");
-    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+    await user.click(await screen.findByRole("button", { name: "编辑 metadata" }));
+    await user.clear(screen.getByRole("textbox", { name: "Model alias" }));
+    await user.type(screen.getByRole("textbox", { name: "Model alias" }), "订单模型未保存");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
 
     expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
     expect(
@@ -439,43 +502,18 @@ describe("ModelingWorkspacePage", () => {
     });
   });
 
-  it("shows grouped calculated-field function hints and persists aggregate expression into draft", async () => {
+  it("routes add-calculated-field action to context drawer when details panel is hidden", async () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
-    await screen.findByRole("button", { name: "选择 model Orders Model" });
+    await user.click(screen.getByRole("button", { name: "trigger-node-action-add-calculated-field" }));
 
-    await user.click(screen.getByRole("button", { name: "Calculated Field" }));
-    expect(
-      await screen.findByTestId("calculated-field-expression-function-groups")
-    ).toBeInTheDocument();
-    expect(screen.getByText("可用函数清单")).toBeInTheDocument();
-    expect(screen.getByText(/聚合函数：sum\(expr\)、avg\(expr\)/)).toBeInTheDocument();
-    expect(screen.getByText(/数学函数：abs\(x\)、round\(x, digits\)/)).toBeInTheDocument();
-    expect(screen.getByText(/字符串函数：lower\(text\)、upper\(text\)/)).toBeInTheDocument();
-
-    await user.type(screen.getByRole("textbox", { name: "计算字段名称" }), "total_sum");
-    await user.type(screen.getByRole("textbox", { name: "表达式" }), "sum(total_amount)");
-    await user.type(screen.getByRole("textbox", { name: "数据类型" }), "numeric");
-    await user.click(screen.getByRole("button", { name: "添加计算字段" }));
-    await user.click(screen.getByRole("button", { name: "保存计算字段" }));
-    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
-
-    await waitFor(() => {
-      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
-        "ws-2",
-        "ds-2b",
-        expect.objectContaining({
-          calculatedFields: expect.arrayContaining([
-            expect.objectContaining({
-              name: "total_sum",
-              expression: "sum(total_amount)"
-            })
-          ])
-        })
-      );
-    });
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: model · model.orders"
+    );
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "true");
+    expect(screen.queryByRole("button", { name: "添加计算字段" })).not.toBeInTheDocument();
   });
 
   it("maps backend calculated-field expression errors to readable grouped guidance", async () => {
@@ -552,21 +590,21 @@ describe("ModelingWorkspacePage", () => {
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
-    await screen.findByRole("button", { name: "选择 model Orders Model" });
-    await user.click(screen.getByRole("button", { name: "加载 Data Preview" }));
+    await user.click(await screen.findByRole("button", { name: "选择 model Orders Model" }));
+    await user.click(await screen.findByRole("button", { name: "View 20 rows" }));
 
     await waitFor(() => {
       expect(mockGetWorkspaceModelingPreview).toHaveBeenCalledWith("ws-2", "ds-2b", {
         targetKind: "model",
         targetId: "model.orders",
-        limit: 100
+        limit: 20
       });
     });
-    expect(await screen.findByText("Preview Rows: 1")).toBeInTheDocument();
+    expect(await screen.findByText("Data preview (1 rows)")).toBeInTheDocument();
     expect(screen.getByText("100.12")).toBeInTheDocument();
   });
 
-  it("supports view metadata save and view preview when selected from query viewId", async () => {
+  it("keeps query-selected view context and persists view removal from sidebar", async () => {
     const user = userEvent.setup();
     window.history.replaceState(
       {},
@@ -609,19 +647,6 @@ describe("ModelingWorkspacePage", () => {
         }
       }
     });
-    mockGetWorkspaceModelingPreview.mockResolvedValueOnce({
-      stage: "modeling_preview_ready",
-      workspaceId: "ws-2",
-      datasourceId: "ds-2b",
-      targetKind: "view",
-      targetId: "view.orders_recent",
-      limit: 100,
-      rowCount: 1,
-      truncated: false,
-      columns: ["id", "total_amount"],
-      rows: [{ id: 99, total_amount: 410.5 }]
-    });
-
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
@@ -630,21 +655,14 @@ describe("ModelingWorkspacePage", () => {
         "Current Context: view · view.orders_recent"
       );
     });
+    expect(screen.queryByRole("button", { name: "加载 Data Preview" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "加载 Data Preview" }));
+    await user.click(await screen.findByRole("button", { name: "删除 view Recent Orders" }));
     await waitFor(() => {
-      expect(mockGetWorkspaceModelingPreview).toHaveBeenCalledWith("ws-2", "ds-2b", {
-        targetKind: "view",
-        targetId: "view.orders_recent",
-        limit: 100
-      });
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State undeployed"
+      );
     });
-    expect(await screen.findByText("Preview Rows: 1")).toBeInTheDocument();
-    expect(screen.getByText("410.5")).toBeInTheDocument();
-
-    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
-    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "Recent Orders V2");
-    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
     await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
 
     await waitFor(() => {
@@ -652,15 +670,116 @@ describe("ModelingWorkspacePage", () => {
         "ws-2",
         "ds-2b",
         expect.objectContaining({
-          views: expect.arrayContaining([
-            expect.objectContaining({
-              id: "view.orders_recent",
-              displayName: expect.stringContaining("Recent Orders V2")
-            })
-          ])
+          views: []
         })
       );
     });
+  });
+
+  it("routes node action addCalculatedField to model context and opens context drawer", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "trigger-node-action-add-calculated-field" }));
+
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: model · model.orders"
+    );
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "true");
+    expect(screen.queryByRole("button", { name: "添加计算字段" })).not.toBeInTheDocument();
+  });
+
+  it("routes node action addRelationship to add-relationship dialog", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "trigger-node-action-add-relationship" }));
+
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: model · model.orders"
+    );
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "false");
+    expect(await screen.findByRole("dialog", { name: "Add relationship" })).toBeInTheDocument();
+  });
+
+  it("routes node action editRelationship to preselected edit-relationship dialog", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-node-action-relationship",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.customers",
+              tableName: "customers",
+              modelName: "customers",
+              displayName: "Customers",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-orders-customers",
+              source: "manual",
+              confidence: 0.9,
+              bridge: {
+                left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                right: { dataset: "analytics", table: "customers", column: "id" },
+                operator: "eq",
+                confidence: 0.9
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "trigger-node-action-edit-relationship" }));
+
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: relationship · rel-orders-customers"
+    );
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "false");
+    expect(await screen.findByRole("dialog", { name: "Edit relationship" })).toBeInTheDocument();
+  });
+
+  it("falls back to add-relationship dialog when target relationship no longer exists", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(
+      screen.getByRole("button", { name: "trigger-node-action-edit-relationship-missing" })
+    );
+
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+      "Current Context: model · model.orders"
+    );
+    expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "false");
+    expect(await screen.findByRole("dialog", { name: "Add relationship" })).toBeInTheDocument();
   });
 
   it("deletes view from sidebar, flips deploy state to undeployed, and persists view removal", async () => {

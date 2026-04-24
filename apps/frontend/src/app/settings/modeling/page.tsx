@@ -27,8 +27,10 @@ import {
 } from "@/lib/datasource-session-context";
 import { ModelingDetailsPanel } from "@/components/settings/modeling/modeling-details-panel";
 import { ModelingDeployPanel } from "@/components/settings/modeling/modeling-deploy-panel";
-import { ModelingFlowCanvas } from "@/components/settings/modeling/modeling-flow-canvas";
+import { ModelingFlowCanvas, type ModelingFlowNodeActionEvent } from "@/components/settings/modeling/modeling-flow-canvas";
 import { ModelingModelDrawer } from "@/components/settings/modeling/modeling-model-drawer";
+import { ModelingRelationshipEditor } from "@/components/settings/modeling/modeling-relationship-editor";
+import { ModelingContextDrawer } from "@/components/settings/modeling/modeling-context-drawer";
 import { ModelingSchemaChangePanel } from "@/components/settings/modeling/modeling-schema-change-panel";
 import {
   ModelingSidebarTree,
@@ -224,6 +226,7 @@ type ModelingPositionPatch = {
   models: Record<string, { x: number; y: number }>;
   views: Record<string, { x: number; y: number }>;
 };
+type ModelingDetailsIntentTab = "metadata" | "calculatedField" | "relationship";
 
 function isFiniteNodePosition(value: unknown): value is { x: number; y: number } {
   if (!value || typeof value !== "object") {
@@ -288,6 +291,7 @@ function mergePositionPatchIntoGraphPayload(
 }
 
 export default function ModelingWorkspacePage() {
+  const showDetailsPanel = process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL === "true";
   const [workspaceId, setWorkspaceId] = useState("");
   const [datasourceId, setDatasourceId] = useState("");
   const [policyVersion, setPolicyVersion] = useState(0);
@@ -297,6 +301,12 @@ export default function ModelingWorkspacePage() {
   const [graphPayload, setGraphPayload] = useState<ModelingGraphPayload>(createEmptyGraphPayload());
   const [selectedNode, setSelectedNode] = useState<ModelingSidebarNode | null>(null);
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
+  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  const [requestedEditorIntent, setRequestedEditorIntent] = useState<{
+    tab: ModelingDetailsIntentTab;
+    relationshipId?: string | null;
+    requestId: number;
+  } | null>(null);
   const [detailsDirty, setDetailsDirty] = useState(false);
   const [hasPendingDraftChanges, setHasPendingDraftChanges] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -317,6 +327,7 @@ export default function ModelingWorkspacePage() {
   const [error, setError] = useState("");
   const latestSnapshotLoadTokenRef = useRef(0);
   const positionPatchChangedRef = useRef(false);
+  const nextEditorIntentRequestIdRef = useRef(1);
 
   const scrollToLayoutPane = useCallback((paneId: string): void => {
     if (typeof window === "undefined") {
@@ -328,6 +339,19 @@ export default function ModelingWorkspacePage() {
       behavior: "smooth"
     });
   }, []);
+
+  const pushEditorIntent = useCallback(
+    (tab: ModelingDetailsIntentTab, relationshipId?: string | null): void => {
+      const nextRequestId = nextEditorIntentRequestIdRef.current;
+      nextEditorIntentRequestIdRef.current += 1;
+      setRequestedEditorIntent({
+        tab,
+        relationshipId: relationshipId ?? null,
+        requestId: nextRequestId
+      });
+    },
+    []
+  );
 
   const loadModelingSnapshot = useCallback(
     async (workspaceIdValue: string, datasourceIdValue: string): Promise<void> => {
@@ -359,6 +383,8 @@ export default function ModelingWorkspacePage() {
         resolveNextSelectedNode(nextGraphPayload, previous, preferredViewIds)
       );
       setModelDrawerOpen(false);
+      setContextDrawerOpen(false);
+      setRequestedEditorIntent(null);
       if (preferredViewIdFromSession && typeof window !== "undefined") {
         window.sessionStorage.removeItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY);
       }
@@ -442,6 +468,8 @@ export default function ModelingWorkspacePage() {
       setGraphPayload(createEmptyGraphPayload());
       setSelectedNode(null);
       setModelDrawerOpen(false);
+      setContextDrawerOpen(false);
+      setRequestedEditorIntent(null);
       setDetailsDirty(false);
       setHasPendingDraftChanges(false);
       return;
@@ -530,6 +558,20 @@ export default function ModelingWorkspacePage() {
     }
     return graphPayload.models.find((model) => model.id === selectedNode.id) ?? null;
   }, [graphPayload.models, selectedNode]);
+  const selectedRelationshipId = selectedNode?.kind === "relationship" ? selectedNode.id : null;
+  const relationshipEditorDefaultFromTable = useMemo(() => {
+    if (selectedNode?.kind === "model") {
+      const selectedModel = graphPayload.models.find((item) => item.id === selectedNode.id);
+      return selectedModel?.tableName;
+    }
+    if (selectedNode?.kind === "relationship") {
+      const selectedRelationship = graphPayload.relationships.find(
+        (item) => item.id === selectedNode.id
+      );
+      return selectedRelationship?.bridge.left.table;
+    }
+    return undefined;
+  }, [graphPayload.models, graphPayload.relationships, selectedNode]);
 
   const saveModelingGraph = async (
     options: SaveModelingGraphOptions = {}
@@ -766,36 +808,94 @@ export default function ModelingWorkspacePage() {
     }
   };
 
-  const selectNodeWithDirtyGuard = (nextNode: ModelingSidebarNode | null): void => {
+  const selectNodeWithDirtyGuard = (nextNode: ModelingSidebarNode | null): boolean => {
     if (!nextNode) {
       if (detailsDirty && typeof window !== "undefined") {
         const confirmed = window.confirm("当前详情面板有未保存改动，确认清除选中吗？");
         if (!confirmed) {
-          return;
+          return false;
         }
       }
       setSelectedNode(null);
       setModelDrawerOpen(false);
+      setContextDrawerOpen(false);
       setDetailsDirty(false);
-      return;
+      return true;
     }
     const isSame =
       selectedNode?.kind === nextNode.kind && selectedNode?.id === nextNode.id;
     if (isSame) {
       if (nextNode.kind === "model") {
         setModelDrawerOpen(true);
+        setContextDrawerOpen(false);
+      } else {
+        setContextDrawerOpen(true);
       }
-      return;
+      return true;
     }
     if (detailsDirty && typeof window !== "undefined") {
       const confirmed = window.confirm("当前详情面板有未保存改动，确认切换对象/关系吗？");
       if (!confirmed) {
-        return;
+        return false;
       }
     }
     setSelectedNode(nextNode);
     setModelDrawerOpen(nextNode.kind === "model");
     setDetailsDirty(false);
+    if (nextNode.kind === "model") {
+      setContextDrawerOpen(false);
+    } else {
+      setContextDrawerOpen(true);
+    }
+    return true;
+  };
+
+  const handleFlowNodeAction = (event: ModelingFlowNodeActionEvent): void => {
+    const targetModelNode: ModelingSidebarNode = {
+      kind: "model",
+      id: event.modelId
+    };
+    if (event.action.type === "addCalculatedField") {
+      if (!selectNodeWithDirtyGuard(targetModelNode)) {
+        return;
+      }
+      setModelDrawerOpen(false);
+      pushEditorIntent("calculatedField");
+      setContextDrawerOpen(true);
+      return;
+    }
+    if (event.action.type === "addRelationship") {
+      if (!selectNodeWithDirtyGuard(targetModelNode)) {
+        return;
+      }
+      setModelDrawerOpen(false);
+      pushEditorIntent("relationship", null);
+      setContextDrawerOpen(showDetailsPanel);
+      return;
+    }
+    const requestedRelationshipId = event.action.relationshipId.trim();
+    const relationshipExists = graphPayload.relationships.some(
+      (item) => item.id === requestedRelationshipId
+    );
+    if (relationshipExists) {
+      if (
+        !selectNodeWithDirtyGuard({
+          kind: "relationship",
+          id: requestedRelationshipId
+        })
+      ) {
+        return;
+      }
+      pushEditorIntent("relationship", requestedRelationshipId);
+      setContextDrawerOpen(showDetailsPanel);
+      return;
+    }
+    if (!selectNodeWithDirtyGuard(targetModelNode)) {
+      return;
+    }
+    setModelDrawerOpen(false);
+    pushEditorIntent("relationship", null);
+    setContextDrawerOpen(showDetailsPanel);
   };
 
   const createModelFromSidebar = (): void => {
@@ -902,6 +1002,33 @@ export default function ModelingWorkspacePage() {
       rowCount: result.rowCount,
       truncated: result.truncated
     };
+  };
+  const handleRelationshipsSave = async (
+    relationships: ModelingGraphPayload["relationships"]
+  ): Promise<void> => {
+    setGraphPayload((previous) => ({
+      ...previous,
+      relationships
+    }));
+    setHasPendingDraftChanges(true);
+    setDeployPrecheck(null);
+    setSelectedNode((previous) => {
+      if (previous?.kind !== "relationship") {
+        return previous;
+      }
+      return relationships.some((item) => item.id === previous.id) ? previous : null;
+    });
+    setMessage("Relationships 已更新，点击“保存 Modeling Draft”后提交。");
+  };
+  const handleSelectRelationship = (relationshipId: string | null): void => {
+    if (!relationshipId) {
+      setSelectedNode((previous) => (previous?.kind === "relationship" ? null : previous));
+      return;
+    }
+    setSelectedNode({
+      kind: "relationship",
+      id: relationshipId
+    });
   };
 
   return (
@@ -1092,6 +1219,7 @@ export default function ModelingWorkspacePage() {
             busy={busy || saving}
             autoLayoutKey={flowAutoLayoutKey}
             onSelectNode={selectNodeWithDirtyGuard}
+            onNodeAction={handleFlowNodeAction}
             onNodePositionsChange={(patch) => {
               setGraphPayload((previous) => {
                 const merged = mergePositionPatchIntoGraphPayload(previous, patch);
@@ -1114,112 +1242,107 @@ export default function ModelingWorkspacePage() {
               Context
             </p>
           </header>
-          <ModelingDetailsPanel
-            selectedNode={selectedNode}
-            models={graphPayload.models}
-            views={graphPayload.views}
-            calculatedFields={graphPayload.calculatedFields}
-            relationships={graphPayload.relationships}
-            busy={busy || saving}
-            onDirtyChange={setDetailsDirty}
-            onMetadataSave={async (input, node) => {
-              setGraphPayload((previous) => {
-                if (node.kind === "model") {
-                  return {
+          <ModelingContextDrawer
+            open={contextDrawerOpen}
+            onOpenChange={(open) => {
+              if (open) {
+                setContextDrawerOpen(true);
+                return;
+              }
+              if (detailsDirty && typeof window !== "undefined") {
+                const confirmed = window.confirm("当前详情面板有未保存改动，确认关闭 Context Drawer 吗？");
+                if (!confirmed) {
+                  return;
+                }
+              }
+              setContextDrawerOpen(false);
+            }}
+          >
+            {showDetailsPanel ? (
+              <ModelingDetailsPanel
+                selectedNode={selectedNode}
+                models={graphPayload.models}
+                views={graphPayload.views}
+                calculatedFields={graphPayload.calculatedFields}
+                relationships={graphPayload.relationships}
+                busy={busy || saving}
+                onDirtyChange={setDetailsDirty}
+                requestedEditorIntent={requestedEditorIntent}
+                onMetadataSave={async (input, node) => {
+                  setGraphPayload((previous) => {
+                    if (node.kind === "model") {
+                      return {
+                        ...previous,
+                        models: previous.models.map((item) =>
+                          item.id === node.id
+                            ? {
+                                ...item,
+                                displayName: input.displayName,
+                                description: input.description
+                              }
+                            : item
+                        )
+                      };
+                    }
+                    return {
+                      ...previous,
+                      views: previous.views.map((item) =>
+                        item.id === node.id
+                          ? {
+                              ...item,
+                              displayName: input.displayName,
+                              description: input.description
+                            }
+                          : item
+                      )
+                    };
+                  });
+                  setHasPendingDraftChanges(true);
+                  setDeployPrecheck(null);
+                  setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
+                }}
+                onCalculatedFieldsSave={async (fields) => {
+                  setGraphPayload((previous) => ({
                     ...previous,
-                    models: previous.models.map((item) =>
-                      item.id === node.id
-                        ? {
-                            ...item,
-                            displayName: input.displayName,
-                            description: input.description
-                          }
-                        : item
-                    )
-                  };
-                }
-                return {
-                  ...previous,
-                  views: previous.views.map((item) =>
-                    item.id === node.id
-                      ? {
-                          ...item,
-                          displayName: input.displayName,
-                          description: input.description
-                        }
-                      : item
-                  )
-                };
-              });
-              setHasPendingDraftChanges(true);
-              setDeployPrecheck(null);
-              setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
-            }}
-            onCalculatedFieldsSave={async (fields) => {
-              setGraphPayload((previous) => ({
-                ...previous,
-                calculatedFields: fields
-              }));
-              setHasPendingDraftChanges(true);
-              setDeployPrecheck(null);
-              setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
-            }}
-            onRelationshipsSave={async (relationships) => {
-              setGraphPayload((previous) => ({
-                ...previous,
-                relationships
-              }));
-              setHasPendingDraftChanges(true);
-              setDeployPrecheck(null);
-              setSelectedNode((previous) => {
-                if (previous?.kind !== "relationship") {
-                  return previous;
-                }
-                return relationships.some((item) => item.id === previous.id) ? previous : null;
-              });
-              setMessage("Relationships 已更新，点击“保存 Modeling Draft”后提交。");
-            }}
-            onLoadPreview={loadPreviewForDetails}
-            onDeleteTarget={async ({ targetKind, targetId }) => {
-              if (targetKind === "model") {
-                deleteModelFromSidebar(targetId);
-                return;
-              }
-              deleteViewFromSidebar(targetId);
-            }}
-            onSelectRelationship={(relationshipId) => {
-              if (!relationshipId) {
-                setSelectedNode((previous) =>
-                  previous?.kind === "relationship" ? null : previous
-                );
-                return;
-              }
-              setSelectedNode({
-                kind: "relationship",
-                id: relationshipId
-              });
-            }}
-          />
+                    calculatedFields: fields
+                  }));
+                  setHasPendingDraftChanges(true);
+                  setDeployPrecheck(null);
+                  setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
+                }}
+                onRelationshipsSave={handleRelationshipsSave}
+                onLoadPreview={loadPreviewForDetails}
+                onDeleteTarget={async ({ targetKind, targetId }) => {
+                  if (targetKind === "model") {
+                    deleteModelFromSidebar(targetId);
+                    return;
+                  }
+                  deleteViewFromSidebar(targetId);
+                }}
+                onSelectRelationship={handleSelectRelationship}
+              />
+            ) : null}
 
-          <ModelingSchemaChangePanel
-            busy={busy || saving || deploying}
-            items={schemaChangeItems}
-            unresolvedCount={schemaChangeItems.filter((item) => item.status === "detected").length}
-            onDetect={detectSchemaChanges}
-            onResolve={resolveSchemaChange}
-          />
+            <ModelingSchemaChangePanel
+              busy={busy || saving || deploying}
+              items={schemaChangeItems}
+              unresolvedCount={schemaChangeItems.filter((item) => item.status === "detected").length}
+              onDetect={detectSchemaChanges}
+              onResolve={resolveSchemaChange}
+            />
 
-          <ModelingDeployPanel
-            busy={busy || saving || deploying}
-            deployState={deployState}
-            hasUndeployedChanges={deployState === "undeployed"}
-            hasPendingDraftChanges={hasPendingDraftChanges}
-            canRunPrecheck={canRunDeployPrecheck}
-            canDeploy={canActivateRevision}
-            precheck={deployPrecheck}
-            onPrecheck={runDeployPrecheck}
-            onDeploy={deployRevision}
-          />
+            <ModelingDeployPanel
+              busy={busy || saving || deploying}
+              deployState={deployState}
+              hasUndeployedChanges={deployState === "undeployed"}
+              hasPendingDraftChanges={hasPendingDraftChanges}
+              canRunPrecheck={canRunDeployPrecheck}
+              canDeploy={canActivateRevision}
+              precheck={deployPrecheck}
+              onPrecheck={runDeployPrecheck}
+              onDeploy={deployRevision}
+            />
+          </ModelingContextDrawer>
         </div>
       </section>
 
@@ -1273,6 +1396,28 @@ export default function ModelingWorkspacePage() {
         }}
         onLoadPreview={loadPreviewForDetails}
       />
+      {!showDetailsPanel ? (
+        <ModelingRelationshipEditor
+          relationships={graphPayload.relationships}
+          models={graphPayload.models}
+          selectedRelationshipId={selectedRelationshipId}
+          defaultFromTable={relationshipEditorDefaultFromTable}
+          requestedEditorIntent={
+            requestedEditorIntent?.tab === "relationship"
+              ? {
+                  relationshipId: requestedEditorIntent.relationshipId ?? null,
+                  requestId: requestedEditorIntent.requestId
+                }
+              : null
+          }
+          busy={busy || saving}
+          onDirtyChange={setDetailsDirty}
+          onSave={handleRelationshipsSave}
+          onSelectRelationship={handleSelectRelationship}
+          inlinePanel={false}
+          dialogSubmitSaves
+        />
+      ) : null}
     </div>
   );
 }

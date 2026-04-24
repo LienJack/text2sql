@@ -10,6 +10,7 @@
 ## 3. 强制技术约束（MUST）
 - 前端 UI 必须使用 React 函数组件实现。
 - 组件基线必须使用 shadcn-ui 体系（可封装业务组件，但基础交互组件来源保持一致）。
+- 业务代码中禁止直接使用原生 HTML UI 交互控件（含表单与交互类控件）；必须优先复用 `apps/frontend/src/components/ui/**` 下的 shadcn 组件或其业务封装。`input`、`select`、`button`、`textarea` 仅为示例，不限于此。
 - shadcn 组件初始化与新增必须优先使用官方 CLI（`pnpm dlx shadcn@latest init` / `pnpm dlx shadcn@latest add ...`），避免手工复制导致漂移。
 - Next.js 前端样式体系必须使用 Tailwind CSS v4（`tailwindcss` + `@tailwindcss/postcss`），禁止回退到 v3 配置模式。
 - 业务组件中禁止常规内联样式（`style={{...}}`）；样式应通过统一样式体系表达。

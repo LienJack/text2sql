@@ -38,6 +38,7 @@ type PreviewResult = {
 type RelationshipItem = {
   id: string;
   name: string;
+  secondaryName?: string;
   from: string;
   to: string;
   type: string;
@@ -116,36 +117,74 @@ function resolveRelationshipLabel(type: string): string {
   return "-";
 }
 
+function resolveRelationshipCounterpartTable(
+  modelTableName: string,
+  relationship: ModelingGraphRelationship
+): string {
+  const modelTableKey = normalizeTableKey(modelTableName);
+  const leftTable = relationship.bridge?.left?.table?.trim() ?? "";
+  const rightTable = relationship.bridge?.right?.table?.trim() ?? "";
+  const leftTableKey = normalizeTableKey(leftTable);
+  const rightTableKey = normalizeTableKey(rightTable);
+
+  if (!modelTableKey) {
+    return "-";
+  }
+  if (leftTableKey === modelTableKey && rightTableKey === modelTableKey) {
+    return rightTable || leftTable || "-";
+  }
+  if (leftTableKey === modelTableKey) {
+    return rightTable || "-";
+  }
+  if (rightTableKey === modelTableKey) {
+    return leftTable || "-";
+  }
+  return "-";
+}
+
+function resolveBridgePath(tableName?: string, columnName?: string): string {
+  const table = tableName?.trim() || "-";
+  const column = columnName?.trim() || "-";
+  return `${table}.${column}`;
+}
+
 function resolveModelRelationships(
   model: ModelingGraphModel,
   relationships: ModelingGraphRelationship[]
 ): RelationshipItem[] {
   const modelTableKey = normalizeTableKey(model.tableName);
   const relationshipItems = relationships.flatMap((relationship) => {
-    const leftTable = relationship.bridge?.left?.table ?? "";
-    const rightTable = relationship.bridge?.right?.table ?? "";
+    const leftTable = relationship.bridge?.left?.table?.trim() ?? "";
+    const rightTable = relationship.bridge?.right?.table?.trim() ?? "";
     const leftTableKey = normalizeTableKey(leftTable);
     const rightTableKey = normalizeTableKey(rightTable);
     if (leftTableKey !== modelTableKey && rightTableKey !== modelTableKey) {
       return [];
     }
-    const from = `${leftTable}.${relationship.bridge.left.column}`;
-    const to = `${rightTable}.${relationship.bridge.right.column}`;
-    const relatedTable = leftTableKey === modelTableKey ? rightTable : leftTable;
-    const relationshipName = normalizeText(relationship.name);
+    const from = resolveBridgePath(leftTable, relationship.bridge?.left?.column);
+    const to = resolveBridgePath(rightTable, relationship.bridge?.right?.column);
+    const relatedTable = resolveRelationshipCounterpartTable(model.tableName, relationship);
+    const relationshipName = relationship.name?.trim() || undefined;
     return [
       {
         id: relationship.id,
-        name: relationshipName === "-" ? relatedTable || relationship.id : relationshipName,
+        name: relatedTable,
+        secondaryName: relationshipName,
         from,
         to,
         type: resolveRelationshipType(relationship),
-        relatedTable: relatedTable || "-"
+        relatedTable
       }
     ];
   });
 
-  return relationshipItems.sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+  return relationshipItems.sort((left, right) => {
+    const nameComparison = left.name.localeCompare(right.name, "zh-CN");
+    if (nameComparison !== 0) {
+      return nameComparison;
+    }
+    return left.id.localeCompare(right.id, "zh-CN");
+  });
 }
 
 export function ModelingModelDrawer(props: {
@@ -565,7 +604,19 @@ export function ModelingModelDrawer(props: {
                                       )}
                                     </Button>
                                   </TableCell>
-                                  <TableCell className="py-2 font-medium">{relationship.name}</TableCell>
+                                  <TableCell className="py-2 font-medium">
+                                    <div className="flex flex-col">
+                                      <span>{relationship.name}</span>
+                                      {relationship.secondaryName ? (
+                                        <span
+                                          className="truncate text-[10px] font-normal text-[var(--text-secondary)]"
+                                          title={relationship.secondaryName}
+                                        >
+                                          {relationship.secondaryName}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </TableCell>
                                   <TableCell className="py-2">
                                     <Badge
                                       variant="outline"
@@ -599,6 +650,9 @@ export function ModelingModelDrawer(props: {
                                     >
                                       Related table: {relationship.relatedTable} | From:{" "}
                                       {relationship.from} | To: {relationship.to}
+                                      {relationship.secondaryName
+                                        ? ` | Relationship: ${relationship.secondaryName}`
+                                        : ""}
                                     </TableCell>
                                   </TableRow>
                                 ) : null}
@@ -840,7 +894,19 @@ export function ModelingModelDrawer(props: {
                       {relationshipItems.length > 0 ? (
                         relationshipItems.map((relationship) => (
                           <TableRow key={`dialog-relationship-${relationship.id}`}>
-                            <TableCell className="py-2 font-medium">{relationship.name}</TableCell>
+                            <TableCell className="py-2 font-medium">
+                              <div className="flex flex-col">
+                                <span>{relationship.name}</span>
+                                {relationship.secondaryName ? (
+                                  <span
+                                    className="truncate text-[10px] font-normal text-[var(--text-secondary)]"
+                                    title={relationship.secondaryName}
+                                  >
+                                    {relationship.secondaryName}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </TableCell>
                             <TableCell className="max-w-[180px] truncate py-2 font-mono text-[11px] text-[var(--text-secondary)]">
                               {relationship.from}
                             </TableCell>

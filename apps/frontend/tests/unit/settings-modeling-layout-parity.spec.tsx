@@ -278,8 +278,11 @@ describe("Modeling layout parity", () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
-    await screen.findByRole("button", { name: "选择 model Customers Model" });
-    await user.click(screen.getByRole("button", { name: "选择 model Customers Model" }));
+    const selectCustomersButton = await screen.findByRole("button", {
+      name: "选择 model Customers Model"
+    });
+    selectCustomersButton.focus();
+    await user.keyboard("{Enter}");
 
     expect(screen.getByText("Current Context: model · model.customers")).toBeInTheDocument();
 
@@ -312,6 +315,9 @@ describe("Modeling layout parity", () => {
     toCanvasButton.focus();
     await user.keyboard("{Enter}");
     expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    toAssetsButton.focus();
+    await user.keyboard(" ");
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(2);
 
     const modelsTreeToggle = screen.getByRole("button", { name: "切换 Models 树" });
     expect(modelsTreeToggle).toHaveAttribute("aria-expanded", "true");
