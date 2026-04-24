@@ -13,6 +13,7 @@ export interface RagRetrievalRequest {
   query: string;
   datasourceId: string;
   runId: string;
+  workspaceId?: string;
   activeIndexVersionId?: string;
   perLaneLimit?: number;
   finalCandidateLimit?: number;
@@ -90,6 +91,55 @@ export interface RagSkillContext {
   degrade_reason?: string;
 }
 
+export interface RagContextPackBindingSummary {
+  model_keys: string[];
+  relationship_keys: string[];
+  metric_keys: string[];
+  calculated_field_keys: string[];
+  modelKeys?: string[];
+  relationshipKeys?: string[];
+  metricKeys?: string[];
+  calculatedFieldKeys?: string[];
+}
+
+export interface RagContextPackInstructionSummary {
+  model_bindings: string[];
+  relationship_bindings: string[];
+  metric_bindings: string[];
+  calculated_field_bindings: string[];
+  modelBindings?: string[];
+  relationshipBindings?: string[];
+  metricBindings?: string[];
+  calculatedFieldBindings?: string[];
+}
+
+export interface RagContextPack {
+  status: "ready" | "degraded";
+  semantic_version?: number;
+  modeling_revision?: number;
+  semantic_lock_status: "locked" | "fallback" | "degraded";
+  semantic_bindings: RagContextPackBindingSummary;
+  instruction_sets: RagContextPackInstructionSummary;
+  selected_context_summary: {
+    count: number;
+    snippets: string[];
+    selectedContextCount?: number;
+  };
+  degrade_reasons: string[];
+  risk_tags: string[];
+  semanticVersion?: number;
+  modelingRevision?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticBindings?: RagContextPackBindingSummary;
+  instructionSets?: RagContextPackInstructionSummary;
+  selectedContextSummary?: {
+    count: number;
+    snippets: string[];
+  };
+  degradeReasons?: string[];
+  riskTags?: string[];
+}
+
 export interface RagRetrievalBundle {
   query: string;
   run_id: string;
@@ -103,6 +153,7 @@ export interface RagRetrievalBundle {
   selected_context?: RagRetrievalChunkPayload[];
   risk_tags?: string[];
   skill_context?: RagSkillContext;
+  context_pack?: RagContextPack;
   decision_reasons?: string[];
 }
 

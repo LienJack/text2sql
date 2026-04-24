@@ -31,11 +31,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { Steps, type StepItem } from "@/components/ui/steps";
 import { StateBlock } from "@/components/ui/state-block";
-import { WorkspaceSelectorInline } from "@/components/data-sources/workspace-selector-inline";
+import { SetupModelsStep } from "@/components/data-sources/setup-models-step";
+import { SetupRelationshipsStep } from "@/components/data-sources/setup-relationships-step";
 import { cn } from "@/lib/utils";
 import {
-  createWorkspace,
+  AdminApiError,
+  commitModelingSetup,
   listWorkspaces,
+  listModelingSetupTables,
+  recommendModelingSetupRelationships,
+  saveModelingSetupSelectedTables,
+  type ModelingSetupRelationshipSuggestion,
+  type ModelingSetupTableOption,
   type WorkspaceSummary
 } from "@/lib/admin-api-client";
 import {
@@ -48,6 +55,7 @@ import {
   uploadDatasourceFile
 } from "@/lib/api-client";
 import {
+  readActiveWorkspaceId,
   writeActiveDatasourceId,
   writeActiveWorkspaceId
 } from "@/lib/datasource-session-context";
@@ -86,6 +94,20 @@ type WizardState = {
   submissionKey: string;
 };
 
+type SetupWizardState = {
+  open: boolean;
+  step: 1 | 2;
+  workspaceId: string;
+  datasourceId: string;
+  loading: boolean;
+  submitting: boolean;
+  tables: ModelingSetupTableOption[];
+  selectedTableNames: string[];
+  suggestions: ModelingSetupRelationshipSuggestion[];
+  selectedSuggestionIds: string[];
+  failure: WizardFailure | null;
+};
+
 const WIZARD_TYPES: Array<{
   type: WizardType;
   title: string;
@@ -116,8 +138,12 @@ const TYPE_FILTERS: Array<{ value: "all" | DatasourceType; label: string }> = [
 
 const WIZARD_STEPS: StepItem[] = [
   { step: 1, title: "选择数据源", subtitle: "挑选接入方式" },
-  { step: 2, title: "配置信息", subtitle: "创建或编辑连接" },
-  { step: 3, title: "工作空间", subtitle: "绑定治理作用域" }
+  { step: 2, title: "配置信息", subtitle: "创建或编辑连接并自动绑定当前工作空间" }
+];
+
+const SETUP_STEPS: StepItem[] = [
+  { step: 1, title: "选择数据表", subtitle: "生成建模基线" },
+  { step: 2, title: "确认关系", subtitle: "确认推荐关系" }
 ];
 
 const CONNECTION_FAILURE_HINTS: Record<
@@ -168,6 +194,25 @@ const STAGE_HINTS: Record<string, { hint: string; action: "retry" | "previous" }
   }
 };
 
+const SETUP_STAGE_HINTS: Record<string, { hint: string; action: "retry" | "previous" }> = {
+  setup_tables_load_failed: {
+    hint: "加载可选表失败，请重试。",
+    action: "retry"
+  },
+  setup_tables_save_failed: {
+    hint: "保存选表失败，请检查选择并重试。",
+    action: "retry"
+  },
+  setup_recommend_failed: {
+    hint: "关系建议生成失败，可重试或返回上一步调整选表。",
+    action: "retry"
+  },
+  setup_commit_failed: {
+    hint: "建模初始化提交失败，请重试当前步骤。",
+    action: "retry"
+  }
+};
+
 function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
   return {
     mode: "create",
@@ -185,6 +230,36 @@ function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
     openAfterCreate: true,
     submissionKey: ""
   };
+}
+
+function createEmptySetupWizardState(): SetupWizardState {
+  return {
+    open: false,
+    step: 1,
+    workspaceId: "",
+    datasourceId: "",
+    loading: false,
+    submitting: false,
+    tables: [],
+    selectedTableNames: [],
+    suggestions: [],
+    selectedSuggestionIds: [],
+    failure: null
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeSelectedTableNames(value: string[]): string[] {
+  return Array.from(
+    new Set(value.map((item) => item.trim().toLowerCase()).filter(Boolean))
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+function normalizeSelectedIds(value: string[]): string[] {
+  return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
 }
 
 function isConnectionFailureCode(value: string): value is ConnectionFailureCode {
@@ -269,6 +344,34 @@ function resolveWizardFailure(error: unknown): WizardFailure {
   };
 }
 
+function resolveSetupFailure(
+  error: unknown,
+  fallbackStage: string
+): WizardFailure {
+  let message = error instanceof Error ? error.message : "建模设置失败";
+  let code: string | undefined;
+  let stage: string | undefined;
+
+  if (error instanceof AdminApiError) {
+    message = error.message;
+    code = error.code;
+    if (isRecord(error.details) && typeof error.details.stage === "string") {
+      stage = error.details.stage;
+    }
+  }
+
+  const resolvedStage = stage || fallbackStage;
+  const stageHint = SETUP_STAGE_HINTS[resolvedStage];
+
+  return {
+    message,
+    code,
+    stage: resolvedStage,
+    hint: stageHint?.hint,
+    action: stageHint?.action ?? "retry"
+  };
+}
+
 function toWizardType(type: DatasourceType): WizardType {
   if (type === "mysql" || type === "postgresql" || type === "csv" || type === "excel" || type === "sqlite") {
     return type;
@@ -290,16 +393,17 @@ function DataSourcesPageContent() {
   const [typeFilter, setTypeFilter] = useState<"all" | DatasourceType>("all");
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorStep, setEditorStep] = useState<1 | 2 | 3>(1);
+  const [editorStep, setEditorStep] = useState<1 | 2>(1);
   const [editorSaving, setEditorSaving] = useState(false);
   const [editorFailure, setEditorFailure] = useState<WizardFailure | null>(null);
   const [wizard, setWizard] = useState<WizardState>(() =>
-    createEmptyWizardState(workspaceIdFromQuery)
+    createEmptyWizardState(readActiveWorkspaceId())
   );
 
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [workspacesLoading, setWorkspacesLoading] = useState(false);
-  const [workspacesError, setWorkspacesError] = useState("");
+  const [setupWizard, setSetupWizard] = useState<SetupWizardState>(() =>
+    createEmptySetupWizardState()
+  );
 
   const loadDatasources = async (): Promise<void> => {
     setLoading(true);
@@ -315,24 +419,27 @@ function DataSourcesPageContent() {
   };
 
   const loadWorkspaces = async (preferredWorkspaceId?: string): Promise<void> => {
-    setWorkspacesLoading(true);
-    setWorkspacesError("");
     try {
       const result = await listWorkspaces({ page: 1, pageSize: 200 });
       setWorkspaces(result.items);
-      const preferred = preferredWorkspaceId?.trim() || wizard.workspaceId || workspaceIdFromQuery;
+      const preferred =
+        preferredWorkspaceId?.trim() ||
+        readActiveWorkspaceId() ||
+        wizard.workspaceId ||
+        workspaceIdFromQuery;
       const resolvedWorkspaceId =
         (preferred && result.items.find((item) => item.id === preferred)?.id) ||
         result.items[0]?.id ||
         "";
       setWizard((previous) => ({
         ...previous,
-        workspaceId: previous.workspaceId || resolvedWorkspaceId
+        workspaceId: resolvedWorkspaceId
       }));
+      if (resolvedWorkspaceId) {
+        writeActiveWorkspaceId(resolvedWorkspaceId);
+      }
     } catch (error) {
-      setWorkspacesError(error instanceof Error ? error.message : "加载工作空间失败");
-    } finally {
-      setWorkspacesLoading(false);
+      setPageError(error instanceof Error ? error.message : "加载工作空间失败");
     }
   };
 
@@ -341,7 +448,10 @@ function DataSourcesPageContent() {
   }, []);
 
   useEffect(() => {
-    writeActiveWorkspaceId(workspaceIdFromQuery);
+    const workspaceFromQuery = workspaceIdFromQuery.trim();
+    if (workspaceFromQuery) {
+      writeActiveWorkspaceId(workspaceFromQuery);
+    }
   }, [workspaceIdFromQuery]);
 
   const filteredDatasources = useMemo(() => {
@@ -364,12 +474,24 @@ function DataSourcesPageContent() {
     () => datasources.filter((item) => item.type === "csv" || item.type === "excel").length,
     [datasources]
   );
+  const currentWorkspaceName = useMemo(() => {
+    if (!wizard.workspaceId.trim()) {
+      return "未选择";
+    }
+    return (
+      workspaces.find((workspace) => workspace.id === wizard.workspaceId)?.name ??
+      wizard.workspaceId
+    );
+  }, [wizard.workspaceId, workspaces]);
 
   const onStartChat = async (
     datasourceId: string,
     workspaceIdOverride?: string
   ): Promise<void> => {
-    const activeWorkspaceId = workspaceIdOverride?.trim() || workspaceIdFromQuery;
+    const activeWorkspaceId =
+      workspaceIdOverride?.trim() ||
+      readActiveWorkspaceId() ||
+      wizard.workspaceId.trim();
     setActiveDatasourceId(datasourceId);
     setPageError("");
     try {
@@ -379,9 +501,7 @@ function DataSourcesPageContent() {
       writeActiveDatasourceId(datasourceId);
       writeActiveWorkspaceId(activeWorkspaceId);
       router.push(
-        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}${
-          activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""
-        }`
+        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}`
       );
     } catch (startError) {
       setPageError(startError instanceof Error ? startError.message : "创建会话失败");
@@ -389,8 +509,199 @@ function DataSourcesPageContent() {
     }
   };
 
+  const closeSetupWizard = (): void => {
+    setSetupWizard(createEmptySetupWizardState());
+  };
+
+  const navigateToModeling = (workspaceId: string, datasourceId: string): void => {
+    writeActiveWorkspaceId(workspaceId);
+    writeActiveDatasourceId(datasourceId);
+    router.push(`/modeling?datasourceId=${encodeURIComponent(datasourceId)}`);
+  };
+
+  const openSetupWizard = async (workspaceId: string, datasourceId: string): Promise<void> => {
+    setSetupWizard({
+      open: true,
+      step: 1,
+      workspaceId,
+      datasourceId,
+      loading: true,
+      submitting: false,
+      tables: [],
+      selectedTableNames: [],
+      suggestions: [],
+      selectedSuggestionIds: [],
+      failure: null
+    });
+
+    try {
+      const tables = await listModelingSetupTables(workspaceId, datasourceId);
+      setSetupWizard((previous) => ({
+        ...previous,
+        loading: false,
+        tables,
+        selectedTableNames: tables.map((item) => item.tableName)
+      }));
+    } catch (error) {
+      setSetupWizard((previous) => ({
+        ...previous,
+        loading: false,
+        failure: resolveSetupFailure(error, "setup_tables_load_failed")
+      }));
+    }
+  };
+
+  const resolveWorkspaceIdForSetup = async (): Promise<string> => {
+    const candidates = [
+      readActiveWorkspaceId(),
+      wizard.workspaceId
+    ]
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const matchedCachedWorkspaceId = candidates.find((candidate) =>
+      workspaces.some((workspace) => workspace.id === candidate)
+    );
+    if (matchedCachedWorkspaceId) {
+      return matchedCachedWorkspaceId;
+    }
+    if (workspaces[0]?.id) {
+      return workspaces[0].id;
+    }
+    const result = await listWorkspaces({ page: 1, pageSize: 200 });
+    setWorkspaces(result.items);
+    const matchedRemoteWorkspaceId = candidates.find((candidate) =>
+      result.items.some((workspace) => workspace.id === candidate)
+    );
+    return matchedRemoteWorkspaceId || result.items[0]?.id?.trim() || "";
+  };
+
+  const openSetupWizardFromDatasourceCard = async (datasourceId: string): Promise<void> => {
+    try {
+      const resolvedWorkspaceId = await resolveWorkspaceIdForSetup();
+      if (!resolvedWorkspaceId) {
+        setPageError("未找到可用工作空间，请先在入口选择或创建工作空间后再执行建模设置。");
+        return;
+      }
+      setPageError("");
+      writeActiveWorkspaceId(resolvedWorkspaceId);
+      writeActiveDatasourceId(datasourceId);
+      await openSetupWizard(resolvedWorkspaceId, datasourceId);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "打开建模设置失败");
+    }
+  };
+
+  const runSetupModelsStep = async (): Promise<void> => {
+    if (setupWizard.submitting) {
+      return;
+    }
+    const selectedTableNames = normalizeSelectedTableNames(setupWizard.selectedTableNames);
+    if (selectedTableNames.length === 0) {
+      setSetupWizard((previous) => ({
+        ...previous,
+        failure: {
+          message: "请至少选择一张数据表后继续。",
+          stage: "setup_tables_save_failed",
+          action: "previous"
+        }
+      }));
+      return;
+    }
+
+    setSetupWizard((previous) => ({
+      ...previous,
+      submitting: true,
+      failure: null
+    }));
+
+    let currentStage = "setup_tables_save_failed";
+    try {
+      const snapshot = await saveModelingSetupSelectedTables(
+        setupWizard.workspaceId,
+        setupWizard.datasourceId,
+        {
+          selectedTables: selectedTableNames
+        }
+      );
+
+      const snapshotSelectedTables =
+        snapshot.selectedTables ?? snapshot.selectedTableNames ?? [];
+      const persistedTableNames =
+        snapshotSelectedTables.length > 0 ? snapshotSelectedTables : selectedTableNames;
+
+      currentStage = "setup_recommend_failed";
+      const suggestions = await recommendModelingSetupRelationships(
+        setupWizard.workspaceId,
+        setupWizard.datasourceId,
+        {
+          selectedTables: persistedTableNames
+        }
+      );
+      setSetupWizard((previous) => ({
+        ...previous,
+        step: 2,
+        submitting: false,
+        selectedTableNames: persistedTableNames,
+        suggestions,
+        selectedSuggestionIds: suggestions.map((item) => item.id),
+        failure: null
+      }));
+    } catch (error) {
+      setSetupWizard((previous) => ({
+        ...previous,
+        submitting: false,
+        failure: resolveSetupFailure(error, currentStage)
+      }));
+    }
+  };
+
+  const commitSetupWizardStep = async (): Promise<void> => {
+    if (setupWizard.submitting) {
+      return;
+    }
+    setSetupWizard((previous) => ({
+      ...previous,
+      submitting: true,
+      failure: null
+    }));
+    try {
+      await commitModelingSetup(setupWizard.workspaceId, setupWizard.datasourceId, {
+        selectedTables: setupWizard.selectedTableNames,
+        selectedRecommendationIds: normalizeSelectedIds(setupWizard.selectedSuggestionIds)
+      });
+      const targetWorkspaceId = setupWizard.workspaceId;
+      const targetDatasourceId = setupWizard.datasourceId;
+      closeSetupWizard();
+      navigateToModeling(targetWorkspaceId, targetDatasourceId);
+    } catch (error) {
+      setSetupWizard((previous) => ({
+        ...previous,
+        submitting: false,
+        failure: resolveSetupFailure(error, "setup_commit_failed")
+      }));
+    }
+  };
+
+  const retrySetupAction = async (): Promise<void> => {
+    const stage = setupWizard.failure?.stage;
+    if (!stage) {
+      return;
+    }
+    if (stage === "setup_tables_load_failed") {
+      await openSetupWizard(setupWizard.workspaceId, setupWizard.datasourceId);
+      return;
+    }
+    if (stage === "setup_tables_save_failed" || stage === "setup_recommend_failed") {
+      await runSetupModelsStep();
+      return;
+    }
+    if (stage === "setup_commit_failed") {
+      await commitSetupWizardStep();
+    }
+  };
+
   const resetEditor = (mode: EditorMode, datasource?: Datasource): void => {
-    const defaultState = createEmptyWizardState(workspaceIdFromQuery);
+    const defaultState = createEmptyWizardState(readActiveWorkspaceId());
 
     if (mode === "edit" && datasource) {
       const defaultPort =
@@ -422,13 +733,13 @@ function DataSourcesPageContent() {
   const openCreateEditor = (): void => {
     resetEditor("create");
     setEditorOpen(true);
-    void loadWorkspaces(workspaceIdFromQuery);
+    void loadWorkspaces(readActiveWorkspaceId());
   };
 
   const openEditEditor = (datasource: Datasource): void => {
     resetEditor("edit", datasource);
     setEditorOpen(true);
-    void loadWorkspaces(workspaceIdFromQuery);
+    void loadWorkspaces(readActiveWorkspaceId());
   };
 
   const closeEditor = (): void => {
@@ -474,9 +785,9 @@ function DataSourcesPageContent() {
     return "";
   };
 
-  const validateStep3 = (): string => {
+  const validateWorkspaceBinding = (): string => {
     if (!wizard.workspaceId.trim()) {
-      return "请选择工作空间后再提交";
+      return "当前未检测到工作空间，请先在入口选择工作空间后再提交。";
     }
     return "";
   };
@@ -509,7 +820,13 @@ function DataSourcesPageContent() {
       return;
     }
 
-    const validationMessage = validateStep3();
+    const stepValidationMessage = validateStep2();
+    if (stepValidationMessage) {
+      setEditorFailure({ message: stepValidationMessage, action: "previous" });
+      return;
+    }
+
+    const validationMessage = validateWorkspaceBinding();
     if (validationMessage) {
       setEditorFailure({ message: validationMessage, action: "previous" });
       return;
@@ -585,9 +902,15 @@ function DataSourcesPageContent() {
       }
 
       await loadDatasources();
+      const mode = wizard.mode;
       const shouldOpenChat = wizard.openAfterCreate;
       const selectedWorkspaceId = wizard.workspaceId;
       closeEditor();
+
+      if (mode === "create" && targetDatasourceId) {
+        await openSetupWizard(selectedWorkspaceId, targetDatasourceId);
+        return;
+      }
 
       if (shouldOpenChat && targetDatasourceId) {
         await onStartChat(targetDatasourceId, selectedWorkspaceId);
@@ -727,6 +1050,14 @@ function DataSourcesPageContent() {
                     >
                       复制数据源 ID
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={unavailable}
+                      onClick={() => {
+                        void openSetupWizardFromDatasourceCard(item.id);
+                      }}
+                    >
+                      建模设置
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => openEditEditor(item)}>编辑数据源</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -778,7 +1109,7 @@ function DataSourcesPageContent() {
                 {wizard.mode === "create" ? "新增数据源" : "编辑数据源"}
               </DialogTitle>
               <DialogDescription className="text-[var(--text-secondary)]">
-                创建和编辑都必须完成工作空间绑定步骤。
+                创建和编辑会自动绑定当前工作空间，无需在此页重复选择。
               </DialogDescription>
             </div>
             <Steps items={WIZARD_STEPS} currentStep={editorStep} />
@@ -945,7 +1276,7 @@ function DataSourcesPageContent() {
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">文件上传</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        先上传文件创建数据源，再在同一流程绑定到目标工作空间。
+                        先上传文件创建数据源，保存时会自动绑定当前工作空间。
                       </p>
                     </div>
                     <label className="space-y-1">
@@ -987,46 +1318,25 @@ function DataSourcesPageContent() {
                     </label>
                   </div>
                 )}
-              </div>
-            ) : null}
-
-            {editorStep === 3 ? (
-              <div className="space-y-4">
-                <WorkspaceSelectorInline
-                  workspaceId={wizard.workspaceId}
-                  workspaces={workspaces}
-                  loading={workspacesLoading}
-                  error={workspacesError}
-                  disabled={editorSaving}
-                  onWorkspaceIdChange={(nextWorkspaceId) => {
-                    patchWizard({ workspaceId: nextWorkspaceId });
-                    writeActiveWorkspaceId(nextWorkspaceId);
-                  }}
-                  onWorkspaceCreated={(workspace) => {
-                    setWorkspaces((previous) => {
-                      if (previous.some((item) => item.id === workspace.id)) {
-                        return previous;
-                      }
-                      return [workspace, ...previous];
-                    });
-                    patchWizard({ workspaceId: workspace.id });
-                    writeActiveWorkspaceId(workspace.id);
-                  }}
-                  onCreateWorkspace={(name) => createWorkspace({ name })}
-                />
 
                 <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-sidebar)] p-4">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    提交会走 workflow 接口，统一处理数据源变更与工作空间绑定。
+                    将自动绑定当前工作空间：<span className="font-medium text-[var(--text-primary)]">{currentWorkspaceName}</span>。
                   </p>
-                  <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
-                    <input
-                      type="checkbox"
-                      checked={wizard.openAfterCreate}
-                      onChange={(event) => patchWizard({ openAfterCreate: event.target.checked })}
-                    />
-                    {wizard.mode === "create" ? "创建完成后立即开启问数" : "保存后立即开启问数"}
-                  </label>
+                  {wizard.mode === "edit" ? (
+                    <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
+                      <input
+                        type="checkbox"
+                        checked={wizard.openAfterCreate}
+                        onChange={(event) => patchWizard({ openAfterCreate: event.target.checked })}
+                      />
+                      保存后立即开启问数
+                    </label>
+                  ) : (
+                    <p className="mt-3 text-xs text-[var(--text-tertiary)]">
+                      创建成功后会自动进入建模设置向导（选表与关系建议确认）。
+                    </p>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -1051,13 +1361,13 @@ function DataSourcesPageContent() {
                     closeEditor();
                     return;
                   }
-                  setEditorStep((previous) => (previous === 3 ? 2 : 1));
+                  setEditorStep(1);
                 }}
               >
                 {editorStep === 1 || (editorStep === 2 && wizard.mode === "edit") ? "取消" : "上一步"}
               </Button>
 
-              {editorStep < 3 ? (
+              {editorStep < 2 ? (
                 <Button
                   size="lg"
                   className="px-5"
@@ -1070,16 +1380,7 @@ function DataSourcesPageContent() {
                       }
                       setEditorFailure(null);
                       setEditorStep(2);
-                      return;
                     }
-
-                    const validationMessage = validateStep2();
-                    if (validationMessage) {
-                      setEditorFailure({ message: validationMessage, action: "previous" });
-                      return;
-                    }
-                    setEditorFailure(null);
-                    setEditorStep(3);
                   }}
                 >
                   下一步
@@ -1096,6 +1397,155 @@ function DataSourcesPageContent() {
                 >
                   {editorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                   {wizard.mode === "create" ? "完成创建" : "保存并绑定"}
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={setupWizard.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeSetupWizard();
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-[980px] gap-0 overflow-hidden border border-[var(--border-default)] bg-[var(--surface-panel)] p-0 shadow-[0_24px_70px_rgba(15,23,42,0.18)] sm:max-w-4xl">
+          <DialogHeader className="gap-4 border-b border-[var(--border-default)] bg-[linear-gradient(180deg,#ffffff_0%,#f5f9ff_100%)] px-7 pt-6 pb-5">
+            <div className="space-y-1">
+              <DialogTitle className="text-xl font-semibold text-[var(--text-primary)]">
+                建模设置向导
+              </DialogTitle>
+              <DialogDescription className="text-[var(--text-secondary)]">
+                选择建模表并确认关系建议，完成后将进入建模工作台。
+              </DialogDescription>
+            </div>
+            <Steps items={SETUP_STEPS} currentStep={setupWizard.step} />
+          </DialogHeader>
+
+          {setupWizard.failure ? (
+            <div className="mx-7 mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-sm font-medium text-red-700">{setupWizard.failure.message}</p>
+              {setupWizard.failure.hint ? (
+                <p className="mt-1 text-xs text-red-700/90">{setupWizard.failure.hint}</p>
+              ) : null}
+              {setupWizard.failure.stage ? (
+                <p className="mt-1 text-xs text-red-700/90">失败阶段：{setupWizard.failure.stage}</p>
+              ) : null}
+              {setupWizard.failure.action ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3 h-9 border-red-200 bg-white px-4 text-red-700 hover:bg-red-100"
+                  onClick={() => {
+                    if (setupWizard.failure?.action === "retry") {
+                      void retrySetupAction();
+                      return;
+                    }
+                    setSetupWizard((previous) => ({
+                      ...previous,
+                      step: 1,
+                      failure: null
+                    }));
+                  }}
+                >
+                  {setupWizard.failure.action === "retry" ? "重试" : "上一步"}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="max-h-[62vh] overflow-auto px-7 py-6">
+            {setupWizard.step === 1 ? (
+              <SetupModelsStep
+                tables={setupWizard.tables}
+                selectedTableNames={setupWizard.selectedTableNames}
+                loading={setupWizard.loading}
+                disabled={setupWizard.submitting}
+                onSelectionChange={(nextSelectedTableNames) =>
+                  setSetupWizard((previous) => ({
+                    ...previous,
+                    selectedTableNames: nextSelectedTableNames,
+                    failure: null
+                  }))
+                }
+              />
+            ) : (
+              <SetupRelationshipsStep
+                suggestions={setupWizard.suggestions}
+                selectedSuggestionIds={setupWizard.selectedSuggestionIds}
+                disabled={setupWizard.submitting}
+                onSelectionChange={(nextSelectedSuggestionIds) =>
+                  setSetupWizard((previous) => ({
+                    ...previous,
+                    selectedSuggestionIds: nextSelectedSuggestionIds,
+                    failure: null
+                  }))
+                }
+              />
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--surface-subtle)] px-7 py-4">
+            <p className="hidden text-xs text-[var(--text-tertiary)] sm:block">
+              失败后会保留你当前的选择，可直接重试。
+            </p>
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <Button
+                variant="outline"
+                size="lg"
+                className="px-5"
+                disabled={setupWizard.submitting}
+                onClick={() => {
+                  if (setupWizard.step === 1) {
+                    closeSetupWizard();
+                    return;
+                  }
+                  setSetupWizard((previous) => ({
+                    ...previous,
+                    step: 1,
+                    failure: null
+                  }));
+                }}
+              >
+                {setupWizard.step === 1 ? "稍后设置" : "上一步"}
+              </Button>
+
+              {setupWizard.step === 1 ? (
+                <Button
+                  size="lg"
+                  className="px-5"
+                  disabled={setupWizard.loading || setupWizard.submitting}
+                  onClick={() => {
+                    void runSetupModelsStep();
+                  }}
+                >
+                  {setupWizard.submitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="h-4 w-4" />
+                  )}
+                  下一步：确认关系
+                </Button>
+              ) : (
+                <Button
+                  size="lg"
+                  className="px-5"
+                  disabled={setupWizard.submitting}
+                  onClick={() => {
+                    void commitSetupWizardStep();
+                  }}
+                >
+                  {setupWizard.submitting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="h-4 w-4" />
+                  )}
+                  {setupWizard.suggestions.length === 0
+                    ? "继续进入建模页"
+                    : "完成设置并进入建模页"}
                 </Button>
               )}
             </div>

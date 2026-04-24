@@ -37,16 +37,16 @@ function composeApiUrl(path: string): string {
 
 function resolveWorkspaceIdHeader(): string | undefined {
   if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = params.get("workspaceId")?.trim();
-    if (fromQuery) {
-      return fromQuery;
-    }
     const fromStorage = window.sessionStorage
       .getItem("text2sql.activeWorkspaceId")
       ?.trim();
     if (fromStorage) {
       return fromStorage;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
     }
   }
   const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();

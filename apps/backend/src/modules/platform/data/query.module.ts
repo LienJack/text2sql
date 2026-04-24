@@ -7,6 +7,8 @@ import { QueryExecutorRouterService } from "../../data/query/query-executor-rout
 import { RowFilterRewriteService } from "../../data/query/row-filter-rewrite.service";
 import { SqlTableAccessGuardService } from "../../data/query/sql-table-access-guard.service";
 import { SqliteExecutorService } from "../../data/query/sqlite-executor.service";
+import { RelationshipDryRunService } from "./query/relationship-dry-run.service";
+import { RelationshipPublishGateFacade } from "./query/relationship-publish-gate.facade";
 import { PlatformDataPersistenceModule } from "./persistence.module";
 
 @Module({
@@ -15,6 +17,8 @@ import { PlatformDataPersistenceModule } from "./persistence.module";
     RowFilterRewriteService,
     SqlTableAccessGuardService,
     QueryExecutorRouterService,
+    RelationshipDryRunService,
+    RelationshipPublishGateFacade,
     SqliteExecutorService,
     MysqlExecutorService,
     PostgresExecutorService,
@@ -23,7 +27,9 @@ import { PlatformDataPersistenceModule } from "./persistence.module";
   exports: [
     RowFilterRewriteService,
     SqlTableAccessGuardService,
-    QueryExecutorRouterService
+    QueryExecutorRouterService,
+    RelationshipDryRunService,
+    RelationshipPublishGateFacade
   ]
 })
 export class PlatformDataQueryModule {}

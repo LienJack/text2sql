@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { DatasourceType } from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
+import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
 
 type RagRetrievalChunkPayload = NonNullable<
   NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
@@ -29,6 +30,7 @@ export class SqlPromptBuilder {
         intent: SqlSemanticIntent;
         retryReason?: string;
       };
+      semanticContextPack?: RagContextPack;
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -37,6 +39,9 @@ export class SqlPromptBuilder {
         ? "For file datasources, the default imported table name is usually `uploaded_data`."
         : "";
     const contextBlock = this.buildContextBlock(selectedContext);
+    const semanticInstructionBlock = this.buildSemanticInstructionBlock(
+      options?.semanticContextPack
+    );
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
     const semanticGuardrailBlock = this.buildSemanticGuardrailBlock(
       options?.semanticGuardrail?.intent ?? "general"
@@ -54,6 +59,7 @@ export class SqlPromptBuilder {
         repairHintBlock,
         tableHint,
         overlayBlock,
+        semanticInstructionBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
       ].join(" "),
       userPrompt: [
@@ -113,5 +119,39 @@ export class SqlPromptBuilder {
       return `${index + 1}. [${domain}] ${chunkId}: ${excerpt}`;
     });
     return ["Retrieved context (trusted evidence):", ...lines].join("\n");
+  }
+
+  private buildSemanticInstructionBlock(contextPack?: RagContextPack): string {
+    if (!contextPack || contextPack.status === "degraded") {
+      return "";
+    }
+    const instructionSets = contextPack.instruction_sets;
+    const lines: string[] = [];
+    if (instructionSets.metric_bindings.length > 0) {
+      lines.push(
+        `Metric bindings: ${instructionSets.metric_bindings.slice(0, 8).join(", ")}`
+      );
+    }
+    if (instructionSets.relationship_bindings.length > 0) {
+      lines.push(
+        `Relationship bindings: ${instructionSets.relationship_bindings
+          .slice(0, 8)
+          .join(", ")}`
+      );
+    }
+    if (instructionSets.calculated_field_bindings.length > 0) {
+      lines.push(
+        `Calculated-field bindings: ${instructionSets.calculated_field_bindings
+          .slice(0, 8)
+          .join(", ")}`
+      );
+    }
+    if (lines.length === 0) {
+      return "";
+    }
+    return [
+      "Structured semantic instruction set (higher priority than free-text context):",
+      ...lines
+    ].join(" ");
   }
 }

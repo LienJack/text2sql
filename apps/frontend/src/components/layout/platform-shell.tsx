@@ -2,10 +2,29 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookOpen, Database, LayoutDashboard, Menu, MessageSquare, Settings, Sparkles, User, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  Bell,
+  BookOpen,
+  Database,
+  LayoutDashboard,
+  Menu,
+  MessageSquare,
+  Settings,
+  Sparkles,
+  User,
+  Workflow,
+  X
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { StateBlock } from "@/components/ui/state-block";
+import { type WorkspaceSummary, listWorkspaces } from "@/lib/admin-api-client";
+import {
+  readActiveWorkspaceId,
+  writeActiveWorkspaceId
+} from "@/lib/datasource-session-context";
 import { cn } from "@/lib/utils";
 
 interface PlatformShellProps {
@@ -16,11 +35,53 @@ const navItems = [
   { href: "/", label: "总览", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/data-sources", label: "数据源", icon: Database },
+  { href: "/modeling", label: "数据关系图", icon: Workflow },
   { href: "/dashboards", label: "看板", icon: LayoutDashboard },
   { href: "/glossary", label: "术语库", icon: BookOpen },
   { href: "/prompts", label: "提示词", icon: Sparkles },
   { href: "/settings", label: "系统设置", icon: Settings }
 ];
+
+type WorkspaceGateStatus = "checking" | "ready" | "selecting" | "error";
+
+function readWorkspaceIdFromQuery(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return new URLSearchParams(window.location.search).get("workspaceId")?.trim() ?? "";
+}
+
+function syncWorkspaceIdToQuery(workspaceId: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  const next = new URL(window.location.href);
+  if (workspaceId) {
+    next.searchParams.set("workspaceId", workspaceId);
+  } else {
+    next.searchParams.delete("workspaceId");
+  }
+  const nextPath = `${next.pathname}${next.search}${next.hash}`;
+  if (nextPath !== current) {
+    window.history.replaceState({}, "", nextPath);
+  }
+}
+
+function resolveWorkspaceId(
+  workspaces: WorkspaceSummary[],
+  candidates: string[]
+): string {
+  const normalizedCandidates = candidates
+    .map((item) => item.trim())
+    .filter(Boolean);
+  for (const candidate of normalizedCandidates) {
+    if (workspaces.some((workspace) => workspace.id === candidate)) {
+      return candidate;
+    }
+  }
+  return "";
+}
 
 function isNavActive(pathname: string, href: string): boolean {
   if (href === "/") {
@@ -29,18 +90,90 @@ function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function resolveActiveNavHref(pathname: string): string {
+  const matchedNavItem = navItems
+    .filter((item) => isNavActive(pathname, item.href))
+    .sort((left, right) => right.href.length - left.href.length)[0];
+  return matchedNavItem?.href ?? "";
+}
+
 export function PlatformShell({ children }: PlatformShellProps) {
   const pathname = usePathname();
+  const activeNavHref = useMemo(() => resolveActiveNavHref(pathname), [pathname]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [workspaceGateStatus, setWorkspaceGateStatus] =
+    useState<WorkspaceGateStatus>("checking");
+  const [workspaceGateError, setWorkspaceGateError] = useState("");
+  const [workspaceOptions, setWorkspaceOptions] = useState<WorkspaceSummary[]>([]);
+  const [workspaceSelection, setWorkspaceSelection] = useState("");
 
   const title = useMemo(() => {
-    const activeItem = navItems.find((item) => isNavActive(pathname, item.href));
+    const activeItem = navItems.find((item) => item.href === activeNavHref);
     return activeItem?.label ?? "工作台";
-  }, [pathname]);
+  }, [activeNavHref]);
 
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
+
+  const applyWorkspaceSelection = useCallback((workspaceId: string): void => {
+    if (!workspaceId.trim()) {
+      return;
+    }
+    writeActiveWorkspaceId(workspaceId);
+    syncWorkspaceIdToQuery(workspaceId);
+    setWorkspaceSelection(workspaceId);
+    setWorkspaceGateStatus("ready");
+    setWorkspaceGateError("");
+  }, []);
+
+  const ensureWorkspaceContext = useCallback(async (): Promise<void> => {
+    setWorkspaceGateStatus("checking");
+    setWorkspaceGateError("");
+    try {
+      const result = await listWorkspaces({ page: 1, pageSize: 200 });
+      setWorkspaceOptions(result.items);
+      if (result.items.length === 0) {
+        writeActiveWorkspaceId("");
+        syncWorkspaceIdToQuery("");
+        setWorkspaceSelection("");
+        setWorkspaceGateStatus("ready");
+        return;
+      }
+
+      const resolvedWorkspaceId = resolveWorkspaceId(result.items, [
+        readWorkspaceIdFromQuery(),
+        readActiveWorkspaceId()
+      ]);
+      if (resolvedWorkspaceId) {
+        applyWorkspaceSelection(resolvedWorkspaceId);
+        return;
+      }
+
+      if (result.items.length === 1) {
+        applyWorkspaceSelection(result.items[0].id);
+        return;
+      }
+
+      setWorkspaceSelection(result.items[0]?.id ?? "");
+      setWorkspaceGateStatus("selecting");
+    } catch (error) {
+      const fallbackWorkspaceId = readActiveWorkspaceId();
+      if (fallbackWorkspaceId) {
+        applyWorkspaceSelection(fallbackWorkspaceId);
+        return;
+      }
+      setWorkspaceGateError(error instanceof Error ? error.message : "加载工作空间失败");
+      setWorkspaceGateStatus("error");
+    }
+  }, [applyWorkspaceSelection]);
+
+  useEffect(() => {
+    void ensureWorkspaceContext();
+  }, [ensureWorkspaceContext]);
+
+  const workspaceGateBlocking =
+    workspaceGateStatus === "selecting" || workspaceGateStatus === "error";
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--surface-page)] font-sans text-[var(--text-primary)] antialiased">
@@ -77,7 +210,7 @@ export function PlatformShell({ children }: PlatformShellProps) {
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6 text-[var(--text-secondary)]">
           {navItems.map((item) => {
-            const active = isNavActive(pathname, item.href);
+            const active = item.href === activeNavHref;
             const Icon = item.icon;
             return (
               <Link
@@ -143,6 +276,53 @@ export function PlatformShell({ children }: PlatformShellProps) {
         </header>
         <main className="relative min-w-0 flex-1 overflow-auto">{children}</main>
       </div>
+
+      {workspaceGateBlocking ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/30 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-5 shadow-[0_16px_40px_rgba(15,23,42,0.2)]">
+            <div className="space-y-1">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">选择工作空间</h2>
+              <p className="text-sm text-[var(--text-secondary)]">
+                进入平台前先确定本次会话的工作空间。
+              </p>
+            </div>
+
+            {workspaceGateStatus === "error" ? (
+              <StateBlock variant="error">{workspaceGateError || "加载工作空间失败"}</StateBlock>
+            ) : null}
+
+            {workspaceGateStatus === "selecting" ? (
+              <NativeSelect
+                value={workspaceSelection}
+                onChange={(event) => setWorkspaceSelection(event.target.value)}
+                aria-label="工作空间前置选择"
+              >
+                {workspaceOptions.map((workspace) => (
+                  <NativeSelectOption key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              {workspaceGateStatus === "error" ? (
+                <Button variant="outline" onClick={() => void ensureWorkspaceContext()}>
+                  重试
+                </Button>
+              ) : null}
+              {workspaceGateStatus === "selecting" ? (
+                <Button
+                  disabled={!workspaceSelection.trim()}
+                  onClick={() => applyWorkspaceSelection(workspaceSelection)}
+                >
+                  进入工作台
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

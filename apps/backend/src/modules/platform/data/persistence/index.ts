@@ -5,3 +5,5 @@ export { LlmConfigRepository } from "../../../data/persistence/llm-config.reposi
 export { UserRepository } from "../../../data/persistence/user.repository";
 export { WorkspaceDatasourcePolicyRepository } from "../../../data/persistence/workspace-datasource-policy.repository";
 export { WorkspaceRepository } from "../../../data/persistence/workspace.repository";
+export { ModelingGraphRepository } from "./modeling-graph.repository";
+export { ModelingGraphValidator } from "./modeling-graph.validator";

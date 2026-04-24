@@ -220,7 +220,8 @@ describe("ChatPanel", () => {
     render(<ChatPanel />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    await screen.findByText("已为你生成 SQL，并展示结果。");
+    await user.click(await screen.findByRole("button", { name: "展开思考过程" }));
 
     await waitFor(() => {
       expect(mockGetRun).toHaveBeenCalledWith("run-1");

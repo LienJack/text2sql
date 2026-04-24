@@ -1,3 +1,5 @@
+import type { ModelingCalculatedFieldExpressionErrorDetails } from "./modeling";
+
 export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
@@ -152,6 +154,7 @@ export interface ExecutionTrace {
     at: string;
   }>;
   promptTemplate?: PromptTemplateTraceEvidence;
+  modelingRevision?: number;
   effectiveContextSummary?: {
     sourcePriority: "user_explicit_over_system";
     userEnvelope: {
@@ -207,7 +210,16 @@ export interface DeliveryEvidenceLayer {
   retrievalLogs?: DeliveryEvidenceReplayLog[];
   riskTags?: string[];
   semanticVersion?: number;
+  modelingRevision?: number;
+  semanticSpineVersion?: number;
   semanticLockStatus?: "locked" | "fallback" | "degraded";
+  contextPackStatus?: "ready" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
   semanticDegradeReason?: string;
   skillContextSummary?: {
     skillCount: number;
@@ -907,8 +919,11 @@ export interface ApiFailure {
   error: {
     code: string;
     message: string;
-    details?: Record<string, unknown>;
+    details?: Record<string, unknown> | ModelingCalculatedFieldExpressionErrorDetails;
   };
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export type * from "./modeling";
+export type * from "./semantic-spine";

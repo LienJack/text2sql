@@ -1,14 +1,22 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { GlossaryService } from "../glossary/glossary.service";
 import type { KnowledgeFacadeContract } from "./contracts/knowledge-facade.contract";
 import type { KnowledgeGlossaryContract } from "./contracts/knowledge-glossary.contract";
 import type { KnowledgeMemoryContract } from "./contracts/knowledge-memory.contract";
 import type { KnowledgeRagContract } from "./contracts/knowledge-rag.contract";
-import type { KnowledgeSemanticRegistryContract } from "./contracts/knowledge-semantic-registry.contract";
+import {
+  KNOWLEDGE_SEMANTIC_SPINE_COMPILER_CONTRACT,
+  KNOWLEDGE_SEMANTIC_SPINE_CONTEXT_PACK_MAPPER_CONTRACT,
+  type KnowledgeSemanticRegistryContract,
+  type KnowledgeSemanticSpineCompilerContract,
+  type KnowledgeSemanticSpineContextPackMapperContract,
+  type KnowledgeSemanticSpineContract
+} from "./contracts/knowledge-semantic-registry.contract";
 import { MemoryPromotionService } from "./memory/memory-promotion.service";
 import { RagReplayRepository } from "./rag/observability/rag-replay.repository";
 import { RagRetrievalService } from "./rag/retrieval/rag-retrieval.service";
 import { RagRerankService } from "./rag/rerank/rag-rerank.service";
+import { SemanticSpineRepository } from "./semantic-spine/semantic-spine.repository";
 import { SemanticRegistryService } from "./semantic-registry/semantic-registry.service";
 
 @Injectable()
@@ -24,7 +32,14 @@ export class KnowledgeChatSupportFacade implements KnowledgeFacadeContract {
     readonly ragRetrievalService: RagRetrievalService,
     readonly ragRerankService: RagRerankService,
     readonly glossaryService: GlossaryService,
-    readonly semanticRegistryService: SemanticRegistryService
+    readonly semanticRegistryService: SemanticRegistryService,
+    readonly semanticSpineRepository: SemanticSpineRepository,
+    @Optional()
+    @Inject(KNOWLEDGE_SEMANTIC_SPINE_COMPILER_CONTRACT)
+    readonly semanticSpineCompiler?: KnowledgeSemanticSpineCompilerContract,
+    @Optional()
+    @Inject(KNOWLEDGE_SEMANTIC_SPINE_CONTEXT_PACK_MAPPER_CONTRACT)
+    readonly semanticSpineContextPackMapper?: KnowledgeSemanticSpineContextPackMapperContract
   ) {
     this.ragContract = {
       retrieval: this.ragRetrievalService,
@@ -34,8 +49,18 @@ export class KnowledgeChatSupportFacade implements KnowledgeFacadeContract {
     this.glossaryContract = {
       terms: this.glossaryService
     };
+    const semanticSpineContract: KnowledgeSemanticSpineContract = {
+      repository: this.semanticSpineRepository
+    };
+    if (this.semanticSpineCompiler) {
+      semanticSpineContract.compiler = this.semanticSpineCompiler;
+    }
+    if (this.semanticSpineContextPackMapper) {
+      semanticSpineContract.mapper = this.semanticSpineContextPackMapper;
+    }
     this.semanticRegistryContract = {
-      registry: this.semanticRegistryService
+      registry: this.semanticRegistryService,
+      semanticSpine: semanticSpineContract
     };
     this.memoryContract = {
       promotion: this.memoryPromotionService

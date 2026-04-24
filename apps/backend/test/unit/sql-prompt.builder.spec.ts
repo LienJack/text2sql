@@ -57,4 +57,40 @@ describe("SqlPromptBuilder", () => {
     expect(prompt.systemPrompt).toContain("single automatic retry");
     expect(prompt.systemPrompt).toContain("count-intent requires COUNT(...) aggregation");
   });
+
+  it("injects structured semantic instruction block before free-text context", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("按 GMV 汇总订单", "sqlite", undefined, {
+      semanticContextPack: {
+        status: "ready",
+        semantic_lock_status: "locked",
+        semantic_bindings: {
+          model_keys: ["model.orders"],
+          relationship_keys: ["rel.orders_customers"],
+          metric_keys: ["metric.gmv"],
+          calculated_field_keys: []
+        },
+        instruction_sets: {
+          model_bindings: ["model.orders"],
+          relationship_bindings: ["rel.orders_customers"],
+          metric_bindings: ["metric.gmv"],
+          calculated_field_bindings: []
+        },
+        selected_context_summary: {
+          count: 0,
+          snippets: []
+        },
+        degrade_reasons: [],
+        risk_tags: []
+      }
+    });
+
+    expect(prompt.systemPrompt).toContain(
+      "Structured semantic instruction set (higher priority than free-text context)"
+    );
+    expect(prompt.systemPrompt).toContain("Metric bindings: metric.gmv");
+    expect(prompt.systemPrompt).toContain(
+      "Relationship bindings: rel.orders_customers"
+    );
+  });
 });

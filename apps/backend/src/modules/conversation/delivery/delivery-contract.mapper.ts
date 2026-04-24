@@ -29,6 +29,17 @@ interface RerankFinalSnapshot {
   degradeReasons: string[];
   selectedContextCount?: number;
   riskTags: string[];
+  modelingRevision?: number;
+  contextPackStatus?: "ready" | "degraded";
+  semanticSpineVersion?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
+  contextPackDegradeReasons?: string[];
 }
 
 interface RetrievalFusedSnapshot {
@@ -47,7 +58,15 @@ interface RetrievalFusedSnapshot {
 
 interface SemanticSnapshot {
   semanticVersion?: number;
+  modelingRevision?: number;
   semanticLockStatus?: "locked" | "fallback" | "degraded";
+  contextPackStatus?: "ready" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
   semanticDegradeReason?: string;
 }
 
@@ -153,8 +172,20 @@ export class DeliveryContractMapper {
       retrievalLogs: replayLogs.length > 0 ? replayLogs : undefined,
       riskTags: evidenceRiskTags.length > 0 ? evidenceRiskTags : undefined,
       semanticVersion: semanticSnapshot.semanticVersion,
-      semanticLockStatus: semanticSnapshot.semanticLockStatus,
-      semanticDegradeReason: semanticSnapshot.semanticDegradeReason,
+      modelingRevision:
+        semanticSnapshot.modelingRevision ?? finalSnapshot.modelingRevision,
+      semanticSpineVersion:
+        finalSnapshot.semanticSpineVersion ?? semanticSnapshot.semanticVersion,
+      semanticLockStatus:
+        finalSnapshot.semanticLockStatus ?? semanticSnapshot.semanticLockStatus,
+      contextPackStatus:
+        finalSnapshot.contextPackStatus ?? semanticSnapshot.contextPackStatus,
+      semanticInstructionSummary:
+        finalSnapshot.semanticInstructionSummary ??
+        semanticSnapshot.semanticInstructionSummary,
+      semanticDegradeReason:
+        semanticSnapshot.semanticDegradeReason ??
+        finalSnapshot.contextPackDegradeReasons?.at(0),
       skillContextSummary: fusedSnapshot.skillContextSummary,
       evidenceStale: evidenceStale || undefined,
       effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
@@ -341,21 +372,88 @@ export class DeliveryContractMapper {
 
     const statusRaw = payload.status;
     const status = statusRaw === "degraded" ? "degraded" : "ready";
-    const degradeReasons = this.readStringArray(payload.degradeReasons);
-    const riskTags = this.readStringArray(payload.riskTags);
-    const selectedContextCountRaw = payload.selectedContextCount;
+    const degradeReasons = this.readStringArray(
+      payload.degradeReasons ?? payload.degrade_reasons
+    );
+    const riskTags = this.readStringArray(payload.riskTags ?? payload.risk_tags);
+    const selectedContextCountRaw =
+      payload.selectedContextCount ?? payload.selected_context_count;
     const selectedContextCount =
-      typeof selectedContextCountRaw === "number" &&
-      Number.isFinite(selectedContextCountRaw) &&
-      selectedContextCountRaw >= 0
-        ? Math.floor(selectedContextCountRaw)
+      this.readNonNegativeInteger(selectedContextCountRaw);
+    const contextPackRaw = this.readRecord(
+      payload.contextPack ?? payload.context_pack
+    );
+    const contextPackStatusRaw = contextPackRaw
+      ? this.readString(
+          contextPackRaw.status ??
+            contextPackRaw.contextPackStatus ??
+            contextPackRaw.context_pack_status
+        )
+      : undefined;
+    const contextPackStatus =
+      contextPackStatusRaw === "degraded" ? "degraded" : contextPackStatusRaw === "ready" ? "ready" : undefined;
+    const semanticSpineVersionRaw = contextPackRaw
+      ? contextPackRaw.semanticVersion ?? contextPackRaw.semantic_version
+      : undefined;
+    const semanticSpineVersion = this.readPositiveInteger(semanticSpineVersionRaw);
+    const semanticLockStatusRaw = contextPackRaw
+      ? this.readString(
+          contextPackRaw.semanticLockStatus ?? contextPackRaw.semantic_lock_status
+        )
+      : undefined;
+    const semanticLockStatus =
+      semanticLockStatusRaw === "locked" ||
+      semanticLockStatusRaw === "fallback" ||
+      semanticLockStatusRaw === "degraded"
+        ? semanticLockStatusRaw
         : undefined;
+    const modelingRevision = this.readPositiveInteger(
+      contextPackRaw?.modelingRevision ??
+        contextPackRaw?.modeling_revision ??
+        contextPackRaw?.activeRevision ??
+        contextPackRaw?.active_revision
+    );
+    const instructionSummaryRaw =
+      this.readRecord(
+        contextPackRaw?.instructionSummary ?? contextPackRaw?.instruction_summary
+      );
+    const semanticInstructionSummary = instructionSummaryRaw
+      ? {
+          modelBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.modelBindingCount ??
+              instructionSummaryRaw.model_binding_count
+          ),
+          relationshipBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.relationshipBindingCount ??
+              instructionSummaryRaw.relationship_binding_count
+          ),
+          metricBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.metricBindingCount ??
+              instructionSummaryRaw.metric_binding_count
+          ),
+          calculatedFieldBindingCount: this.readNonNegativeInt(
+            instructionSummaryRaw.calculatedFieldBindingCount ??
+              instructionSummaryRaw.calculated_field_binding_count
+          )
+        }
+      : undefined;
+    const contextPackDegradeReasons = contextPackRaw
+      ? this.readStringArray(
+          contextPackRaw.degradeReasons ?? contextPackRaw.degrade_reasons
+        )
+      : [];
 
     return {
       status,
       degradeReasons,
       selectedContextCount,
-      riskTags
+      riskTags,
+      modelingRevision,
+      contextPackStatus,
+      semanticSpineVersion,
+      semanticLockStatus,
+      semanticInstructionSummary,
+      contextPackDegradeReasons
     };
   }
 
@@ -377,18 +475,20 @@ export class DeliveryContractMapper {
         if (!this.isRecord(item)) {
           return undefined;
         }
-        const chunkId = this.readString(item.chunkId);
+        const chunkId = this.readString(item.chunkId ?? item.chunk_id);
         if (!chunkId) {
           return undefined;
         }
         return {
           chunkId,
-          sourceLane: this.readString(item.sourceLane),
+          sourceLane: this.readString(item.sourceLane ?? item.source_lane),
           domain: this.readString(item.domain)
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
-    const skillContextSummary = this.readSkillContextSummary(payload.skillContext);
+    const skillContextSummary = this.readSkillContextSummary(
+      payload.skillContext ?? payload.skill_context
+    );
 
     return {
       status,
@@ -398,6 +498,12 @@ export class DeliveryContractMapper {
   }
 
   private readSemanticSnapshot(run: SqlRun): SemanticSnapshot {
+    const traceWithCompat = run.trace as SqlRun["trace"] & {
+      modeling_revision?: unknown;
+    };
+    const traceModelingRevision = this.readPositiveInteger(
+      traceWithCompat.modelingRevision ?? traceWithCompat.modeling_revision
+    );
     const semanticSteps = [...(run.trace.steps ?? [])]
       .reverse()
       .filter(
@@ -411,29 +517,61 @@ export class DeliveryContractMapper {
         continue;
       }
       const semanticVersionRaw = output.semanticVersion;
-      const semanticVersion =
-        typeof semanticVersionRaw === "number" &&
-        Number.isFinite(semanticVersionRaw) &&
-        semanticVersionRaw > 0
-          ? Math.floor(semanticVersionRaw)
-          : undefined;
-      const lockStatus = this.readString(output.lockStatus);
+      const semanticVersionCompatRaw =
+        semanticVersionRaw ?? output.semantic_version;
+      const semanticVersion = this.readPositiveInteger(semanticVersionCompatRaw);
+      const lockStatus = this.readString(output.lockStatus ?? output.lock_status);
       const semanticLockStatus =
         lockStatus === "locked" || lockStatus === "fallback" || lockStatus === "degraded"
           ? lockStatus
           : undefined;
+      const modelingRevision = this.readPositiveInteger(
+        output.modelingRevision ??
+          output.modeling_revision ??
+          output.activeRevision ??
+          output.active_revision
+      );
+      const contextPack = this.readRecord(output.contextPack ?? output.context_pack);
+      const contextPackStatusRaw = this.readString(
+        output.contextPackStatus ??
+          output.context_pack_status ??
+          contextPack?.status ??
+          contextPack?.context_pack_status
+      );
+      const contextPackStatus =
+        contextPackStatusRaw === "ready" || contextPackStatusRaw === "degraded"
+          ? contextPackStatusRaw
+          : undefined;
+      const semanticInstructionSummary = this.readSemanticInstructionSummary(
+        output.semanticBindingSummary ??
+          output.semantic_binding_summary ??
+          output.semanticInstructionSummary ??
+          output.semantic_instruction_summary
+      );
       const semanticDegradeReason = this.readString(output.degradeReason);
+      const semanticDegradeReasonCompat =
+        semanticDegradeReason ?? this.readString(output.degrade_reason);
 
-      if (semanticVersion || semanticLockStatus || semanticDegradeReason) {
+      if (
+        semanticVersion ||
+        semanticLockStatus ||
+        semanticDegradeReasonCompat ||
+        modelingRevision !== undefined ||
+        contextPackStatus ||
+        semanticInstructionSummary
+      ) {
         return {
+          modelingRevision: traceModelingRevision ?? modelingRevision,
           semanticVersion,
           semanticLockStatus,
-          semanticDegradeReason
+          contextPackStatus,
+          semanticInstructionSummary,
+          semanticDegradeReason: semanticDegradeReasonCompat
         };
       }
     }
 
-    return {};
+    return { modelingRevision: traceModelingRevision };
   }
 
   private readTraceContextEvidence(run: SqlRun): TraceContextEvidence {
@@ -562,14 +700,20 @@ export class DeliveryContractMapper {
     const skills = Array.isArray(value.skills) ? value.skills : [];
     const context = Array.isArray(value.context) ? value.context : [];
     const degradeReason = this.readString(value.degrade_reason);
-    if (skills.length === 0 && context.length === 0 && !degradeReason) {
+    const degradeReasonCompat =
+      degradeReason ?? this.readString(value.degradeReason);
+    if (skills.length === 0 && context.length === 0 && !degradeReasonCompat) {
       return undefined;
     }
     return {
       skillCount: skills.length,
       contextCount: context.length,
-      degradeReason
+      degradeReason: degradeReasonCompat
     };
+  }
+
+  private readRecord(value: unknown): Record<string, unknown> | undefined {
+    return this.isRecord(value) ? value : undefined;
   }
 
   private formatSnippet(candidate: {
@@ -621,6 +765,50 @@ export class DeliveryContractMapper {
     }
     const normalized = value.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private readNonNegativeInt(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return Math.floor(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return 0;
+  }
+
+  private readPositiveInteger(value: unknown): number | undefined {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return Math.floor(value);
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed);
+      }
+    }
+    return undefined;
+  }
+
+  private readSemanticInstructionSummary(
+    value: unknown
+  ): SemanticSnapshot["semanticInstructionSummary"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    return {
+      modelBindingCount: this.readNonNegativeInt(value.modelBindingCount ?? value.model_binding_count),
+      relationshipBindingCount: this.readNonNegativeInt(
+        value.relationshipBindingCount ?? value.relationship_binding_count
+      ),
+      metricBindingCount: this.readNonNegativeInt(value.metricBindingCount ?? value.metric_binding_count),
+      calculatedFieldBindingCount: this.readNonNegativeInt(
+        value.calculatedFieldBindingCount ?? value.calculated_field_binding_count
+      )
+    };
   }
 
   private readNonNegativeInteger(value: unknown): number | undefined {

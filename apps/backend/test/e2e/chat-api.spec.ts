@@ -54,6 +54,10 @@ describe("chat api (e2e)", () => {
     expect(runRes.body.data.run.llmRaw).toBeTruthy();
     expect(runRes.body.data.run.llmRaw.provider).toBe("volcengine");
     expect(runRes.body.data.run.llmRaw.model).toBeTruthy();
+    const contextPackStatus = runRes.body.data.delivery?.evidence?.contextPackStatus;
+    if (contextPackStatus !== undefined) {
+      expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
 
     const messageViewRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)

@@ -12,6 +12,7 @@ import { ChatController } from "./chat.controller";
 import { ChatService } from "./chat.service";
 import { ExecuteMessageUsecase } from "./application/execute-message.usecase";
 import { RunViewUsecase } from "./application/run-view.usecase";
+import { SaveViewFromRunUsecase } from "./application/save-view-from-run.usecase";
 import { SessionLifecycleUsecase } from "./application/session-lifecycle.usecase";
 import { StreamMessageUsecase } from "./application/stream-message.usecase";
 import { ChatDeliveryEnrichmentService } from "./application/shared/chat-delivery-enrichment.service";
@@ -38,6 +39,7 @@ import { ChatRunPersistenceService } from "./application/shared/chat-run-persist
     ExecuteMessageUsecase,
     StreamMessageUsecase,
     RunViewUsecase,
+    SaveViewFromRunUsecase,
     ChatPostRunHooksService,
     ChatPolicyGuardService,
     ChatRunPersistenceService,

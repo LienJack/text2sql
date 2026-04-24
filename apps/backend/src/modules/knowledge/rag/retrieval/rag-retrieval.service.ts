@@ -11,6 +11,7 @@ import { RagBudgetPolicy } from "../../../rag/perf/rag-budget-policy";
 import { RagCacheKeyFactory } from "../../../rag/perf/rag-cache-key.factory";
 import { RagQueryCacheService } from "../../../rag/perf/rag-query-cache.service";
 import { RagQualityService } from "../../../rag/quality/rag-quality.service";
+import { ModelingGraphRepository } from "../../../platform/data/persistence/modeling-graph.repository";
 import { fuseWithRrf } from "../../../rag/retrieval/fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
@@ -23,6 +24,7 @@ import {
   type RagRetrievalLaneResult,
   type RagRetrievalRequest,
   type RagRetrievalResponse,
+  type RagContextPack,
   type RagSkillContext
 } from "../../../rag/retrieval/rag-retrieval.types";
 
@@ -37,6 +39,7 @@ const DEFAULT_LANE_TIMEOUT_MS: Record<RagRetrievalLane, number> = {
 };
 const REQUIRED_DOMAIN_COVERAGE = ["schema", "sql_example", "semantic_term"];
 const SEMANTIC_PROMOTED_DEGRADED_REASON = "semantic_promoted_linkage_degraded";
+const MODELING_REVISION_MISSING_RISK_TAG = "modeling_revision_missing";
 
 class LaneTimeoutError extends Error {
   constructor(public readonly lane: RagRetrievalLane) {
@@ -61,7 +64,8 @@ export class RagRetrievalService {
     private readonly cacheKeyFactory: RagCacheKeyFactory,
     private readonly queryCache: RagQueryCacheService,
     private readonly budgetPolicy: RagBudgetPolicy,
-    private readonly ragQualityService: RagQualityService
+    private readonly ragQualityService: RagQualityService,
+    private readonly modelingGraphRepository: ModelingGraphRepository
   ) {}
 
   async retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse> {
@@ -85,7 +89,13 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "invalid_retrieval_input"),
-          candidates: []
+          candidates: [],
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
     }
@@ -104,7 +114,13 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "no_active_index"),
-          candidates: []
+          candidates: [],
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
       await this.persistReplay(response.retrieval_bundle);
@@ -141,10 +157,11 @@ export class RagRetrievalService {
     });
     const cacheRead = this.queryCache.get<RagRetrievalResponse["retrieval_bundle"]>(cacheKey);
     if (cacheRead.hit && cacheRead.value) {
-      const cachedBundle = this.hydrateCachedBundle({
+      const cachedBundle = await this.hydrateCachedBundle({
         cachedBundle: cacheRead.value,
         query,
         datasourceId,
+        workspaceId: input.workspaceId,
         runId,
         decisionReasons: budgetDecision.decisionReasons
       });
@@ -211,6 +228,13 @@ export class RagRetrievalService {
         decision_reasons: budgetDecision.decisionReasons
       }
     };
+    response.retrieval_bundle.context_pack = await this.buildContextPack({
+      bundle: response.retrieval_bundle,
+      workspaceId: input.workspaceId,
+      datasourceId,
+      status: response.retrieval_bundle.status,
+      degradeReasons: uniqueDegradeReasons
+    });
 
     this.queryCache.set({
       key: cacheKey,
@@ -230,14 +254,15 @@ export class RagRetrievalService {
     return response;
   }
 
-  private hydrateCachedBundle(input: {
+  private async hydrateCachedBundle(input: {
     cachedBundle: RagRetrievalResponse["retrieval_bundle"];
     query: string;
     datasourceId: string;
+    workspaceId?: string;
     runId: string;
     decisionReasons: string[];
-  }): RagRetrievalResponse["retrieval_bundle"] {
-    return {
+  }): Promise<RagRetrievalResponse["retrieval_bundle"]> {
+    const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
       datasource_id: input.datasourceId,
@@ -252,6 +277,14 @@ export class RagRetrievalService {
         ...input.decisionReasons
       ])
     };
+    hydratedBundle.context_pack = await this.buildContextPack({
+      bundle: hydratedBundle,
+      workspaceId: input.workspaceId,
+      datasourceId: input.datasourceId,
+      status: hydratedBundle.status,
+      degradeReasons: hydratedBundle.degrade_reasons
+    });
+    return hydratedBundle;
   }
 
   private async collectLaneResults(input: {
@@ -791,6 +824,158 @@ export class RagRetrievalService {
 
   private unique(values: string[]): string[] {
     return Array.from(new Set(values));
+  }
+
+  private async buildContextPack(input: {
+    bundle?: RagRetrievalResponse["retrieval_bundle"];
+    workspaceId?: string;
+    datasourceId: string;
+    status: "ready" | "degraded";
+    degradeReasons: string[];
+  }): Promise<RagContextPack> {
+    const bundle = input.bundle;
+    const activeModeling = await this.resolveActiveModelingSnapshot(
+      input.workspaceId,
+      input.datasourceId
+    );
+    const semanticCandidates =
+      bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
+      [];
+    const retrievalModelKeys = this.unique(
+      semanticCandidates.flatMap((candidate) => candidate.chunk.metadata.tableNames)
+    );
+    const modelKeys = this.unique([
+      ...activeModeling.modelKeys,
+      ...retrievalModelKeys
+    ]);
+    const relationshipKeys = this.unique(activeModeling.relationshipKeys);
+    const calculatedFieldKeys = this.unique(activeModeling.calculatedFieldKeys);
+    const metricKeys = this.unique(
+      bundle?.skill_context?.context.map((entry) => entry.term) ?? []
+    );
+    const selectedContext = bundle?.selected_context ?? [];
+    const modelingRevision = activeModeling.modelingRevision;
+    const semanticBindings = {
+      model_keys: modelKeys,
+      relationship_keys: relationshipKeys,
+      metric_keys: metricKeys,
+      calculated_field_keys: calculatedFieldKeys,
+      modelKeys,
+      relationshipKeys,
+      metricKeys,
+      calculatedFieldKeys
+    };
+    const instructionSets = {
+      model_bindings: modelKeys,
+      relationship_bindings: relationshipKeys,
+      metric_bindings: metricKeys,
+      calculated_field_bindings: calculatedFieldKeys,
+      modelBindings: modelKeys,
+      relationshipBindings: relationshipKeys,
+      metricBindings: metricKeys,
+      calculatedFieldBindings: calculatedFieldKeys
+    };
+    const selectedContextSummary = {
+      count: selectedContext.length,
+      snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5),
+      selectedContextCount: selectedContext.length
+    };
+    const degradeReasons = this.unique(input.degradeReasons);
+    const riskTags = this.unique([
+      ...(input.status === "degraded"
+        ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+        : bundle?.risk_tags ?? []),
+      ...(input.workspaceId && modelingRevision === undefined
+        ? [MODELING_REVISION_MISSING_RISK_TAG]
+        : [])
+    ]);
+
+    return {
+      status: input.status,
+      modeling_revision: modelingRevision,
+      modelingRevision,
+      semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
+      semanticLockStatus: input.status === "ready" ? "locked" : "degraded",
+      semantic_bindings: semanticBindings,
+      semanticBindings,
+      instruction_sets: instructionSets,
+      instructionSets,
+      selected_context_summary: selectedContextSummary,
+      selectedContextSummary,
+      degrade_reasons: degradeReasons,
+      degradeReasons,
+      risk_tags: riskTags,
+      riskTags
+    };
+  }
+
+  private async resolveActiveModelingSnapshot(
+    workspaceIdRaw: string | undefined,
+    datasourceIdRaw: string
+  ): Promise<{
+    modelingRevision?: number;
+    modelKeys: string[];
+    relationshipKeys: string[];
+    calculatedFieldKeys: string[];
+  }> {
+    const workspaceId = workspaceIdRaw?.trim();
+    const datasourceId = datasourceIdRaw.trim();
+    if (!workspaceId || !datasourceId) {
+      return {
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
+    }
+    const scope = await this.modelingGraphRepository.getLatestScopeState({
+      workspaceId,
+      datasourceId
+    });
+    if (!scope.activeRevision) {
+      return {
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
+    }
+    const activeRevision = await this.modelingGraphRepository.findRevision({
+      workspaceId,
+      datasourceId,
+      revision: scope.activeRevision
+    });
+    if (!activeRevision) {
+      return {
+        modelingRevision: scope.activeRevision,
+        modelKeys: [],
+        relationshipKeys: [],
+        calculatedFieldKeys: []
+      };
+    }
+
+    const modelKeys = this.unique(
+      (activeRevision.graphPayload.models ?? [])
+        .map((model) => this.readString(model.modelName ?? model.id ?? model.tableName))
+        .filter((model): model is string => Boolean(model))
+    );
+    const relationshipKeys = this.unique(
+      (activeRevision.graphPayload.relationships ?? [])
+        .map((relationship) =>
+          this.readString(relationship.id ?? relationship.name)
+        )
+        .filter((relationship): relationship is string => Boolean(relationship))
+    );
+    const calculatedFieldKeys = this.unique(
+      (activeRevision.graphPayload.calculatedFields ?? [])
+        .map((field) => this.readString(field.id ?? field.name))
+        .filter((field): field is string => Boolean(field))
+    );
+
+    return {
+      modelingRevision: scope.activeRevision,
+      modelKeys,
+      relationshipKeys,
+      calculatedFieldKeys
+    };
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {

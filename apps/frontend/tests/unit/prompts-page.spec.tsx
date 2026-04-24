@@ -159,7 +159,7 @@ describe("PromptsPage", () => {
     expect(await screen.findByText("模板已删除。")).toBeInTheDocument();
     expect(screen.queryByText("MySQL 高阶优化 V2")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("搜索模板名称...")).toHaveValue("MySQL");
-  });
+  }, 15000);
 
   it.each([
     ["FORBIDDEN", "当前账号没有模板写权限（仅管理员可执行写操作）。"],

@@ -32,12 +32,15 @@ export class PlannerVersionLockService {
 
   async resolve(input: PlannerVersionLockInput): Promise<PlannerVersionLockResult> {
     const { domain, term, datasourceId } = this.resolveDomainAndTerm(input);
+    const contextPackSemanticVersion = this.resolveContextPackSemanticVersion(
+      input.retrievalBundle
+    );
     const requestedSemanticVersion =
       typeof input.requestedSemanticVersion === "number" &&
       Number.isInteger(input.requestedSemanticVersion) &&
       input.requestedSemanticVersion > 0
         ? input.requestedSemanticVersion
-        : undefined;
+        : contextPackSemanticVersion;
 
     if (requestedSemanticVersion) {
       const requested = await this.semanticRegistry.resolveTerm({
@@ -116,8 +119,15 @@ export class PlannerVersionLockService {
       semanticVersion: resolved.semantic_version,
       requestedSemanticVersion: undefined,
       fallbackApplied: false,
-      degradeReason: resolved.degrade_reason ?? SEMANTIC_TERM_NOT_FOUND_REASON,
-      riskTags: this.mergeRiskTags([SEMANTIC_REGISTRY_DEGRADED_RISK_TAG], resolved.risk_tags),
+      degradeReason:
+        resolved.degrade_reason ??
+        input.retrievalBundle?.context_pack?.degrade_reasons?.at(0) ??
+        SEMANTIC_TERM_NOT_FOUND_REASON,
+      riskTags: this.mergeRiskTags(
+        [SEMANTIC_REGISTRY_DEGRADED_RISK_TAG],
+        resolved.risk_tags,
+        input.retrievalBundle?.context_pack?.risk_tags
+      ),
       domain,
       term
     };
@@ -168,6 +178,16 @@ export class PlannerVersionLockService {
       .toLowerCase()
       .match(/[a-z0-9_\p{L}\p{N}]+/gu);
     return tokens?.at(0);
+  }
+
+  private resolveContextPackSemanticVersion(
+    retrievalBundle?: RagRetrievalBundle
+  ): number | undefined {
+    const value = retrievalBundle?.context_pack?.semantic_version;
+    if (!Number.isInteger(value) || !value || value <= 0) {
+      return undefined;
+    }
+    return value;
   }
 
   private mergeRiskTags(...groups: Array<string[] | undefined>): string[] {

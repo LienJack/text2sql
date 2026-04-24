@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Activity,
   Building2,
@@ -102,9 +103,9 @@ function resolveWorkspaceId(
   if (items.length === 0) {
     return "";
   }
-  const fromQuery = readWorkspaceIdFromQuery();
   const fromSession = readActiveWorkspaceId();
-  const candidate = [fromQuery, fromSession, previousWorkspaceId, items[0]?.id]
+  const fromQuery = readWorkspaceIdFromQuery();
+  const candidate = [fromSession, fromQuery, previousWorkspaceId, items[0]?.id]
     .map((value) => value?.trim() ?? "")
     .find((value) => value.length > 0);
   if (!candidate) {
@@ -646,26 +647,13 @@ export default function SettingsPage() {
               </div>
             ) : governanceTab ? (
               actorRole === "admin" ? (
-                <div className="min-w-[220px]">
-                  <NativeSelect
-                    value={workspaceId}
-                    disabled={workspaceLoading || workspaces.length === 0}
-                    onChange={(event) => {
-                      const nextWorkspaceId = event.target.value;
-                      setWorkspaceId(nextWorkspaceId);
-                      syncWorkspaceContext(nextWorkspaceId);
-                      setManagementRefreshToken((previous) => previous + 1);
-                    }}
-                    className="border-[rgba(148,163,184,0.45)] bg-white/80"
-                  >
-                    <NativeSelectOption value="">请选择工作空间</NativeSelectOption>
-                    {workspaces.map((workspace) => (
-                      <NativeSelectOption key={workspace.id} value={workspace.id}>
-                        {workspace.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </div>
+                <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                  {workspaceLoading
+                    ? "正在加载工作空间..."
+                    : selectedWorkspace
+                      ? `当前工作空间：${selectedWorkspace.name}`
+                      : "当前无可用工作空间"}
+                </p>
               ) : (
                 <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                   当前账号不可管理治理配置
@@ -1062,6 +1050,13 @@ export default function SettingsPage() {
               <StateBlock variant="idle">
                 在此维护工作空间、成员与数据源绑定关系。
               </StateBlock>
+              {actorRole === "admin" ? (
+                <div className="flex justify-end">
+                  <Button asChild variant="outline">
+                    <Link href="/modeling">进入数据关系图</Link>
+                  </Button>
+                </div>
+              ) : null}
               <WorkspaceManagementPanel
                 actorRole={actorRole}
                 refreshToken={managementRefreshToken}

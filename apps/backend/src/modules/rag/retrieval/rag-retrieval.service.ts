@@ -11,6 +11,7 @@ import { RagBudgetPolicy } from "../perf/rag-budget-policy";
 import { RagCacheKeyFactory } from "../perf/rag-cache-key.factory";
 import { RagQueryCacheService } from "../perf/rag-query-cache.service";
 import { RagQualityService } from "../quality/rag-quality.service";
+import { ModelingGraphRepository } from "../../platform/data/persistence/modeling-graph.repository";
 import { fuseWithRrf } from "./fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
@@ -23,6 +24,7 @@ import {
   type RagRetrievalLaneResult,
   type RagRetrievalRequest,
   type RagRetrievalResponse,
+  type RagContextPack,
   type RagSkillContext
 } from "./rag-retrieval.types";
 
@@ -61,7 +63,8 @@ export class RagRetrievalService {
     private readonly cacheKeyFactory: RagCacheKeyFactory,
     private readonly queryCache: RagQueryCacheService,
     private readonly budgetPolicy: RagBudgetPolicy,
-    private readonly ragQualityService: RagQualityService
+    private readonly ragQualityService: RagQualityService,
+    private readonly modelingGraphRepository: ModelingGraphRepository
   ) {}
 
   async retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse> {
@@ -85,7 +88,13 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "invalid_retrieval_input"),
-          candidates: []
+          candidates: [],
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
     }
@@ -104,7 +113,13 @@ export class RagRetrievalService {
           status: "degraded",
           degrade_reasons: degradeReasons,
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "no_active_index"),
-          candidates: []
+          candidates: [],
+          context_pack: await this.buildContextPack({
+            workspaceId: input.workspaceId,
+            datasourceId,
+            status: "degraded",
+            degradeReasons
+          })
         }
       };
       await this.persistReplay(response.retrieval_bundle);
@@ -141,10 +156,11 @@ export class RagRetrievalService {
     });
     const cacheRead = this.queryCache.get<RagRetrievalResponse["retrieval_bundle"]>(cacheKey);
     if (cacheRead.hit && cacheRead.value) {
-      const cachedBundle = this.hydrateCachedBundle({
+      const cachedBundle = await this.hydrateCachedBundle({
         cachedBundle: cacheRead.value,
         query,
         datasourceId,
+        workspaceId: input.workspaceId,
         runId,
         decisionReasons: budgetDecision.decisionReasons
       });
@@ -211,6 +227,13 @@ export class RagRetrievalService {
         decision_reasons: budgetDecision.decisionReasons
       }
     };
+    response.retrieval_bundle.context_pack = await this.buildContextPack({
+      bundle: response.retrieval_bundle,
+      workspaceId: input.workspaceId,
+      datasourceId,
+      status: response.retrieval_bundle.status,
+      degradeReasons: uniqueDegradeReasons
+    });
 
     this.queryCache.set({
       key: cacheKey,
@@ -230,14 +253,15 @@ export class RagRetrievalService {
     return response;
   }
 
-  private hydrateCachedBundle(input: {
+  private async hydrateCachedBundle(input: {
     cachedBundle: RagRetrievalResponse["retrieval_bundle"];
     query: string;
     datasourceId: string;
+    workspaceId?: string;
     runId: string;
     decisionReasons: string[];
-  }): RagRetrievalResponse["retrieval_bundle"] {
-    return {
+  }): Promise<RagRetrievalResponse["retrieval_bundle"]> {
+    const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
       datasource_id: input.datasourceId,
@@ -252,6 +276,14 @@ export class RagRetrievalService {
         ...input.decisionReasons
       ])
     };
+    hydratedBundle.context_pack = await this.buildContextPack({
+      bundle: hydratedBundle,
+      workspaceId: input.workspaceId,
+      datasourceId: input.datasourceId,
+      status: hydratedBundle.status,
+      degradeReasons: hydratedBundle.degrade_reasons
+    });
+    return hydratedBundle;
   }
 
   private async collectLaneResults(input: {
@@ -791,6 +823,74 @@ export class RagRetrievalService {
 
   private unique(values: string[]): string[] {
     return Array.from(new Set(values));
+  }
+
+  private async buildContextPack(input: {
+    bundle?: RagRetrievalResponse["retrieval_bundle"];
+    workspaceId?: string;
+    datasourceId: string;
+    status: "ready" | "degraded";
+    degradeReasons: string[];
+  }): Promise<RagContextPack> {
+    const bundle = input.bundle;
+    const semanticCandidates =
+      bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
+      [];
+    const modelKeys = this.unique(
+      semanticCandidates.flatMap((candidate) => candidate.chunk.metadata.tableNames)
+    );
+    const metricKeys = this.unique(
+      bundle?.skill_context?.context.map((entry) => entry.term) ?? []
+    );
+    const selectedContext = bundle?.selected_context ?? [];
+    const modelingRevision = await this.resolveActiveModelingRevision(
+      input.workspaceId,
+      input.datasourceId
+    );
+
+    return {
+      status: input.status,
+      modeling_revision: modelingRevision,
+      semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
+      semantic_bindings: {
+        model_keys: modelKeys,
+        relationship_keys: [],
+        metric_keys: metricKeys,
+        calculated_field_keys: []
+      },
+      instruction_sets: {
+        model_bindings: modelKeys,
+        relationship_bindings: [],
+        metric_bindings: metricKeys,
+        calculated_field_bindings: []
+      },
+      selected_context_summary: {
+        count: selectedContext.length,
+        snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5)
+      },
+      degrade_reasons: this.unique(input.degradeReasons),
+      risk_tags: this.unique(
+        input.status === "degraded"
+          ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+          : bundle?.risk_tags ?? []
+      )
+    };
+  }
+
+  private async resolveActiveModelingRevision(
+    workspaceIdRaw: string | undefined,
+    datasourceIdRaw: string
+  ): Promise<number | undefined> {
+    const workspaceId = workspaceIdRaw?.trim();
+    const datasourceId = datasourceIdRaw.trim();
+    if (!workspaceId || !datasourceId) {
+      return undefined;
+    }
+    const scope = await this.modelingGraphRepository.getLatestScopeState({
+      workspaceId,
+      datasourceId
+    });
+    return scope.activeRevision;
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {

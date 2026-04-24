@@ -11,6 +11,7 @@ import { DatasourceRegistryService } from "../governance/datasource/datasource-r
 import { GateMetricsService } from "../observability/gate-metrics.service";
 import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
 import { RagQualityService } from "../rag/quality/rag-quality.service";
+import { SemanticSpineShadowGateService } from "../observability/semantic-spine-shadow-gate.service";
 
 @Controller()
 export class HealthController {
@@ -23,7 +24,8 @@ export class HealthController {
     private readonly datasourceRegistry: DatasourceRegistryService,
     private readonly gateMetrics: GateMetricsService,
     private readonly ragIngestionMetrics: RagIngestionMetricsService,
-    private readonly ragQuality: RagQualityService
+    private readonly ragQuality: RagQualityService,
+    private readonly semanticSpineShadow: SemanticSpineShadowGateService
   ) {}
 
   private async buildHealthResponse(req: Request): Promise<ApiResponse<unknown>> {
@@ -35,6 +37,7 @@ export class HealthController {
     });
     const postgresEnabled = Boolean(this.config.databaseUrl);
     const ragQualityGate = this.ragQuality.snapshot();
+    const semanticSpineShadowGate = this.semanticSpineShadow.snapshot();
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
       runtime: {
@@ -86,6 +89,9 @@ export class HealthController {
         ragQuality: {
           gate: ragQualityGate,
           r6: ragQualityGate.r6
+        },
+        semanticSpineShadow: {
+          gate: semanticSpineShadowGate
         }
       },
       cors: {
