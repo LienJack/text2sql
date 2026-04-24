@@ -15,6 +15,7 @@ type ModelingGraphRevisionRow = {
   status: string;
   graphHash: string;
   graphPayload: string;
+  graphPayloadVersion: number;
   createdByActorId: string | null;
   activatedByActorId: string | null;
   activatedAt: Date | null;
@@ -117,6 +118,7 @@ export class ModelingGraphRepository implements OnModuleInit, OnModuleDestroy {
       status: "draft",
       graphHash: input.graphHash,
       graphPayload: input.graphPayload,
+      graphPayloadVersion: 2,
       createdByActorId: input.actorId?.trim() || null,
       activatedByActorId: null,
       activatedAt: null,
@@ -142,6 +144,7 @@ export class ModelingGraphRepository implements OnModuleInit, OnModuleDestroy {
             status: record.status,
             graphHash: record.graphHash,
             graphPayload: JSON.stringify(record.graphPayload),
+            graphPayloadVersion: record.graphPayloadVersion,
             createdByActorId: record.createdByActorId ?? null,
             activatedByActorId: null,
             activatedAt: null,
@@ -342,6 +345,7 @@ export class ModelingGraphRepository implements OnModuleInit, OnModuleDestroy {
       status: row.status === "active" ? "active" : "draft",
       graphHash: row.graphHash,
       graphPayload: this.parsePayload(row.graphPayload),
+      graphPayloadVersion: this.parseGraphPayloadVersion(row.graphPayloadVersion),
       createdByActorId: row.createdByActorId,
       activatedByActorId: row.activatedByActorId,
       activatedAt: row.activatedAt ? row.activatedAt.toISOString() : null,
@@ -366,6 +370,21 @@ export class ModelingGraphRepository implements OnModuleInit, OnModuleDestroy {
         schemaChanges: []
       };
     }
+  }
+
+  private parseGraphPayloadVersion(value: unknown): number {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 2) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_GRAPH_PAYLOAD_VERSION_UNSUPPORTED",
+        "检测到未迁移的 modeling graph payload version，请先完成硬切迁移。",
+        409,
+        {
+          requiredGraphPayloadVersion: 2,
+          actualGraphPayloadVersion: value
+        }
+      );
+    }
+    return Math.floor(value);
   }
 
   private sortRevisions(

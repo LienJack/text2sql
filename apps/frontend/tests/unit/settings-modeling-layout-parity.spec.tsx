@@ -254,8 +254,6 @@ describe("Modeling layout parity", () => {
 
     await screen.findByTestId("layout-parity-react-flow");
 
-    expect(screen.getByText("N 2")).toBeInTheDocument();
-    expect(screen.getByText("E 0")).toBeInTheDocument();
     expect(screen.getByText("当前无 relationships 连线，可继续在 Relationship Editor 中补充。")).toBeInTheDocument();
   });
 
@@ -267,9 +265,6 @@ describe("Modeling layout parity", () => {
     await user.click(screen.getByRole("button", { name: "选择 model Customers Model" }));
 
     expect(screen.getByText("Current Context: model · model.customers")).toBeInTheDocument();
-    expect(screen.getByTestId("modeling-flow-toolbar-selected-summary")).toHaveTextContent(
-      "当前选中：model · model.customers"
-    );
 
     await waitFor(() => {
       const hasFocusedCustomersNode = fitViewMock.mock.calls.some((call) => {
@@ -293,11 +288,9 @@ describe("Modeling layout parity", () => {
 
     const toCanvasButton = screen.getByRole("button", { name: "定位到画布" });
     const toAssetsButton = screen.getByRole("button", { name: "资产树" });
-    const toContextButton = screen.getByRole("button", { name: "详情/部署" });
     expect(screen.getByTestId("modeling-mobile-quick-access")).toBeInTheDocument();
     expect(toCanvasButton).toHaveAttribute("aria-controls", "modeling-canvas-pane");
     expect(toAssetsButton).toHaveAttribute("aria-controls", "modeling-assets-pane");
-    expect(toContextButton).toHaveAttribute("aria-controls", "modeling-context-pane");
 
     toCanvasButton.focus();
     await user.keyboard("{Enter}");

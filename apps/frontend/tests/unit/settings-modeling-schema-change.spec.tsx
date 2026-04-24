@@ -40,7 +40,7 @@ const mockResolveWorkspaceModelingSchemaChange = vi.mocked(
 describe("settings modeling schema change flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.history.replaceState({}, "", "/settings/modeling?workspaceId=ws-1&datasourceId=ds-1");
+    window.history.replaceState({}, "", "/modeling?workspaceId=ws-1&datasourceId=ds-1");
 
     mockListWorkspaces.mockResolvedValue({
       items: [{ id: "ws-1", name: "Workspace 1", isDefault: true }],

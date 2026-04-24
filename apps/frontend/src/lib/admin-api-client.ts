@@ -12,6 +12,7 @@ import type {
   RollbackGlossaryAnchorRequest,
   RollbackGlossaryAnchorResponse,
   ModelingGraphPatchRequest,
+  ModelingGraphRelationship,
   ModelingGraphPayload,
   ModelingGraphSnapshot,
   UpdateGlossaryTermRequest,
@@ -232,6 +233,12 @@ export type UpsertModelingGraphInput = ModelingGraphPatchRequest;
 
 export type WorkspaceModelingGraphSnapshot = ModelingGraphSnapshot;
 
+export interface ModelingRevisionSummary {
+  draftRevision?: number;
+  activeRevision?: number;
+  deployState: "undeployed" | "synced";
+}
+
 export interface WorkspaceModelingPreviewResult {
   stage: "modeling_preview_ready";
   workspaceId: string;
@@ -286,7 +293,10 @@ export interface PrecheckWorkspaceModelingDeployResult {
   datasourceId: string;
   policyVersion: number;
   draftRevision: number;
+  targetRevision?: number;
   activeRevision?: number;
+  deployState?: "undeployed" | "synced";
+  revisionSummary?: ModelingRevisionSummary;
   pass: boolean;
   riskLevel: "low" | "medium" | "high";
   blockingReasons: string[];
@@ -307,6 +317,9 @@ export interface DeployWorkspaceModelingResult {
   workspaceId: string;
   datasourceId: string;
   activeRevision: number;
+  targetRevision?: number;
+  deployState?: "synced";
+  revisionSummary?: ModelingRevisionSummary;
   graphHash: string;
   blockingReasons: string[];
 }
@@ -717,6 +730,38 @@ function normalizeWorkspaceModelingSchemaChangeGroup(
   return Array.from(deduped.values());
 }
 
+function normalizeModelingRevisionSummary(
+  value: unknown,
+  fallback: { draftRevision?: number; activeRevision?: number }
+): ModelingRevisionSummary {
+  const record = isRecord(value) ? value : {};
+  const draftRevision =
+    typeof record.draftRevision === "number"
+      ? record.draftRevision
+      : typeof record.targetRevision === "number"
+        ? record.targetRevision
+        : fallback.draftRevision;
+  const activeRevision =
+    typeof record.activeRevision === "number"
+      ? record.activeRevision
+      : fallback.activeRevision;
+  const deployStateRaw =
+    typeof record.deployState === "string" ? record.deployState : undefined;
+  const deployState: "undeployed" | "synced" =
+    deployStateRaw === "synced"
+      ? "synced"
+      : draftRevision !== undefined &&
+          activeRevision !== undefined &&
+          draftRevision === activeRevision
+        ? "synced"
+        : "undeployed";
+  return {
+    draftRevision,
+    activeRevision,
+    deployState
+  };
+}
+
 function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
   const record = isRecord(value) ? value : {};
   const models = Array.isArray(record.models) ? record.models : [];
@@ -725,18 +770,57 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
   const views = Array.isArray(record.views) ? record.views : [];
   const schemaChanges = Array.isArray(record.schemaChanges) ? record.schemaChanges : [];
 
+  const normalizedRelationships = relationships
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item) => {
+      const bridge = isRecord(item.bridge) ? item.bridge : {};
+      const relationshipSource: ModelingGraphRelationship["source"] =
+        item.source === "inferred" ||
+        item.source === "fk" ||
+        item.source === "semantic"
+          ? item.source
+          : "manual";
+      const typeRaw = typeof item.type === "string" ? item.type : item.cardinality;
+      const relationshipType: ModelingGraphRelationship["type"] =
+        typeRaw === "many-to-one" ||
+        typeRaw === "one-to-many" ||
+        typeRaw === "one-to-one"
+          ? typeRaw
+          : undefined;
+        return {
+          id: String(item.id ?? ""),
+          name: typeof item.name === "string" ? item.name : undefined,
+          source: relationshipSource,
+          confidence: Math.max(0, Math.min(1, readNumber(item.confidence, 0))),
+        type: relationshipType,
+        cardinality: relationshipType,
+        bridge: {
+          left: normalizeRelationshipBridgeEndpoint(bridge.left),
+          right: normalizeRelationshipBridgeEndpoint(bridge.right),
+          operator: "eq" as const,
+          confidence: Math.max(0, Math.min(1, readNumber(bridge.confidence, 0)))
+        }
+      };
+    });
+
+  const normalizedCalculatedFields = calculatedFields
+    .filter((item): item is Record<string, unknown> => isRecord(item))
+    .map((item) => ({
+      id: String(item.id ?? ""),
+      modelId: String(item.modelId ?? ""),
+      name: String(item.name ?? ""),
+      expression: String(item.expression ?? ""),
+      dataType: String(item.dataType ?? "")
+    }));
+
   return {
     models: models
       .filter((item): item is Record<string, unknown> => isRecord(item))
-      .map((item) => ({
-        id: String(item.id ?? item.tableName ?? ""),
-        tableName: String(item.tableName ?? "").toLowerCase(),
-        modelName: String(item.modelName ?? ""),
-        displayName:
-          typeof item.displayName === "string" ? item.displayName : null,
-        description:
-          typeof item.description === "string" ? item.description : null,
-        columns: Array.isArray(item.columns)
+      .map((item) => {
+        const modelId = String(item.id ?? item.tableName ?? "");
+        const tableName = String(item.tableName ?? "").toLowerCase();
+        const modelName = String(item.modelName ?? "");
+        const columns = Array.isArray(item.columns)
           ? item.columns
               .filter((column): column is Record<string, unknown> => isRecord(column))
               .map((column) => ({
@@ -749,48 +833,35 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
                 description:
                   typeof column.description === "string" ? column.description : null
               }))
-          : []
-      })),
-    relationships: relationships
-      .filter((item): item is Record<string, unknown> => isRecord(item))
-      .map((item) => {
-        const bridge = isRecord(item.bridge) ? item.bridge : {};
-        const typeRaw = typeof item.type === "string" ? item.type : item.cardinality;
-        const relationshipType =
-          typeRaw === "many-to-one" ||
-          typeRaw === "one-to-many" ||
-          typeRaw === "one-to-one"
-            ? typeRaw
-            : undefined;
+          : [];
+        const calculatedFieldIds = normalizedCalculatedFields
+          .filter((field) => field.modelId === modelId)
+          .map((field) => field.id);
+        const relationshipIds = normalizedRelationships
+          .filter((relationship) => {
+            const leftTable = relationship.bridge.left.table;
+            const rightTable = relationship.bridge.right.table;
+            return leftTable === tableName || rightTable === tableName;
+          })
+          .map((relationship) => relationship.id);
         return {
-          id: String(item.id ?? ""),
-          name: typeof item.name === "string" ? item.name : undefined,
-          source:
-            item.source === "inferred" ||
-            item.source === "fk" ||
-            item.source === "semantic"
-              ? item.source
-              : "manual",
-          confidence: Math.max(0, Math.min(1, readNumber(item.confidence, 0))),
-          type: relationshipType,
-          cardinality: relationshipType,
-          bridge: {
-            left: normalizeRelationshipBridgeEndpoint(bridge.left),
-            right: normalizeRelationshipBridgeEndpoint(bridge.right),
-            operator: "eq" as const,
-            confidence: Math.max(0, Math.min(1, readNumber(bridge.confidence, 0)))
+          id: modelId,
+          tableName,
+          modelName,
+          displayName:
+            typeof item.displayName === "string" ? item.displayName : null,
+          description:
+            typeof item.description === "string" ? item.description : null,
+          columns,
+          nodeSections: {
+            columns: columns.map((column) => column.name),
+            calculatedFields: calculatedFieldIds,
+            relationships: relationshipIds
           }
         };
       }),
-    calculatedFields: calculatedFields
-      .filter((item): item is Record<string, unknown> => isRecord(item))
-      .map((item) => ({
-        id: String(item.id ?? ""),
-        modelId: String(item.modelId ?? ""),
-        name: String(item.name ?? ""),
-        expression: String(item.expression ?? ""),
-        dataType: String(item.dataType ?? "")
-      })),
+    relationships: normalizedRelationships,
+    calculatedFields: normalizedCalculatedFields,
     views: views
       .filter((item): item is Record<string, unknown> => isRecord(item))
       .map((item) => ({
@@ -825,11 +896,19 @@ function normalizeWorkspaceModelingGraphSnapshot(
 ): WorkspaceModelingGraphSnapshot {
   const record = isRecord(value) ? value : {};
   const draftRecord = isRecord(record.draft) ? record.draft : null;
+  const draftRevision =
+    draftRecord && typeof draftRecord.revision === "number" ? draftRecord.revision : undefined;
+  const activeRevision =
+    typeof record.activeRevision === "number" ? record.activeRevision : undefined;
+  const revisionSummary = normalizeModelingRevisionSummary(record.revisionSummary, {
+    draftRevision,
+    activeRevision
+  });
   return {
     workspaceId: String(record.workspaceId ?? workspaceId),
     datasourceId: String(record.datasourceId ?? datasourceId),
-    activeRevision:
-      typeof record.activeRevision === "number" ? record.activeRevision : undefined,
+    activeRevision,
+    revisionSummary,
     draft: draftRecord
       ? {
           policyVersion: readNumber(draftRecord.policyVersion, 0),
@@ -2223,30 +2302,57 @@ export async function precheckWorkspaceModelingDeploy(
   input: {
     policyVersion: number;
     draftRevision?: number;
+    targetRevision?: number;
     representativeSqlSamples?: string[];
   }
 ): Promise<PrecheckWorkspaceModelingDeployResult> {
   try {
+    const requestedRevision = input.draftRevision ?? input.targetRevision;
     const data = await request<unknown>(
       `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/deploy/precheck`,
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify({
+          ...input,
+          draftRevision: requestedRevision,
+          targetRevision: requestedRevision
+        })
       }
     );
     const record = isRecord(data) ? data : {};
     const dryRunRecord = isRecord(record.dryRun) ? record.dryRun : {};
     const schemaChangeRecord = isRecord(record.schemaChange) ? record.schemaChange : {};
+    const draftRevision =
+      typeof record.draftRevision === "number"
+        ? record.draftRevision
+        : typeof record.targetRevision === "number"
+          ? record.targetRevision
+          : requestedRevision ?? 0;
+    const activeRevision =
+      typeof record.activeRevision === "number" ? record.activeRevision : undefined;
+    const deployStateRaw =
+      typeof record.deployState === "string" ? record.deployState : undefined;
+    const deployState: "undeployed" | "synced" =
+      deployStateRaw === "synced"
+        ? "synced"
+        : activeRevision !== undefined && activeRevision === draftRevision
+          ? "synced"
+          : "undeployed";
     return {
       stage: "modeling_deploy_precheck_completed",
       workspaceId: String(record.workspaceId ?? workspaceId),
       datasourceId: String(record.datasourceId ?? datasourceId),
       policyVersion:
         typeof record.policyVersion === "number" ? record.policyVersion : input.policyVersion,
-      draftRevision:
-        typeof record.draftRevision === "number" ? record.draftRevision : input.draftRevision ?? 0,
-      activeRevision:
-        typeof record.activeRevision === "number" ? record.activeRevision : undefined,
+      draftRevision,
+      targetRevision:
+        typeof record.targetRevision === "number" ? record.targetRevision : draftRevision,
+      activeRevision,
+      deployState,
+      revisionSummary: normalizeModelingRevisionSummary(record.revisionSummary, {
+        draftRevision,
+        activeRevision
+      }),
       pass: Boolean(record.pass),
       riskLevel:
         record.riskLevel === "high" || record.riskLevel === "medium" ? record.riskLevel : "low",
@@ -2294,24 +2400,39 @@ export async function deployWorkspaceModeling(
   input: {
     policyVersion: number;
     draftRevision?: number;
+    targetRevision?: number;
     representativeSqlSamples?: string[];
   }
 ): Promise<DeployWorkspaceModelingResult> {
   try {
+    const requestedRevision = input.draftRevision ?? input.targetRevision;
     const data = await request<unknown>(
       `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/deploy`,
       {
         method: "POST",
-        body: JSON.stringify(input)
+        body: JSON.stringify({
+          ...input,
+          draftRevision: requestedRevision,
+          targetRevision: requestedRevision
+        })
       }
     );
     const record = isRecord(data) ? data : {};
+    const activeRevision =
+      typeof record.activeRevision === "number" ? record.activeRevision : 0;
+    const targetRevision =
+      typeof record.targetRevision === "number" ? record.targetRevision : activeRevision;
     return {
       stage: "modeling_deployed",
       workspaceId: String(record.workspaceId ?? workspaceId),
       datasourceId: String(record.datasourceId ?? datasourceId),
-      activeRevision:
-        typeof record.activeRevision === "number" ? record.activeRevision : 0,
+      activeRevision,
+      targetRevision,
+      deployState: "synced",
+      revisionSummary: normalizeModelingRevisionSummary(record.revisionSummary, {
+        draftRevision: targetRevision,
+        activeRevision
+      }),
       graphHash: String(record.graphHash ?? ""),
       blockingReasons: Array.isArray(record.blockingReasons)
         ? record.blockingReasons.filter((item): item is string => typeof item === "string")

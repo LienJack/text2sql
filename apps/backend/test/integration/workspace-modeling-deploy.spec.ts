@@ -7,6 +7,97 @@ const actor = {
 };
 
 describe("workspace modeling deploy integration", () => {
+  it("accepts targetRevision alias and returns revisionSummary contract in precheck", async () => {
+    const workspaceRelationshipService = {
+      getDraft: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 4,
+        draft: {
+          policyVersion: 7,
+          revision: 5,
+          graphHash: "hash-v5",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
+      getDraftRevision: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        activeRevision: 4,
+        draft: {
+          policyVersion: 7,
+          revision: 5,
+          graphHash: "hash-v5",
+          edges: [],
+          updatedAt: "2026-04-23T12:00:00.000Z",
+          updatedByActorId: actor.id
+        }
+      })),
+      publishPrecheck: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        draftRevision: 5,
+        publish_precheck_passed: true,
+        blockingReasons: [],
+        policyVersion: 7
+      })),
+      publishDraft: jest.fn(),
+      rollbackDraft: jest.fn()
+    };
+
+    const workspaceDatasourceService = {
+      listDatasourceTablePermissions: jest.fn(async () => ({
+        workspaceId: "ws-1",
+        datasourceId: "ds-1",
+        policyVersion: 7,
+        tableNames: ["orders"]
+      }))
+    };
+
+    const relationshipPublishGateFacade = {
+      evaluate: jest.fn(async () => ({
+        pass: true,
+        riskLevel: "low" as const,
+        blockingReasons: [],
+        dryRun: {
+          pass: true,
+          executedCount: 1,
+          failedSamples: []
+        }
+      }))
+    };
+
+    const workspaceModelingService = {
+      describeModelingSchemaChangeState: jest.fn(async () => ({
+        highRiskStatus: "low" as const,
+        unresolvedHighRiskCount: 0,
+        unresolvedSchemaChangeIds: []
+      }))
+    };
+
+    const service = new WorkspaceModelingDeployService(
+      workspaceRelationshipService as never,
+      workspaceDatasourceService as never,
+      relationshipPublishGateFacade as never,
+      workspaceModelingService as never
+    );
+
+    const precheck = await service.precheck(actor, "ws-1", "ds-1", {
+      policyVersion: 7,
+      targetRevision: 5
+    });
+
+    expect(precheck.draftRevision).toBe(5);
+    expect(precheck.targetRevision).toBe(5);
+    expect(precheck.revisionSummary).toEqual({
+      draftRevision: 5,
+      activeRevision: 4,
+      deployState: "undeployed"
+    });
+  });
+
   it("blocks deploy when unresolved schema changes exist", async () => {
     const workspaceRelationshipService = {
       getDraft: jest.fn(async () => ({

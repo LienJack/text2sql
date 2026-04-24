@@ -17,4 +17,10 @@ export class GetModelingPreviewDto {
   @Min(1)
   @Max(100)
   limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  revision?: number;
 }

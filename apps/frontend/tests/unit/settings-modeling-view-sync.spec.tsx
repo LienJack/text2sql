@@ -97,7 +97,7 @@ describe("settings modeling view sync from chat", () => {
         "view.chat_run.run-sync"
       );
       expect(assignSpy).toHaveBeenCalledWith(
-        "/settings/modeling?workspaceId=ws-sync&datasourceId=ds-sync&viewId=view.chat_run.run-sync"
+        "/modeling?workspaceId=ws-sync&datasourceId=ds-sync&viewId=view.chat_run.run-sync"
       );
     });
 
@@ -176,7 +176,7 @@ describe("settings modeling page view selection sync", () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/modeling?workspaceId=ws-sync&datasourceId=ds-sync&viewId=view.chat_run.run-sync"
+      "/modeling?workspaceId=ws-sync&datasourceId=ds-sync&viewId=view.chat_run.run-sync"
     );
 
     render(<ModelingWorkspacePage />);
@@ -193,7 +193,7 @@ describe("settings modeling page view selection sync", () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/modeling?workspaceId=ws-sync&datasourceId=ds-sync"
+      "/modeling?workspaceId=ws-sync&datasourceId=ds-sync"
     );
 
     render(<ModelingWorkspacePage />);

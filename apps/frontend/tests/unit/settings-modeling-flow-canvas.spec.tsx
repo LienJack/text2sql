@@ -243,7 +243,6 @@ describe("ModelingFlowCanvas", () => {
       />
     );
 
-    expect(screen.getByText("Nodes 3 · Edges 1")).toBeInTheDocument();
     await waitFor(() => {
       expect(fitViewMock).toHaveBeenCalledTimes(1);
     });
@@ -291,8 +290,6 @@ describe("ModelingFlowCanvas", () => {
     expect(
       screen.getByText(/检测到 1 条 relationship 无法完整映射到 model 节点/)
     ).toBeInTheDocument();
-    expect(screen.getByText("N 3")).toBeInTheDocument();
-    expect(screen.getByText("E 1")).toBeInTheDocument();
   });
 
   it("renders empty guidance when graph has no nodes", () => {

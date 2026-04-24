@@ -86,7 +86,7 @@ export function SaveAsViewDialog({
     window.sessionStorage.setItem("text2sql.activeDatasourceId", success.datasourceId);
     window.sessionStorage.setItem("text2sql.modeling.selectViewId", success.view.id);
     window.location.assign(
-      `/settings/modeling?workspaceId=${encodeURIComponent(
+      `/modeling?workspaceId=${encodeURIComponent(
         success.workspaceId
       )}&datasourceId=${encodeURIComponent(success.datasourceId)}&viewId=${encodeURIComponent(
         success.view.id

@@ -98,6 +98,11 @@ type ModelingGraphSnapshotResponse = {
   workspaceId: string;
   datasourceId: string;
   activeRevision?: number;
+  revisionSummary: {
+    draftRevision?: number;
+    activeRevision?: number;
+    deployState: "undeployed" | "synced";
+  };
   draft: {
     policyVersion: number;
     revision: number;
@@ -510,10 +515,12 @@ export class WorkspaceModelingService {
     );
     const draft = draftState.draft;
     if (!draft) {
+      const revisionSummary = this.buildRevisionSummary(undefined, draftState.activeRevision);
       return {
         workspaceId,
         datasourceId,
         activeRevision: draftState.activeRevision,
+        revisionSummary,
         draft: null
       };
     }
@@ -523,10 +530,15 @@ export class WorkspaceModelingService {
       revision: draft.revision,
       edges: draft.edges
     });
+    const revisionSummary = this.buildRevisionSummary(
+      draft.revision,
+      draftState.activeRevision
+    );
     return {
       workspaceId,
       datasourceId,
       activeRevision: draftState.activeRevision,
+      revisionSummary,
       draft: {
         policyVersion: draft.policyVersion,
         revision: draft.revision,
@@ -585,6 +597,10 @@ export class WorkspaceModelingService {
       workspaceId,
       datasourceId,
       activeRevision: current.activeRevision,
+      revisionSummary: this.buildRevisionSummary(
+        replaced.draft.revision,
+        current.activeRevision
+      ),
       draft: {
         policyVersion: replaced.draft.policyVersion,
         revision: replaced.draft.revision,
@@ -2470,6 +2486,27 @@ ORDER BY kcu.table_name, kcu.column_name, ccu.table_name, ccu.column_name
       });
     }
     return normalized;
+  }
+
+  private buildRevisionSummary(
+    draftRevision: number | undefined,
+    activeRevision: number | undefined
+  ): {
+    draftRevision?: number;
+    activeRevision?: number;
+    deployState: "undeployed" | "synced";
+  } {
+    const deployState =
+      draftRevision !== undefined && activeRevision !== undefined && draftRevision === activeRevision
+        ? "synced"
+        : draftRevision === undefined && activeRevision !== undefined
+          ? "synced"
+          : "undeployed";
+    return {
+      draftRevision,
+      activeRevision,
+      deployState
+    };
   }
 
   private normalizeOptionalIdempotencyKey(value?: string): string | undefined {

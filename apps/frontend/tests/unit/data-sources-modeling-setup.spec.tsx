@@ -170,7 +170,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
         selectedTables: ["customers", "orders"],
         selectedRecommendationIds: ["rel-orders-customers"]
       });
-      expect(mockPush).toHaveBeenCalledWith("/settings/modeling?datasourceId=ds-created");
+      expect(mockPush).toHaveBeenCalledWith("/modeling?datasourceId=ds-created");
     });
 
     expect(window.sessionStorage.getItem("text2sql.activeWorkspaceId")).toBe("ws-new");
@@ -192,7 +192,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
         selectedTables: ["customers", "orders"],
         selectedRecommendationIds: []
       });
-      expect(mockPush).toHaveBeenCalledWith("/settings/modeling?datasourceId=ds-created");
+      expect(mockPush).toHaveBeenCalledWith("/modeling?datasourceId=ds-created");
     });
   });
 

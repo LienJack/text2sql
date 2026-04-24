@@ -16,6 +16,7 @@ import {
   type NodeTypes,
   type ReactFlowInstance
 } from "@xyflow/react";
+import { LocateFixed, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
@@ -29,7 +30,7 @@ import {
   ModelingFlowNode,
   type ModelingFlowNodeData
 } from "@/components/settings/modeling/modeling-flow-node";
-import { ModelingFlowToolbar } from "@/components/settings/modeling/modeling-flow-toolbar";
+import { Button } from "@/components/ui/button";
 import { StateBlock } from "@/components/ui/state-block";
 
 const NODE_TYPES: NodeTypes = {
@@ -99,6 +100,9 @@ function buildGraph(
   const relationships = Array.isArray(graphPayload.relationships)
     ? graphPayload.relationships
     : [];
+  const calculatedFields = Array.isArray(graphPayload.calculatedFields)
+    ? graphPayload.calculatedFields
+    : [];
 
   const sortedModels = [...models].sort((left, right) =>
     resolveModelLabel(left).localeCompare(resolveModelLabel(right), "zh-CN")
@@ -108,6 +112,37 @@ function buildGraph(
   );
 
   const modelNodeIdByTable = new Map<string, string>();
+  const calculatedFieldNamesByModelId = new Map<string, string[]>();
+  const relationshipIdsByTable = new Map<string, string[]>();
+
+  for (const field of calculatedFields) {
+    const modelId = field.modelId?.trim();
+    const fieldName = field.name?.trim();
+    if (!modelId || !fieldName) {
+      continue;
+    }
+    const existing = calculatedFieldNamesByModelId.get(modelId) ?? [];
+    existing.push(fieldName);
+    calculatedFieldNamesByModelId.set(modelId, existing);
+  }
+
+  for (const relationship of relationships) {
+    const relationshipId = relationship.id?.trim();
+    if (!relationshipId) {
+      continue;
+    }
+    const leftTable = relationship.bridge?.left?.table;
+    const rightTable = relationship.bridge?.right?.table;
+    for (const tableName of [leftTable, rightTable]) {
+      const tableKey = typeof tableName === "string" ? normalizeTableKey(tableName) : "";
+      if (!tableKey) {
+        continue;
+      }
+      const existing = relationshipIdsByTable.get(tableKey) ?? [];
+      existing.push(relationshipId);
+      relationshipIdsByTable.set(tableKey, existing);
+    }
+  }
 
   const modelNodes: Array<Node<ModelingFlowNodeData>> = sortedModels.map((model, index) => {
     const nodeId = toFlowNodeId({
@@ -118,6 +153,27 @@ function buildGraph(
     if (tableKey && !modelNodeIdByTable.has(tableKey)) {
       modelNodeIdByTable.set(tableKey, nodeId);
     }
+    const fallbackColumns = Array.isArray(model.columns)
+      ? model.columns.map((column) => column.name).filter(Boolean)
+      : [];
+    const fallbackCalculatedFields = calculatedFieldNamesByModelId.get(model.id) ?? [];
+    const fallbackRelationships = relationshipIdsByTable.get(tableKey) ?? [];
+    const sections = {
+      columns:
+        Array.isArray(model.nodeSections?.columns) && model.nodeSections.columns.length > 0
+          ? model.nodeSections.columns
+          : fallbackColumns,
+      calculatedFields:
+        Array.isArray(model.nodeSections?.calculatedFields) &&
+        model.nodeSections.calculatedFields.length > 0
+          ? model.nodeSections.calculatedFields
+          : fallbackCalculatedFields,
+      relationships:
+        Array.isArray(model.nodeSections?.relationships) &&
+        model.nodeSections.relationships.length > 0
+          ? model.nodeSections.relationships
+          : fallbackRelationships
+    };
     return {
       id: nodeId,
       type: MODELING_FLOW_NODE_TYPE,
@@ -125,7 +181,8 @@ function buildGraph(
         kind: "model",
         title: resolveModelLabel(model),
         subtitle: model.tableName,
-        columnCount: Array.isArray(model.columns) ? model.columns.length : 0
+        columnCount: sections.columns.length,
+        sections
       },
       position: {
         x: (index % FLOW_COLUMNS) * FLOW_NODE_X_GAP,
@@ -407,25 +464,45 @@ export function ModelingFlowCanvas(props: {
 
   return (
     <section className="space-y-3" data-testid="modeling-flow-canvas">
-      <ModelingFlowToolbar
-        nodeCount={flowNodes.length}
-        edgeCount={flowEdges.length}
-        hasInvalidEdges={graph.invalidRelationshipCount > 0}
-        selectedNode={selectedNode}
-        busy={busy}
-        onFitView={handleFitView}
-        onClearSelection={() => {
-          onSelectNode(null);
-        }}
-      />
-
       {graph.invalidRelationshipCount > 0 ? (
         <StateBlock variant="error">
           检测到 {graph.invalidRelationshipCount} 条 relationship 无法完整映射到 model 节点，已在画布中以异常连线标注，请检查导入表与 graph 数据一致性。
         </StateBlock>
       ) : null}
 
-      <div className="h-[500px] overflow-hidden rounded-lg border border-[var(--border-default)] bg-white/95">
+      <div className="relative h-[620px] overflow-hidden rounded-lg border border-[var(--border-default)] bg-white/95 xl:h-[700px]">
+        {flowNodes.length > 0 && !graph.graphBuildError ? (
+          <div className="pointer-events-none absolute right-3 top-3 z-10">
+            <div className="pointer-events-auto flex items-center gap-1.5 rounded-md border border-[var(--border-default)] bg-white/95 p-1 shadow-sm">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2"
+                onClick={handleFitView}
+                disabled={busy}
+                aria-label="画布适配视图"
+              >
+                <LocateFixed className="h-3.5 w-3.5" />
+                Fit
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2"
+                onClick={() => {
+                  onSelectNode(null);
+                }}
+                disabled={busy || !selectedNode}
+                aria-label="清除当前选中"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Clear
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {busy ? (
           <div className="flex h-full items-center justify-center p-6">
             <StateBlock variant="loading">正在加载 modeling graph…</StateBlock>

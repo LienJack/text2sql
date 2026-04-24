@@ -344,6 +344,28 @@ describe("workspace modeling graph revision integration", () => {
     expect(third.draft?.graphPayload.calculatedFields[0]?.expression).toContain("coalesce");
   });
 
+  it("exposes revision summary contract for snapshot payload parity", async () => {
+    const { service } = buildModelingService();
+
+    const afterUpsert = await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: baseModelPayload
+    });
+
+    expect((afterUpsert as any).revisionSummary).toMatchObject({
+      draftRevision: afterUpsert.draft?.revision,
+      activeRevision: afterUpsert.activeRevision,
+      deployState: "undeployed"
+    });
+
+    const snapshot = await service.getModelingGraph(actor, "ws-1", "ds-1");
+    expect((snapshot as any).revisionSummary).toMatchObject({
+      draftRevision: snapshot.draft?.revision,
+      activeRevision: snapshot.activeRevision,
+      deployState: "undeployed"
+    });
+  });
+
   it("maps invalid calculated-field expression to stable domain error details", async () => {
     const { service } = buildModelingService();
 

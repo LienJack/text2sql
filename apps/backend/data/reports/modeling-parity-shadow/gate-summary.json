@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-23T15:25:01.871Z",
+  "generatedAt": "2026-04-24T04:43:07.359Z",
   "inputs": {
     "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/samples.json",
     "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/samples.json",
@@ -10,7 +10,7 @@
     "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/gate-summary.json",
     "modelingWorkspace": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/modeling-parity-shadow/gate-summary.json"
   },
-  "strictMode": true,
+  "strictMode": false,
   "gatePass": false,
   "reasons": [
     "relationship_platform:sample_not_ready",

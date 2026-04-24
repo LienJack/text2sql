@@ -16,6 +16,13 @@ export type ModelingGraphModel = {
   displayName?: string | null;
   description?: string | null;
   columns: ModelingGraphColumn[];
+  nodeSections?: ModelingGraphNodeSections;
+};
+
+export type ModelingGraphNodeSections = {
+  columns: string[];
+  calculatedFields: string[];
+  relationships: string[];
 };
 
 export type ModelingGraphRelationship = {
@@ -87,6 +94,7 @@ export type ModelingGraphRevisionRecord = {
   status: ModelingGraphStatus;
   graphHash: string;
   graphPayload: ModelingGraphPayload;
+  graphPayloadVersion: number;
   createdByActorId?: string | null;
   activatedByActorId?: string | null;
   activatedAt?: string | null;

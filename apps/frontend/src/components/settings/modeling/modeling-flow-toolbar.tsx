@@ -1,7 +1,6 @@
 "use client";
 
-import { LocateFixed, RefreshCw, Workflow } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Workflow } from "lucide-react";
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
 
 export function ModelingFlowToolbar(props: {
@@ -9,12 +8,8 @@ export function ModelingFlowToolbar(props: {
   edgeCount: number;
   hasInvalidEdges: boolean;
   selectedNode: ModelingSidebarNode | null;
-  busy?: boolean;
-  onFitView?: () => void;
-  onClearSelection?: () => void;
 }) {
-  const { nodeCount, edgeCount, hasInvalidEdges, selectedNode, busy, onFitView, onClearSelection } =
-    props;
+  const { nodeCount, edgeCount, hasInvalidEdges, selectedNode } = props;
   const selectedSummary = selectedNode
     ? `${selectedNode.kind} · ${selectedNode.id}`
     : "当前未选中节点（可从左侧资产树选择）";
@@ -56,30 +51,6 @@ export function ModelingFlowToolbar(props: {
               存在未映射关系
             </span>
           ) : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={onFitView}
-            disabled={busy || !onFitView}
-            aria-label="画布适配视图"
-          >
-            <LocateFixed className="h-4 w-4" />
-            Fit
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={onClearSelection}
-            disabled={busy || !selectedNode || !onClearSelection}
-            aria-label="清除当前选中"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Clear
-          </Button>
         </div>
       </div>
       {hasInvalidEdges ? (

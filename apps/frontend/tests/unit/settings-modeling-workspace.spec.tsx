@@ -51,7 +51,7 @@ describe("ModelingWorkspacePage", () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/modeling?workspaceId=ws-2&datasourceId=ds-2b"
+      "/modeling?workspaceId=ws-2&datasourceId=ds-2b"
     );
     window.sessionStorage.clear();
     window.sessionStorage.setItem("text2sql.activeWorkspaceId", "ws-1");
@@ -430,7 +430,7 @@ describe("ModelingWorkspacePage", () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/modeling?workspaceId=ws-2&datasourceId=ds-2b&viewId=view.orders_recent"
+      "/modeling?workspaceId=ws-2&datasourceId=ds-2b&viewId=view.orders_recent"
     );
 
     mockGetWorkspaceModelingGraph.mockResolvedValueOnce({

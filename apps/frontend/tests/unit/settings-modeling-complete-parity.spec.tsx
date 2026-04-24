@@ -45,7 +45,7 @@ describe("settings modeling complete parity", () => {
     window.history.replaceState(
       {},
       "",
-      "/settings/modeling?workspaceId=ws-2&datasourceId=ds-2b&viewId=view.orders_recent"
+      "/modeling?workspaceId=ws-2&datasourceId=ds-2b&viewId=view.orders_recent"
     );
     window.sessionStorage.clear();
 

@@ -38,7 +38,12 @@ describe("ModelingFlowNode", () => {
         kind: "model",
         title: "Orders",
         subtitle: "orders",
-        columnCount: 12
+        columnCount: 12,
+        sections: {
+          columns: ["id", "order_no", "customer_id"],
+          calculatedFields: ["order_total"],
+          relationships: ["orders_to_customers"]
+        }
       },
       selected: true
     } as unknown as Parameters<typeof ModelingFlowNode>[0];
@@ -53,6 +58,18 @@ describe("ModelingFlowNode", () => {
     expect(node.className).toContain("ring-1");
     expect(screen.getByText("model")).toBeInTheDocument();
     expect(screen.getByText("列数 12")).toBeInTheDocument();
+    expect(screen.getByText("Columns")).toBeInTheDocument();
+    expect(screen.getByText("Calculated Fields")).toBeInTheDocument();
+    expect(screen.getByText("Relationships")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("modeling-flow-node-section-columns-items")
+    ).toHaveTextContent("id, order_no +1");
+    expect(
+      screen.getByTestId("modeling-flow-node-section-calculatedFields-items")
+    ).toHaveTextContent("order_total");
+    expect(
+      screen.getByTestId("modeling-flow-node-section-relationships-items")
+    ).toHaveTextContent("orders_to_customers");
   });
 
   it("renders dragging view node status without column count", () => {
@@ -76,6 +93,7 @@ describe("ModelingFlowNode", () => {
     expect(node).toHaveAttribute("data-dragging", "true");
     expect(node).toHaveAttribute("data-selected", "false");
     expect(screen.queryByText(/列数/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Columns")).not.toBeInTheDocument();
   });
 });
 

@@ -35,7 +35,7 @@ const navItems = [
   { href: "/", label: "总览", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/data-sources", label: "数据源", icon: Database },
-  { href: "/settings/modeling", label: "数据关系图", icon: Workflow },
+  { href: "/modeling", label: "数据关系图", icon: Workflow },
   { href: "/dashboards", label: "看板", icon: LayoutDashboard },
   { href: "/glossary", label: "术语库", icon: BookOpen },
   { href: "/prompts", label: "提示词", icon: Sparkles },

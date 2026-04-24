@@ -16,6 +16,13 @@ export type ModelingGraphModel = {
   displayName?: string | null;
   description?: string | null;
   columns: ModelingGraphColumn[];
+  nodeSections?: ModelingGraphNodeSections;
+};
+
+export type ModelingGraphNodeSections = {
+  columns: string[];
+  calculatedFields: string[];
+  relationships: string[];
 };
 
 export type ModelingGraphRelationship = {
@@ -130,5 +137,12 @@ export type ModelingGraphSnapshot = {
   workspaceId: string;
   datasourceId: string;
   activeRevision?: number;
+  revisionSummary?: ModelingRevisionSummary;
   draft: ModelingGraphDraft | null;
+};
+
+export type ModelingRevisionSummary = {
+  draftRevision?: number;
+  activeRevision?: number;
+  deployState: "undeployed" | "synced";
 };

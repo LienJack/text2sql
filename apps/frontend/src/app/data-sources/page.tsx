@@ -516,7 +516,7 @@ function DataSourcesPageContent() {
   const navigateToModeling = (workspaceId: string, datasourceId: string): void => {
     writeActiveWorkspaceId(workspaceId);
     writeActiveDatasourceId(datasourceId);
-    router.push(`/settings/modeling?datasourceId=${encodeURIComponent(datasourceId)}`);
+    router.push(`/modeling?datasourceId=${encodeURIComponent(datasourceId)}`);
   };
 
   const openSetupWizard = async (workspaceId: string, datasourceId: string): Promise<void> => {

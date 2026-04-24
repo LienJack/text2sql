@@ -10,7 +10,11 @@ describe("ModelingDeployPanel", () => {
 
     render(
       <ModelingDeployPanel
+        deployState="undeployed"
         hasUndeployedChanges
+        hasPendingDraftChanges={false}
+        canRunPrecheck
+        canDeploy={false}
         precheck={{
           pass: false,
           riskLevel: "high",

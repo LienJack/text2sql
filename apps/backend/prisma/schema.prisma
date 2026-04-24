@@ -538,6 +538,7 @@ model WorkspaceModelingGraphRevision {
   status           String   @default("draft")
   graphHash        String
   graphPayload     String
+  graphPayloadVersion Int  @default(2)
   createdByActorId String?
   activatedByActorId String?
   activatedAt      DateTime?

@@ -20,8 +20,14 @@ type ModelingDeployPrecheckResponse = {
   datasourceId: string;
   policyVersion: number;
   draftRevision: number;
+  targetRevision: number;
   activeRevision?: number;
   deployState: "undeployed" | "synced";
+  revisionSummary: {
+    draftRevision: number;
+    activeRevision?: number;
+    deployState: "undeployed" | "synced";
+  };
   pass: boolean;
   riskLevel: "low" | "medium" | "high";
   blockingReasons: string[];
@@ -81,7 +87,8 @@ export class WorkspaceModelingDeployService {
         }
       );
     }
-    const draftRevision = body.draftRevision ?? draftState.draft.revision;
+    const draftRevision =
+      body.draftRevision ?? body.targetRevision ?? draftState.draft.revision;
     const tablePermissionSet = await this.workspaceDatasourceService.listDatasourceTablePermissions(
       actor,
       workspaceId,
@@ -164,8 +171,14 @@ export class WorkspaceModelingDeployService {
       datasourceId,
       policyVersion: precheck.policyVersion,
       draftRevision,
+      targetRevision: draftRevision,
       activeRevision: targetDraftState.activeRevision,
       deployState,
+      revisionSummary: {
+        draftRevision,
+        activeRevision: targetDraftState.activeRevision,
+        deployState
+      },
       pass: blockingReasons.size === 0 && gate.dryRun.pass,
       riskLevel:
         schemaChangeState.highRiskStatus === "high" || gate.riskLevel === "high"
@@ -194,7 +207,13 @@ export class WorkspaceModelingDeployService {
     workspaceId: string;
     datasourceId: string;
     activeRevision: number;
+    targetRevision: number;
     deployState: "synced";
+    revisionSummary: {
+      draftRevision: number;
+      activeRevision: number;
+      deployState: "synced";
+    };
     graphHash: string;
     blockingReasons: string[];
     blockingReasonDetails: ModelingDeployBlockingReasonDetail[];
@@ -273,7 +292,13 @@ export class WorkspaceModelingDeployService {
         workspaceId,
         datasourceId,
         activeRevision: published.activeRevision,
+        targetRevision: published.activeRevision,
         deployState: "synced",
+        revisionSummary: {
+          draftRevision: published.activeRevision,
+          activeRevision: published.activeRevision,
+          deployState: "synced"
+        },
         graphHash: published.graphHash,
         blockingReasons: precheck.blockingReasons,
         blockingReasonDetails: precheck.blockingReasonDetails,

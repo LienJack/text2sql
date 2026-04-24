@@ -189,7 +189,7 @@ describe("chat save-as-view dialog", () => {
       "view.chat_run.run-1"
     );
     expect(assignSpy).toHaveBeenCalledWith(
-      "/settings/modeling?workspaceId=ws-1&datasourceId=ds-1&viewId=view.chat_run.run-1"
+      "/modeling?workspaceId=ws-1&datasourceId=ds-1&viewId=view.chat_run.run-1"
     );
 
     Object.defineProperty(window, "location", {

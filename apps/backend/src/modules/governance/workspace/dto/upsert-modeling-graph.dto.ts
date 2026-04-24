@@ -41,4 +41,16 @@ export class UpsertModelingGraphDto {
   @IsArray()
   @Transform(({ value }) => toArrayOrUndefined(value))
   schemaChanges?: Record<string, unknown>[];
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  draftRevision?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  targetRevision?: number;
 }

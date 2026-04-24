@@ -56,7 +56,7 @@ describe("PlatformShell", () => {
   });
 
   it("prefers nested nav item title for modeling path", () => {
-    mockUsePathname.mockReturnValue("/settings/modeling");
+    mockUsePathname.mockReturnValue("/modeling");
     render(
       <PlatformShell>
         <div>Modeling page body</div>

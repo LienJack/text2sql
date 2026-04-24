@@ -27,6 +27,7 @@ import {
 import { ModelingDetailsPanel } from "@/components/settings/modeling/modeling-details-panel";
 import { ModelingDeployPanel } from "@/components/settings/modeling/modeling-deploy-panel";
 import { ModelingFlowCanvas } from "@/components/settings/modeling/modeling-flow-canvas";
+import { ModelingModelDrawer } from "@/components/settings/modeling/modeling-model-drawer";
 import { ModelingSchemaChangePanel } from "@/components/settings/modeling/modeling-schema-change-panel";
 import {
   ModelingSidebarTree,
@@ -206,6 +207,7 @@ export default function ModelingWorkspacePage() {
   const [snapshot, setSnapshot] = useState<WorkspaceModelingGraphSnapshot | null>(null);
   const [graphPayload, setGraphPayload] = useState<ModelingGraphPayload>(createEmptyGraphPayload());
   const [selectedNode, setSelectedNode] = useState<ModelingSidebarNode | null>(null);
+  const [modelDrawerOpen, setModelDrawerOpen] = useState(false);
   const [detailsDirty, setDetailsDirty] = useState(false);
   const [hasPendingDraftChanges, setHasPendingDraftChanges] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -265,6 +267,7 @@ export default function ModelingWorkspacePage() {
       setSelectedNode((previous) =>
         resolveNextSelectedNode(nextGraphPayload, previous, preferredViewIds)
       );
+      setModelDrawerOpen(false);
       if (preferredViewIdFromSession && typeof window !== "undefined") {
         window.sessionStorage.removeItem(MODELING_SELECTED_VIEW_ID_STORAGE_KEY);
       }
@@ -346,6 +349,7 @@ export default function ModelingWorkspacePage() {
       setSnapshot(null);
       setGraphPayload(createEmptyGraphPayload());
       setSelectedNode(null);
+      setModelDrawerOpen(false);
       setDetailsDirty(false);
       setHasPendingDraftChanges(false);
       return;
@@ -364,6 +368,13 @@ export default function ModelingWorkspacePage() {
       }
     })();
   }, [datasourceId, loadModelingSnapshot, workspaceId]);
+
+  useEffect(() => {
+    if (selectedNode?.kind === "model") {
+      return;
+    }
+    setModelDrawerOpen(false);
+  }, [selectedNode]);
 
   const hasSavedUndeployedChanges = useMemo(() => {
     if (!snapshot?.draft) {
@@ -394,6 +405,12 @@ export default function ModelingWorkspacePage() {
       workspaceId,
     [workspaceId, workspaces]
   );
+  const selectedModelForDrawer = useMemo(() => {
+    if (selectedNode?.kind !== "model") {
+      return null;
+    }
+    return graphPayload.models.find((model) => model.id === selectedNode.id) ?? null;
+  }, [graphPayload.models, selectedNode]);
 
   const saveModelingGraph = async (): Promise<void> => {
     if (!workspaceId || !datasourceId) {
@@ -544,12 +561,16 @@ export default function ModelingWorkspacePage() {
         }
       }
       setSelectedNode(null);
+      setModelDrawerOpen(false);
       setDetailsDirty(false);
       return;
     }
     const isSame =
       selectedNode?.kind === nextNode.kind && selectedNode?.id === nextNode.id;
     if (isSame) {
+      if (nextNode.kind === "model") {
+        setModelDrawerOpen(true);
+      }
       return;
     }
     if (detailsDirty && typeof window !== "undefined") {
@@ -559,6 +580,7 @@ export default function ModelingWorkspacePage() {
       }
     }
     setSelectedNode(nextNode);
+    setModelDrawerOpen(nextNode.kind === "model");
     setDetailsDirty(false);
   };
 
@@ -596,6 +618,7 @@ export default function ModelingWorkspacePage() {
         kind: "model",
         id: createdModelId
       });
+      setModelDrawerOpen(true);
       setHasPendingDraftChanges(true);
       setDeployPrecheck(null);
       setMessage(`已新增 Model：${createdModelId}，请补充字段后保存 Modeling Draft。`);
@@ -603,6 +626,7 @@ export default function ModelingWorkspacePage() {
   };
 
   const deleteModelFromSidebar = (modelId: string): void => {
+    const shouldCloseDrawer = selectedNode?.kind === "model" && selectedNode.id === modelId;
     setGraphPayload((previous) => {
       const target = previous.models.find((item) => item.id === modelId);
       if (!target) {
@@ -623,6 +647,9 @@ export default function ModelingWorkspacePage() {
     setSelectedNode((previous) =>
       previous?.kind === "model" && previous.id === modelId ? null : previous
     );
+    if (shouldCloseDrawer) {
+      setModelDrawerOpen(false);
+    }
     setHasPendingDraftChanges(true);
     setDeployPrecheck(null);
     setMessage(`已删除 Model：${modelId}，请保存 Modeling Draft。`);
@@ -665,73 +692,66 @@ export default function ModelingWorkspacePage() {
 
   return (
     <div className="space-y-4 px-4 py-4 sm:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
-          <Link
-            href="/settings"
-            className="inline-flex items-center gap-1 text-sm text-[var(--action-primary)]"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            返回设置
-          </Link>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Modeling Workbench</h1>
-          <p className="text-sm text-[var(--text-secondary)]">
-            Flowchart-first 工作台：左侧资产树 + 中央 ERD 画布 + 右侧上下文，统一管理 Models / Views / Relationships。
-          </p>
+      <div className="sr-only">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <Link
+              href="/settings"
+              className="inline-flex items-center gap-1 text-sm text-[var(--action-primary)]"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              返回设置
+            </Link>
+            <h1 className="text-xl font-semibold text-[var(--text-primary)]">Modeling Workbench</h1>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Flowchart-first 工作台：左侧资产树 + 中央 ERD 画布 + 右侧上下文，统一管理 Models / Views / Relationships。
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4 sm:grid-cols-2">
-        <NativeSelect
-          value={workspaceId}
-          disabled
-          aria-label="选择工作空间"
-        >
-          {workspaceId ? (
-            <NativeSelectOption value={workspaceId}>
-              {selectedWorkspaceName}
-            </NativeSelectOption>
-          ) : (
-            <NativeSelectOption value="">当前无工作空间上下文</NativeSelectOption>
-          )}
-        </NativeSelect>
-        <NativeSelect
-          value={datasourceId}
-          onChange={(event) => {
-            const nextDatasourceId = event.target.value;
-            setDatasourceId(nextDatasourceId);
-            writeActiveDatasourceId(nextDatasourceId);
-            syncModelingPageQueryContext(workspaceId, nextDatasourceId);
-          }}
-          aria-label="选择数据源"
-        >
-          <NativeSelectOption value="">请选择数据源</NativeSelectOption>
-          {datasources.map((datasource) => (
-            <NativeSelectOption key={datasource.id} value={datasource.id}>
-              {datasource.name}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+        <div className="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4 sm:grid-cols-2">
+          <NativeSelect
+            value={workspaceId}
+            disabled
+            aria-label="选择工作空间"
+          >
+            {workspaceId ? (
+              <NativeSelectOption value={workspaceId}>
+                {selectedWorkspaceName}
+              </NativeSelectOption>
+            ) : (
+              <NativeSelectOption value="">当前无工作空间上下文</NativeSelectOption>
+            )}
+          </NativeSelect>
+          <NativeSelect
+            value={datasourceId}
+            onChange={(event) => {
+              const nextDatasourceId = event.target.value;
+              setDatasourceId(nextDatasourceId);
+              writeActiveDatasourceId(nextDatasourceId);
+              syncModelingPageQueryContext(workspaceId, nextDatasourceId);
+            }}
+            aria-label="选择数据源"
+          >
+            <NativeSelectOption value="">请选择数据源</NativeSelectOption>
+            {datasources.map((datasource) => (
+              <NativeSelectOption key={datasource.id} value={datasource.id}>
+                {datasource.name}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </div>
       </div>
 
       {error ? <StateBlock variant="error">{error}</StateBlock> : null}
       {message ? <StateBlock variant="success">{message}</StateBlock> : null}
 
       <section
-        className="space-y-2 rounded-lg border border-[var(--border-default)] bg-white/90 px-4 py-3"
+        className="rounded-lg border border-[var(--border-default)] bg-white/90 px-3 py-2"
         data-testid="modeling-top-status-bar"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-            <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] px-2 py-0.5">
-              Draft {snapshot?.draft?.revision ?? "-"}
-            </span>
-            <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] px-2 py-0.5">
-              Active {snapshot?.activeRevision ?? "-"}
-            </span>
-            <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] px-2 py-0.5">
-              Policy {policyVersion}
-            </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs text-[var(--text-secondary)]">
             <span
               className={`rounded-full border px-2 py-0.5 ${
                 deployState === "undeployed"
@@ -742,7 +762,6 @@ export default function ModelingWorkspacePage() {
             >
               Deploy State {deployState}
             </span>
-            <span className="truncate">Current Context: {resolveSelectedNodeSummary(selectedNode)}</span>
           </div>
           <Button
             onClick={() => {
@@ -753,32 +772,30 @@ export default function ModelingWorkspacePage() {
             保存 Modeling Draft
           </Button>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-          <span>Models {graphPayload.models.length}</span>
-          <span>Views {graphPayload.views.length}</span>
-          <span>Relationships {graphPayload.relationships.length}</span>
+        <div className="sr-only">
+          <p>Draft {snapshot?.draft?.revision ?? "-"}</p>
+          <p>Active {snapshot?.activeRevision ?? "-"}</p>
+          <p>Policy {policyVersion}</p>
+          <p>Current Context: {resolveSelectedNodeSummary(selectedNode)}</p>
+          <p>Models {graphPayload.models.length}</p>
+          <p>Views {graphPayload.views.length}</p>
+          <p>Relationships {graphPayload.relationships.length}</p>
+          <p>
+            {deployState === "undeployed"
+              ? hasPendingDraftChanges
+                ? "Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。"
+                : "Deploy State: undeployed。检测到 draft revision 与 active revision 不一致。"
+              : "Deploy State: synced。当前无 undeployed revision。"}
+          </p>
+          {detailsDirty ? <p>详情面板存在未保存改动，切换对象前会进行确认。</p> : null}
         </div>
-
-        {deployState === "undeployed" ? (
-          <StateBlock variant="idle">
-            {hasPendingDraftChanges
-              ? "Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。"
-              : "Deploy State: undeployed。检测到 draft revision 与 active revision 不一致。"}
-          </StateBlock>
-        ) : (
-          <StateBlock variant="idle">Deploy State: synced。当前无 undeployed revision。</StateBlock>
-        )}
-        {detailsDirty ? (
-          <StateBlock variant="idle">详情面板存在未保存改动，切换对象前会进行确认。</StateBlock>
-        ) : null}
       </section>
 
       <section
         className="rounded-lg border border-[var(--border-default)] bg-white/90 p-2 sm:hidden"
         data-testid="modeling-mobile-quick-access"
       >
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             type="button"
             size="sm"
@@ -801,22 +818,11 @@ export default function ModelingWorkspacePage() {
           >
             资产树
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            aria-controls="modeling-context-pane"
-            onClick={() => {
-              scrollToLayoutPane("modeling-context-pane");
-            }}
-          >
-            详情/部署
-          </Button>
         </div>
       </section>
 
       <section
-        className="grid grid-cols-1 gap-4 xl:grid-cols-[260px_minmax(0,1fr)_320px] 2xl:grid-cols-[280px_minmax(0,1fr)_340px]"
+        className="relative grid grid-cols-1 gap-4 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]"
         data-testid="modeling-layout-parity-shell"
       >
         <div
@@ -863,7 +869,7 @@ export default function ModelingWorkspacePage() {
 
         <div
           id="modeling-context-pane"
-          className="order-3 space-y-4"
+          className="absolute -left-[9999px] top-0 w-[320px] space-y-4 2xl:w-[340px]"
           data-testid="modeling-layout-context-pane"
         >
           <header className="px-1" data-testid="modeling-layout-context-header">
@@ -979,6 +985,19 @@ export default function ModelingWorkspacePage() {
           />
         </div>
       </section>
+
+      <ModelingModelDrawer
+        open={Boolean(selectedModelForDrawer) && modelDrawerOpen}
+        model={selectedModelForDrawer}
+        relationships={graphPayload.relationships}
+        onOpenChange={(open) => {
+          if (open) {
+            return;
+          }
+          selectNodeWithDirtyGuard(null);
+        }}
+        onLoadPreview={loadPreviewForDetails}
+      />
     </div>
   );
 }
