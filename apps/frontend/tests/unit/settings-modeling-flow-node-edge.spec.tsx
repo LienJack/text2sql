@@ -95,6 +95,27 @@ describe("ModelingFlowNode", () => {
     expect(screen.queryByText(/列数/)).not.toBeInTheDocument();
     expect(screen.queryByText("Columns")).not.toBeInTheDocument();
   });
+
+  it("keeps compact model node rendering when section data is absent", () => {
+    const nodeProps = {
+      id: "model.minimal",
+      data: {
+        kind: "model",
+        title: "Minimal Model",
+        subtitle: "minimal",
+        columnCount: 1
+      },
+      selected: false
+    } as unknown as Parameters<typeof ModelingFlowNode>[0];
+
+    render(
+      <ModelingFlowNode {...nodeProps} />
+    );
+
+    expect(screen.getByTestId("modeling-flow-node")).toHaveAttribute("data-node-kind", "model");
+    expect(screen.queryByText("Calculated Fields")).not.toBeInTheDocument();
+    expect(screen.queryByText("Relationships")).not.toBeInTheDocument();
+  });
 });
 
 describe("ModelingFlowEdge", () => {

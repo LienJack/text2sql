@@ -242,8 +242,10 @@ describe("Modeling layout parity", () => {
       "modeling-layout-canvas-pane",
       "modeling-layout-context-pane"
     ]);
+    await screen.findByTestId("layout-parity-react-flow");
     expect(within(leftPane).getByTestId("modeling-sidebar-tree")).toBeInTheDocument();
     expect(within(canvasPane).getByTestId("modeling-flow-canvas")).toBeInTheDocument();
+    expect(within(canvasPane).getByRole("button", { name: "自动布局画布" })).toBeInTheDocument();
     expect(within(contextPane).getByTestId("layout-mock-details-panel")).toBeInTheDocument();
     expect(within(contextPane).getByTestId("layout-mock-schema-panel")).toBeInTheDocument();
     expect(within(contextPane).getByTestId("layout-mock-deploy-panel")).toBeInTheDocument();

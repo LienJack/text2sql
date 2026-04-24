@@ -6,6 +6,11 @@ import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import { ModelingFlowCanvas } from "@/components/settings/modeling/modeling-flow-canvas";
 
 const fitViewMock = vi.fn();
+const computeElkLayoutMock = vi.fn();
+
+vi.mock("@/components/settings/modeling/layout/elk-layout", () => ({
+  computeElkLayout: (...args: unknown[]) => computeElkLayoutMock(...args)
+}));
 
 vi.mock("@xyflow/react", () => {
   const applyNodeChanges = (
@@ -209,6 +214,16 @@ const baseGraphPayload: ModelingGraphPayload = {
 describe("ModelingFlowCanvas", () => {
   beforeEach(() => {
     fitViewMock.mockClear();
+    computeElkLayoutMock.mockReset();
+    computeElkLayoutMock.mockResolvedValue({
+      ok: true,
+      elapsedMs: 120,
+      positions: {
+        "model:model.customers": { x: 360, y: 220 },
+        "model:model.orders": { x: 40, y: 20 },
+        "view:view.daily_orders": { x: 720, y: 340 }
+      }
+    });
     Object.defineProperty(window, "ResizeObserver", {
       writable: true,
       configurable: true,
@@ -258,6 +273,112 @@ describe("ModelingFlowCanvas", () => {
 
     await user.click(screen.getByRole("button", { name: "画布适配视图" }));
     expect(fitViewMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies one-click auto layout and keeps selection/edit flow available", async () => {
+    const user = userEvent.setup();
+    const onSelectNode = vi.fn();
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:1"
+        onSelectNode={onSelectNode}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("0,0");
+    });
+
+    await user.click(screen.getByRole("button", { name: "自动布局画布" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("360,220");
+      expect(screen.getByText("Auto Layout 完成（120ms）。")).toBeInTheDocument();
+    });
+    expect(computeElkLayoutMock).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-click" }));
+    expect(onSelectNode).toHaveBeenCalledWith({ kind: "model", id: "model.customers" });
+  });
+
+  it("keeps previous positions and shows non-blocking warning when auto layout fails", async () => {
+    const user = userEvent.setup();
+    computeElkLayoutMock.mockResolvedValueOnce({
+      ok: false,
+      reason: "timeout",
+      message: "timeout",
+      elapsedMs: 2000
+    });
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:1"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("0,0");
+    });
+
+    await user.click(screen.getByRole("button", { name: "自动布局画布" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Auto Layout 超时，已保留当前画布位置。")).toBeInTheDocument();
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("0,0");
+    });
+  });
+
+  it("discards stale layout result when autoLayoutKey changes during async execution", async () => {
+    const user = userEvent.setup();
+    let resolveLayout: ((value: unknown) => void) | undefined;
+    computeElkLayoutMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLayout = resolve;
+        })
+    );
+
+    const { rerender } = render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:1"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("0,0");
+    });
+
+    await user.click(screen.getByRole("button", { name: "自动布局画布" }));
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:2"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    resolveLayout?.({
+      ok: true,
+      elapsedMs: 300,
+      positions: {
+        "model:model.customers": { x: 500, y: 500 }
+      }
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("0,0");
+    });
   });
 
   it("shows recoverable invalid-relationship warning instead of crashing", () => {
@@ -313,6 +434,27 @@ describe("ModelingFlowCanvas", () => {
     ).toBeInTheDocument();
   });
 
+  it("disables auto layout action when graph has only one node", async () => {
+    const singleNodePayload: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      models: [baseGraphPayload.models[0]],
+      views: [],
+      relationships: []
+    };
+    render(
+      <ModelingFlowCanvas
+        graphPayload={singleNodePayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:single"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "自动布局画布" })).toBeDisabled();
+    });
+  });
+
   it("re-runs auto-fit when autoLayoutKey changes", async () => {
     const { rerender } = render(
       <ModelingFlowCanvas
@@ -360,7 +502,9 @@ describe("ModelingFlowCanvas", () => {
     await waitFor(() => {
       expect(screen.getByTestId("first-node-position")).toHaveTextContent("999,888");
     });
-    expect(fitViewMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(fitViewMock).toHaveBeenCalledTimes(1);
+    });
 
     rerender(
       <ModelingFlowCanvas
@@ -375,6 +519,8 @@ describe("ModelingFlowCanvas", () => {
       expect(screen.getByTestId("first-node-position")).toHaveTextContent("999,888");
       expect(screen.getByTestId("selected-edge-ids")).toHaveTextContent("rel-orders-customers");
     });
-    expect(fitViewMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(fitViewMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

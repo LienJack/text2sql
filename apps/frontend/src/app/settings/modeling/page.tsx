@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import {
+  AdminApiError,
   deployWorkspaceModeling,
   detectWorkspaceModelingSchemaChanges,
   getWorkspaceModelingPreview,
@@ -38,6 +39,24 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { StateBlock } from "@/components/ui/state-block";
 
 const MODELING_SELECTED_VIEW_ID_STORAGE_KEY = "text2sql.modeling.selectViewId";
+const POLICY_VERSION_CONFLICT_ERROR_CODES = new Set([
+  "WORKSPACE_DATASOURCE_POLICY_VERSION_CONFLICT",
+  "POLICY_VERSION_CONFLICT"
+]);
+
+function isPolicyVersionConflictError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const code =
+    error instanceof AdminApiError && typeof error.code === "string"
+      ? error.code
+      : undefined;
+  if (code && POLICY_VERSION_CONFLICT_ERROR_CODES.has(code)) {
+    return true;
+  }
+  return error.message.includes("policyVersion 已过期");
+}
 
 function createEmptyGraphPayload(): ModelingGraphPayload {
   return {
@@ -417,28 +436,68 @@ export default function ModelingWorkspacePage() {
       setError("请先选择工作空间与数据源。");
       return;
     }
+    const graphPayloadToSave = {
+      models: graphPayload.models,
+      relationships: graphPayload.relationships,
+      calculatedFields: graphPayload.calculatedFields,
+      views: graphPayload.views,
+      schemaChanges: graphPayload.schemaChanges
+    };
+    const applySavedSnapshot = (
+      nextSnapshot: WorkspaceModelingGraphSnapshot,
+      fallbackPolicyVersion: number
+    ): void => {
+      const nextGraphPayload = normalizeGraphPayload(nextSnapshot.draft?.graphPayload);
+      setSnapshot(nextSnapshot);
+      setGraphPayload(nextGraphPayload);
+      setPolicyVersion(nextSnapshot.draft?.policyVersion ?? fallbackPolicyVersion);
+      setSelectedNode((previous) => resolveNextSelectedNode(nextGraphPayload, previous));
+      setDetailsDirty(false);
+      setHasPendingDraftChanges(false);
+      setDeployPrecheck(null);
+    };
     setSaving(true);
     setError("");
     setMessage("");
     try {
       const nextSnapshot = await upsertWorkspaceModelingGraph(workspaceId, datasourceId, {
         policyVersion,
-        models: graphPayload.models,
-        relationships: graphPayload.relationships,
-        calculatedFields: graphPayload.calculatedFields,
-        views: graphPayload.views,
-        schemaChanges: graphPayload.schemaChanges
+        ...graphPayloadToSave
       });
-      const nextGraphPayload = normalizeGraphPayload(nextSnapshot.draft?.graphPayload);
-      setSnapshot(nextSnapshot);
-      setGraphPayload(nextGraphPayload);
-      setPolicyVersion(nextSnapshot.draft?.policyVersion ?? policyVersion);
-      setSelectedNode((previous) => resolveNextSelectedNode(nextGraphPayload, previous));
-      setDetailsDirty(false);
-      setHasPendingDraftChanges(false);
-      setDeployPrecheck(null);
+      applySavedSnapshot(nextSnapshot, policyVersion);
       setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
     } catch (submitError) {
+      if (isPolicyVersionConflictError(submitError)) {
+        try {
+          const latestPermissions = await listWorkspaceDatasourceTablePermissions(
+            workspaceId,
+            datasourceId
+          );
+          const latestPolicyVersion = latestPermissions.policyVersion;
+          if (latestPolicyVersion !== policyVersion) {
+            const retriedSnapshot = await upsertWorkspaceModelingGraph(
+              workspaceId,
+              datasourceId,
+              {
+                policyVersion: latestPolicyVersion,
+                ...graphPayloadToSave
+              }
+            );
+            applySavedSnapshot(retriedSnapshot, latestPolicyVersion);
+            setMessage(
+              `policyVersion 已从 ${policyVersion} 更新为 ${latestPolicyVersion}，已自动重试并保存成功（revision=${retriedSnapshot.draft?.revision ?? "-"}）。`
+            );
+            return;
+          }
+        } catch (retryError) {
+          setError(
+            retryError instanceof Error
+              ? `policyVersion 自动刷新重试失败：${retryError.message}`
+              : "policyVersion 自动刷新重试失败，请刷新后重试。"
+          );
+          return;
+        }
+      }
       setError(submitError instanceof Error ? submitError.message : "保存建模图失败");
     } finally {
       setSaving(false);

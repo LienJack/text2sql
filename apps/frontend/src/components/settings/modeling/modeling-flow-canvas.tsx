@@ -19,6 +19,7 @@ import {
 import { LocateFixed, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
+import { computeElkLayout } from "@/components/settings/modeling/layout/elk-layout";
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
 import {
   MODELING_FLOW_EDGE_TYPE,
@@ -44,6 +45,7 @@ const EDGE_TYPES: EdgeTypes = {
 const FLOW_COLUMNS = 3;
 const FLOW_NODE_X_GAP = 280;
 const FLOW_NODE_Y_GAP = 170;
+const AUTO_LAYOUT_TIMEOUT_MS = 2000;
 
 function resolveModelLabel(model: ModelingGraphPayload["models"][number]): string {
   return model.displayName?.trim() || model.modelName?.trim() || model.tableName;
@@ -86,6 +88,23 @@ function resolveRelationshipLabel(
   const rightTable = bridge?.right?.table ?? "unknown_right_table";
   const rightColumn = bridge?.right?.column ?? "unknown_right_column";
   return `${leftTable}.${leftColumn} = ${rightTable}.${rightColumn}`;
+}
+
+function estimateLayoutNodeSize(node: Node<ModelingFlowNodeData>): { width: number; height: number } {
+  if (node.data.kind === "view") {
+    return {
+      width: 240,
+      height: 90
+    };
+  }
+  const sectionCount = node.data.sections
+    ? [node.data.sections.columns, node.data.sections.calculatedFields, node.data.sections.relationships]
+        .filter((items) => items.length > 0).length
+    : 0;
+  return {
+    width: 260,
+    height: 120 + sectionCount * 44
+  };
 }
 
 function buildGraph(
@@ -311,7 +330,11 @@ export function ModelingFlowCanvas(props: {
   const [didAutoFit, setDidAutoFit] = useState(false);
   const [flowNodes, setFlowNodes] = useState<Array<Node<ModelingFlowNodeData>>>([]);
   const [flowEdges, setFlowEdges] = useState<Array<Edge<ModelingFlowEdgeData>>>([]);
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const [layoutMessage, setLayoutMessage] = useState("");
+  const [layoutMessageVariant, setLayoutMessageVariant] = useState<"success" | "error">("success");
   const selectionFocusKeyRef = useRef("");
+  const latestLayoutRunIdRef = useRef(0);
 
   const graph = useMemo(() => {
     try {
@@ -378,6 +401,9 @@ export function ModelingFlowCanvas(props: {
   useEffect(() => {
     setDidAutoFit(false);
     selectionFocusKeyRef.current = "";
+    latestLayoutRunIdRef.current += 1;
+    setLayoutBusy(false);
+    setLayoutMessage("");
   }, [autoLayoutKey]);
 
   useEffect(() => {
@@ -424,6 +450,78 @@ export function ModelingFlowCanvas(props: {
     });
   }, [flowInstance]);
 
+  const handleAutoLayout = useCallback(async () => {
+    if (busy || layoutBusy || flowNodes.length < 2) {
+      return;
+    }
+    const currentRunId = latestLayoutRunIdRef.current + 1;
+    latestLayoutRunIdRef.current = currentRunId;
+    setLayoutBusy(true);
+    setLayoutMessage("");
+
+    const layoutResult = await computeElkLayout(
+      {
+        nodes: flowNodes.map((node) => {
+          const size = estimateLayoutNodeSize(node);
+          return {
+            id: node.id,
+            width: size.width,
+            height: size.height,
+            position: node.position
+          };
+        }),
+        edges: flowEdges.map((edge) => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target
+        }))
+      },
+      {
+        timeoutMs: AUTO_LAYOUT_TIMEOUT_MS
+      }
+    );
+
+    if (currentRunId !== latestLayoutRunIdRef.current) {
+      return;
+    }
+
+    if (!layoutResult.ok) {
+      setLayoutBusy(false);
+      setLayoutMessageVariant("error");
+      if (layoutResult.reason === "timeout") {
+        setLayoutMessage("Auto Layout 超时，已保留当前画布位置。");
+      } else {
+        setLayoutMessage("Auto Layout 执行失败，已保留当前画布位置。");
+      }
+      return;
+    }
+
+    setFlowNodes((previousNodes) =>
+      previousNodes.map((node) => {
+        const nextPosition = layoutResult.positions[node.id];
+        if (!nextPosition) {
+          return node;
+        }
+        return {
+          ...node,
+          position: nextPosition
+        };
+      })
+    );
+    setLayoutBusy(false);
+    setLayoutMessageVariant("success");
+    setLayoutMessage(`Auto Layout 完成（${layoutResult.elapsedMs}ms）。`);
+
+    if (flowInstance) {
+      window.requestAnimationFrame(() => {
+        flowInstance.fitView({
+          padding: 0.22,
+          duration: 260
+        });
+      });
+    }
+  }, [busy, flowEdges, flowInstance, flowNodes, layoutBusy]);
+
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node<ModelingFlowNodeData>) => {
       const nextNode = fromFlowNodeId(node.id);
@@ -461,6 +559,7 @@ export function ModelingFlowCanvas(props: {
 
   const canRenderReactFlow =
     typeof window !== "undefined" && typeof window.ResizeObserver !== "undefined";
+  const controlBusy = Boolean(busy || layoutBusy);
 
   return (
     <section className="space-y-3" data-testid="modeling-flow-canvas">
@@ -479,8 +578,22 @@ export function ModelingFlowCanvas(props: {
                 size="sm"
                 variant="outline"
                 className="h-7 gap-1.5 px-2"
+                onClick={() => {
+                  void handleAutoLayout();
+                }}
+                disabled={controlBusy || flowNodes.length < 2}
+                aria-label="自动布局画布"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${layoutBusy ? "animate-spin" : ""}`} />
+                Auto Layout
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1.5 px-2"
                 onClick={handleFitView}
-                disabled={busy}
+                disabled={controlBusy}
                 aria-label="画布适配视图"
               >
                 <LocateFixed className="h-3.5 w-3.5" />
@@ -494,7 +607,7 @@ export function ModelingFlowCanvas(props: {
                 onClick={() => {
                   onSelectNode(null);
                 }}
-                disabled={busy || !selectedNode}
+                disabled={controlBusy || !selectedNode}
                 aria-label="清除当前选中"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -586,6 +699,8 @@ export function ModelingFlowCanvas(props: {
           </div>
         )}
       </div>
+
+      {layoutMessage ? <StateBlock variant={layoutMessageVariant}>{layoutMessage}</StateBlock> : null}
 
       {flowEdges.length === 0 && flowNodes.length > 0 ? (
         <StateBlock variant="idle">当前无 relationships 连线，可继续在 Relationship Editor 中补充。</StateBlock>

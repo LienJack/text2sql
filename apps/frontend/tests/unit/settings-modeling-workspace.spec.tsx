@@ -203,6 +203,68 @@ describe("ModelingWorkspacePage", () => {
     });
   });
 
+  it("auto-refreshes policyVersion and retries save when stale policy conflict occurs", async () => {
+    const user = userEvent.setup();
+    let permissionReadCount = 0;
+    mockListWorkspaceDatasourceTablePermissions.mockImplementation(async () => {
+      permissionReadCount += 1;
+      return {
+        workspaceId: "ws-2",
+        datasourceId: "ds-2b",
+        tableNames: ["orders"],
+        policyVersion: permissionReadCount > 1 ? 8 : 7
+      };
+    });
+    mockUpsertWorkspaceModelingGraph
+      .mockRejectedValueOnce(
+        new AdminApiError("policyVersion 已过期，请刷新后重试。", {
+          code: "WORKSPACE_DATASOURCE_POLICY_VERSION_CONFLICT",
+          details: {
+            expectedPolicyVersion: 8,
+            providedPolicyVersion: 7
+          }
+        })
+      )
+      .mockImplementationOnce(async (workspaceId, datasourceId, input) => ({
+        workspaceId,
+        datasourceId,
+        activeRevision: 1,
+        draft: {
+          policyVersion: input.policyVersion,
+          revision: 3,
+          graphHash: "hash-r3-retried",
+          updatedAt: "2026-04-23T01:00:00.000Z",
+          graphPayload: {
+            models: input.models ?? [],
+            relationships: input.relationships ?? [],
+            calculatedFields: input.calculatedFields ?? [],
+            views: input.views ?? [],
+            schemaChanges: input.schemaChanges ?? []
+          }
+        }
+      }));
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledTimes(2);
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenNthCalledWith(
+        2,
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          policyVersion: 8
+        })
+      );
+    });
+    expect(
+      screen.getByText(/policyVersion 已从 7 更新为 8，已自动重试并保存成功/)
+    ).toBeInTheDocument();
+  });
+
   it("keeps relationship selection context when draft save fails", async () => {
     const user = userEvent.setup();
     Object.defineProperty(window, "ResizeObserver", {
