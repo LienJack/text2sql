@@ -4,6 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import { ModelingFlowCanvas } from "@/components/settings/modeling/modeling-flow-canvas";
+import {
+  createModelingFlowFieldHandleId,
+  createModelingFlowRelationshipHandleId,
+  MODELING_FLOW_NODE_FALLBACK_SOURCE_LEFT_HANDLE_ID
+} from "@/components/settings/modeling/modeling-flow-node";
 
 const fitViewMock = vi.fn();
 const computeElkLayoutMock = vi.fn();
@@ -62,10 +67,31 @@ vi.mock("@xyflow/react", () => {
     applyEdgeChanges,
     ReactFlow: (props: Record<string, unknown>) => {
       const onInit = props.onInit as ((instance: { fitView: typeof fitViewMock }) => void) | undefined;
+      type MockFlowNode = {
+        id: string;
+        selected?: boolean;
+        position?: { x: number; y: number };
+        data?: {
+          sections?: {
+            columns?: string[];
+            calculatedFields?: string[];
+            relationships?: string[];
+          };
+          onNodeAction?: (action: {
+            type: "addCalculatedField" | "addRelationship" | "editRelationship";
+            relationshipId?: string;
+          }) => void;
+        };
+      };
       const nodes =
-        (props.nodes as Array<{ id: string; selected?: boolean; position?: { x: number; y: number } }> | undefined) ??
-        [];
-      const edges = (props.edges as Array<{ id: string; selected?: boolean }> | undefined) ?? [];
+        (props.nodes as Array<MockFlowNode> | undefined) ?? [];
+      const edges =
+        (props.edges as Array<{
+          id: string;
+          selected?: boolean;
+          sourceHandle?: string;
+          targetHandle?: string;
+        }> | undefined) ?? [];
       const onNodeClick = props.onNodeClick as
         | ((event: unknown, node: { id: string }) => void)
         | undefined;
@@ -77,6 +103,10 @@ vi.mock("@xyflow/react", () => {
         | ((changes: Array<Record<string, unknown>>) => void)
         | undefined;
       const initOnceRef = React.useRef(false);
+      const ordersNode = nodes.find((node) => node.id === "model:model.orders");
+      const ordersSections = ordersNode?.data?.sections;
+      const firstModelNode = nodes.find((node) => node.id.startsWith("model:"));
+      const firstRelationshipId = firstModelNode?.data?.sections?.relationships?.[0];
 
       React.useEffect(() => {
         if (initOnceRef.current) {
@@ -127,13 +157,70 @@ vi.mock("@xyflow/react", () => {
           <button
             type="button"
             onClick={() => {
+              if (nodes[0]) {
+                onNodesChange?.([
+                  {
+                    id: nodes[0].id,
+                    type: "position",
+                    position: { x: 777, y: 666 },
+                    dragging: true
+                  }
+                ]);
+              }
+            }}
+          >
+            trigger-node-dragging
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               onPaneClick?.();
             }}
           >
             trigger-pane-click
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              firstModelNode?.data?.onNodeAction?.({
+                type: "addCalculatedField"
+              });
+            }}
+          >
+            trigger-node-add-calculated-field
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              firstModelNode?.data?.onNodeAction?.({
+                type: "addRelationship"
+              });
+            }}
+          >
+            trigger-node-add-relationship
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (firstRelationshipId) {
+                firstModelNode?.data?.onNodeAction?.({
+                  type: "editRelationship",
+                  relationshipId: firstRelationshipId
+                });
+              }
+            }}
+          >
+            trigger-node-edit-relationship
+          </button>
           <p data-testid="first-node-position">
             {nodes[0]?.position ? `${nodes[0].position.x},${nodes[0].position.y}` : "none"}
+          </p>
+          <p data-testid="orders-node-columns">{ordersSections?.columns?.join(",") ?? ""}</p>
+          <p data-testid="orders-node-calculated-fields">
+            {ordersSections?.calculatedFields?.join(",") ?? ""}
+          </p>
+          <p data-testid="orders-node-relationships">
+            {ordersSections?.relationships?.join(",") ?? ""}
           </p>
           <p data-testid="selected-node-ids">
             {nodes
@@ -146,6 +233,17 @@ vi.mock("@xyflow/react", () => {
               .filter((edge) => edge.selected)
               .map((edge) => edge.id)
               .join(",")}
+          </p>
+          <p data-testid="first-edge-handles">
+            {edges[0] ? `${edges[0].sourceHandle ?? ""}->${edges[0].targetHandle ?? ""}` : "none"}
+          </p>
+          <p data-testid="edge-handle-map">
+            {edges
+              .map(
+                (edge) =>
+                  `${edge.id}:${edge.sourceHandle ?? ""}->${edge.targetHandle ?? ""}`
+              )
+              .join("|")}
           </p>
         </div>
       );
@@ -209,6 +307,19 @@ const baseGraphPayload: ModelingGraphPayload = {
     }
   ],
   schemaChanges: []
+};
+
+const positionedGraphPayload: ModelingGraphPayload = {
+  ...baseGraphPayload,
+  models: baseGraphPayload.models.map((model) =>
+    model.id === "model.customers"
+      ? { ...model, position: { x: 132, y: 264 } }
+      : { ...model, position: { x: 420, y: 280 } }
+  ),
+  views: baseGraphPayload.views.map((view) => ({
+    ...view,
+    position: { x: 720, y: 360 }
+  }))
 };
 
 describe("ModelingFlowCanvas", () => {
@@ -302,6 +413,368 @@ describe("ModelingFlowCanvas", () => {
 
     await user.click(screen.getByRole("button", { name: "trigger-node-click" }));
     expect(onSelectNode).toHaveBeenCalledWith({ kind: "model", id: "model.customers" });
+  });
+
+  it("prefers persisted payload positions over default grid fallback", async () => {
+    render(
+      <ModelingFlowCanvas
+        graphPayload={positionedGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:positioned"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-node-position")).toHaveTextContent("132,264");
+    });
+  });
+
+  it("maps missing nodeSections to fallback columns/calculated fields/relationships", async () => {
+    const payloadWithoutNodeSections: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      calculatedFields: [
+        {
+          id: "cf-1",
+          modelId: "model.orders",
+          name: "order_total",
+          expression: "price * qty",
+          dataType: "number"
+        },
+        {
+          id: "cf-2",
+          modelId: "model.orders",
+          name: "discount_total",
+          expression: "discount",
+          dataType: "number"
+        },
+        {
+          id: "cf-3",
+          modelId: "model.orders",
+          name: "tax_total",
+          expression: "tax",
+          dataType: "number"
+        },
+        {
+          id: "cf-4",
+          modelId: "model.orders",
+          name: "net_total",
+          expression: "price-tax",
+          dataType: "number"
+        }
+      ],
+      relationships: [
+        {
+          id: "rel-orders-customers-1",
+          source: "manual",
+          confidence: 0.9,
+          bridge: {
+            left: { dataset: "analytics", table: "orders", column: "customer_id" },
+            right: { dataset: "analytics", table: "customers", column: "id" },
+            operator: "eq",
+            confidence: 0.9
+          }
+        },
+        {
+          id: "rel-orders-customers-2",
+          source: "manual",
+          confidence: 0.88,
+          bridge: {
+            left: { dataset: "analytics", table: "orders", column: "sales_rep_id" },
+            right: { dataset: "analytics", table: "customers", column: "owner_id" },
+            operator: "eq",
+            confidence: 0.88
+          }
+        },
+        {
+          id: "rel-orders-customers-3",
+          source: "manual",
+          confidence: 0.8,
+          bridge: {
+            left: { dataset: "analytics", table: "orders", column: "invoice_owner_id" },
+            right: { dataset: "analytics", table: "customers", column: "billing_owner_id" },
+            operator: "eq",
+            confidence: 0.8
+          }
+        }
+      ]
+    };
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={payloadWithoutNodeSections}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:fallback"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("orders-node-columns")).toHaveTextContent("id");
+      expect(screen.getByTestId("orders-node-calculated-fields")).toHaveTextContent(
+        "order_total,discount_total,tax_total,net_total"
+      );
+      expect(screen.getByTestId("orders-node-relationships")).toHaveTextContent(
+        "rel-orders-customers-1,rel-orders-customers-2,rel-orders-customers-3"
+      );
+    });
+  });
+
+  it("limits column preview to five items and prioritizes primary keys", async () => {
+    const payloadWithManyColumns: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      models: [
+        {
+          ...baseGraphPayload.models[0],
+          columns: [
+            { name: "created_at", dataType: "timestamp", isNullable: false, isPrimaryKey: false },
+            { name: "order_no", dataType: "varchar", isNullable: false, isPrimaryKey: false },
+            { name: "id", dataType: "int", isNullable: false, isPrimaryKey: true },
+            { name: "merchant_id", dataType: "int", isNullable: false, isPrimaryKey: false },
+            { name: "status", dataType: "varchar", isNullable: false, isPrimaryKey: false },
+            { name: "total_amount", dataType: "decimal", isNullable: false, isPrimaryKey: false },
+            { name: "paid_at", dataType: "timestamp", isNullable: true, isPrimaryKey: false }
+          ],
+          nodeSections: {
+            columns: [
+              "created_at",
+              "order_no",
+              "id",
+              "merchant_id",
+              "status",
+              "total_amount",
+              "paid_at"
+            ],
+            calculatedFields: [],
+            relationships: []
+          }
+        },
+        baseGraphPayload.models[1]
+      ]
+    };
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={payloadWithManyColumns}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:column-preview-limit"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("orders-node-columns")).toHaveTextContent(
+        "id,created_at,order_no,merchant_id,status"
+      );
+    });
+  });
+
+  it("binds relationship edges to matching relationship-row handles", async () => {
+    const payloadWithJoinColumns: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      models: [
+        {
+          ...baseGraphPayload.models[0],
+          columns: [
+            { name: "id", dataType: "int", isNullable: false, isPrimaryKey: true },
+            { name: "customer_id", dataType: "int", isNullable: false, isPrimaryKey: false }
+          ]
+        },
+        baseGraphPayload.models[1]
+      ]
+    };
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={payloadWithJoinColumns}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:field-handle"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-edge-handles")).toHaveTextContent(
+        `${createModelingFlowRelationshipHandleId("rel-orders-customers", "left")}->${createModelingFlowRelationshipHandleId("rel-orders-customers", "right")}`
+      );
+    });
+  });
+
+  it("maps relationship-row labels to relationship ids for edge binding", async () => {
+    const payloadWithRelationshipLabelRows: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      models: baseGraphPayload.models.map((model) => {
+        if (model.id === "model.orders") {
+          return {
+            ...model,
+            nodeSections: {
+              columns: ["id"],
+              calculatedFields: [],
+              relationships: ["customers"]
+            }
+          };
+        }
+        if (model.id === "model.customers") {
+          return {
+            ...model,
+            nodeSections: {
+              columns: ["id"],
+              calculatedFields: [],
+              relationships: ["orders"]
+            }
+          };
+        }
+        return model;
+      }),
+      relationships: baseGraphPayload.relationships.map((relationship) => ({
+        ...relationship,
+        name: "orders_customers_relation"
+      }))
+    };
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={payloadWithRelationshipLabelRows}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:relationship-label-row-binding"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-edge-handles")).toHaveTextContent(
+        `${createModelingFlowRelationshipHandleId("rel-orders-customers", "left")}->${createModelingFlowRelationshipHandleId("rel-orders-customers", "right")}`
+      );
+    });
+  });
+
+  it("falls back per endpoint when field/relationship row handle is unavailable", async () => {
+    const payloadWithoutRelationshipRows: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      models: baseGraphPayload.models.map((model) => ({
+        ...model,
+        nodeSections: {
+          columns: model.columns.map((column) => column.name),
+          calculatedFields: [],
+          relationships: []
+        }
+      }))
+    };
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={payloadWithoutRelationshipRows}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:fallback-handle"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("first-edge-handles")).toHaveTextContent(
+        `${MODELING_FLOW_NODE_FALLBACK_SOURCE_LEFT_HANDLE_ID}->${createModelingFlowFieldHandleId("id", "right")}`
+      );
+    });
+  });
+
+  it("emits latest model/view positions after auto layout and drag", async () => {
+    const user = userEvent.setup();
+    const onNodePositionsChange = vi.fn();
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:emit"
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "自动布局画布" }));
+
+    await waitFor(() => {
+      expect(onNodePositionsChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          models: expect.objectContaining({
+            "model.customers": { x: 360, y: 220 },
+            "model.orders": { x: 40, y: 20 }
+          }),
+          views: expect.objectContaining({
+            "view.daily_orders": { x: 720, y: 340 }
+          })
+        })
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-drag" }));
+
+    await waitFor(() => {
+      expect(onNodePositionsChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          models: expect.objectContaining({
+            "model.customers": { x: 999, y: 888 }
+          })
+        })
+      );
+    });
+  });
+
+  it("does not emit position patch for dragging-in-progress node updates", async () => {
+    const user = userEvent.setup();
+    const onNodePositionsChange = vi.fn();
+
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:dragging-frame"
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-dragging" }));
+
+    expect(onNodePositionsChange).not.toHaveBeenCalled();
+  });
+
+  it("dispatches node action events to page-layer handler", async () => {
+    const user = userEvent.setup();
+    const onNodeAction = vi.fn();
+    const canvasProps = {
+      graphPayload: baseGraphPayload,
+      selectedNode: null,
+      autoLayoutKey: "ws:ds:node-action",
+      onSelectNode: vi.fn(),
+      onNodeAction
+    } as unknown as Parameters<typeof ModelingFlowCanvas>[0];
+
+    render(<ModelingFlowCanvas {...canvasProps} />);
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-add-calculated-field" }));
+    await user.click(screen.getByRole("button", { name: "trigger-node-add-relationship" }));
+    await user.click(screen.getByRole("button", { name: "trigger-node-edit-relationship" }));
+
+    expect(onNodeAction).toHaveBeenNthCalledWith(1, {
+      modelId: "model.customers",
+      action: {
+        type: "addCalculatedField"
+      }
+    });
+    expect(onNodeAction).toHaveBeenNthCalledWith(2, {
+      modelId: "model.customers",
+      action: {
+        type: "addRelationship"
+      }
+    });
+    expect(onNodeAction).toHaveBeenNthCalledWith(3, {
+      modelId: "model.customers",
+      action: {
+        type: "editRelationship",
+        relationshipId: "rel-orders-customers"
+      }
+    });
   });
 
   it("keeps previous positions and shows non-blocking warning when auto layout fails", async () => {
@@ -521,6 +994,49 @@ describe("ModelingFlowCanvas", () => {
     });
     await waitFor(() => {
       expect(fitViewMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("keeps selected model node when graph payload updates", async () => {
+    const selectedModel = { kind: "model", id: "model.orders" } as const;
+    const { rerender } = render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={selectedModel}
+        autoLayoutKey="ws:ds:selection"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-node-ids")).toHaveTextContent("model:model.orders");
+    });
+
+    const payloadUpdate: ModelingGraphPayload = {
+      ...baseGraphPayload,
+      calculatedFields: [
+        {
+          id: "cf-new",
+          modelId: "model.orders",
+          name: "order_total",
+          expression: "price * qty",
+          dataType: "number"
+        }
+      ]
+    };
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={payloadUpdate}
+        selectedNode={selectedModel}
+        autoLayoutKey="ws:ds:selection"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("orders-node-calculated-fields")).toHaveTextContent("order_total");
+      expect(screen.getByTestId("selected-node-ids")).toHaveTextContent("model:model.orders");
     });
   });
 });

@@ -13,6 +13,63 @@ import {
   upsertWorkspaceModelingGraph
 } from "@/lib/admin-api-client";
 
+vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
+  ModelingFlowCanvas: (props: {
+    graphPayload: {
+      relationships: Array<{ id: string }>;
+    };
+    onNodeAction?: (input: {
+      modelId: string;
+      action:
+        | { type: "addCalculatedField" }
+        | { type: "addRelationship" }
+        | { type: "editRelationship"; relationshipId: string };
+    }) => void;
+  }) => {
+    const firstRelationshipId = props.graphPayload.relationships[0]?.id ?? "rel-orders-customers";
+    return (
+      <div data-testid="mock-modeling-flow-canvas">
+        <button
+          type="button"
+          onClick={() => {
+            props.onNodeAction?.({
+              modelId: "model.orders",
+              action: { type: "addCalculatedField" }
+            });
+          }}
+        >
+          trigger-node-action-add-calculated-field
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            props.onNodeAction?.({
+              modelId: "model.orders",
+              action: { type: "addRelationship" }
+            });
+          }}
+        >
+          trigger-node-action-add-relationship
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            props.onNodeAction?.({
+              modelId: "model.orders",
+              action: {
+                type: "editRelationship",
+                relationshipId: firstRelationshipId
+              }
+            });
+          }}
+        >
+          trigger-node-action-edit-relationship
+        </button>
+      </div>
+    );
+  }
+}));
+
 vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/admin-api-client")>();
   return {
@@ -93,18 +150,57 @@ describe("settings modeling complete parity", () => {
                   modelName: "orders",
                   displayName: "Orders Model",
                   description: null,
-                  columns: []
+                  position: { x: 120, y: 96 },
+                  columns: [
+                    { name: "id", dataType: "integer", isPrimaryKey: true, isNullable: false },
+                    { name: "order_no", dataType: "text", isPrimaryKey: false, isNullable: false },
+                    {
+                      name: "customer_id",
+                      dataType: "integer",
+                      isPrimaryKey: false,
+                      isNullable: false
+                    }
+                  ],
+                  nodeSections: {
+                    columns: ["id", "order_no", "customer_id"],
+                    calculatedFields: ["order_total"],
+                    relationships: ["rel-orders-customers"]
+                  }
                 }
               ],
-              relationships: [],
-              calculatedFields: [],
+              relationships: [
+                {
+                  id: "rel-orders-customers",
+                  name: "orders_to_customers",
+                  source: "manual",
+                  confidence: 0.92,
+                  type: "many-to-one",
+                  cardinality: "many-to-one",
+                  bridge: {
+                    left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                    right: { dataset: "analytics", table: "customers", column: "id" },
+                    operator: "eq",
+                    confidence: 0.92
+                  }
+                }
+              ],
+              calculatedFields: [
+                {
+                  id: "cf.orders.order_total",
+                  modelId: "model.orders",
+                  name: "order_total",
+                  expression: "total_amount",
+                  dataType: "numeric"
+                }
+              ],
               views: [
                 {
                   id: "view.orders_recent",
                   name: "orders_recent",
                   sql: "SELECT id, total_amount FROM orders ORDER BY id DESC",
                   displayName: "Recent Orders",
-                  description: "saved from chat"
+                  description: "saved from chat",
+                  position: { x: 580, y: 260 }
                 }
               ],
               schemaChanges: []
@@ -129,11 +225,49 @@ describe("settings modeling complete parity", () => {
                 modelName: "orders",
                 displayName: "Orders Model",
                 description: null,
-                columns: []
+                position: { x: 120, y: 96 },
+                columns: [
+                  { name: "id", dataType: "integer", isPrimaryKey: true, isNullable: false },
+                  { name: "order_no", dataType: "text", isPrimaryKey: false, isNullable: false },
+                  {
+                    name: "customer_id",
+                    dataType: "integer",
+                    isPrimaryKey: false,
+                    isNullable: false
+                  }
+                ],
+                nodeSections: {
+                  columns: ["id", "order_no", "customer_id"],
+                  calculatedFields: ["order_total"],
+                  relationships: ["rel-orders-customers"]
+                }
               }
             ],
-            relationships: [],
-            calculatedFields: [],
+            relationships: [
+              {
+                id: "rel-orders-customers",
+                name: "orders_to_customers",
+                source: "manual",
+                confidence: 0.92,
+                type: "many-to-one",
+                cardinality: "many-to-one",
+                bridge: {
+                  left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                  right: { dataset: "analytics", table: "customers", column: "id" },
+                  operator: "eq",
+                  confidence: 0.92
+                }
+              }
+            ],
+            calculatedFields: [
+              {
+                id: "cf.orders.order_total",
+                modelId: "model.orders",
+                name: "order_total",
+                expression: "total_amount",
+                dataType: "numeric"
+              }
+            ],
             views: [],
             schemaChanges: []
           }
@@ -203,7 +337,7 @@ describe("settings modeling complete parity", () => {
     });
   });
 
-  it("keeps save-as-view context, supports view preview/delete, and completes deploy gating flow", async () => {
+  it("keeps save-as-view context, supports view delete, and completes deploy gating flow", async () => {
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
 
@@ -216,18 +350,10 @@ describe("settings modeling complete parity", () => {
       );
     });
 
-    await user.click(screen.getByRole("button", { name: "加载 Data Preview" }));
-    await waitFor(() => {
-      expect(mockGetWorkspaceModelingPreview).toHaveBeenCalledWith("ws-2", "ds-2b", {
-        targetKind: "view",
-        targetId: "view.orders_recent",
-        limit: 100
-      });
-    });
-    expect(await screen.findByText("Preview Rows: 1")).toBeInTheDocument();
-    expect(screen.getByText("88.9")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "加载 Data Preview" })).not.toBeInTheDocument();
+    expect(mockGetWorkspaceModelingPreview).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "删除 view Recent Orders" }));
+    await user.click(await screen.findByRole("button", { name: "删除 view Recent Orders" }));
     await waitFor(() => {
       expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
         "Deploy State undeployed"
@@ -242,6 +368,7 @@ describe("settings modeling complete parity", () => {
         "ds-2b",
         expect.objectContaining({
           policyVersion: 11,
+          models: [expect.objectContaining({ id: "model.orders", position: { x: 120, y: 96 } })],
           views: []
         })
       );
@@ -275,5 +402,86 @@ describe("settings modeling complete parity", () => {
       expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent("Deploy State synced");
       expect(screen.getByText(/Deploy State: synced。当前无 undeployed revision。/)).toBeInTheDocument();
     });
+  });
+
+  it("publishes from top action after draft save and precheck", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State synced"
+      );
+    });
+
+    await user.click(await screen.findByRole("button", { name: "删除 view Recent Orders" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State undeployed"
+      );
+    });
+
+    const publishButton = screen.getByRole("button", { name: "发布" });
+    await waitFor(() => {
+      expect(publishButton).toBeEnabled();
+    });
+    await user.click(publishButton);
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          policyVersion: 11,
+          views: []
+        })
+      );
+      expect(mockPrecheckWorkspaceModelingDeploy).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        policyVersion: 11,
+        draftRevision: 3
+      });
+      expect(mockDeployWorkspaceModeling).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        policyVersion: 11,
+        draftRevision: 3
+      });
+    });
+  });
+
+  it("routes node action entries with keyboard support and opens relationship dialogs", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+    const topStatusBar = screen.getByTestId("modeling-top-status-bar");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent("Deploy State synced");
+    });
+
+    const addCalculatedFieldEntry = screen.getByRole("button", {
+      name: "trigger-node-action-add-calculated-field"
+    });
+    addCalculatedFieldEntry.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => {
+      expect(topStatusBar).toHaveTextContent("Current Context: model · model.orders");
+      expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "true");
+    });
+    expect(screen.queryByRole("button", { name: "保存计算字段" })).not.toBeInTheDocument();
+
+    const addRelationshipEntry = screen.getByRole("button", {
+      name: "trigger-node-action-add-relationship"
+    });
+    addRelationshipEntry.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Add relationship" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    const editRelationshipEntry = screen.getByRole("button", {
+      name: "trigger-node-action-edit-relationship"
+    });
+    editRelationshipEntry.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("dialog", { name: "Edit relationship" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(topStatusBar).toHaveTextContent("Current Context: relationship · rel-orders-customers");
   });
 });

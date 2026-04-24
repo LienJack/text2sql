@@ -344,6 +344,96 @@ describe("workspace modeling graph revision integration", () => {
     expect(third.draft?.graphPayload.calculatedFields[0]?.expression).toContain("coalesce");
   });
 
+  it("round-trips model/view positions and creates new revision for position-only updates", async () => {
+    const { service } = buildModelingService();
+
+    const first = await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: [
+        {
+          id: "orders",
+          tableName: "orders",
+          modelName: "Orders",
+          position: { x: 120, y: 80 },
+          columns: [{ name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true }]
+        }
+      ],
+      views: [
+        {
+          id: "view_orders",
+          name: "orders_view",
+          sql: "select id from orders",
+          position: { x: 540, y: 300 }
+        }
+      ],
+      relationships: [
+        {
+          id: "rel_orders_customers",
+          source: "manual",
+          confidence: 0.91,
+          bridge: edgePayload[0]!.bridge
+        }
+      ]
+    });
+
+    expect(first.draft?.graphPayload.models[0]?.position).toEqual({ x: 120, y: 80 });
+    expect(first.draft?.graphPayload.views[0]?.position).toEqual({ x: 540, y: 300 });
+
+    const second = await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: [
+        {
+          id: "orders",
+          tableName: "orders",
+          modelName: "Orders",
+          position: { x: 260, y: 140 },
+          columns: [{ name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true }]
+        }
+      ],
+      views: [
+        {
+          id: "view_orders",
+          name: "orders_view",
+          sql: "select id from orders",
+          position: { x: 620, y: 340 }
+        }
+      ]
+    });
+
+    expect(second.draft?.revision).toBe((first.draft?.revision ?? 0) + 1);
+    expect(second.draft?.graphPayload.models[0]?.position).toEqual({ x: 260, y: 140 });
+    expect(second.draft?.graphPayload.views[0]?.position).toEqual({ x: 620, y: 340 });
+    expect(second.draft?.graphPayload.relationships).toEqual(first.draft?.graphPayload.relationships);
+
+    const snapshot = await service.getModelingGraph(actor, "ws-1", "ds-1");
+    expect(snapshot.draft?.graphPayload.models[0]?.position).toEqual({ x: 260, y: 140 });
+    expect(snapshot.draft?.graphPayload.views[0]?.position).toEqual({ x: 620, y: 340 });
+  });
+
+  it("rejects invalid node position values with stable domain error", async () => {
+    const { service } = buildModelingService();
+
+    await expect(
+      service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+        policyVersion: 3,
+        models: [
+          {
+            id: "orders",
+            tableName: "orders",
+            modelName: "Orders",
+            position: { x: "invalid", y: 20 },
+            columns: []
+          }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "WORKSPACE_MODELING_GRAPH_INVALID",
+      details: {
+        field: "position.x"
+      }
+    });
+  });
+
   it("exposes revision summary contract for snapshot payload parity", async () => {
     const { service } = buildModelingService();
 

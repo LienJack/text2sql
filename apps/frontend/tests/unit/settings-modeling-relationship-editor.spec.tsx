@@ -1,25 +1,80 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ModelingGraphModel } from "@text2sql/shared-types";
 import { ModelingRelationshipEditor } from "@/components/settings/modeling/modeling-relationship-editor";
 
+if (typeof Element !== "undefined") {
+  const elementPrototype = Element.prototype as Element & {
+    hasPointerCapture?: (pointerId: number) => boolean;
+    releasePointerCapture?: (pointerId: number) => void;
+    setPointerCapture?: (pointerId: number) => void;
+  };
+  if (typeof elementPrototype.hasPointerCapture !== "function") {
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+      configurable: true,
+      value: () => false
+    });
+  }
+  if (typeof elementPrototype.releasePointerCapture !== "function") {
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+      configurable: true,
+      value: () => undefined
+    });
+  }
+  if (typeof elementPrototype.setPointerCapture !== "function") {
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+      configurable: true,
+      value: () => undefined
+    });
+  }
+}
+
 describe("ModelingRelationshipEditor", () => {
-  it("adds and saves relationship edges", async () => {
+  it("adds and saves relationship edges via selectable table/field dialog", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined);
+    const models: ModelingGraphModel[] = [
+      {
+        id: "model.orders",
+        tableName: "orders",
+        modelName: "orders",
+        columns: [
+          { name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true },
+          { name: "customer_id", dataType: "integer", isNullable: false, isPrimaryKey: false }
+        ]
+      },
+      {
+        id: "model.customers",
+        tableName: "customers",
+        modelName: "customers",
+        columns: [
+          { name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true },
+          { name: "name", dataType: "text", isNullable: true, isPrimaryKey: false }
+        ]
+      }
+    ];
 
-    render(<ModelingRelationshipEditor relationships={[]} onSave={onSave} />);
+    render(
+      <ModelingRelationshipEditor
+        models={models}
+        relationships={[]}
+        defaultFromTable="orders"
+        onSave={onSave}
+      />
+    );
 
-    await user.type(screen.getByRole("textbox", { name: "左端 dataset" }), "analytics");
-    await user.type(screen.getByRole("textbox", { name: "左端 table" }), "orders");
-    await user.type(screen.getByRole("textbox", { name: "左端 column" }), "customer_id");
-    await user.type(screen.getByRole("textbox", { name: "右端 dataset" }), "analytics");
-    await user.type(screen.getByRole("textbox", { name: "右端 table" }), "customers");
-    await user.type(screen.getByRole("textbox", { name: "右端 column" }), "id");
-    await user.clear(screen.getByRole("textbox", { name: "关系可信度" }));
-    await user.type(screen.getByRole("textbox", { name: "关系可信度" }), "0.9");
+    const pickSelectOption = async (triggerLabel: string, optionName: string): Promise<void> => {
+      await user.click(screen.getByLabelText(triggerLabel));
+      await user.click(await screen.findByRole("option", { name: optionName }));
+    };
 
     await user.click(screen.getByRole("button", { name: "添加关系" }));
+    await pickSelectOption("From table", "orders");
+    await pickSelectOption("From field", "customer_id");
+    await pickSelectOption("To table", "customers");
+    await pickSelectOption("To field", "id");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
     await user.click(screen.getByRole("button", { name: "保存关系" }));
 
     await waitFor(() => {
@@ -28,20 +83,20 @@ describe("ModelingRelationshipEditor", () => {
           id: "orders_customer_id__customers_id",
           name: undefined,
           source: "manual",
-          confidence: 0.9,
+          confidence: 0.8,
           bridge: {
             left: {
-              dataset: "analytics",
+              dataset: "",
               table: "orders",
               column: "customer_id"
             },
             right: {
-              dataset: "analytics",
+              dataset: "",
               table: "customers",
               column: "id"
             },
             operator: "eq",
-            confidence: 0.9
+            confidence: 0.8
           }
         }
       ]);

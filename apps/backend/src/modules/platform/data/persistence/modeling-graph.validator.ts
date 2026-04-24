@@ -55,6 +55,12 @@ export class ModelingGraphValidator {
     this.assertNoDuplicateIds(payload.relationships.map((item) => item.id), "relationships");
     this.assertNoDuplicateIds(payload.views.map((item) => item.id), "views");
     this.assertNoDuplicateIds(payload.calculatedFields.map((item) => item.id), "calculatedFields");
+    for (const model of payload.models) {
+      this.assertNodePosition(model.position, `models.${model.id}.position`);
+    }
+    for (const view of payload.views) {
+      this.assertNodePosition(view.position, `views.${view.id}.position`);
+    }
     for (const relationship of payload.relationships) {
       this.assertRelationship(relationship);
     }
@@ -111,6 +117,25 @@ export class ModelingGraphValidator {
         400,
         {
           relationshipId: relationship.id
+        }
+      );
+    }
+  }
+
+  private assertNodePosition(
+    value: { x: number; y: number } | undefined,
+    field: string
+  ): void {
+    if (!value) {
+      return;
+    }
+    if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_GRAPH_INVALID",
+        "node position 必须是有限数值。",
+        400,
+        {
+          field
         }
       );
     }

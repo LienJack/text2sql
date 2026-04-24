@@ -17,12 +17,18 @@ export type ModelingGraphModel = {
   description?: string | null;
   columns: ModelingGraphColumn[];
   nodeSections?: ModelingGraphNodeSections;
+  position?: ModelingGraphNodePosition;
 };
 
 export type ModelingGraphNodeSections = {
   columns: string[];
   calculatedFields: string[];
   relationships: string[];
+};
+
+export type ModelingGraphNodePosition = {
+  x: number;
+  y: number;
 };
 
 export type ModelingGraphRelationship = {
@@ -69,6 +75,7 @@ export type ModelingGraphView = {
   sql: string;
   displayName?: string | null;
   description?: string | null;
+  position?: ModelingGraphNodePosition;
 };
 
 export type ModelingGraphSchemaChange = {

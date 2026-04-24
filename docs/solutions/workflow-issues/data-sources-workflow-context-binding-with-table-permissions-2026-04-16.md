@@ -40,7 +40,7 @@ Practical rules:
 - Handle workflow failures by stage (`workspace_*`, `datasource_*`, `binding_*`) rather than legacy ACL stage names.
 
 Reference implementation surfaces:
-- Backend workflow contract: [`apps/backend/src/modules/datasource/dto/upsert-datasource-workflow.dto.ts`](../../../apps/backend/src/modules/datasource/dto/upsert-datasource-workflow.dto.ts), [`apps/backend/src/modules/datasource/datasource-workflow.service.ts`](../../../apps/backend/src/modules/datasource/datasource-workflow.service.ts)
+- Backend workflow contract: [`apps/backend/src/modules/governance/datasource/dto/upsert-datasource-workflow.dto.ts`](../../../apps/backend/src/modules/governance/datasource/dto/upsert-datasource-workflow.dto.ts), [`apps/backend/src/modules/governance/datasource/datasource-workflow.service.ts`](../../../apps/backend/src/modules/governance/datasource/datasource-workflow.service.ts)
 - Frontend workflow submit + retry idempotency: [`apps/frontend/src/lib/api-client.ts`](../../../apps/frontend/src/lib/api-client.ts), [`apps/frontend/src/app/data-sources/page.tsx`](../../../apps/frontend/src/app/data-sources/page.tsx), [`apps/frontend/tests/unit/data-sources-page.spec.tsx`](../../../apps/frontend/tests/unit/data-sources-page.spec.tsx)
 - Table-permissions governance API client: [`apps/frontend/src/lib/admin-api-client.ts`](../../../apps/frontend/src/lib/admin-api-client.ts)
 

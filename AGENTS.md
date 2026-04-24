@@ -101,6 +101,7 @@ CI 参考：
 
 关键 MUST：
 - React 函数组件 + shadcn-ui 体系。
+- 业务代码禁止直接使用原生 HTML UI 交互控件（表单/交互类）；必须优先复用 shadcn 组件（含业务封装）。`input/select/button/textarea` 仅为示例，不限于此。
 - Tailwind CSS v4，不回退 v3 模式。
 - 保持核心演示链路可用（创建会话/发送消息/SQL 预览）。
 - 涉及 RAG 可见化改造时，必须覆盖 runId（sync/stream）一致性、`selected_context` 四态矩阵、terminal 不回退 loading、375px 与键盘可达性（`Enter/Space` + `aria-expanded`）验收。
@@ -220,6 +221,18 @@ CI 参考：
 
 - 文档合同检查：`node scripts/check-docs-rag-understanding.mjs`
 - smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
+## 10) Modeling 画布排障优先参考
+
+当需求涉及 modeling 画布的以下问题时，优先阅读并复用该 playbook：
+
+- 拖拽卡片闪烁（drag flicker）
+- relationship 连线挂错行/错 handle（edge binding）
+- auto layout 后节点重叠（layout overlap）
+
+参考文档：
+
+- `docs/solutions/workflow-issues/frontend-modeling-reactflow-flicker-edge-binding-layout-playbook-2026-04-24.md`
 
 ## graphify
 

@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ModelingFlowEdge } from "@/components/settings/modeling/modeling-flow-edge";
 import { ModelingFlowNode } from "@/components/settings/modeling/modeling-flow-node";
@@ -13,21 +14,37 @@ vi.mock("@xyflow/react", () => ({
   },
   BaseEdge: ({
     className,
+    markerStart,
+    markerEnd,
+    style,
+    onMouseEnter,
+    onMouseLeave,
     ...props
   }: {
     className?: string;
+    markerStart?: string;
+    markerEnd?: string;
+    style?: Record<string, unknown>;
+    onMouseEnter?: () => void;
+    onMouseLeave?: () => void;
     "data-confidence-band"?: string;
     "data-selected"?: string;
   }) => (
     <div
       data-testid="flow-base-edge"
       data-class={className ?? ""}
+      data-style={JSON.stringify(style ?? {})}
+      data-marker-start={markerStart ?? ""}
+      data-marker-end={markerEnd ?? ""}
       data-confidence-band={props["data-confidence-band"]}
       data-selected={props["data-selected"]}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     />
   ),
   EdgeLabelRenderer: ({ children }: { children: unknown }) => <div>{children as never}</div>,
-  getBezierPath: () => ["M0,0", 10, 10]
+  getBezierPath: () => ["M0,0", 10, 10],
+  getSmoothStepPath: () => ["M0,0", 10, 10]
 }));
 
 describe("ModelingFlowNode", () => {
@@ -41,9 +58,32 @@ describe("ModelingFlowNode", () => {
         columnCount: 12,
         sections: {
           columns: ["id", "order_no", "customer_id"],
-          calculatedFields: ["order_total"],
-          relationships: ["orders_to_customers"]
-        }
+          calculatedFields: ["order_total", "order_bucket", "net_revenue", "margin_rate"],
+          relationships: [
+            "rel-orders-customers",
+            "rel-orders-items",
+            "rel-orders-payments",
+            "rel-orders-shipments"
+          ]
+        },
+        relationshipDisplayMeta: [
+          {
+            primaryText: "customers",
+            secondaryText: "orders_to_customers"
+          },
+          {
+            primaryText: "order_items",
+            secondaryText: "orders_to_items"
+          },
+          {
+            primaryText: "payments",
+            secondaryText: "orders_to_payments"
+          },
+          {
+            primaryText: "shipments",
+            secondaryText: "orders_to_shipments"
+          }
+        ]
       },
       selected: true
     } as unknown as Parameters<typeof ModelingFlowNode>[0];
@@ -56,20 +96,33 @@ describe("ModelingFlowNode", () => {
     expect(node).toHaveAttribute("data-node-kind", "model");
     expect(node).toHaveAttribute("data-selected", "true");
     expect(node.className).toContain("ring-1");
-    expect(screen.getByText("model")).toBeInTheDocument();
-    expect(screen.getByText("列数 12")).toBeInTheDocument();
+    expect(screen.getByLabelText("Orders 节点菜单")).toBeInTheDocument();
     expect(screen.getByText("Columns")).toBeInTheDocument();
     expect(screen.getByText("Calculated Fields")).toBeInTheDocument();
     expect(screen.getByText("Relationships")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("modeling-flow-node-section-columns-items")
-    ).toHaveTextContent("id, order_no +1");
-    expect(
-      screen.getByTestId("modeling-flow-node-section-calculatedFields-items")
-    ).toHaveTextContent("order_total");
-    expect(
-      screen.getByTestId("modeling-flow-node-section-relationships-items")
-    ).toHaveTextContent("orders_to_customers");
+    const columnsSection = screen.getByTestId("modeling-flow-node-section-columns-items");
+    expect(within(columnsSection).getByText("id")).toBeInTheDocument();
+    expect(within(columnsSection).getByText("order_no")).toBeInTheDocument();
+    expect(within(columnsSection).getByText("customer_id")).toBeInTheDocument();
+    const calculatedFieldsSection = screen.getByTestId(
+      "modeling-flow-node-section-calculatedFields-items"
+    );
+    expect(within(calculatedFieldsSection).getByText("order_total")).toBeInTheDocument();
+    expect(within(calculatedFieldsSection).getByText("order_bucket")).toBeInTheDocument();
+    expect(within(calculatedFieldsSection).getByText("net_revenue")).toBeInTheDocument();
+    expect(within(calculatedFieldsSection).getByText("margin_rate")).toBeInTheDocument();
+    expect(within(calculatedFieldsSection).getAllByRole("listitem")).toHaveLength(4);
+
+    const relationshipsSection = screen.getByTestId(
+      "modeling-flow-node-section-relationships-items"
+    );
+    expect(within(relationshipsSection).getByText("customers")).toBeInTheDocument();
+    expect(within(relationshipsSection).getByText("order_items")).toBeInTheDocument();
+    expect(within(relationshipsSection).getByText("payments")).toBeInTheDocument();
+    expect(within(relationshipsSection).getByText("shipments")).toBeInTheDocument();
+    const firstRelationshipItem = within(relationshipsSection).getByText("customers").closest("li");
+    expect(firstRelationshipItem).toHaveAttribute("title", "customers · orders_to_customers");
+    expect(within(relationshipsSection).getAllByRole("listitem")).toHaveLength(4);
   });
 
   it("renders dragging view node status without column count", () => {
@@ -116,10 +169,159 @@ describe("ModelingFlowNode", () => {
     expect(screen.queryByText("Calculated Fields")).not.toBeInTheDocument();
     expect(screen.queryByText("Relationships")).not.toBeInTheDocument();
   });
+
+  it("renders placeholder for empty calculated fields and relationships", () => {
+    const nodeProps = {
+      id: "model.empty-sections",
+      data: {
+        kind: "model",
+        title: "Empty Sections Model",
+        subtitle: "empty_sections",
+        columnCount: 1,
+        sections: {
+          columns: ["id"],
+          calculatedFields: [],
+          relationships: []
+        }
+      },
+      selected: false
+    } as unknown as Parameters<typeof ModelingFlowNode>[0];
+
+    render(
+      <ModelingFlowNode {...nodeProps} />
+    );
+
+    expect(
+      screen.getByTestId("modeling-flow-node-section-calculatedFields-items")
+    ).toHaveTextContent("—");
+    expect(
+      screen.getByTestId("modeling-flow-node-section-relationships-items")
+    ).toHaveTextContent("—");
+  });
+
+  it("supports Enter/Space keyboard triggers for add and relationship entry actions", async () => {
+    const user = userEvent.setup();
+    const onNodeAction = vi.fn();
+    const nodeProps = {
+      id: "model.orders",
+      data: {
+        kind: "model",
+        title: "Orders",
+        subtitle: "orders",
+        sections: {
+          columns: ["id", "order_no"],
+          calculatedFields: ["order_total"],
+          relationships: ["rel-orders-customers"]
+        },
+        relationshipDisplayMeta: [
+          {
+            primaryText: "customers",
+            secondaryText: "orders_to_customers"
+          }
+        ],
+        relationshipActionIds: ["rel-orders-customers"],
+        onNodeAction
+      },
+      selected: false
+    } as unknown as Parameters<typeof ModelingFlowNode>[0];
+
+    render(
+      <ModelingFlowNode {...nodeProps} />
+    );
+
+    const addCalculatedFieldButton = screen.getByTestId(
+      "modeling-flow-node-action-add-calculated-field"
+    );
+    const addRelationshipButton = screen.getByTestId("modeling-flow-node-action-add-relationship");
+    const editRelationshipButton = screen.getByTestId(
+      "modeling-flow-node-action-edit-relationship-rel-orders-customers"
+    );
+
+    expect(addCalculatedFieldButton).toHaveAttribute(
+      "aria-label",
+      "为 Orders 新增 Calculated Field"
+    );
+    expect(addRelationshipButton).toHaveAttribute("aria-label", "为 Orders 新增 Relationship");
+    expect(editRelationshipButton).toHaveAttribute(
+      "aria-label",
+      "编辑 Orders 的 Relationship customers"
+    );
+
+    addCalculatedFieldButton.focus();
+    await user.keyboard("{Enter}");
+
+    addRelationshipButton.focus();
+    await user.keyboard(" ");
+
+    editRelationshipButton.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onNodeAction).toHaveBeenCalledTimes(3);
+    expect(onNodeAction).toHaveBeenNthCalledWith(1, { type: "addCalculatedField" });
+    expect(onNodeAction).toHaveBeenNthCalledWith(2, { type: "addRelationship" });
+    expect(onNodeAction).toHaveBeenNthCalledWith(3, {
+      type: "editRelationship",
+      relationshipId: "rel-orders-customers"
+    });
+  });
+
+  it("keeps action buttons disabled-safe and ignores keyboard triggers when actions are disabled", async () => {
+    const user = userEvent.setup();
+    const onNodeAction = vi.fn();
+    const nodeProps = {
+      id: "model.orders",
+      data: {
+        kind: "model",
+        title: "Orders",
+        subtitle: "orders",
+        actionsDisabled: true,
+        sections: {
+          columns: ["id", "order_no"],
+          calculatedFields: ["order_total"],
+          relationships: ["rel-orders-customers"]
+        },
+        relationshipDisplayMeta: [
+          {
+            primaryText: "customers",
+            secondaryText: "orders_to_customers"
+          }
+        ],
+        relationshipActionIds: ["rel-orders-customers"],
+        onNodeAction
+      },
+      selected: false
+    } as unknown as Parameters<typeof ModelingFlowNode>[0];
+
+    render(
+      <ModelingFlowNode {...nodeProps} />
+    );
+
+    const addCalculatedFieldButton = screen.getByTestId(
+      "modeling-flow-node-action-add-calculated-field"
+    );
+    const addRelationshipButton = screen.getByTestId("modeling-flow-node-action-add-relationship");
+    const editRelationshipButton = screen.getByTestId(
+      "modeling-flow-node-action-edit-relationship-rel-orders-customers"
+    );
+
+    expect(addCalculatedFieldButton).toBeDisabled();
+    expect(addRelationshipButton).toBeDisabled();
+    expect(editRelationshipButton).toBeDisabled();
+
+    addCalculatedFieldButton.focus();
+    await user.keyboard("{Enter}");
+    addRelationshipButton.focus();
+    await user.keyboard(" ");
+    editRelationshipButton.focus();
+    await user.keyboard("{Enter}");
+
+    expect(onNodeAction).not.toHaveBeenCalled();
+  });
 });
 
 describe("ModelingFlowEdge", () => {
-  it("renders dashed warning edge style for low-confidence inferred relationship", () => {
+  it("renders dashed warning edge style for low-confidence inferred relationship", async () => {
+    const user = userEvent.setup();
     const edgeProps = {
       id: "rel-1",
       sourceX: 0,
@@ -132,7 +334,17 @@ describe("ModelingFlowEdge", () => {
       data: {
         label: "orders.customer_id = customers.id",
         source: "inferred",
-        confidence: 0.42
+        confidence: 0.42,
+        from: {
+          dataset: "olist_orders_dataset",
+          table: "orders",
+          column: "customer_id"
+        },
+        to: {
+          dataset: "olist_customers_dataset",
+          table: "customers",
+          column: "id"
+        }
       }
     } as unknown as Parameters<typeof ModelingFlowEdge>[0];
 
@@ -149,13 +361,14 @@ describe("ModelingFlowEdge", () => {
     expect(edgeClass).toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-confidence-band", "low");
     expect(edge).toHaveAttribute("data-selected", "false");
-    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveTextContent(
-      "[inferred · 0.42]"
-    );
-    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveAttribute(
-      "data-confidence-band",
-      "low"
-    );
+    expect(edge).toHaveAttribute("data-marker-start", "");
+    expect(edge).toHaveAttribute("data-marker-end", "");
+    expect(screen.queryByTestId("modeling-flow-edge-hover-card")).not.toBeInTheDocument();
+
+    await user.hover(edge);
+    expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
+    expect(screen.getByText("Relationship")).toBeInTheDocument();
+    expect(screen.getByText("olist_orders_dataset.orders.customer_id")).toBeInTheDocument();
   });
 
   it("uses selected emphasis style for selected edge", () => {
@@ -185,11 +398,15 @@ describe("ModelingFlowEdge", () => {
     const edgeClass = edge.getAttribute("data-class") ?? "";
     expect(edgeClass).toContain("stroke-[var(--action-primary)]");
     expect(edgeClass).toContain("stroke-[2.5]");
+    expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
+    expect(screen.getByText("Description")).toBeInTheDocument();
+    expect(screen.getAllByText("-").length).toBeGreaterThan(0);
     expect(edgeClass).not.toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-selected", "true");
   });
 
-  it("renders relationship type marker in edge label when cardinality exists", () => {
+  it("renders one/many markers based on relationship cardinality", async () => {
+    const user = userEvent.setup();
     const edgeProps = {
       id: "rel-type",
       sourceX: 0,
@@ -213,9 +430,46 @@ describe("ModelingFlowEdge", () => {
       </svg>
     );
 
-    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveTextContent(
-      "[many-to-one · manual · 0.88]"
+    const edge = screen.getByTestId("flow-base-edge");
+    expect(edge.getAttribute("data-marker-start")).toContain("-many");
+    expect(edge.getAttribute("data-marker-end")).toContain("-one");
+
+    await user.hover(edge);
+    expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
+    expect(screen.getByText(/1对多 \(Many-to-one\)/)).toBeInTheDocument();
+  });
+
+  it("renders many-to-many relationship label when cardinality is many-to-many", async () => {
+    const user = userEvent.setup();
+    const edgeProps = {
+      id: "rel-many-to-many",
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 100,
+      targetY: 50,
+      sourcePosition: "right",
+      targetPosition: "left",
+      selected: false,
+      data: {
+        label: "orders_items.product_id = products.id",
+        source: "manual",
+        confidence: 0.9,
+        cardinality: "many-to-many"
+      }
+    } as unknown as Parameters<typeof ModelingFlowEdge>[0];
+
+    render(
+      <svg>
+        <ModelingFlowEdge {...edgeProps} />
+      </svg>
     );
+
+    const edge = screen.getByTestId("flow-base-edge");
+    expect(edge.getAttribute("data-marker-start")).toContain("-many");
+    expect(edge.getAttribute("data-marker-end")).toContain("-many");
+
+    await user.hover(edge);
+    expect(screen.getByText("多对多 (Many-to-many)")).toBeInTheDocument();
   });
 
   it("marks low-confidence manual edge as dashed warning style", () => {
@@ -245,13 +499,10 @@ describe("ModelingFlowEdge", () => {
     const edgeClass = edge.getAttribute("data-class") ?? "";
     expect(edgeClass).toContain("stroke-amber-600");
     expect(edgeClass).toContain("[stroke-dasharray:6_4]");
-    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveAttribute(
-      "data-confidence-band",
-      "low"
-    );
   });
 
-  it("uses invalid style marker for broken relationship edge", () => {
+  it("uses invalid style marker for broken relationship edge", async () => {
+    const user = userEvent.setup();
     const edgeProps = {
       id: "rel-invalid",
       sourceX: 0,
@@ -278,8 +529,12 @@ describe("ModelingFlowEdge", () => {
     const edge = screen.getByTestId("flow-base-edge");
     const edgeClass = edge.getAttribute("data-class") ?? "";
     expect(edgeClass).toContain("stroke-red-500");
+    expect(edgeClass).toContain("stroke-[2.2]");
     expect(edgeClass).toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-confidence-band", "invalid");
-    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveTextContent("[invalid · manual · 0.50]");
+
+    await user.hover(edge);
+    expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
   });
 });
