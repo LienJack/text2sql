@@ -12,7 +12,7 @@ describe("workspace modeling schema change integration", () => {
     jest.restoreAllMocks();
   });
 
-  it("detects deleted/modified schema changes and resolves one item idempotently", async () => {
+  it("supports three-group detection, auto cleanup resolve, idempotent replay, and manual gate for type change", async () => {
     const appendAuditEventSpy = jest.spyOn(
       ModelingSchemaChangeRepository.prototype,
       "appendAuditEvent"
@@ -28,11 +28,85 @@ describe("workspace modeling schema change integration", () => {
             { name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true },
             { name: "total_amount", dataType: "numeric", isNullable: false, isPrimaryKey: false }
           ]
+        },
+        {
+          id: "legacy_orders",
+          tableName: "legacy_orders",
+          modelName: "LegacyOrders",
+          columns: [
+            { name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true },
+            { name: "order_id", dataType: "integer", isNullable: false, isPrimaryKey: false }
+          ]
         }
       ],
-      relationships: [],
-      calculatedFields: [],
-      views: [],
+      relationships: [
+        {
+          id: "rel-legacy-orders",
+          source: "manual" as const,
+          confidence: 0.9,
+          bridge: {
+            left: {
+              dataset: "ds-1",
+              table: "legacy_orders",
+              column: "order_id"
+            },
+            right: {
+              dataset: "ds-1",
+              table: "orders",
+              column: "id"
+            },
+            operator: "eq" as const,
+            confidence: 0.9
+          }
+        },
+        {
+          id: "rel-orders-total",
+          source: "manual" as const,
+          confidence: 0.8,
+          bridge: {
+            left: {
+              dataset: "ds-1",
+              table: "orders",
+              column: "total_amount"
+            },
+            right: {
+              dataset: "ds-1",
+              table: "orders",
+              column: "id"
+            },
+            operator: "eq" as const,
+            confidence: 0.8
+          }
+        }
+      ],
+      calculatedFields: [
+        {
+          id: "cf-legacy-order-id",
+          modelId: "legacy_orders",
+          name: "legacy_order_id",
+          expression: "order_id",
+          dataType: "integer"
+        },
+        {
+          id: "cf-orders-total",
+          modelId: "orders",
+          name: "orders_total",
+          expression: "total_amount * 1.1",
+          dataType: "numeric"
+        }
+      ],
+      views: [
+        {
+          id: "view-legacy",
+          name: "legacy_orders_view",
+          sql: "select * from legacy_orders"
+        },
+        {
+          id: "view-orders-total",
+          name: "orders_total_view",
+          sql: "select total_amount from orders"
+        }
+      ],
       schemaChanges: []
     };
 
@@ -128,9 +202,11 @@ describe("workspace modeling schema change integration", () => {
       policyVersion: 7
     });
     expect(detected.stage).toBe("schema_change_detected");
+    expect(detected.summary.deletedTableCount).toBe(1);
     expect(detected.summary.deletedColumnCount).toBe(1);
     expect(detected.summary.modifiedColumnCount).toBe(1);
-    expect(detected.unresolvedHighRiskCount).toBeGreaterThanOrEqual(1);
+    expect(detected.unresolvedHighRiskCount).toBe(3);
+    expect(detected.highRiskStatus).toBe("high");
     expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(1);
     expect(appendAuditEventSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -144,23 +220,79 @@ describe("workspace modeling schema change integration", () => {
       })
     );
 
-    const firstChangeId = detected.changes.deleted[0]?.id ?? detected.changes.modified[0]?.id;
-    expect(firstChangeId).toBeTruthy();
+    const deletedTableChangeId = detected.changes.deletedTables[0]?.id;
+    const deletedColumnChangeId = detected.changes.deletedColumns[0]?.id;
+    const modifiedColumnChangeId = detected.changes.modifiedColumns[0]?.id;
+    expect(deletedTableChangeId).toBeTruthy();
+    expect(deletedColumnChangeId).toBeTruthy();
+    expect(modifiedColumnChangeId).toBeTruthy();
 
-    const resolved = await service.resolveModelingSchemaChange(actor, "ws-1", "ds-1", {
+    const resolveDeletedTable = await service.resolveModelingSchemaChange(actor, "ws-1", "ds-1", {
       policyVersion: 7,
-      changeId: firstChangeId!
+      changeId: deletedTableChangeId!
     });
-    expect(resolved.stage).toBe("schema_change_resolved");
-    expect(resolved.alreadyResolved).toBe(false);
-    expect(resolved.schemaChange.status).toBe("resolved");
+    expect(resolveDeletedTable.stage).toBe("schema_change_resolved");
+    expect(resolveDeletedTable.alreadyResolved).toBe(false);
+    expect(resolveDeletedTable.schemaChange.status).toBe("resolved");
+    expect(resolveDeletedTable.unresolvedHighRiskCount).toBe(2);
 
-    const replayResolve = await service.resolveModelingSchemaChange(actor, "ws-1", "ds-1", {
+    const snapshotAfterDeleteTable = await service.getModelingGraph(actor, "ws-1", "ds-1");
+    const payloadAfterDeleteTable = snapshotAfterDeleteTable.draft?.graphPayload;
+    expect(payloadAfterDeleteTable?.models.map((item) => item.id)).not.toContain("legacy_orders");
+    expect(payloadAfterDeleteTable?.relationships.map((item) => item.id)).not.toContain(
+      "rel-legacy-orders"
+    );
+    expect(payloadAfterDeleteTable?.calculatedFields.map((item) => item.id)).not.toContain(
+      "cf-legacy-order-id"
+    );
+    expect(payloadAfterDeleteTable?.views.map((item) => item.id)).not.toContain("view-legacy");
+
+    const replayResolveDeletedTable = await service.resolveModelingSchemaChange(
+      actor,
+      "ws-1",
+      "ds-1",
+      {
+        policyVersion: 7,
+        changeId: deletedTableChangeId!
+      }
+    );
+    expect(replayResolveDeletedTable.alreadyResolved).toBe(true);
+    expect(replayResolveDeletedTable.schemaChange.status).toBe("resolved");
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(2);
+
+    const resolveDeletedColumn = await service.resolveModelingSchemaChange(actor, "ws-1", "ds-1", {
       policyVersion: 7,
-      changeId: firstChangeId!
+      changeId: deletedColumnChangeId!
     });
-    expect(replayResolve.alreadyResolved).toBe(true);
-    expect(replayResolve.schemaChange.status).toBe("resolved");
+    expect(resolveDeletedColumn.alreadyResolved).toBe(false);
+    expect(resolveDeletedColumn.schemaChange.status).toBe("resolved");
+    expect(resolveDeletedColumn.unresolvedHighRiskCount).toBe(1);
+
+    const snapshotAfterDeleteColumn = await service.getModelingGraph(actor, "ws-1", "ds-1");
+    const payloadAfterDeleteColumn = snapshotAfterDeleteColumn.draft?.graphPayload;
+    const ordersModel = payloadAfterDeleteColumn?.models.find((item) => item.id === "orders");
+    expect(ordersModel?.columns.map((item) => item.name)).toEqual(["id"]);
+    expect(payloadAfterDeleteColumn?.relationships.map((item) => item.id)).not.toContain(
+      "rel-orders-total"
+    );
+    expect(payloadAfterDeleteColumn?.calculatedFields.map((item) => item.id)).not.toContain(
+      "cf-orders-total"
+    );
+    expect(payloadAfterDeleteColumn?.views.map((item) => item.id)).not.toContain(
+      "view-orders-total"
+    );
+
+    const replayResolveDeletedColumn = await service.resolveModelingSchemaChange(
+      actor,
+      "ws-1",
+      "ds-1",
+      {
+        policyVersion: 7,
+        changeId: deletedColumnChangeId!
+      }
+    );
+    expect(replayResolveDeletedColumn.alreadyResolved).toBe(true);
+    expect(replayResolveDeletedColumn.schemaChange.status).toBe("resolved");
     expect(appendAuditEventSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "ws-1",
@@ -168,16 +300,35 @@ describe("workspace modeling schema change integration", () => {
         event: expect.objectContaining({
           action: "resolve",
           outcome: "already_resolved",
-          changeId: firstChangeId
+          changeId: deletedColumnChangeId
         })
       })
     );
 
+    await expect(
+      service.resolveModelingSchemaChange(actor, "ws-1", "ds-1", {
+        policyVersion: 7,
+        changeId: modifiedColumnChangeId!
+      })
+    ).rejects.toMatchObject({
+      code: "WORKSPACE_MODELING_SCHEMA_CHANGE_MANUAL_RESOLUTION_REQUIRED",
+      statusCode: 409
+    });
+
+    const schemaChangeState = await service.describeModelingSchemaChangeState(
+      actor,
+      "ws-1",
+      "ds-1"
+    );
+    expect(schemaChangeState.highRiskStatus).toBe("high");
+    expect(schemaChangeState.unresolvedHighRiskCount).toBe(1);
+    expect(schemaChangeState.unresolvedSchemaChangeIds).toContain(modifiedColumnChangeId!);
+
     const replayDetected = await service.detectModelingSchemaChanges(actor, "ws-1", "ds-1", {
       policyVersion: 7
     });
-    expect(replayDetected.unresolvedHighRiskCount).toBe(resolved.unresolvedHighRiskCount);
-    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(2);
+    expect(replayDetected.unresolvedHighRiskCount).toBe(1);
+    expect(workspaceRelationshipService.replaceDraft).toHaveBeenCalledTimes(3);
     expect(appendAuditEventSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         workspaceId: "ws-1",

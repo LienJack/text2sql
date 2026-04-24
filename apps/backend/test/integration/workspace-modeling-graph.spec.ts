@@ -118,7 +118,8 @@ const buildModelingService = () => {
       queryExecutorRouter as never,
       calculatedFieldExpressionValidator,
       modelingGraphRepository
-    )
+    ),
+    queryExecutorRouter
   };
 };
 
@@ -261,6 +262,7 @@ describe("workspace modeling graph revision integration", () => {
           name: "orders_to_customers",
           source: "manual",
           confidence: 0.91,
+          type: "many-to-one",
           bridge: edgePayload[0]!.bridge
         }
       ],
@@ -315,6 +317,7 @@ describe("workspace modeling graph revision integration", () => {
           name: "orders_to_customers",
           source: "manual",
           confidence: 0.95,
+          type: "one-to-many",
           bridge: edgePayload[0]!.bridge
         }
       ],
@@ -335,6 +338,8 @@ describe("workspace modeling graph revision integration", () => {
 
     expect(third.draft?.graphPayload.models).toEqual(second.draft?.graphPayload.models);
     expect(third.draft?.graphPayload.relationships[0]?.confidence).toBe(0.95);
+    expect(third.draft?.graphPayload.relationships[0]?.type).toBe("one-to-many");
+    expect(third.draft?.graphPayload.relationships[0]?.cardinality).toBe("one-to-many");
     expect(third.draft?.graphPayload.views[0]?.sql).toContain("discount_amount");
     expect(third.draft?.graphPayload.calculatedFields[0]?.expression).toContain("coalesce");
   });
@@ -366,6 +371,137 @@ describe("workspace modeling graph revision integration", () => {
         name: "broken_field"
       }
     });
+  });
+
+  it("returns modeling preview rows with truncation semantics for model target", async () => {
+    const { service, queryExecutorRouter } = buildModelingService();
+    queryExecutorRouter.execute.mockResolvedValueOnce({
+      rows: [
+        { id: 1, total_amount: 10.5 },
+        { id: 2, total_amount: 20.1 }
+      ]
+    });
+
+    await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: baseModelPayload
+    });
+
+    const preview = await service.getModelingPreview(actor, "ws-1", "ds-1", {
+      targetKind: "model",
+      targetId: "orders",
+      limit: 1
+    });
+
+    expect(queryExecutorRouter.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sql: expect.stringContaining("SELECT * FROM"),
+        limit: 2
+      })
+    );
+    expect(preview.targetKind).toBe("model");
+    expect(preview.targetId).toBe("orders");
+    expect(preview.rowCount).toBe(1);
+    expect(preview.truncated).toBe(true);
+    expect(preview.columns).toEqual(expect.arrayContaining(["id", "total_amount"]));
+    expect(preview.rows).toEqual([{ id: 1, total_amount: 10.5 }]);
+  });
+
+  it("returns modeling preview rows for view target and wraps view sql safely", async () => {
+    const { service, queryExecutorRouter } = buildModelingService();
+    queryExecutorRouter.execute.mockResolvedValueOnce({
+      rows: [
+        { id: 7, total_amount: 99.2 },
+        { id: 8, total_amount: 120.4 }
+      ]
+    });
+
+    await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: baseModelPayload,
+      views: [
+        {
+          id: "view_orders_recent",
+          name: "orders_recent",
+          sql: "SELECT id, total_amount FROM orders ORDER BY id DESC"
+        }
+      ]
+    });
+
+    const preview = await service.getModelingPreview(actor, "ws-1", "ds-1", {
+      targetKind: "view",
+      targetId: "view_orders_recent",
+      limit: 1
+    });
+
+    expect(queryExecutorRouter.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sql: expect.stringContaining("modeling_view_preview"),
+        limit: 2
+      })
+    );
+    expect(queryExecutorRouter.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sql: expect.stringContaining("SELECT id, total_amount FROM orders ORDER BY id DESC")
+      })
+    );
+    expect(preview.targetKind).toBe("view");
+    expect(preview.targetId).toBe("view_orders_recent");
+    expect(preview.rowCount).toBe(1);
+    expect(preview.truncated).toBe(true);
+    expect(preview.columns).toEqual(expect.arrayContaining(["id", "total_amount"]));
+    expect(preview.rows).toEqual([{ id: 7, total_amount: 99.2 }]);
+  });
+
+  it("accepts aggregate/math/string functions from expression list", async () => {
+    const { service } = buildModelingService();
+
+    const result = await service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+      policyVersion: 3,
+      models: [
+        {
+          id: "orders",
+          tableName: "orders",
+          modelName: "Orders",
+          columns: [
+            { name: "id", dataType: "integer", isNullable: false, isPrimaryKey: true },
+            { name: "total_amount", dataType: "numeric", isNullable: false, isPrimaryKey: false },
+            { name: "customer_name", dataType: "text", isNullable: true, isPrimaryKey: false }
+          ]
+        }
+      ],
+      calculatedFields: [
+        {
+          id: "cf_total_sum",
+          modelId: "orders",
+          name: "total_sum",
+          expression: "sum(total_amount)",
+          dataType: "numeric"
+        },
+        {
+          id: "cf_avg_rounded",
+          modelId: "orders",
+          name: "avg_rounded",
+          expression: "round(avg(total_amount), 2)",
+          dataType: "numeric"
+        },
+        {
+          id: "cf_customer_name_upper",
+          modelId: "orders",
+          name: "customer_name_upper",
+          expression: "upper(customer_name)",
+          dataType: "string"
+        }
+      ]
+    });
+
+    expect(result.draft?.graphPayload.calculatedFields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "cf_total_sum", expression: "sum(total_amount)" }),
+        expect.objectContaining({ id: "cf_avg_rounded", expression: "round(avg(total_amount), 2)" }),
+        expect.objectContaining({ id: "cf_customer_name_upper", expression: "upper(customer_name)" })
+      ])
+    );
   });
 
   it.each([
@@ -418,4 +554,36 @@ describe("workspace modeling graph revision integration", () => {
       });
     }
   );
+
+  it("returns function-list guidance when expression uses unsupported function", async () => {
+    const { service } = buildModelingService();
+
+    await expect(
+      service.upsertModelingGraph(actor, "ws-1", "ds-1", {
+        policyVersion: 3,
+        models: baseModelPayload,
+        calculatedFields: [
+          {
+            id: "cf_pow_case",
+            modelId: "orders",
+            name: "pow_case",
+            expression: "pow(total_amount, 2)",
+            dataType: "numeric"
+          }
+        ]
+      })
+    ).rejects.toMatchObject({
+      code: "WORKSPACE_MODELING_GRAPH_CALCULATED_FIELD_EXPRESSION_INVALID",
+      message: expect.stringContaining("pow"),
+      details: {
+        category: "not-supported",
+        functionName: "pow",
+        supportedFunctionGroups: {
+          aggregate: expect.arrayContaining(["sum", "avg"]),
+          math: expect.arrayContaining(["abs", "round"]),
+          string: expect.arrayContaining(["upper", "concat"])
+        }
+      }
+    });
+  });
 });

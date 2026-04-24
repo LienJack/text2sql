@@ -15,6 +15,12 @@ import { ModelingRelationshipEditor } from "@/components/settings/modeling/model
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
 
 type DetailsTab = "metadata" | "calculatedField" | "relationship";
+type PreviewResult = {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
+};
 
 function resolveMetadataTarget(
   selectedNode: ModelingSidebarNode | null,
@@ -69,6 +75,15 @@ export function ModelingDetailsPanel(props: {
   onRelationshipsSave: (
     relationships: ModelingGraphRelationship[]
   ) => Promise<void> | void;
+  onLoadPreview?: (input: {
+    targetKind: "model" | "view";
+    targetId: string;
+    limit?: number;
+  }) => Promise<PreviewResult>;
+  onDeleteTarget?: (input: {
+    targetKind: "model" | "view";
+    targetId: string;
+  }) => Promise<void> | void;
   onSelectRelationship?: (relationshipId: string | null) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -82,11 +97,16 @@ export function ModelingDetailsPanel(props: {
     onMetadataSave,
     onCalculatedFieldsSave,
     onRelationshipsSave,
+    onLoadPreview,
+    onDeleteTarget,
     onSelectRelationship,
     onDirtyChange
   } = props;
   const [tab, setTab] = useState<DetailsTab>("metadata");
   const [editorDirty, setEditorDirty] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewData, setPreviewData] = useState<PreviewResult | null>(null);
 
   useEffect(() => {
     if (selectedNode?.kind === "relationship") {
@@ -95,6 +115,8 @@ export function ModelingDetailsPanel(props: {
       setTab("metadata");
     }
     setEditorDirty(false);
+    setPreviewError("");
+    setPreviewData(null);
   }, [selectedNode?.kind, selectedNode?.id]);
 
   useEffect(() => {
@@ -128,6 +150,44 @@ export function ModelingDetailsPanel(props: {
     }
     setEditorDirty(false);
     setTab(nextTab);
+  };
+
+  const loadPreview = async (): Promise<void> => {
+    if (!metadataTarget || !onLoadPreview) {
+      return;
+    }
+    setPreviewLoading(true);
+    setPreviewError("");
+    try {
+      const result = await onLoadPreview({
+        targetKind: metadataTarget.kind,
+        targetId: metadataTarget.id,
+        limit: 100
+      });
+      setPreviewData(result);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "加载预览失败");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const deleteTarget = async (): Promise<void> => {
+    if (!metadataTarget || !onDeleteTarget) {
+      return;
+    }
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        `确认删除当前${metadataTarget.kind === "model" ? " Model" : " View"}吗？`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    await onDeleteTarget({
+      targetKind: metadataTarget.kind,
+      targetId: metadataTarget.id
+    });
   };
 
   return (
@@ -176,18 +236,79 @@ export function ModelingDetailsPanel(props: {
 
       {tab === "metadata" ? (
         metadataTarget ? (
-          <ModelingMetadataEditor
-            target={metadataTarget}
-            busy={busy}
-            onDirtyChange={setEditorDirty}
-            onSave={async (input) => {
-              if (!selectedNode || selectedNode.kind === "relationship") {
-                return;
-              }
-              await onMetadataSave(input, selectedNode);
-              setEditorDirty(false);
-            }}
-          />
+          <div className="space-y-3">
+            <ModelingMetadataEditor
+              target={metadataTarget}
+              busy={busy}
+              onDirtyChange={setEditorDirty}
+              onSave={async (input) => {
+                if (!selectedNode || selectedNode.kind === "relationship") {
+                  return;
+                }
+                await onMetadataSave(input, selectedNode);
+                setEditorDirty(false);
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || previewLoading || !onLoadPreview}
+                onClick={() => {
+                  void loadPreview();
+                }}
+              >
+                {previewLoading ? "预览加载中..." : "加载 Data Preview"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy || !onDeleteTarget}
+                onClick={() => {
+                  void deleteTarget();
+                }}
+              >
+                删除当前{metadataTarget.kind === "model" ? " Model" : " View"}
+              </Button>
+            </div>
+            {previewError ? <StateBlock variant="error">{previewError}</StateBlock> : null}
+            {previewData ? (
+              <div className="space-y-2 rounded-md border border-[var(--border-default)] bg-white p-3">
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Preview Rows: {previewData.rowCount}
+                  {previewData.truncated ? "（已截断至 100 行）" : ""}
+                </p>
+                {previewData.columns.length === 0 || previewData.rows.length === 0 ? (
+                  <StateBlock variant="idle">当前无可展示预览数据。</StateBlock>
+                ) : (
+                  <div className="max-h-56 overflow-auto rounded border border-[var(--border-default)]">
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-[var(--surface-muted)] text-left">
+                          {previewData.columns.map((column) => (
+                            <th key={column} className="border-b border-[var(--border-default)] px-2 py-1">
+                              {column}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.rows.map((row, index) => (
+                          <tr key={`preview-row-${index}`} className="odd:bg-white even:bg-[var(--surface-muted)]/40">
+                            {previewData.columns.map((column) => (
+                              <td key={`${index}:${column}`} className="border-b border-[var(--border-default)] px-2 py-1 align-top">
+                                {String(row[column] ?? "")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
         ) : (
           <StateBlock variant="idle">当前选中对象不支持 Metadata 编辑，请切换到 model/view。</StateBlock>
         )

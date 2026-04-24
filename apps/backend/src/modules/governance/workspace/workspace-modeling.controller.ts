@@ -6,6 +6,7 @@ import { DomainError } from "../../../common/domain-error";
 import { WorkspaceAdminGuard } from "../../auth/workspace-admin.guard";
 import { DetectModelingSchemaChangeDto } from "./dto/detect-modeling-schema-change.dto";
 import { DeployModelingGraphDto } from "./dto/deploy-modeling-graph.dto";
+import { GetModelingPreviewDto } from "./dto/get-modeling-preview.dto";
 import { UpsertModelingGraphDto } from "./dto/upsert-modeling-graph.dto";
 import { UpsertModelingSetupDto } from "./dto/upsert-modeling-setup.dto";
 import { ResolveModelingSchemaChangeDto } from "./dto/resolve-modeling-schema-change.dto";
@@ -147,6 +148,26 @@ export class WorkspaceModelingController {
   ): Promise<ApiResponse<unknown>> {
     try {
       const data = await this.workspaceModelingService.upsertModelingGraph(
+        req.actor,
+        workspaceId,
+        datasourceId,
+        body
+      );
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post(":workspaceId/datasources/:datasourceId/modeling/preview")
+  async getModelingPreview(
+    @Param("workspaceId") workspaceId: string,
+    @Param("datasourceId") datasourceId: string,
+    @Body() body: GetModelingPreviewDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.workspaceModelingService.getModelingPreview(
         req.actor,
         workspaceId,
         datasourceId,

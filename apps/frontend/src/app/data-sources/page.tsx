@@ -33,12 +33,10 @@ import { Steps, type StepItem } from "@/components/ui/steps";
 import { StateBlock } from "@/components/ui/state-block";
 import { SetupModelsStep } from "@/components/data-sources/setup-models-step";
 import { SetupRelationshipsStep } from "@/components/data-sources/setup-relationships-step";
-import { WorkspaceSelectorInline } from "@/components/data-sources/workspace-selector-inline";
 import { cn } from "@/lib/utils";
 import {
   AdminApiError,
   commitModelingSetup,
-  createWorkspace,
   listWorkspaces,
   listModelingSetupTables,
   recommendModelingSetupRelationships,
@@ -57,6 +55,7 @@ import {
   uploadDatasourceFile
 } from "@/lib/api-client";
 import {
+  readActiveWorkspaceId,
   writeActiveDatasourceId,
   writeActiveWorkspaceId
 } from "@/lib/datasource-session-context";
@@ -139,8 +138,7 @@ const TYPE_FILTERS: Array<{ value: "all" | DatasourceType; label: string }> = [
 
 const WIZARD_STEPS: StepItem[] = [
   { step: 1, title: "选择数据源", subtitle: "挑选接入方式" },
-  { step: 2, title: "配置信息", subtitle: "创建或编辑连接" },
-  { step: 3, title: "工作空间", subtitle: "绑定治理作用域" }
+  { step: 2, title: "配置信息", subtitle: "创建或编辑连接并自动绑定当前工作空间" }
 ];
 
 const SETUP_STEPS: StepItem[] = [
@@ -395,16 +393,14 @@ function DataSourcesPageContent() {
   const [typeFilter, setTypeFilter] = useState<"all" | DatasourceType>("all");
 
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorStep, setEditorStep] = useState<1 | 2 | 3>(1);
+  const [editorStep, setEditorStep] = useState<1 | 2>(1);
   const [editorSaving, setEditorSaving] = useState(false);
   const [editorFailure, setEditorFailure] = useState<WizardFailure | null>(null);
   const [wizard, setWizard] = useState<WizardState>(() =>
-    createEmptyWizardState(workspaceIdFromQuery)
+    createEmptyWizardState(readActiveWorkspaceId())
   );
 
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [workspacesLoading, setWorkspacesLoading] = useState(false);
-  const [workspacesError, setWorkspacesError] = useState("");
   const [setupWizard, setSetupWizard] = useState<SetupWizardState>(() =>
     createEmptySetupWizardState()
   );
@@ -423,24 +419,27 @@ function DataSourcesPageContent() {
   };
 
   const loadWorkspaces = async (preferredWorkspaceId?: string): Promise<void> => {
-    setWorkspacesLoading(true);
-    setWorkspacesError("");
     try {
       const result = await listWorkspaces({ page: 1, pageSize: 200 });
       setWorkspaces(result.items);
-      const preferred = preferredWorkspaceId?.trim() || wizard.workspaceId || workspaceIdFromQuery;
+      const preferred =
+        preferredWorkspaceId?.trim() ||
+        readActiveWorkspaceId() ||
+        wizard.workspaceId ||
+        workspaceIdFromQuery;
       const resolvedWorkspaceId =
         (preferred && result.items.find((item) => item.id === preferred)?.id) ||
         result.items[0]?.id ||
         "";
       setWizard((previous) => ({
         ...previous,
-        workspaceId: previous.workspaceId || resolvedWorkspaceId
+        workspaceId: resolvedWorkspaceId
       }));
+      if (resolvedWorkspaceId) {
+        writeActiveWorkspaceId(resolvedWorkspaceId);
+      }
     } catch (error) {
-      setWorkspacesError(error instanceof Error ? error.message : "加载工作空间失败");
-    } finally {
-      setWorkspacesLoading(false);
+      setPageError(error instanceof Error ? error.message : "加载工作空间失败");
     }
   };
 
@@ -449,7 +448,10 @@ function DataSourcesPageContent() {
   }, []);
 
   useEffect(() => {
-    writeActiveWorkspaceId(workspaceIdFromQuery);
+    const workspaceFromQuery = workspaceIdFromQuery.trim();
+    if (workspaceFromQuery) {
+      writeActiveWorkspaceId(workspaceFromQuery);
+    }
   }, [workspaceIdFromQuery]);
 
   const filteredDatasources = useMemo(() => {
@@ -472,12 +474,24 @@ function DataSourcesPageContent() {
     () => datasources.filter((item) => item.type === "csv" || item.type === "excel").length,
     [datasources]
   );
+  const currentWorkspaceName = useMemo(() => {
+    if (!wizard.workspaceId.trim()) {
+      return "未选择";
+    }
+    return (
+      workspaces.find((workspace) => workspace.id === wizard.workspaceId)?.name ??
+      wizard.workspaceId
+    );
+  }, [wizard.workspaceId, workspaces]);
 
   const onStartChat = async (
     datasourceId: string,
     workspaceIdOverride?: string
   ): Promise<void> => {
-    const activeWorkspaceId = workspaceIdOverride?.trim() || workspaceIdFromQuery;
+    const activeWorkspaceId =
+      workspaceIdOverride?.trim() ||
+      readActiveWorkspaceId() ||
+      wizard.workspaceId.trim();
     setActiveDatasourceId(datasourceId);
     setPageError("");
     try {
@@ -487,9 +501,7 @@ function DataSourcesPageContent() {
       writeActiveDatasourceId(datasourceId);
       writeActiveWorkspaceId(activeWorkspaceId);
       router.push(
-        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}${
-          activeWorkspaceId ? `&workspaceId=${encodeURIComponent(activeWorkspaceId)}` : ""
-        }`
+        `/chat?datasource=${encodeURIComponent(datasourceId)}&sessionId=${encodeURIComponent(session.id)}`
       );
     } catch (startError) {
       setPageError(startError instanceof Error ? startError.message : "创建会话失败");
@@ -504,9 +516,7 @@ function DataSourcesPageContent() {
   const navigateToModeling = (workspaceId: string, datasourceId: string): void => {
     writeActiveWorkspaceId(workspaceId);
     writeActiveDatasourceId(datasourceId);
-    router.push(
-      `/settings/modeling?workspaceId=${encodeURIComponent(workspaceId)}&datasourceId=${encodeURIComponent(datasourceId)}`
-    );
+    router.push(`/settings/modeling?datasourceId=${encodeURIComponent(datasourceId)}`);
   };
 
   const openSetupWizard = async (workspaceId: string, datasourceId: string): Promise<void> => {
@@ -538,6 +548,46 @@ function DataSourcesPageContent() {
         loading: false,
         failure: resolveSetupFailure(error, "setup_tables_load_failed")
       }));
+    }
+  };
+
+  const resolveWorkspaceIdForSetup = async (): Promise<string> => {
+    const candidates = [
+      readActiveWorkspaceId(),
+      wizard.workspaceId
+    ]
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const matchedCachedWorkspaceId = candidates.find((candidate) =>
+      workspaces.some((workspace) => workspace.id === candidate)
+    );
+    if (matchedCachedWorkspaceId) {
+      return matchedCachedWorkspaceId;
+    }
+    if (workspaces[0]?.id) {
+      return workspaces[0].id;
+    }
+    const result = await listWorkspaces({ page: 1, pageSize: 200 });
+    setWorkspaces(result.items);
+    const matchedRemoteWorkspaceId = candidates.find((candidate) =>
+      result.items.some((workspace) => workspace.id === candidate)
+    );
+    return matchedRemoteWorkspaceId || result.items[0]?.id?.trim() || "";
+  };
+
+  const openSetupWizardFromDatasourceCard = async (datasourceId: string): Promise<void> => {
+    try {
+      const resolvedWorkspaceId = await resolveWorkspaceIdForSetup();
+      if (!resolvedWorkspaceId) {
+        setPageError("未找到可用工作空间，请先在入口选择或创建工作空间后再执行建模设置。");
+        return;
+      }
+      setPageError("");
+      writeActiveWorkspaceId(resolvedWorkspaceId);
+      writeActiveDatasourceId(datasourceId);
+      await openSetupWizard(resolvedWorkspaceId, datasourceId);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "打开建模设置失败");
     }
   };
 
@@ -651,7 +701,7 @@ function DataSourcesPageContent() {
   };
 
   const resetEditor = (mode: EditorMode, datasource?: Datasource): void => {
-    const defaultState = createEmptyWizardState(workspaceIdFromQuery);
+    const defaultState = createEmptyWizardState(readActiveWorkspaceId());
 
     if (mode === "edit" && datasource) {
       const defaultPort =
@@ -683,13 +733,13 @@ function DataSourcesPageContent() {
   const openCreateEditor = (): void => {
     resetEditor("create");
     setEditorOpen(true);
-    void loadWorkspaces(workspaceIdFromQuery);
+    void loadWorkspaces(readActiveWorkspaceId());
   };
 
   const openEditEditor = (datasource: Datasource): void => {
     resetEditor("edit", datasource);
     setEditorOpen(true);
-    void loadWorkspaces(workspaceIdFromQuery);
+    void loadWorkspaces(readActiveWorkspaceId());
   };
 
   const closeEditor = (): void => {
@@ -735,9 +785,9 @@ function DataSourcesPageContent() {
     return "";
   };
 
-  const validateStep3 = (): string => {
+  const validateWorkspaceBinding = (): string => {
     if (!wizard.workspaceId.trim()) {
-      return "请选择工作空间后再提交";
+      return "当前未检测到工作空间，请先在入口选择工作空间后再提交。";
     }
     return "";
   };
@@ -770,7 +820,13 @@ function DataSourcesPageContent() {
       return;
     }
 
-    const validationMessage = validateStep3();
+    const stepValidationMessage = validateStep2();
+    if (stepValidationMessage) {
+      setEditorFailure({ message: stepValidationMessage, action: "previous" });
+      return;
+    }
+
+    const validationMessage = validateWorkspaceBinding();
     if (validationMessage) {
       setEditorFailure({ message: validationMessage, action: "previous" });
       return;
@@ -994,6 +1050,14 @@ function DataSourcesPageContent() {
                     >
                       复制数据源 ID
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={unavailable}
+                      onClick={() => {
+                        void openSetupWizardFromDatasourceCard(item.id);
+                      }}
+                    >
+                      建模设置
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => openEditEditor(item)}>编辑数据源</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -1045,7 +1109,7 @@ function DataSourcesPageContent() {
                 {wizard.mode === "create" ? "新增数据源" : "编辑数据源"}
               </DialogTitle>
               <DialogDescription className="text-[var(--text-secondary)]">
-                创建和编辑都必须完成工作空间绑定步骤。
+                创建和编辑会自动绑定当前工作空间，无需在此页重复选择。
               </DialogDescription>
             </div>
             <Steps items={WIZARD_STEPS} currentStep={editorStep} />
@@ -1212,7 +1276,7 @@ function DataSourcesPageContent() {
                     <div>
                       <p className="text-sm font-medium text-[var(--text-primary)]">文件上传</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        先上传文件创建数据源，再在同一流程绑定到目标工作空间。
+                        先上传文件创建数据源，保存时会自动绑定当前工作空间。
                       </p>
                     </div>
                     <label className="space-y-1">
@@ -1254,37 +1318,10 @@ function DataSourcesPageContent() {
                     </label>
                   </div>
                 )}
-              </div>
-            ) : null}
-
-            {editorStep === 3 ? (
-              <div className="space-y-4">
-                <WorkspaceSelectorInline
-                  workspaceId={wizard.workspaceId}
-                  workspaces={workspaces}
-                  loading={workspacesLoading}
-                  error={workspacesError}
-                  disabled={editorSaving}
-                  onWorkspaceIdChange={(nextWorkspaceId) => {
-                    patchWizard({ workspaceId: nextWorkspaceId });
-                    writeActiveWorkspaceId(nextWorkspaceId);
-                  }}
-                  onWorkspaceCreated={(workspace) => {
-                    setWorkspaces((previous) => {
-                      if (previous.some((item) => item.id === workspace.id)) {
-                        return previous;
-                      }
-                      return [workspace, ...previous];
-                    });
-                    patchWizard({ workspaceId: workspace.id });
-                    writeActiveWorkspaceId(workspace.id);
-                  }}
-                  onCreateWorkspace={(name) => createWorkspace({ name })}
-                />
 
                 <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-sidebar)] p-4">
                   <p className="text-sm text-[var(--text-secondary)]">
-                    提交会走 workflow 接口，统一处理数据源变更与工作空间绑定。
+                    将自动绑定当前工作空间：<span className="font-medium text-[var(--text-primary)]">{currentWorkspaceName}</span>。
                   </p>
                   {wizard.mode === "edit" ? (
                     <label className="mt-3 flex items-center gap-2 text-sm text-[var(--text-primary)]">
@@ -1324,13 +1361,13 @@ function DataSourcesPageContent() {
                     closeEditor();
                     return;
                   }
-                  setEditorStep((previous) => (previous === 3 ? 2 : 1));
+                  setEditorStep(1);
                 }}
               >
                 {editorStep === 1 || (editorStep === 2 && wizard.mode === "edit") ? "取消" : "上一步"}
               </Button>
 
-              {editorStep < 3 ? (
+              {editorStep < 2 ? (
                 <Button
                   size="lg"
                   className="px-5"
@@ -1343,16 +1380,7 @@ function DataSourcesPageContent() {
                       }
                       setEditorFailure(null);
                       setEditorStep(2);
-                      return;
                     }
-
-                    const validationMessage = validateStep2();
-                    if (validationMessage) {
-                      setEditorFailure({ message: validationMessage, action: "previous" });
-                      return;
-                    }
-                    setEditorFailure(null);
-                    setEditorStep(3);
                   }}
                 >
                   下一步

@@ -150,6 +150,35 @@ describe("ModelingFlowEdge", () => {
     expect(edge).toHaveAttribute("data-selected", "true");
   });
 
+  it("renders relationship type marker in edge label when cardinality exists", () => {
+    const edgeProps = {
+      id: "rel-type",
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 100,
+      targetY: 50,
+      sourcePosition: "right",
+      targetPosition: "left",
+      selected: false,
+      data: {
+        label: "orders.customer_id = customers.id",
+        source: "manual",
+        confidence: 0.88,
+        cardinality: "many-to-one"
+      }
+    } as unknown as Parameters<typeof ModelingFlowEdge>[0];
+
+    render(
+      <svg>
+        <ModelingFlowEdge {...edgeProps} />
+      </svg>
+    );
+
+    expect(screen.getByTestId("modeling-flow-edge-label")).toHaveTextContent(
+      "[many-to-one · manual · 0.88]"
+    );
+  });
+
   it("marks low-confidence manual edge as dashed warning style", () => {
     const edgeProps = {
       id: "rel-3",

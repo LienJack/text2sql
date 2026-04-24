@@ -234,11 +234,11 @@ export class WorkspaceModelingSchemaChangeDetectorService {
     const tableLabel = input.tableName;
     const summary =
       input.kind === "deleted_table"
-        ? `数据表 ${tableLabel} 已删除。`
+        ? `数据表 ${tableLabel} 已删除。可执行 Resolve 自动清理受影响对象。`
         : input.kind === "deleted_column"
-          ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 已删除。`
+          ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 已删除。可执行 Resolve 自动清理受影响对象。`
           : input.kind === "modified_column_type"
-            ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 类型或约束已变化。`
+            ? `数据表 ${tableLabel} 的字段 ${input.columnName ?? ""} 类型或约束已变化。需人工重建后重新 Detect。`
             : `数据表 ${tableLabel}${input.columnName ? `.${input.columnName}` : ""} 出现其他 schema change。`;
 
     return {

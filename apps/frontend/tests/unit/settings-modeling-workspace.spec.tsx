@@ -2,7 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
+import { ModelingCalculatedFieldEditor } from "@/components/settings/modeling/modeling-calculated-field-editor";
 import {
+  AdminApiError,
+  getWorkspaceModelingPreview,
   getWorkspaceModelingGraph,
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
@@ -18,6 +21,7 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     listWorkspaces: vi.fn(),
     listWorkspaceDatasourceBindings: vi.fn(),
     listWorkspaceDatasourceTablePermissions: vi.fn(),
+    getWorkspaceModelingPreview: vi.fn(),
     getWorkspaceModelingGraph: vi.fn(),
     precheckWorkspaceModelingDeploy: vi.fn(),
     upsertWorkspaceModelingGraph: vi.fn()
@@ -29,6 +33,7 @@ const mockListWorkspaceDatasourceBindings = vi.mocked(listWorkspaceDatasourceBin
 const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
   listWorkspaceDatasourceTablePermissions
 );
+const mockGetWorkspaceModelingPreview = vi.mocked(getWorkspaceModelingPreview);
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
 const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
 const mockUpsertWorkspaceModelingGraph = vi.mocked(upsertWorkspaceModelingGraph);
@@ -111,6 +116,18 @@ describe("ModelingWorkspacePage", () => {
           schemaChanges: []
         }
       }
+    });
+    mockGetWorkspaceModelingPreview.mockResolvedValue({
+      stage: "modeling_preview_ready",
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      targetKind: "model",
+      targetId: "model.orders",
+      limit: 100,
+      rowCount: 1,
+      truncated: false,
+      columns: ["id", "total_amount"],
+      rows: [{ id: 1, total_amount: 100.12 }]
     });
 
     mockPrecheckWorkspaceModelingDeploy.mockResolvedValue({
@@ -274,11 +291,301 @@ describe("ModelingWorkspacePage", () => {
     await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型未保存");
     await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
 
-    await user.click(screen.getByRole("button", { name: "Precheck" }));
-
+    expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
     expect(
-      await screen.findByText("检测到未保存的建模改动，请先点击“保存 Modeling Draft”后再执行 precheck。")
+      screen.getByText("Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。")
     ).toBeInTheDocument();
     expect(mockPrecheckWorkspaceModelingDeploy).not.toHaveBeenCalled();
+  });
+
+  it("shows grouped calculated-field function hints and persists aggregate expression into draft", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await screen.findByRole("button", { name: "选择 model Orders Model" });
+
+    await user.click(screen.getByRole("button", { name: "Calculated Field" }));
+    expect(
+      await screen.findByTestId("calculated-field-expression-function-groups")
+    ).toBeInTheDocument();
+    expect(screen.getByText("可用函数清单")).toBeInTheDocument();
+    expect(screen.getByText(/聚合函数：sum\(expr\)、avg\(expr\)/)).toBeInTheDocument();
+    expect(screen.getByText(/数学函数：abs\(x\)、round\(x, digits\)/)).toBeInTheDocument();
+    expect(screen.getByText(/字符串函数：lower\(text\)、upper\(text\)/)).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox", { name: "计算字段名称" }), "total_sum");
+    await user.type(screen.getByRole("textbox", { name: "表达式" }), "sum(total_amount)");
+    await user.type(screen.getByRole("textbox", { name: "数据类型" }), "numeric");
+    await user.click(screen.getByRole("button", { name: "添加计算字段" }));
+    await user.click(screen.getByRole("button", { name: "保存计算字段" }));
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          calculatedFields: expect.arrayContaining([
+            expect.objectContaining({
+              name: "total_sum",
+              expression: "sum(total_amount)"
+            })
+          ])
+        })
+      );
+    });
+  });
+
+  it("maps backend calculated-field expression errors to readable grouped guidance", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockRejectedValue(
+      new AdminApiError("calculated field expression 非法：函数 pow 不在支持清单中。", {
+        code: "WORKSPACE_MODELING_GRAPH_CALCULATED_FIELD_EXPRESSION_INVALID",
+        details: {
+          category: "not-supported",
+          reason: "函数 pow 不在支持清单中。",
+          functionName: "pow",
+          supportedFunctionGroups: {
+            aggregate: ["sum", "avg"],
+            math: ["abs", "round"],
+            string: ["upper", "concat"]
+          }
+        }
+      })
+    );
+
+    render(
+      <ModelingCalculatedFieldEditor
+        model={{
+          id: "model.orders",
+          tableName: "orders",
+          modelName: "orders",
+          displayName: "Orders",
+          description: null,
+          columns: []
+        }}
+        calculatedFields={[]}
+        onSave={onSave}
+      />
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "计算字段名称" }), "pow_case");
+    await user.type(screen.getByRole("textbox", { name: "表达式" }), "pow(total_amount, 2)");
+    await user.type(screen.getByRole("textbox", { name: "数据类型" }), "numeric");
+    await user.click(screen.getByRole("button", { name: "添加计算字段" }));
+    await user.click(screen.getByRole("button", { name: "保存计算字段" }));
+
+    expect(
+      await screen.findByText(/表达式函数不在支持清单中（pow）/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/可用函数：聚合函数\(sum, avg\)/)).toBeInTheDocument();
+  });
+
+  it("creates model from sidebar and persists it into draft save payload", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "创建 model" }));
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          models: expect.arrayContaining([
+            expect.objectContaining({
+              id: expect.stringMatching(/^model\.new_model_/),
+              tableName: expect.stringMatching(/^new_model_/)
+            })
+          ])
+        })
+      );
+    });
+  });
+
+  it("loads metadata preview for selected model", async () => {
+    const user = userEvent.setup();
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await screen.findByRole("button", { name: "选择 model Orders Model" });
+    await user.click(screen.getByRole("button", { name: "加载 Data Preview" }));
+
+    await waitFor(() => {
+      expect(mockGetWorkspaceModelingPreview).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        targetKind: "model",
+        targetId: "model.orders",
+        limit: 100
+      });
+    });
+    expect(await screen.findByText("Preview Rows: 1")).toBeInTheDocument();
+    expect(screen.getByText("100.12")).toBeInTheDocument();
+  });
+
+  it("supports view metadata save and view preview when selected from query viewId", async () => {
+    const user = userEvent.setup();
+    window.history.replaceState(
+      {},
+      "",
+      "/settings/modeling?workspaceId=ws-2&datasourceId=ds-2b&viewId=view.orders_recent"
+    );
+
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-with-view",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders Model",
+              description: "old desc",
+              columns: []
+            }
+          ],
+          relationships: [],
+          calculatedFields: [],
+          views: [
+            {
+              id: "view.orders_recent",
+              name: "orders_recent",
+              sql: "SELECT id, total_amount FROM orders ORDER BY id DESC",
+              displayName: "Recent Orders",
+              description: "recent orders"
+            }
+          ],
+          schemaChanges: []
+        }
+      }
+    });
+    mockGetWorkspaceModelingPreview.mockResolvedValueOnce({
+      stage: "modeling_preview_ready",
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      targetKind: "view",
+      targetId: "view.orders_recent",
+      limit: 100,
+      rowCount: 1,
+      truncated: false,
+      columns: ["id", "total_amount"],
+      rows: [{ id: 99, total_amount: 410.5 }]
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Current Context: view · view.orders_recent"
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "加载 Data Preview" }));
+    await waitFor(() => {
+      expect(mockGetWorkspaceModelingPreview).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        targetKind: "view",
+        targetId: "view.orders_recent",
+        limit: 100
+      });
+    });
+    expect(await screen.findByText("Preview Rows: 1")).toBeInTheDocument();
+    expect(screen.getByText("410.5")).toBeInTheDocument();
+
+    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
+    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "Recent Orders V2");
+    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          views: expect.arrayContaining([
+            expect.objectContaining({
+              id: "view.orders_recent",
+              displayName: expect.stringContaining("Recent Orders V2")
+            })
+          ])
+        })
+      );
+    });
+  });
+
+  it("deletes view from sidebar, flips deploy state to undeployed, and persists view removal", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 2,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-synced",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders Model",
+              description: "old desc",
+              columns: []
+            }
+          ],
+          relationships: [],
+          calculatedFields: [],
+          views: [
+            {
+              id: "view.orders_recent",
+              name: "orders_recent",
+              sql: "SELECT id, total_amount FROM orders ORDER BY id DESC",
+              displayName: "Recent Orders",
+              description: "recent orders"
+            }
+          ],
+          schemaChanges: []
+        }
+      }
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State synced"
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "删除 view Recent Orders" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
+        "Deploy State undeployed"
+      );
+    });
+    expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "保存 Modeling Draft" }));
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          views: []
+        })
+      );
+    });
   });
 });

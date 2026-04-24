@@ -7,6 +7,7 @@ import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import {
   deployWorkspaceModeling,
   detectWorkspaceModelingSchemaChanges,
+  getWorkspaceModelingPreview,
   getWorkspaceModelingGraph,
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
@@ -172,6 +173,29 @@ function resolveSelectedNodeSummary(selectedNode: ModelingSidebarNode | null): s
   }
   return `${selectedNode.kind} · ${selectedNode.id}`;
 }
+
+function sanitizeIdentifierPart(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function buildNextModelDraftName(existingTableNames: string[]): string {
+  const existing = new Set(existingTableNames.map((item) => sanitizeIdentifierPart(item)));
+  let next = existing.size + 1;
+  while (next < 10000) {
+    const candidate = `new_model_${next}`;
+    if (!existing.has(candidate)) {
+      return candidate;
+    }
+    next += 1;
+  }
+  return `new_model_${Date.now()}`;
+}
+
+type ModelingDeployState = "undeployed" | "synced";
 
 export default function ModelingWorkspacePage() {
   const [workspaceId, setWorkspaceId] = useState("");
@@ -341,16 +365,34 @@ export default function ModelingWorkspacePage() {
     })();
   }, [datasourceId, loadModelingSnapshot, workspaceId]);
 
-  const hasUndeployedChanges = useMemo(() => {
+  const hasSavedUndeployedChanges = useMemo(() => {
     if (!snapshot?.draft) {
       return false;
     }
     return snapshot.draft.revision !== snapshot.activeRevision;
   }, [snapshot]);
+  const deployState: ModelingDeployState =
+    hasPendingDraftChanges || hasSavedUndeployedChanges ? "undeployed" : "synced";
+  const currentDraftRevision = snapshot?.draft?.revision;
+  const hasCurrentDraftRevision = typeof currentDraftRevision === "number";
+  const isPrecheckForCurrentDraft = Boolean(
+    deployPrecheck &&
+      hasCurrentDraftRevision &&
+      deployPrecheck.draftRevision === currentDraftRevision
+  );
+  const canRunDeployPrecheck = hasSavedUndeployedChanges && !hasPendingDraftChanges;
+  const canActivateRevision =
+    canRunDeployPrecheck && isPrecheckForCurrentDraft && Boolean(deployPrecheck?.pass);
 
   const flowAutoLayoutKey = useMemo(
     () => `${workspaceId}:${datasourceId}`,
     [datasourceId, workspaceId]
+  );
+  const selectedWorkspaceName = useMemo(
+    () =>
+      workspaces.find((workspace) => workspace.id === workspaceId)?.name ??
+      workspaceId,
+    [workspaceId, workspaces]
   );
 
   const saveModelingGraph = async (): Promise<void> => {
@@ -377,6 +419,7 @@ export default function ModelingWorkspacePage() {
       setSelectedNode((previous) => resolveNextSelectedNode(nextGraphPayload, previous));
       setDetailsDirty(false);
       setHasPendingDraftChanges(false);
+      setDeployPrecheck(null);
       setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "保存建模图失败");
@@ -439,6 +482,10 @@ export default function ModelingWorkspacePage() {
       setError("检测到未保存的建模改动，请先点击“保存 Modeling Draft”后再执行 precheck。");
       return;
     }
+    if (!hasSavedUndeployedChanges) {
+      setError("当前 Deploy State 为 synced，无需执行 precheck。");
+      return;
+    }
     setDeploying(true);
     setError("");
     try {
@@ -463,12 +510,20 @@ export default function ModelingWorkspacePage() {
       setError("检测到未保存的建模改动，请先保存 Modeling Draft 后再激活 revision。");
       return;
     }
+    if (!hasSavedUndeployedChanges) {
+      setError("当前 Deploy State 为 synced，无需激活 revision。");
+      return;
+    }
+    if (!isPrecheckForCurrentDraft || !deployPrecheck?.pass) {
+      setError("请先对当前 undeployed revision 执行并通过 Precheck，再激活 revision。");
+      return;
+    }
     setDeploying(true);
     setError("");
     try {
       await deployWorkspaceModeling(workspaceId, datasourceId, {
         policyVersion,
-        draftRevision: snapshot?.draft?.revision
+        draftRevision: currentDraftRevision
       });
       await loadModelingSnapshot(workspaceId, datasourceId);
       setDeployPrecheck(null);
@@ -507,6 +562,107 @@ export default function ModelingWorkspacePage() {
     setDetailsDirty(false);
   };
 
+  const createModelFromSidebar = (): void => {
+    let createdModelId = "";
+    setGraphPayload((previous) => {
+      const nextTableName = buildNextModelDraftName(
+        previous.models.map((item) => item.tableName)
+      );
+      const createdModel = {
+        id: `model.${nextTableName}`,
+        tableName: nextTableName,
+        modelName: nextTableName,
+        displayName: null,
+        description: null,
+        columns: [
+          {
+            name: "id",
+            dataType: "integer",
+            isNullable: false,
+            isPrimaryKey: true,
+            displayName: null,
+            description: null
+          }
+        ]
+      };
+      createdModelId = createdModel.id;
+      return {
+        ...previous,
+        models: [...previous.models, createdModel].sort((left, right) => left.id.localeCompare(right.id))
+      };
+    });
+    if (createdModelId) {
+      setSelectedNode({
+        kind: "model",
+        id: createdModelId
+      });
+      setHasPendingDraftChanges(true);
+      setDeployPrecheck(null);
+      setMessage(`已新增 Model：${createdModelId}，请补充字段后保存 Modeling Draft。`);
+    }
+  };
+
+  const deleteModelFromSidebar = (modelId: string): void => {
+    setGraphPayload((previous) => {
+      const target = previous.models.find((item) => item.id === modelId);
+      if (!target) {
+        return previous;
+      }
+      const targetTableName = target.tableName.trim().toLowerCase();
+      return {
+        ...previous,
+        models: previous.models.filter((item) => item.id !== modelId),
+        relationships: previous.relationships.filter((relationship) => {
+          const leftTable = relationship.bridge.left.table.trim().toLowerCase();
+          const rightTable = relationship.bridge.right.table.trim().toLowerCase();
+          return leftTable !== targetTableName && rightTable !== targetTableName;
+        }),
+        calculatedFields: previous.calculatedFields.filter((field) => field.modelId !== modelId)
+      };
+    });
+    setSelectedNode((previous) =>
+      previous?.kind === "model" && previous.id === modelId ? null : previous
+    );
+    setHasPendingDraftChanges(true);
+    setDeployPrecheck(null);
+    setMessage(`已删除 Model：${modelId}，请保存 Modeling Draft。`);
+  };
+
+  const deleteViewFromSidebar = (viewId: string): void => {
+    setGraphPayload((previous) => ({
+      ...previous,
+      views: previous.views.filter((item) => item.id !== viewId)
+    }));
+    setSelectedNode((previous) =>
+      previous?.kind === "view" && previous.id === viewId ? null : previous
+    );
+    setHasPendingDraftChanges(true);
+    setDeployPrecheck(null);
+    setMessage(`已删除 View：${viewId}，请保存 Modeling Draft。`);
+  };
+
+  const loadPreviewForDetails = async (input: {
+    targetKind: "model" | "view";
+    targetId: string;
+    limit?: number;
+  }): Promise<{
+    columns: string[];
+    rows: Array<Record<string, unknown>>;
+    rowCount: number;
+    truncated: boolean;
+  }> => {
+    if (!workspaceId || !datasourceId) {
+      throw new Error("缺少 workspace/datasource，上下文不可预览。");
+    }
+    const result = await getWorkspaceModelingPreview(workspaceId, datasourceId, input);
+    return {
+      columns: result.columns,
+      rows: result.rows,
+      rowCount: result.rowCount,
+      truncated: result.truncated
+    };
+  };
+
   return (
     <div className="space-y-4 px-4 py-4 sm:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -518,9 +674,9 @@ export default function ModelingWorkspacePage() {
             <ArrowLeft className="h-4 w-4" />
             返回设置
           </Link>
-          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Modeling Workspace</h1>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Modeling Workbench</h1>
           <p className="text-sm text-[var(--text-secondary)]">
-            统一管理 Models / Views / Calculated Fields / Relationships，保留 workspace 级上下文。
+            Flowchart-first 工作台：左侧资产树 + 中央 ERD 画布 + 右侧上下文，统一管理 Models / Views / Relationships。
           </p>
         </div>
       </div>
@@ -528,20 +684,16 @@ export default function ModelingWorkspacePage() {
       <div className="grid grid-cols-1 gap-3 rounded-lg border border-[var(--border-default)] bg-white/90 p-4 sm:grid-cols-2">
         <NativeSelect
           value={workspaceId}
-          onChange={(event) => {
-            const nextWorkspaceId = event.target.value;
-            setWorkspaceId(nextWorkspaceId);
-            writeActiveWorkspaceId(nextWorkspaceId);
-            syncModelingPageQueryContext(nextWorkspaceId, "");
-          }}
+          disabled
           aria-label="选择工作空间"
         >
-          <NativeSelectOption value="">请选择工作空间</NativeSelectOption>
-          {workspaces.map((workspace) => (
-            <NativeSelectOption key={workspace.id} value={workspace.id}>
-              {workspace.name}
+          {workspaceId ? (
+            <NativeSelectOption value={workspaceId}>
+              {selectedWorkspaceName}
             </NativeSelectOption>
-          ))}
+          ) : (
+            <NativeSelectOption value="">当前无工作空间上下文</NativeSelectOption>
+          )}
         </NativeSelect>
         <NativeSelect
           value={datasourceId}
@@ -580,6 +732,16 @@ export default function ModelingWorkspacePage() {
             <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] px-2 py-0.5">
               Policy {policyVersion}
             </span>
+            <span
+              className={`rounded-full border px-2 py-0.5 ${
+                deployState === "undeployed"
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}
+              data-testid="modeling-deploy-state-chip"
+            >
+              Deploy State {deployState}
+            </span>
             <span className="truncate">Current Context: {resolveSelectedNodeSummary(selectedNode)}</span>
           </div>
           <Button
@@ -598,20 +760,17 @@ export default function ModelingWorkspacePage() {
           <span>Relationships {graphPayload.relationships.length}</span>
         </div>
 
-        {hasUndeployedChanges ? (
+        {deployState === "undeployed" ? (
           <StateBlock variant="idle">
-            检测到 undeployed draft（draft revision 与 active revision 不一致）。
+            {hasPendingDraftChanges
+              ? "Deploy State: undeployed。检测到未保存的 modeling 改动，请先保存 Modeling Draft。"
+              : "Deploy State: undeployed。检测到 draft revision 与 active revision 不一致。"}
           </StateBlock>
         ) : (
-          <StateBlock variant="idle">当前无已保存但未部署的 revision 差异。</StateBlock>
+          <StateBlock variant="idle">Deploy State: synced。当前无 undeployed revision。</StateBlock>
         )}
         {detailsDirty ? (
           <StateBlock variant="idle">详情面板存在未保存改动，切换对象前会进行确认。</StateBlock>
-        ) : null}
-        {hasPendingDraftChanges ? (
-          <StateBlock variant="idle">
-            当前改动尚未写入 draft revision，deploy/precheck 前请先保存 Modeling Draft。
-          </StateBlock>
         ) : null}
       </section>
 
@@ -624,6 +783,7 @@ export default function ModelingWorkspacePage() {
             type="button"
             size="sm"
             variant="outline"
+            aria-controls="modeling-canvas-pane"
             onClick={() => {
               scrollToLayoutPane("modeling-canvas-pane");
             }}
@@ -634,6 +794,7 @@ export default function ModelingWorkspacePage() {
             type="button"
             size="sm"
             variant="outline"
+            aria-controls="modeling-assets-pane"
             onClick={() => {
               scrollToLayoutPane("modeling-assets-pane");
             }}
@@ -644,6 +805,7 @@ export default function ModelingWorkspacePage() {
             type="button"
             size="sm"
             variant="outline"
+            aria-controls="modeling-context-pane"
             onClick={() => {
               scrollToLayoutPane("modeling-context-pane");
             }}
@@ -659,9 +821,14 @@ export default function ModelingWorkspacePage() {
       >
         <div
           id="modeling-assets-pane"
-          className="order-2 xl:order-1"
+          className="order-2 space-y-2 xl:order-1"
           data-testid="modeling-layout-left-pane"
         >
+          <header className="px-1" data-testid="modeling-layout-left-header">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              Assets
+            </p>
+          </header>
           <ModelingSidebarTree
             models={graphPayload.models}
             views={graphPayload.views}
@@ -669,14 +836,22 @@ export default function ModelingWorkspacePage() {
             onSelectNode={(node) => {
               selectNodeWithDirtyGuard(node);
             }}
+            onCreateModel={createModelFromSidebar}
+            onDeleteModel={deleteModelFromSidebar}
+            onDeleteView={deleteViewFromSidebar}
           />
         </div>
 
         <div
           id="modeling-canvas-pane"
-          className="order-1 xl:order-2"
+          className="order-1 space-y-2 xl:order-2"
           data-testid="modeling-layout-canvas-pane"
         >
+          <header className="px-1" data-testid="modeling-layout-canvas-header">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              ERD Workbench
+            </p>
+          </header>
           <ModelingFlowCanvas
             graphPayload={graphPayload}
             selectedNode={selectedNode}
@@ -691,6 +866,11 @@ export default function ModelingWorkspacePage() {
           className="order-3 space-y-4"
           data-testid="modeling-layout-context-pane"
         >
+          <header className="px-1" data-testid="modeling-layout-context-header">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              Context
+            </p>
+          </header>
           <ModelingDetailsPanel
             selectedNode={selectedNode}
             models={graphPayload.models}
@@ -756,6 +936,14 @@ export default function ModelingWorkspacePage() {
               });
               setMessage("Relationships 已更新，点击“保存 Modeling Draft”后提交。");
             }}
+            onLoadPreview={loadPreviewForDetails}
+            onDeleteTarget={async ({ targetKind, targetId }) => {
+              if (targetKind === "model") {
+                deleteModelFromSidebar(targetId);
+                return;
+              }
+              deleteViewFromSidebar(targetId);
+            }}
             onSelectRelationship={(relationshipId) => {
               if (!relationshipId) {
                 setSelectedNode((previous) =>
@@ -780,7 +968,11 @@ export default function ModelingWorkspacePage() {
 
           <ModelingDeployPanel
             busy={busy || saving || deploying}
-            hasUndeployedChanges={hasUndeployedChanges}
+            deployState={deployState}
+            hasUndeployedChanges={deployState === "undeployed"}
+            hasPendingDraftChanges={hasPendingDraftChanges}
+            canRunPrecheck={canRunDeployPrecheck}
+            canDeploy={canActivateRevision}
             precheck={deployPrecheck}
             onPrecheck={runDeployPrecheck}
             onDeploy={deployRevision}

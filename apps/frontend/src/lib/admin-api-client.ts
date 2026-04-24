@@ -37,16 +37,16 @@ function composeApiUrl(path: string): string {
 
 function resolveWorkspaceIdHeader(): string | undefined {
   if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = params.get("workspaceId")?.trim();
-    if (fromQuery) {
-      return fromQuery;
-    }
     const fromStorage = window.sessionStorage
       .getItem("text2sql.activeWorkspaceId")
       ?.trim();
     if (fromStorage) {
       return fromStorage;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
     }
   }
   const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();
@@ -231,6 +231,19 @@ export interface CommitModelingSetupResult {
 export type UpsertModelingGraphInput = ModelingGraphPatchRequest;
 
 export type WorkspaceModelingGraphSnapshot = ModelingGraphSnapshot;
+
+export interface WorkspaceModelingPreviewResult {
+  stage: "modeling_preview_ready";
+  workspaceId: string;
+  datasourceId: string;
+  targetKind: "model" | "view";
+  targetId: string;
+  limit: number;
+  rowCount: number;
+  truncated: boolean;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+}
 
 export interface WorkspaceModelingSchemaChangeItem {
   id: string;
@@ -742,6 +755,13 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
       .filter((item): item is Record<string, unknown> => isRecord(item))
       .map((item) => {
         const bridge = isRecord(item.bridge) ? item.bridge : {};
+        const typeRaw = typeof item.type === "string" ? item.type : item.cardinality;
+        const relationshipType =
+          typeRaw === "many-to-one" ||
+          typeRaw === "one-to-many" ||
+          typeRaw === "one-to-one"
+            ? typeRaw
+            : undefined;
         return {
           id: String(item.id ?? ""),
           name: typeof item.name === "string" ? item.name : undefined,
@@ -752,6 +772,8 @@ function normalizeModelingGraphPayload(value: unknown): ModelingGraphPayload {
               ? item.source
               : "manual",
           confidence: Math.max(0, Math.min(1, readNumber(item.confidence, 0))),
+          type: relationshipType,
+          cardinality: relationshipType,
           bridge: {
             left: normalizeRelationshipBridgeEndpoint(bridge.left),
             right: normalizeRelationshipBridgeEndpoint(bridge.right),
@@ -2031,6 +2053,58 @@ export async function upsertWorkspaceModelingGraph(
       }
     );
     return normalizeWorkspaceModelingGraphSnapshot(workspaceId, datasourceId, data);
+  } catch (error) {
+    throw toAdminApiError(error);
+  }
+}
+
+export async function getWorkspaceModelingPreview(
+  workspaceId: string,
+  datasourceId: string,
+  input: {
+    targetKind: "model" | "view";
+    targetId: string;
+    limit?: number;
+  }
+): Promise<WorkspaceModelingPreviewResult> {
+  const targetId = input.targetId.trim();
+  if (!targetId) {
+    throw new AdminApiError("targetId 不能为空。", {
+      code: "VALIDATION_ERROR",
+      details: { field: "targetId" }
+    });
+  }
+  try {
+    const data = await request<unknown>(
+      `/api/v1/system/workspaces/${workspaceId}/datasources/${datasourceId}/modeling/preview`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          targetKind: input.targetKind,
+          targetId,
+          limit: input.limit
+        })
+      }
+    );
+    const record = isRecord(data) ? data : {};
+    const rows = Array.isArray(record.rows)
+      ? record.rows.filter((item): item is Record<string, unknown> => isRecord(item))
+      : [];
+    const columns = normalizeStringList(record.columns).sort((left, right) =>
+      left.localeCompare(right)
+    );
+    return {
+      stage: "modeling_preview_ready",
+      workspaceId: String(record.workspaceId ?? workspaceId),
+      datasourceId: String(record.datasourceId ?? datasourceId),
+      targetKind: record.targetKind === "view" ? "view" : "model",
+      targetId: String(record.targetId ?? targetId),
+      limit: readNumber(record.limit, input.limit ?? 100),
+      rowCount: readNumber(record.rowCount, rows.length),
+      truncated: Boolean(record.truncated),
+      columns,
+      rows
+    };
   } catch (error) {
     throw toAdminApiError(error);
   }

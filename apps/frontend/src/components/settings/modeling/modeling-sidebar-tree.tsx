@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Database, FolderTree } from "lucide-react";
+import { ChevronDown, ChevronRight, Database, FolderTree, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ModelingGraphModel, ModelingGraphView } from "@text2sql/shared-types";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,9 @@ export function ModelingSidebarTree(props: {
   views: ModelingGraphView[];
   selectedNode: ModelingSidebarNode | null;
   onSelectNode: (node: ModelingSidebarNode) => void;
+  onCreateModel?: () => void;
+  onDeleteModel?: (modelId: string) => void;
+  onDeleteView?: (viewId: string) => void;
 }) {
   const [modelExpanded, setModelExpanded] = useState(true);
   const [viewExpanded, setViewExpanded] = useState(true);
@@ -55,6 +58,7 @@ export function ModelingSidebarTree(props: {
   const modelNodes = useMemo(
     () =>
       props.models.map((model) => ({
+        model,
         node: { kind: "model", id: model.id } as const,
         title: resolveModelLabel(model),
         subtitle: model.tableName
@@ -82,6 +86,21 @@ export function ModelingSidebarTree(props: {
         <p className="text-xs text-[var(--text-secondary)]">
           通过 Models / Views 树导航资产并进入详情编辑。
         </p>
+        <div className="mt-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-full"
+            onClick={() => {
+              props.onCreateModel?.();
+            }}
+            aria-label="创建 model"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            新建 Model
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-2" role="tree" aria-label="建模资产树" data-testid="modeling-sidebar-tree-content">
@@ -110,21 +129,59 @@ export function ModelingSidebarTree(props: {
                 modelNodes.map((item) => {
                   const selected = isNodeSelected(props.selectedNode, item.node);
                   return (
-                    <Button
+                    <div
                       key={nodeKey(item.node)}
-                      type="button"
-                      variant={selected ? "default" : "ghost"}
-                      className="h-auto w-full justify-start px-2 py-2 text-left"
-                      aria-label={`选择 model ${item.title}`}
-                      onClick={() => {
-                        props.onSelectNode(item.node);
-                      }}
+                      className={`rounded-md border px-2 py-2 ${
+                        selected
+                          ? "border-[var(--action-primary)] bg-[var(--action-primary)]/5"
+                          : "border-[var(--border-default)] bg-white"
+                      }`}
                     >
-                      <span className="flex flex-col items-start">
-                        <span className="text-sm">{item.title}</span>
-                        <span className="text-xs opacity-80">{item.subtitle}</span>
-                      </span>
-                    </Button>
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          aria-label={`选择 model ${item.title}`}
+                          onClick={() => {
+                            props.onSelectNode(item.node);
+                          }}
+                        >
+                          <span className="block truncate text-sm text-[var(--text-primary)]">
+                            {item.title}
+                          </span>
+                          <span className="block truncate text-xs text-[var(--text-secondary)]">
+                            {item.subtitle}
+                          </span>
+                        </button>
+                        {props.onDeleteModel ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            aria-label={`删除 model ${item.title}`}
+                            onClick={() => {
+                              props.onDeleteModel?.(item.node.id);
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                      </div>
+                      {item.model.columns.length > 0 ? (
+                        <div className="mt-1 space-y-1 border-t border-[var(--border-default)] pt-1">
+                          {item.model.columns.map((column) => (
+                            <p
+                              key={`${item.model.id}:${column.name}`}
+                              className="truncate pl-1 text-[11px] text-[var(--text-secondary)]"
+                            >
+                              {column.isPrimaryKey ? "PK " : ""}
+                              {column.name}
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })
               )}
@@ -157,21 +214,44 @@ export function ModelingSidebarTree(props: {
                 viewNodes.map((item) => {
                   const selected = isNodeSelected(props.selectedNode, item.node);
                   return (
-                    <Button
+                    <div
                       key={nodeKey(item.node)}
-                      type="button"
-                      variant={selected ? "default" : "ghost"}
-                      className="h-auto w-full justify-start px-2 py-2 text-left"
-                      aria-label={`选择 view ${item.title}`}
-                      onClick={() => {
-                        props.onSelectNode(item.node);
-                      }}
+                      className={`flex items-center justify-between gap-2 rounded-md border px-2 py-2 ${
+                        selected
+                          ? "border-[var(--action-primary)] bg-[var(--action-primary)]/5"
+                          : "border-[var(--border-default)] bg-white"
+                      }`}
                     >
-                      <span className="flex flex-col items-start">
-                        <span className="text-sm">{item.title}</span>
-                        <span className="text-xs opacity-80">{item.subtitle}</span>
-                      </span>
-                    </Button>
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        aria-label={`选择 view ${item.title}`}
+                        onClick={() => {
+                          props.onSelectNode(item.node);
+                        }}
+                      >
+                        <span className="block truncate text-sm text-[var(--text-primary)]">
+                          {item.title}
+                        </span>
+                        <span className="block truncate text-xs text-[var(--text-secondary)]">
+                          {item.subtitle}
+                        </span>
+                      </button>
+                      {props.onDeleteView ? (
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7"
+                          aria-label={`删除 view ${item.title}`}
+                          onClick={() => {
+                            props.onDeleteView?.(item.node.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
                   );
                 })
               )}

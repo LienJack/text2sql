@@ -11,6 +11,7 @@ import { DatasourceRepository, ModelingGraphRepository } from "../../platform/da
 import { ModelingSchemaChangeRepository } from "../../platform/data/persistence/modeling-schema-change.repository";
 import { QueryExecutorRouterService } from "../../platform/data/query";
 import type { DetectModelingSchemaChangeDto } from "./dto/detect-modeling-schema-change.dto";
+import type { GetModelingPreviewDto } from "./dto/get-modeling-preview.dto";
 import type { UpsertModelingGraphDto } from "./dto/upsert-modeling-graph.dto";
 import type { UpsertModelingSetupDto } from "./dto/upsert-modeling-setup.dto";
 import type { ResolveModelingSchemaChangeDto } from "./dto/resolve-modeling-schema-change.dto";
@@ -105,6 +106,19 @@ type ModelingGraphSnapshotResponse = {
     updatedByActorId?: string;
     graphPayload: ModelingGraphPayload;
   } | null;
+};
+
+type ModelingPreviewResponse = {
+  stage: "modeling_preview_ready";
+  workspaceId: string;
+  datasourceId: string;
+  targetKind: "model" | "view";
+  targetId: string;
+  limit: number;
+  rowCount: number;
+  truncated: boolean;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
 };
 
 type ForeignKeyConstraint = {
@@ -582,6 +596,114 @@ export class WorkspaceModelingService {
     };
   }
 
+  async getModelingPreview(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: GetModelingPreviewDto
+  ): Promise<ModelingPreviewResponse> {
+    const workspaceId = this.normalizeRequiredId(workspaceIdRaw, "workspaceId");
+    const datasourceId = this.normalizeRequiredId(datasourceIdRaw, "datasourceId");
+    const targetId = this.normalizeRequiredId(body.targetId, "targetId");
+    const limit = Math.min(100, Math.max(1, body.limit ?? 100));
+    const targetKind = body.targetKind;
+    const snapshot = await this.getModelingGraph(actor, workspaceId, datasourceId);
+    const payload = snapshot.draft?.graphPayload;
+    if (!payload) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_PREVIEW_TARGET_NOT_FOUND",
+        "当前无可预览的 modeling draft。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          targetKind,
+          targetId
+        }
+      );
+    }
+
+    const datasource = await this.loadDatasourceOrThrow(datasourceId);
+    let sql = "";
+    if (targetKind === "model") {
+      const model = payload.models.find((item) => item.id === targetId);
+      if (!model) {
+        throw new DomainError(
+          "WORKSPACE_MODELING_PREVIEW_TARGET_NOT_FOUND",
+          "未找到目标 model。",
+          404,
+          {
+            workspaceId,
+            datasourceId,
+            targetKind,
+            targetId
+          }
+        );
+      }
+      sql = this.buildModelPreviewSql(datasource.type, model.tableName);
+    } else {
+      const view = payload.views.find((item) => item.id === targetId);
+      if (!view) {
+        throw new DomainError(
+          "WORKSPACE_MODELING_PREVIEW_TARGET_NOT_FOUND",
+          "未找到目标 view。",
+          404,
+          {
+            workspaceId,
+            datasourceId,
+            targetKind,
+            targetId
+          }
+        );
+      }
+      sql = this.buildViewPreviewSql(view.sql);
+    }
+
+    try {
+      const queryResult = await this.queryExecutorRouter.execute({
+        datasource,
+        sql,
+        limit: limit + 1
+      });
+      const rows = queryResult.rows
+        .slice(0, limit)
+        .map((item) => (item && typeof item === "object" ? (item as Record<string, unknown>) : {}));
+      const columns = Array.from(
+        rows.reduce((set, row) => {
+          Object.keys(row).forEach((column) => {
+            set.add(column);
+          });
+          return set;
+        }, new Set<string>())
+      ).sort((left, right) => left.localeCompare(right));
+      return {
+        stage: "modeling_preview_ready",
+        workspaceId,
+        datasourceId,
+        targetKind,
+        targetId,
+        limit,
+        rowCount: rows.length,
+        truncated: queryResult.rows.length > limit,
+        columns,
+        rows
+      };
+    } catch (error) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_PREVIEW_QUERY_FAILED",
+        "modeling preview 查询失败。",
+        400,
+        {
+          workspaceId,
+          datasourceId,
+          targetKind,
+          targetId,
+          cause: error instanceof Error ? error.message : String(error)
+        }
+      );
+    }
+  }
+
   async describeModelingSchemaChangeState(
     actor: Actor,
     workspaceIdRaw: string,
@@ -812,6 +934,20 @@ export class WorkspaceModelingService {
       );
     }
 
+    if (resolvedItem.kind === "modified_column_type" && !resolveResult.alreadyResolved) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_SCHEMA_CHANGE_MANUAL_RESOLUTION_REQUIRED",
+        "列类型变化需先人工重建建模对象后重新 Detect，暂不支持直接 Resolve。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          schemaChangeId: changeId,
+          kind: resolvedItem.kind
+        }
+      );
+    }
+
     if (resolveResult.alreadyResolved) {
       const draftSnapshot = currentGraph.draft;
       if (!draftSnapshot) {
@@ -861,7 +997,26 @@ export class WorkspaceModelingService {
       };
     }
 
-    const updatedSchemaChanges = resolveResult.updatedRecords;
+    let nextPayload: ModelingGraphPayload = currentPayload;
+    let updatedSchemaChanges = resolveResult.updatedRecords;
+
+    if (this.isAutoResolvableSchemaChangeKind(resolvedItem.kind)) {
+      nextPayload = this.applyAutoResolutionForSchemaChange({
+        currentPayload,
+        schemaChange: resolvedItem
+      });
+      const postResolutionDetected = await this.schemaChangeDetector.detect({
+        currentPayload: nextPayload,
+        liveTableNames: context.liveTableNames,
+        loadLiveColumns: async (tableName: string) =>
+          this.loadTableColumns(context.datasource, tableName)
+      });
+      updatedSchemaChanges = this.modelingSchemaChangeRepository.mergeDetected(
+        updatedSchemaChanges,
+        postResolutionDetected.items
+      );
+    }
+
     const replaced = await this.workspaceRelationshipService.replaceDraft(
       actor,
       workspaceId,
@@ -869,11 +1024,11 @@ export class WorkspaceModelingService {
       {
         policyVersion: context.policyVersion,
         edges: this.extractEdgesFromModelingPayload({
-          ...currentPayload,
+          ...nextPayload,
           schemaChanges: updatedSchemaChanges
         }),
         modelingGraphPayload: {
-          ...currentPayload,
+          ...nextPayload,
           schemaChanges: updatedSchemaChanges
         }
       }
@@ -913,6 +1068,92 @@ export class WorkspaceModelingService {
         graphHash: replaced.draft.graphHash,
         updatedAt: replaced.draft.updatedAt
       }
+    };
+  }
+
+  private isAutoResolvableSchemaChangeKind(
+    kind: ModelingSchemaChangeKind
+  ): kind is "deleted_table" | "deleted_column" {
+    return kind === "deleted_table" || kind === "deleted_column";
+  }
+
+  private applyAutoResolutionForSchemaChange(input: {
+    currentPayload: ModelingGraphPayload;
+    schemaChange: ModelingSchemaChangeDetail;
+  }): ModelingGraphPayload {
+    const tableName = normalizeTableName(input.schemaChange.tableName);
+    const columnName = input.schemaChange.columnName
+      ? normalizeTableName(input.schemaChange.columnName)
+      : undefined;
+    const schemaChangeModelIds = new Set(input.schemaChange.impact.models);
+    const schemaChangeRelationshipIds = new Set(input.schemaChange.impact.relationships);
+    const schemaChangeCalculatedFieldIds = new Set(input.schemaChange.impact.calculatedFields);
+    const schemaChangeViewIds = new Set(input.schemaChange.impact.views);
+
+    for (const model of input.currentPayload.models) {
+      const isSameTable = normalizeTableName(model.tableName) === tableName;
+      const isSameModelId =
+        input.schemaChange.modelId !== undefined && model.id === input.schemaChange.modelId;
+      if (isSameTable || isSameModelId) {
+        schemaChangeModelIds.add(model.id);
+      }
+    }
+
+    const models =
+      input.schemaChange.kind === "deleted_table"
+        ? input.currentPayload.models.filter((model) => {
+            const isSameTable = normalizeTableName(model.tableName) === tableName;
+            return !(isSameTable || schemaChangeModelIds.has(model.id));
+          })
+        : input.currentPayload.models.map((model) => {
+            if (!schemaChangeModelIds.has(model.id) || !columnName) {
+              return model;
+            }
+            return {
+              ...model,
+              columns: model.columns.filter(
+                (column) => normalizeTableName(column.name) !== columnName
+              )
+            };
+          });
+
+    const relationships = input.currentPayload.relationships.filter((relationship) => {
+      if (schemaChangeRelationshipIds.has(relationship.id)) {
+        return false;
+      }
+      const leftTable = normalizeTableName(relationship.bridge.left.table);
+      const rightTable = normalizeTableName(relationship.bridge.right.table);
+      if (input.schemaChange.kind === "deleted_table") {
+        return leftTable !== tableName && rightTable !== tableName;
+      }
+      if (!columnName) {
+        return true;
+      }
+      const leftColumn = normalizeTableName(relationship.bridge.left.column);
+      const rightColumn = normalizeTableName(relationship.bridge.right.column);
+      const leftMatches = leftTable === tableName && leftColumn === columnName;
+      const rightMatches = rightTable === tableName && rightColumn === columnName;
+      return !leftMatches && !rightMatches;
+    });
+
+    const calculatedFields = input.currentPayload.calculatedFields.filter((field) => {
+      if (schemaChangeCalculatedFieldIds.has(field.id)) {
+        return false;
+      }
+      if (input.schemaChange.kind === "deleted_table") {
+        return !schemaChangeModelIds.has(field.modelId);
+      }
+      return true;
+    });
+
+    const views = input.currentPayload.views.filter((view) => !schemaChangeViewIds.has(view.id));
+
+    return {
+      ...input.currentPayload,
+      models: [...models].sort((left, right) => left.id.localeCompare(right.id)),
+      relationships: [...relationships].sort((left, right) => left.id.localeCompare(right.id)),
+      calculatedFields: [...calculatedFields].sort((left, right) => left.id.localeCompare(right.id)),
+      views: [...views].sort((left, right) => left.id.localeCompare(right.id))
     };
   }
 
@@ -1602,6 +1843,9 @@ export class WorkspaceModelingService {
       sourceRaw === "inferred" || sourceRaw === "fk" || sourceRaw === "semantic"
         ? sourceRaw
         : "manual";
+    const relationshipType = this.normalizeRelationshipType(
+      this.readStringValue(input.type) ?? this.readStringValue(input.cardinality)
+    );
     const bridge = this.normalizeRelationshipBridge(input.bridge, datasourceId);
     const confidence = this.readNumberOrDefault(input.confidence, bridge.confidence);
     return {
@@ -1609,8 +1853,23 @@ export class WorkspaceModelingService {
       name,
       source,
       confidence: Number(Math.max(0, Math.min(1, confidence)).toFixed(4)),
+      ...(relationshipType
+        ? {
+            type: relationshipType,
+            cardinality: relationshipType
+          }
+        : {}),
       bridge
     };
+  }
+
+  private normalizeRelationshipType(
+    value: string | undefined
+  ): ModelingGraphPayload["relationships"][number]["type"] {
+    if (value === "many-to-one" || value === "one-to-many" || value === "one-to-one") {
+      return value;
+    }
+    return undefined;
   }
 
   private normalizeRelationshipBridge(
@@ -1923,10 +2182,12 @@ export class WorkspaceModelingService {
       this.readBooleanLike(row["pk"]) ||
       this.readString(row, ["columnKey", "column_key"])?.toUpperCase() === "PRI" ||
       this.readString(row, ["constraintType", "constraint_type"]) === "PRIMARY KEY";
+    const isNotNullRaw = this.readBooleanLike(row["isNotNull"]);
     const isNullableRaw =
       this.readBooleanLike(row["isNullable"]) ??
       this.readBooleanLike(row["nullable"]) ??
-      this.readBooleanLike(row["is_nullable"]);
+      this.readBooleanLike(row["is_nullable"]) ??
+      (isNotNullRaw === undefined ? undefined : !isNotNullRaw);
     const notNullRaw =
       this.readBooleanLike(row["notnull"]) ??
       this.readBooleanLike(row["notNull"]) ??
@@ -2343,11 +2604,46 @@ ORDER BY c.ordinal_position
 SELECT
   name AS columnName,
   type AS dataType,
-  "notnull" AS notnull,
+  "notnull" AS isNotNull,
   pk AS pk
 FROM pragma_table_info('${escapedTableName}')
 ORDER BY cid
     `.trim();
+  }
+
+  private buildModelPreviewSql(type: DatasourceType, tableName: string): string {
+    const qualifiedName = this.quoteQualifiedIdentifier(type, tableName);
+    return `SELECT * FROM ${qualifiedName}`;
+  }
+
+  private buildViewPreviewSql(sql: string): string {
+    const normalized = sql.trim().replace(/;+\s*$/g, "");
+    if (!normalized) {
+      throw new DomainError(
+        "WORKSPACE_MODELING_PREVIEW_QUERY_FAILED",
+        "view SQL 为空，无法预览。",
+        400
+      );
+    }
+    return `SELECT * FROM (${normalized}) AS modeling_view_preview`;
+  }
+
+  private quoteQualifiedIdentifier(type: DatasourceType, value: string): string {
+    const quote = type === "mysql" ? "`" : "\"";
+    return value
+      .split(".")
+      .map((segment) => `${quote}${this.escapeSqlIdentifier(segment.trim(), quote)}${quote}`)
+      .join(".");
+  }
+
+  private escapeSqlIdentifier(value: string, quote: string): string {
+    if (!value) {
+      throw new DomainError("VALIDATION_ERROR", "标识符不能为空。", 400, {
+        field: "identifier"
+      });
+    }
+    const escapedQuote = quote === "`" ? /`/g : /"/g;
+    return value.replace(escapedQuote, `${quote}${quote}`);
   }
 
   private readString(

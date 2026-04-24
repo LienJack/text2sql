@@ -23,6 +23,8 @@ export type ModelingGraphRelationship = {
   name?: string;
   source: "manual" | "inferred" | "fk" | "semantic";
   confidence: number;
+  type?: ModelingGraphRelationshipType;
+  cardinality?: ModelingGraphRelationshipCardinality;
   bridge: {
     left: {
       dataset: string;
@@ -38,6 +40,13 @@ export type ModelingGraphRelationship = {
     confidence: number;
   };
 };
+
+export type ModelingGraphRelationshipType =
+  | "many-to-one"
+  | "one-to-many"
+  | "one-to-one";
+
+export type ModelingGraphRelationshipCardinality = ModelingGraphRelationshipType;
 
 export type ModelingGraphCalculatedField = {
   id: string;

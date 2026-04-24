@@ -21,6 +21,7 @@ type ModelingDeployPrecheckResponse = {
   policyVersion: number;
   draftRevision: number;
   activeRevision?: number;
+  deployState: "undeployed" | "synced";
   pass: boolean;
   riskLevel: "low" | "medium" | "high";
   blockingReasons: string[];
@@ -140,10 +141,12 @@ export class WorkspaceModelingDeployService {
       ...precheck.blockingReasons,
       ...gateBlockingReasons
     ]);
+    const deployState =
+      targetDraftState.activeRevision === draftRevision ? "synced" : "undeployed";
     if (schemaChangeState.highRiskStatus === "high") {
       blockingReasons.add("unresolved_schema_changes");
     }
-    if (targetDraftState.activeRevision === draftRevision) {
+    if (deployState === "synced") {
       blockingReasons.add("revision_already_active");
     }
     const blockingReasonDetails = this.buildBlockingReasonDetails({
@@ -162,6 +165,7 @@ export class WorkspaceModelingDeployService {
       policyVersion: precheck.policyVersion,
       draftRevision,
       activeRevision: targetDraftState.activeRevision,
+      deployState,
       pass: blockingReasons.size === 0 && gate.dryRun.pass,
       riskLevel:
         schemaChangeState.highRiskStatus === "high" || gate.riskLevel === "high"
@@ -190,6 +194,7 @@ export class WorkspaceModelingDeployService {
     workspaceId: string;
     datasourceId: string;
     activeRevision: number;
+    deployState: "synced";
     graphHash: string;
     blockingReasons: string[];
     blockingReasonDetails: ModelingDeployBlockingReasonDetail[];
@@ -234,6 +239,7 @@ export class WorkspaceModelingDeployService {
             datasourceId,
             stage: precheck.stage,
             draftRevision: precheck.draftRevision,
+            deployState: precheck.deployState,
             blockingReasons: precheck.blockingReasons,
             blockingReasonDetails: precheck.blockingReasonDetails
           }
@@ -267,6 +273,7 @@ export class WorkspaceModelingDeployService {
         workspaceId,
         datasourceId,
         activeRevision: published.activeRevision,
+        deployState: "synced",
         graphHash: published.graphHash,
         blockingReasons: precheck.blockingReasons,
         blockingReasonDetails: precheck.blockingReasonDetails,

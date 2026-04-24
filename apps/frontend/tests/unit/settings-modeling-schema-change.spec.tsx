@@ -75,6 +75,11 @@ describe("settings modeling schema change flow", () => {
         id: "schema-change:deleted_column:orders:total_amount",
         kind: "deleted_column" as const,
         summary: "orders.total_amount 已删除"
+      },
+      {
+        id: "schema-change:modified_column_type:orders:id",
+        kind: "modified_column_type" as const,
+        summary: "orders.id 类型已变化"
       }
     ];
     let schemaChangesDetected = false;
@@ -113,79 +118,105 @@ describe("settings modeling schema change flow", () => {
       .mockImplementationOnce(async () => {
         schemaChangesDetected = true;
         return {
-        stage: "schema_change_detected",
-        workspaceId: "ws-1",
-        datasourceId: "ds-1",
-        policyVersion: 9,
-        unresolvedHighRiskCount: 2,
-        highRiskStatus: "high",
-        changes: [
-          {
-            id: "schema-change:deleted_table:legacy_orders",
-            kind: "deleted_table",
-            status: "detected",
-            summary: "legacy_orders 表已删除"
-          },
-          {
-            id: "schema-change:deleted_column:orders:total_amount",
-            kind: "deleted_column",
-            status: "detected",
-            summary: "orders.total_amount 已删除"
-          }
-        ],
-        groupedChanges: {
-          deletedTables: [
+          stage: "schema_change_detected",
+          workspaceId: "ws-1",
+          datasourceId: "ds-1",
+          policyVersion: 9,
+          unresolvedHighRiskCount: 3,
+          highRiskStatus: "high",
+          changes: [
             {
               id: "schema-change:deleted_table:legacy_orders",
               kind: "deleted_table",
               status: "detected",
               summary: "legacy_orders 表已删除"
-            }
-          ],
-          deletedColumns: [
+            },
             {
               id: "schema-change:deleted_column:orders:total_amount",
               kind: "deleted_column",
               status: "detected",
               summary: "orders.total_amount 已删除"
+            },
+            {
+              id: "schema-change:modified_column_type:orders:id",
+              kind: "modified_column_type",
+              status: "detected",
+              summary: "orders.id 类型已变化"
             }
           ],
-          modifiedColumns: [],
-          other: []
-        }
-      };
+          groupedChanges: {
+            deletedTables: [
+              {
+                id: "schema-change:deleted_table:legacy_orders",
+                kind: "deleted_table",
+                status: "detected",
+                summary: "legacy_orders 表已删除"
+              }
+            ],
+            deletedColumns: [
+              {
+                id: "schema-change:deleted_column:orders:total_amount",
+                kind: "deleted_column",
+                status: "detected",
+                summary: "orders.total_amount 已删除"
+              }
+            ],
+            modifiedColumns: [
+              {
+                id: "schema-change:modified_column_type:orders:id",
+                kind: "modified_column_type",
+                status: "detected",
+                summary: "orders.id 类型已变化"
+              }
+            ],
+            other: []
+          }
+        };
       })
       .mockImplementationOnce(async () => {
         schemaChangesDetected = true;
         return {
-        stage: "schema_change_detected",
-        workspaceId: "ws-1",
-        datasourceId: "ds-1",
-        policyVersion: 9,
-        unresolvedHighRiskCount: 1,
-        highRiskStatus: "high",
-        changes: [
-          {
-            id: "schema-change:deleted_column:orders:total_amount",
-            kind: "deleted_column",
-            status: "detected",
-            summary: "orders.total_amount 已删除"
-          }
-        ],
-        groupedChanges: {
-          deletedTables: [],
-          deletedColumns: [
+          stage: "schema_change_detected",
+          workspaceId: "ws-1",
+          datasourceId: "ds-1",
+          policyVersion: 9,
+          unresolvedHighRiskCount: 2,
+          highRiskStatus: "high",
+          changes: [
             {
               id: "schema-change:deleted_column:orders:total_amount",
               kind: "deleted_column",
               status: "detected",
               summary: "orders.total_amount 已删除"
+            },
+            {
+              id: "schema-change:modified_column_type:orders:id",
+              kind: "modified_column_type",
+              status: "detected",
+              summary: "orders.id 类型已变化"
             }
           ],
-          modifiedColumns: [],
-          other: []
-        }
-      };
+          groupedChanges: {
+            deletedTables: [],
+            deletedColumns: [
+              {
+                id: "schema-change:deleted_column:orders:total_amount",
+                kind: "deleted_column",
+                status: "detected",
+                summary: "orders.total_amount 已删除"
+              }
+            ],
+            modifiedColumns: [
+              {
+                id: "schema-change:modified_column_type:orders:id",
+                kind: "modified_column_type",
+                status: "detected",
+                summary: "orders.id 类型已变化"
+              }
+            ],
+            other: []
+          }
+        };
       });
 
     mockResolveWorkspaceModelingSchemaChange.mockImplementation(async () => {
@@ -218,8 +249,12 @@ describe("settings modeling schema change flow", () => {
     await user.click(detectButton);
 
     expect(await screen.findByText("Schema Change")).toBeInTheDocument();
+    expect(await screen.findByText("Table Deleted (1)")).toBeInTheDocument();
+    expect(screen.getByText("Column Deleted (1)")).toBeInTheDocument();
+    expect(screen.getByText("Column Type Changed (1)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "需人工处理" })).toBeDisabled();
     const resolveButtons = await screen.findAllByRole("button", { name: "Resolve" });
-    expect(resolveButtons.length).toBeGreaterThan(0);
+    expect(resolveButtons).toHaveLength(2);
     await user.click(resolveButtons[0]);
 
     await waitFor(() => {

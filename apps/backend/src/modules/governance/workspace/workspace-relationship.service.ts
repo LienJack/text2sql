@@ -592,8 +592,23 @@ export class WorkspaceRelationshipService {
     edges: RelationshipEdgeRecord[],
     basePayload?: ModelingGraphPayload
   ): ModelingGraphPayload {
-    const relationshipSourceById = new Map(
-      (basePayload?.relationships ?? []).map((item) => [item.id, item.source])
+    const relationshipMetaById = new Map(
+      (basePayload?.relationships ?? []).map((item) => [
+        item.id,
+        {
+          source: item.source,
+          type:
+            item.type === "many-to-one" ||
+            item.type === "one-to-many" ||
+            item.type === "one-to-one"
+              ? item.type
+              : item.cardinality === "many-to-one" ||
+                  item.cardinality === "one-to-many" ||
+                  item.cardinality === "one-to-one"
+                ? item.cardinality
+                : undefined
+        }
+      ])
     );
     return {
       models: (basePayload?.models ?? [])
@@ -616,26 +631,35 @@ export class WorkspaceRelationshipService {
         }))
         .sort((left, right) => left.id.localeCompare(right.id)),
       relationships: edges
-        .map((edge) => ({
-          id: edge.id,
-          name: edge.name,
-          source: relationshipSourceById.get(edge.id) ?? "manual",
-          confidence: Number(edge.bridge.confidence.toFixed(4)),
-          bridge: {
-            left: {
-              dataset: edge.bridge.left.dataset,
-              table: edge.bridge.left.table,
-              column: edge.bridge.left.column
-            },
-            right: {
-              dataset: edge.bridge.right.dataset,
-              table: edge.bridge.right.table,
-              column: edge.bridge.right.column
-            },
-            operator: "eq" as const,
-            confidence: Number(edge.bridge.confidence.toFixed(4))
-          }
-        }))
+        .map((edge) => {
+          const meta = relationshipMetaById.get(edge.id);
+          return {
+            id: edge.id,
+            name: edge.name,
+            source: meta?.source ?? "manual",
+            confidence: Number(edge.bridge.confidence.toFixed(4)),
+            ...(meta?.type
+              ? {
+                  type: meta.type,
+                  cardinality: meta.type
+                }
+              : {}),
+            bridge: {
+              left: {
+                dataset: edge.bridge.left.dataset,
+                table: edge.bridge.left.table,
+                column: edge.bridge.left.column
+              },
+              right: {
+                dataset: edge.bridge.right.dataset,
+                table: edge.bridge.right.table,
+                column: edge.bridge.right.column
+              },
+              operator: "eq" as const,
+              confidence: Number(edge.bridge.confidence.toFixed(4))
+            }
+          };
+        })
         .sort((left, right) => left.id.localeCompare(right.id)),
       calculatedFields: (basePayload?.calculatedFields ?? [])
         .map((field) => ({

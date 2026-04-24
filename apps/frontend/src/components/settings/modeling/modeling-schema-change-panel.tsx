@@ -18,14 +18,19 @@ export function ModelingSchemaChangePanel(props: {
   onResolve: (changeId: string) => Promise<void> | void;
 }) {
   const { busy, items, unresolvedCount, onDetect, onResolve } = props;
-  const deletedItems = items.filter(
-    (item) => item.kind === "deleted_table" || item.kind === "deleted_column"
-  );
-  const modifiedItems = items.filter((item) => item.kind === "modified_column_type");
+  const deletedTableItems = items.filter((item) => item.kind === "deleted_table");
+  const deletedColumnItems = items.filter((item) => item.kind === "deleted_column");
+  const modifiedColumnItems = items.filter((item) => item.kind === "modified_column_type");
   const otherItems = items.filter((item) => item.kind === "other");
   const resolvedCount = items.filter((item) => item.status === "resolved").length;
 
-  const renderGroup = (title: string, groupItems: ModelingSchemaChangeItem[]) => {
+  const renderGroup = (input: {
+    title: string;
+    description: string;
+    groupItems: ModelingSchemaChangeItem[];
+    strategy: "auto" | "manual";
+  }) => {
+    const { title, description, groupItems, strategy } = input;
     if (groupItems.length === 0) {
       return null;
     }
@@ -34,6 +39,7 @@ export function ModelingSchemaChangePanel(props: {
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
           {title} ({groupItems.length})
         </p>
+        <p className="text-xs text-[var(--text-secondary)]">{description}</p>
         <div className="space-y-2">
           {groupItems.map((item) => (
             <div
@@ -51,12 +57,16 @@ export function ModelingSchemaChangePanel(props: {
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={busy || item.status === "resolved"}
+                  disabled={busy || item.status === "resolved" || strategy === "manual"}
                   onClick={() => {
                     void onResolve(item.id);
                   }}
                 >
-                  Resolve
+                  {item.status === "resolved"
+                    ? "已处理"
+                    : strategy === "manual"
+                      ? "需人工处理"
+                      : "Resolve"}
                 </Button>
               </div>
             </div>
@@ -100,8 +110,20 @@ export function ModelingSchemaChangePanel(props: {
       <div className="rounded-md border border-[var(--border-default)] bg-white p-3 text-xs text-[var(--text-secondary)]">
         <p className="font-medium text-[var(--text-primary)]">Impact Summary</p>
         <p className="mt-1">
-          Deleted: {deletedItems.length} · Modified: {modifiedItems.length} · Other:{" "}
-          {otherItems.length}
+          Deleted Tables: {deletedTableItems.length} · Deleted Columns: {deletedColumnItems.length} ·
+          Modified Columns: {modifiedColumnItems.length} · Other: {otherItems.length}
+        </p>
+        <p className="mt-1">
+          <span>Deleted ({deletedTableItems.length + deletedColumnItems.length})</span>
+          <span> · </span>
+          <span>Modified ({modifiedColumnItems.length})</span>
+        </p>
+      </div>
+
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+        <p className="font-medium">Deploy Gate</p>
+        <p className="mt-1">
+          未解决高风险项会阻断 Deploy；其中“列类型变化”需先人工重建后重新 Detect，不能直接 Resolve。
         </p>
       </div>
 
@@ -109,9 +131,30 @@ export function ModelingSchemaChangePanel(props: {
         <StateBlock variant="idle">暂无 schema change 项，点击 Detect 开始扫描。</StateBlock>
       ) : (
         <div className="space-y-3">
-          {renderGroup("Deleted", deletedItems)}
-          {renderGroup("Modified", modifiedItems)}
-          {renderGroup("Other", otherItems)}
+          {renderGroup({
+            title: "Table Deleted",
+            description: "可执行 Resolve 自动清理受影响对象（model / relationship / CF / view）。",
+            groupItems: deletedTableItems,
+            strategy: "auto"
+          })}
+          {renderGroup({
+            title: "Column Deleted",
+            description: "可执行 Resolve 自动清理受影响对象（列与相关依赖）。",
+            groupItems: deletedColumnItems,
+            strategy: "auto"
+          })}
+          {renderGroup({
+            title: "Column Type Changed",
+            description: "需人工重建字段/模型后重新 Detect。",
+            groupItems: modifiedColumnItems,
+            strategy: "manual"
+          })}
+          {renderGroup({
+            title: "Other",
+            description: "请按摘要逐项排查；若支持自动处置可执行 Resolve。",
+            groupItems: otherItems,
+            strategy: "auto"
+          })}
         </div>
       )}
     </section>

@@ -64,6 +64,9 @@ const buildService = (options?: {
   };
   const queryExecutorRouter = {
     execute: jest.fn(async ({ sql }: { sql: string }) => {
+      if (/\bas\s+notnull\b/i.test(sql)) {
+        throw new Error("unexpected sqlite alias notnull in introspection query");
+      }
       if (sql.includes("pragma_table_info('customers')")) {
         return {
           columns: ["columnName", "dataType", "notnull", "pk"],

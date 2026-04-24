@@ -239,9 +239,57 @@ describe("settings modeling deploy flow", () => {
       expect(topStatusBar).toHaveTextContent(/Draft\s+2/);
       expect(topStatusBar).toHaveTextContent(/Active\s+2/);
       expect(topStatusBar).toHaveTextContent(/Policy\s+11/);
-      expect(screen.getByText("当前无已保存但未部署的 revision 差异。")).toBeInTheDocument();
-      expect(screen.getByText("当前无 undeployed revision，无需 deploy。")).toBeInTheDocument();
+      expect(topStatusBar).toHaveTextContent(/Deploy State synced/);
+      expect(screen.getByText(/Deploy State: synced。当前无 undeployed revision。/)).toBeInTheDocument();
+      expect(screen.getByText(/当前无 undeployed revision，无需 deploy。/)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Activate Revision" })).toBeDisabled();
     });
+  });
+
+  it("marks deploy state as undeployed after local modeling edits before draft save", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValue({
+      workspaceId: "ws-1",
+      datasourceId: "ds-1",
+      activeRevision: 2,
+      draft: {
+        policyVersion: 11,
+        revision: 2,
+        graphHash: "hash-r2",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model-orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders Model",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await screen.findByRole("button", { name: "选择 model Orders Model" });
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(/Deploy State synced/);
+
+    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
+    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型未保存");
+    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+
+    const topStatusBar = screen.getByTestId("modeling-top-status-bar");
+    expect(topStatusBar).toHaveTextContent(/Deploy State undeployed/);
+    expect(screen.getByText(/Deploy State: undeployed。检测到未保存的 modeling 改动/)).toBeInTheDocument();
+    expect(screen.getByText("当前存在未保存的建模改动，请先保存 Modeling Draft。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Precheck" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Activate Revision" })).toBeDisabled();
   });
 });

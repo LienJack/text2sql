@@ -3,6 +3,7 @@ import { DomainError } from "../../../common/domain-error";
 import type { ModelingGraphCalculatedField, ModelingGraphModel, ModelingGraphPayload } from "../../platform/data/persistence/modeling-graph.types";
 
 type CalculatedFieldExpressionErrorCategory = "syntax" | "type" | "ref" | "not-supported";
+type CalculatedFieldFunctionGroup = "aggregate" | "math" | "string";
 type ExpressionValueType = "number" | "string" | "boolean" | "datetime" | "unknown";
 type ExpressionTokenType =
   | "identifier"
@@ -35,7 +36,14 @@ class ExpressionValidationError extends Error {
   }
 }
 
-const SUPPORTED_FUNCTIONS = new Set(["abs", "round", "coalesce", "nullif", "lower", "upper", "length", "concat"]);
+const SUPPORTED_FUNCTION_GROUPS: Record<CalculatedFieldFunctionGroup, string[]> = {
+  aggregate: ["sum", "avg", "min", "max", "count"],
+  math: ["abs", "round", "coalesce", "nullif"],
+  string: ["lower", "upper", "length", "concat"]
+};
+const SUPPORTED_FUNCTIONS = new Set(
+  Object.values(SUPPORTED_FUNCTION_GROUPS).flatMap((items) => items)
+);
 const UNSUPPORTED_KEYWORDS = /\b(select|from|where|join|case|when|then|else|end|over|partition|order|group|having|union|limit)\b/i;
 const NOT_SUPPORTED_TOKENS = /(::|->|=>)/;
 
@@ -402,9 +410,23 @@ export class WorkspaceCalculatedFieldExpressionValidatorService {
   private evaluateFunction(token: ExpressionToken, args: ExpressionValueType[]): ExpressionValueType {
     const functionName = token.value.toLowerCase();
     if (!SUPPORTED_FUNCTIONS.has(functionName)) {
-      throw new ExpressionValidationError("not-supported", "调用了暂不支持的函数。", {
-        functionName
+      throw new ExpressionValidationError("not-supported", `函数 ${functionName} 不在支持清单中。`, {
+        functionName,
+        supportedFunctionGroups: SUPPORTED_FUNCTION_GROUPS
       });
+    }
+    if (functionName === "sum" || functionName === "avg") {
+      this.assertArgumentCount(functionName, args, [1], token.position);
+      this.assertArgumentType(functionName, args[0]!, ["number", "unknown"], 0);
+      return args[0] === "unknown" ? "unknown" : "number";
+    }
+    if (functionName === "count") {
+      this.assertArgumentCount(functionName, args, [1], token.position);
+      return "number";
+    }
+    if (functionName === "min" || functionName === "max") {
+      this.assertArgumentCount(functionName, args, [1], token.position);
+      return args[0] ?? "unknown";
     }
     if (functionName === "abs") {
       this.assertArgumentCount(functionName, args, [1], token.position);
@@ -524,7 +546,9 @@ export class WorkspaceCalculatedFieldExpressionValidatorService {
 
   private assertExpressionFeaturesSupported(expression: string): void {
     if (UNSUPPORTED_KEYWORDS.test(expression) || NOT_SUPPORTED_TOKENS.test(expression)) {
-      throw new ExpressionValidationError("not-supported", "expression 包含暂不支持的语法特性。");
+      throw new ExpressionValidationError("not-supported", "expression 包含暂不支持的语法特性。", {
+        supportedFunctionGroups: SUPPORTED_FUNCTION_GROUPS
+      });
     }
   }
 
@@ -606,7 +630,7 @@ export class WorkspaceCalculatedFieldExpressionValidatorService {
   ): never {
     throw new DomainError(
       "WORKSPACE_MODELING_GRAPH_CALCULATED_FIELD_EXPRESSION_INVALID",
-      "calculated field expression 非法。",
+      `calculated field expression 非法：${reason}`,
       400,
       {
         field: "expression",

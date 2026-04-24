@@ -1,14 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ModelingGraphRelationship } from "@text2sql/shared-types";
+import type {
+  ModelingGraphRelationship,
+  ModelingGraphRelationshipType
+} from "@text2sql/shared-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { StateBlock } from "@/components/ui/state-block";
 
 type RelationshipForm = {
   id: string;
   name: string;
+  type: ModelingGraphRelationshipType;
+  hasExplicitType: boolean;
   leftDataset: string;
   leftTable: string;
   leftColumn: string;
@@ -18,10 +24,34 @@ type RelationshipForm = {
   confidence: string;
 };
 
+const DEFAULT_RELATIONSHIP_TYPE: ModelingGraphRelationshipType = "many-to-one";
+
+const RELATIONSHIP_TYPE_LABELS: Record<ModelingGraphRelationshipType, string> = {
+  "many-to-one": "many-to-one",
+  "one-to-many": "one-to-many",
+  "one-to-one": "one-to-one"
+};
+
+function resolveRelationshipType(
+  relationship?: ModelingGraphRelationship
+): ModelingGraphRelationshipType {
+  const nextType = relationship?.type ?? relationship?.cardinality;
+  if (
+    nextType === "many-to-one" ||
+    nextType === "one-to-many" ||
+    nextType === "one-to-one"
+  ) {
+    return nextType;
+  }
+  return DEFAULT_RELATIONSHIP_TYPE;
+}
+
 function toForm(relationship?: ModelingGraphRelationship): RelationshipForm {
   return {
     id: relationship?.id ?? "",
     name: relationship?.name ?? "",
+    type: resolveRelationshipType(relationship),
+    hasExplicitType: Boolean(relationship?.type ?? relationship?.cardinality),
     leftDataset: relationship?.bridge.left.dataset ?? "",
     leftTable: relationship?.bridge.left.table ?? "",
     leftColumn: relationship?.bridge.left.column ?? "",
@@ -119,6 +149,10 @@ export function ModelingRelationshipEditor(props: {
         confidence: Math.max(0, Math.min(1, Number(form.confidence) || 0))
       }
     };
+    if (form.hasExplicitType || form.type !== DEFAULT_RELATIONSHIP_TYPE) {
+      relationship.type = form.type;
+      relationship.cardinality = form.type;
+    }
     const signature = `${relationship.bridge.left.dataset}.${relationship.bridge.left.table}.${relationship.bridge.left.column}:${relationship.bridge.right.dataset}.${relationship.bridge.right.table}.${relationship.bridge.right.column}:${relationship.bridge.operator}`;
     const hasDuplicate = workingRelationships.some((item) => {
       if (item.id === relationship.id) {
@@ -182,6 +216,28 @@ export function ModelingRelationshipEditor(props: {
             setForm((previous) => ({ ...previous, name: event.target.value }));
           }}
         />
+        <NativeSelect
+          aria-label="关系类型"
+          value={form.type}
+          onChange={(event) => {
+            const nextType = event.target.value as ModelingGraphRelationshipType;
+            if (
+              nextType === "many-to-one" ||
+              nextType === "one-to-many" ||
+              nextType === "one-to-one"
+            ) {
+              setForm((previous) => ({
+                ...previous,
+                type: nextType,
+                hasExplicitType: true
+              }));
+            }
+          }}
+        >
+          <NativeSelectOption value="many-to-one">many-to-one</NativeSelectOption>
+          <NativeSelectOption value="one-to-many">one-to-many</NativeSelectOption>
+          <NativeSelectOption value="one-to-one">one-to-one</NativeSelectOption>
+        </NativeSelect>
         <Input
           aria-label="左端 dataset"
           placeholder="analytics"
@@ -276,6 +332,11 @@ export function ModelingRelationshipEditor(props: {
                 </p>
                 <p className="text-xs text-[var(--text-secondary)]">
                   {`${relationship.bridge.left.table}.${relationship.bridge.left.column} = ${relationship.bridge.right.table}.${relationship.bridge.right.column}`}
+                </p>
+                <p className="text-xs text-[var(--text-secondary)]">
+                  {`type: ${
+                    RELATIONSHIP_TYPE_LABELS[resolveRelationshipType(relationship)]
+                  }`}
                 </p>
               </div>
               <div className="flex gap-2">

@@ -16,7 +16,7 @@ import {
   type NodeTypes,
   type ReactFlowInstance
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelingGraphPayload } from "@text2sql/shared-types";
 import type { ModelingSidebarNode } from "@/components/settings/modeling/modeling-sidebar-tree";
 import {
@@ -176,6 +176,16 @@ function buildGraph(
       : bridge.confidence;
     const relationshipLabel = resolveRelationshipLabel(relationship);
     const normalizedConfidence = Number.isFinite(confidence) ? confidence : 0;
+    const relationshipType =
+      relationship.type === "many-to-one" ||
+      relationship.type === "one-to-many" ||
+      relationship.type === "one-to-one"
+        ? relationship.type
+        : relationship.cardinality === "many-to-one" ||
+            relationship.cardinality === "one-to-many" ||
+            relationship.cardinality === "one-to-one"
+          ? relationship.cardinality
+          : undefined;
 
     if (!sourceNodeId || !targetNodeId) {
       invalidRelationshipCount += 1;
@@ -187,6 +197,8 @@ function buildGraph(
         label: relationshipLabel,
         source: relationship.source,
         confidence: normalizedConfidence,
+        type: relationshipType,
+        cardinality: relationshipType,
         invalid: true
       };
       return [
@@ -204,6 +216,8 @@ function buildGraph(
       label: relationshipLabel,
       source: relationship.source,
       confidence: normalizedConfidence,
+      type: relationshipType,
+      cardinality: relationshipType,
       invalid: false
     };
     return [
@@ -240,8 +254,24 @@ export function ModelingFlowCanvas(props: {
   const [didAutoFit, setDidAutoFit] = useState(false);
   const [flowNodes, setFlowNodes] = useState<Array<Node<ModelingFlowNodeData>>>([]);
   const [flowEdges, setFlowEdges] = useState<Array<Edge<ModelingFlowEdgeData>>>([]);
+  const selectionFocusKeyRef = useRef("");
 
-  const graph = useMemo(() => buildGraph(graphPayload), [graphPayload]);
+  const graph = useMemo(() => {
+    try {
+      return {
+        ...buildGraph(graphPayload),
+        graphBuildError: ""
+      };
+    } catch (error) {
+      return {
+        nodes: [],
+        edges: [],
+        invalidRelationshipCount: 0,
+        graphBuildError:
+          error instanceof Error ? error.message : "graph payload 映射失败，请检查数据结构。"
+      };
+    }
+  }, [graphPayload]);
   const selectedFlowNodeId =
     selectedNode?.kind === "model" || selectedNode?.kind === "view"
       ? toFlowNodeId(selectedNode)
@@ -290,6 +320,7 @@ export function ModelingFlowCanvas(props: {
 
   useEffect(() => {
     setDidAutoFit(false);
+    selectionFocusKeyRef.current = "";
   }, [autoLayoutKey]);
 
   useEffect(() => {
@@ -307,6 +338,27 @@ export function ModelingFlowCanvas(props: {
       window.cancelAnimationFrame(rafId);
     };
   }, [busy, didAutoFit, flowInstance, flowNodes.length]);
+
+  useEffect(() => {
+    if (!flowInstance || busy) {
+      return;
+    }
+    if (!selectedFlowNodeId) {
+      selectionFocusKeyRef.current = "";
+      return;
+    }
+    const selectionKey = selectedFlowNodeId;
+    if (selectionFocusKeyRef.current === selectionKey) {
+      return;
+    }
+    flowInstance.fitView({
+      nodes: [{ id: selectedFlowNodeId }],
+      padding: 0.3,
+      maxZoom: 1.15,
+      duration: 220
+    });
+    selectionFocusKeyRef.current = selectionKey;
+  }, [busy, flowInstance, selectedFlowNodeId]);
 
   const handleFitView = useCallback(() => {
     flowInstance?.fitView({
@@ -377,6 +429,12 @@ export function ModelingFlowCanvas(props: {
         {busy ? (
           <div className="flex h-full items-center justify-center p-6">
             <StateBlock variant="loading">正在加载 modeling graph…</StateBlock>
+          </div>
+        ) : graph.graphBuildError ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <StateBlock variant="error">
+              graph 映射出现异常，已阻止画布崩溃。请检查模型/关系数据后重试（{graph.graphBuildError}）。
+            </StateBlock>
           </div>
         ) : flowNodes.length === 0 ? (
           <div className="flex h-full items-center justify-center p-6">

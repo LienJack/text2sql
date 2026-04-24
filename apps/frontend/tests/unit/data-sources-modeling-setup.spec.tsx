@@ -6,7 +6,6 @@ import DataSourcesPage from "@/app/data-sources/page";
 import { listDatasources, submitDatasourceWorkflow } from "@/lib/api-client";
 import {
   commitModelingSetup,
-  createWorkspace,
   listModelingSetupTables,
   listWorkspaces,
   recommendModelingSetupRelationships,
@@ -49,7 +48,6 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
 const mockListDatasources = vi.mocked(listDatasources);
 const mockSubmitDatasourceWorkflow = vi.mocked(submitDatasourceWorkflow);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
-const mockCreateWorkspace = vi.mocked(createWorkspace);
 const mockListModelingSetupTables = vi.mocked(listModelingSetupTables);
 const mockSaveModelingSetupSelectedTables = vi.mocked(saveModelingSetupSelectedTables);
 const mockRecommendModelingSetupRelationships = vi.mocked(
@@ -77,7 +75,7 @@ const MYSQL_DS: Datasource = {
   updatedAt: "2026-04-10T00:00:00.000Z"
 };
 
-async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+async function openCreateToStep2(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole("button", { name: "新增" }));
   await user.click(screen.getByRole("button", { name: /MySQL/i }));
   await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -90,14 +88,6 @@ async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Prom
   await user.clear(screen.getByPlaceholderText("Username"));
   await user.type(screen.getByPlaceholderText("Username"), "root");
   await user.type(screen.getByPlaceholderText("Password"), "secret");
-
-  await user.click(screen.getByRole("button", { name: "下一步" }));
-  await user.click(screen.getByRole("button", { name: "新建工作空间" }));
-  await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
-  await user.click(screen.getByRole("button", { name: "创建" }));
-  await waitFor(() => {
-    expect(mockCreateWorkspace).toHaveBeenCalledWith({ name: "增长分析" });
-  });
 }
 
 async function createDatasourceAndOpenSetupWizard(
@@ -105,7 +95,7 @@ async function createDatasourceAndOpenSetupWizard(
 ): Promise<void> {
   render(<DataSourcesPage />);
   await screen.findByText("MySQL 主数据源");
-  await openCreateToStep3(user);
+  await openCreateToStep2(user);
   await user.click(screen.getByRole("button", { name: "完成创建" }));
   await screen.findByText("建模设置向导");
 }
@@ -114,19 +104,20 @@ describe("DataSourcesPage modeling setup wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
+    window.sessionStorage.setItem("text2sql.activeWorkspaceId", "ws-new");
 
     mockListDatasources.mockResolvedValue([MYSQL_DS]);
     mockListWorkspaces.mockResolvedValue({
-      items: [],
-      total: 0,
+      items: [
+        {
+          id: "ws-new",
+          name: "增长分析",
+          isDefault: true
+        }
+      ],
+      total: 1,
       page: 1,
       pageSize: 200
-    });
-    mockCreateWorkspace.mockResolvedValue({
-      id: "ws-new",
-      name: "增长分析",
-      isDefault: false,
-      createdAt: "2026-04-15T00:00:00.000Z"
     });
     mockSubmitDatasourceWorkflow.mockResolvedValue({
       mode: "create",
@@ -179,9 +170,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
         selectedTables: ["customers", "orders"],
         selectedRecommendationIds: ["rel-orders-customers"]
       });
-      expect(mockPush).toHaveBeenCalledWith(
-        "/settings/modeling?workspaceId=ws-new&datasourceId=ds-created"
-      );
+      expect(mockPush).toHaveBeenCalledWith("/settings/modeling?datasourceId=ds-created");
     });
 
     expect(window.sessionStorage.getItem("text2sql.activeWorkspaceId")).toBe("ws-new");
@@ -203,9 +192,7 @@ describe("DataSourcesPage modeling setup wizard", () => {
         selectedTables: ["customers", "orders"],
         selectedRecommendationIds: []
       });
-      expect(mockPush).toHaveBeenCalledWith(
-        "/settings/modeling?workspaceId=ws-new&datasourceId=ds-created"
-      );
+      expect(mockPush).toHaveBeenCalledWith("/settings/modeling?datasourceId=ds-created");
     });
   });
 
@@ -240,6 +227,33 @@ describe("DataSourcesPage modeling setup wizard", () => {
 
     expect(mockSaveModelingSetupSelectedTables.mock.calls[1]?.[2]).toEqual({
       selectedTables: ["customers", "orders"]
+    });
+  });
+
+  it("opens setup wizard from existing datasource card menu", async () => {
+    const user = userEvent.setup();
+    mockListWorkspaces.mockResolvedValueOnce({
+      items: [
+        {
+          id: "ws-existing",
+          name: "默认工作空间",
+          isDefault: true
+        }
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 200
+    });
+
+    render(<DataSourcesPage />);
+    await screen.findByText("MySQL 主数据源");
+
+    await user.click(screen.getByRole("button", { name: "更多操作" }));
+    await user.click(screen.getByRole("menuitem", { name: "建模设置" }));
+
+    expect(await screen.findByText("建模设置向导")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockListModelingSetupTables).toHaveBeenCalledWith("ws-existing", "mysql_main");
     });
   });
 });

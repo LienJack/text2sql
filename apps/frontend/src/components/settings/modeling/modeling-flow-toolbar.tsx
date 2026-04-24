@@ -17,7 +17,7 @@ export function ModelingFlowToolbar(props: {
     props;
   const selectedSummary = selectedNode
     ? `${selectedNode.kind} · ${selectedNode.id}`
-    : "当前未选中节点";
+    : "当前未选中节点（可从左侧资产树选择）";
 
   return (
     <div
@@ -28,9 +28,18 @@ export function ModelingFlowToolbar(props: {
         <div className="min-w-0 space-y-1">
           <p className="inline-flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
             <Workflow className="h-4 w-4" />
-            Flowchart Canvas
+            Workbench ERD Canvas
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--text-secondary)]">
+              flowchart-first
+            </span>
           </p>
-          <p className="truncate text-xs text-[var(--text-secondary)]">当前选中：{selectedSummary}</p>
+          <p
+            className="truncate text-xs text-[var(--text-secondary)]"
+            aria-live="polite"
+            data-testid="modeling-flow-toolbar-selected-summary"
+          >
+            当前选中：{selectedSummary}
+          </p>
         </div>
         <div
           className="flex flex-wrap items-center gap-1.5"

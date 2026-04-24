@@ -17,6 +17,44 @@ type CalculatedFieldForm = {
   dataType: string;
 };
 
+type ExpressionErrorCategory = "syntax" | "type" | "ref" | "not-supported";
+type FunctionGroupHint = {
+  id: "aggregate" | "math" | "string";
+  label: string;
+  examples: string[];
+};
+type ExpressionValidationErrorDetails = {
+  category?: string;
+  reason?: string;
+  functionName?: string;
+  supportedFunctionGroups?: Record<string, unknown>;
+};
+
+const FUNCTION_GROUP_HINTS: FunctionGroupHint[] = [
+  {
+    id: "aggregate",
+    label: "聚合函数",
+    examples: ["sum(expr)", "avg(expr)", "min(expr)", "max(expr)", "count(expr)"]
+  },
+  {
+    id: "math",
+    label: "数学函数",
+    examples: ["abs(x)", "round(x, digits)", "coalesce(a, b, ...)", "nullif(a, b)"]
+  },
+  {
+    id: "string",
+    label: "字符串函数",
+    examples: ["lower(text)", "upper(text)", "length(text)", "concat(a, b, ...)"]
+  }
+];
+
+const EXPRESSION_ERROR_CATEGORY_LABEL: Record<ExpressionErrorCategory, string> = {
+  syntax: "语法错误",
+  type: "类型不匹配",
+  ref: "字段引用错误",
+  "not-supported": "函数或语法不支持"
+};
+
 function toForm(field?: ModelingGraphCalculatedField): CalculatedFieldForm {
   return {
     id: field?.id ?? "",
@@ -29,6 +67,78 @@ function toForm(field?: ModelingGraphCalculatedField): CalculatedFieldForm {
 function nextFieldId(modelId: string, name: string): string {
   const base = name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_") || "calculated_field";
   return `${modelId}.${base}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeFunctionGroupHints(value: unknown): string {
+  if (!isRecord(value)) {
+    return FUNCTION_GROUP_HINTS
+      .map((group) => `${group.label}(${group.examples.join(", ")})`)
+      .join("；");
+  }
+
+  const grouped = Object.entries(value)
+    .map(([groupId, items]) => {
+      if (!Array.isArray(items)) {
+        return null;
+      }
+      const normalizedItems = items
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean);
+      if (normalizedItems.length === 0) {
+        return null;
+      }
+      const fallbackLabel = groupId;
+      const label = FUNCTION_GROUP_HINTS.find((group) => group.id === groupId)?.label ?? fallbackLabel;
+      return `${label}(${normalizedItems.join(", ")})`;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  if (grouped.length > 0) {
+    return grouped.join("；");
+  }
+
+  return FUNCTION_GROUP_HINTS
+    .map((group) => `${group.label}(${group.examples.join(", ")})`)
+    .join("；");
+}
+
+function resolveCalculatedFieldSaveError(error: unknown): string {
+  if (!isRecord(error)) {
+    if (error instanceof Error) {
+      return error.message || "保存 Calculated Fields 失败";
+    }
+    return "保存 Calculated Fields 失败";
+  }
+
+  const code = typeof error.code === "string" ? error.code : "";
+  const message = typeof error.message === "string" ? error.message : "保存 Calculated Fields 失败";
+  if (code !== "WORKSPACE_MODELING_GRAPH_CALCULATED_FIELD_EXPRESSION_INVALID") {
+    return message;
+  }
+
+  const details: ExpressionValidationErrorDetails = isRecord(error.details) ? error.details : {};
+  const category = details.category as ExpressionErrorCategory | undefined;
+  const categoryLabel = category ? EXPRESSION_ERROR_CATEGORY_LABEL[category] : "表达式错误";
+  const reason = typeof details.reason === "string" ? details.reason : "";
+
+  if (category === "not-supported") {
+    const unsupportedFunction =
+      typeof details.functionName === "string" && details.functionName.trim()
+        ? `（${details.functionName.trim()}）`
+        : "";
+    const groupedHints = normalizeFunctionGroupHints(details.supportedFunctionGroups);
+    return `表达式函数不在支持清单中${unsupportedFunction}。${reason || "请改用允许的表达式函数。"} 可用函数：${groupedHints}`;
+  }
+
+  if (reason) {
+    return `${categoryLabel}：${reason}`;
+  }
+
+  return message;
 }
 
 export function ModelingCalculatedFieldEditor(props: {
@@ -110,7 +220,7 @@ export function ModelingCalculatedFieldEditor(props: {
       const untouched = calculatedFields.filter((field) => field.modelId !== model.id);
       await onSave([...untouched, ...workingFields]);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存 Calculated Fields 失败");
+      setError(resolveCalculatedFieldSaveError(saveError));
     } finally {
       setSubmitting(false);
     }
@@ -142,6 +252,22 @@ export function ModelingCalculatedFieldEditor(props: {
             setForm((previous) => ({ ...previous, expression: event.target.value }));
           }}
         />
+        <div
+          className="rounded-md border border-dashed border-[var(--border-default)] bg-[var(--surface-muted,#f8fafc)] px-3 py-2"
+          data-testid="calculated-field-expression-function-groups"
+        >
+          <p className="text-xs font-semibold text-[var(--text-primary)]">可用函数清单</p>
+          <div className="mt-1 space-y-1">
+            {FUNCTION_GROUP_HINTS.map((group) => (
+              <p key={group.id} className="text-xs text-[var(--text-secondary)]">
+                {group.label}：{group.examples.join("、")}
+              </p>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">
+            字段引用支持当前模型列与已定义计算字段；跨模型时使用 `model.column`。
+          </p>
+        </div>
         <Input
           aria-label="数据类型"
           placeholder="例如 decimal"

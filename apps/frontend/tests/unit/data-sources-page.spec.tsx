@@ -11,7 +11,6 @@ import {
 } from "@/lib/api-client";
 import {
   commitModelingSetup,
-  createWorkspace,
   listModelingSetupTables,
   listWorkspaces,
   recommendModelingSetupRelationships,
@@ -56,7 +55,6 @@ const mockListDatasources = vi.mocked(listDatasources);
 const mockSubmitDatasourceWorkflow = vi.mocked(submitDatasourceWorkflow);
 const mockCreateSession = vi.mocked(createSession);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
-const mockCreateWorkspace = vi.mocked(createWorkspace);
 const mockListModelingSetupTables = vi.mocked(listModelingSetupTables);
 const mockSaveModelingSetupSelectedTables = vi.mocked(saveModelingSetupSelectedTables);
 const mockRecommendModelingSetupRelationships = vi.mocked(
@@ -84,7 +82,7 @@ const MYSQL_DS: Datasource = {
   updatedAt: "2026-04-10T00:00:00.000Z"
 };
 
-async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+async function openCreateToStep2(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole("button", { name: "新增" }));
   await user.click(screen.getByRole("button", { name: /MySQL/i }));
   await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -97,26 +95,25 @@ async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Prom
   await user.clear(screen.getByPlaceholderText("Username"));
   await user.type(screen.getByPlaceholderText("Username"), "root");
   await user.type(screen.getByPlaceholderText("Password"), "secret");
-
-  await user.click(screen.getByRole("button", { name: "下一步" }));
-  expect(screen.getByText("绑定治理作用域")).toBeInTheDocument();
 }
 
 describe("DataSourcesPage workflow closure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem("text2sql.activeWorkspaceId", "ws-new");
     mockListDatasources.mockResolvedValue([MYSQL_DS]);
     mockListWorkspaces.mockResolvedValue({
-      items: [],
-      total: 0,
+      items: [
+        {
+          id: "ws-new",
+          name: "增长分析",
+          isDefault: true
+        }
+      ],
+      total: 1,
       page: 1,
       pageSize: 200
-    });
-    mockCreateWorkspace.mockResolvedValue({
-      id: "ws-new",
-      name: "增长分析",
-      isDefault: false,
-      createdAt: "2026-04-15T00:00:00.000Z"
     });
     mockListModelingSetupTables.mockResolvedValue([
       { id: "orders", tableName: "orders" },
@@ -161,24 +158,13 @@ describe("DataSourcesPage workflow closure", () => {
   });
 
   it(
-    "completes create workflow with inline workspace creation and workspace binding",
+    "completes create workflow with active workspace binding",
     async () => {
     const user = userEvent.setup();
     render(<DataSourcesPage />);
 
     await screen.findByText("MySQL 主数据源");
-    await openCreateToStep3(user);
-
-    await user.click(screen.getByRole("button", { name: "完成创建" }));
-    expect(await screen.findByText("请选择工作空间后再提交")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "新建工作空间" }));
-    await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
-    await user.click(screen.getByRole("button", { name: "创建" }));
-
-    await waitFor(() => {
-      expect(mockCreateWorkspace).toHaveBeenCalledWith({ name: "增长分析" });
-    });
+    await openCreateToStep2(user);
 
     await user.click(screen.getByRole("button", { name: "完成创建" }));
 
@@ -225,11 +211,7 @@ describe("DataSourcesPage workflow closure", () => {
 
     render(<DataSourcesPage />);
     await screen.findByText("MySQL 主数据源");
-    await openCreateToStep3(user);
-
-    await user.click(screen.getByRole("button", { name: "新建工作空间" }));
-    await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
-    await user.click(screen.getByRole("button", { name: "创建" }));
+    await openCreateToStep2(user);
 
     await user.click(screen.getByRole("button", { name: "完成创建" }));
     expect(await screen.findByText("绑定失败")).toBeInTheDocument();
