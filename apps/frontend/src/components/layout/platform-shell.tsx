@@ -2,7 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookOpen, Database, LayoutDashboard, Menu, MessageSquare, Settings, Sparkles, User, X } from "lucide-react";
+import {
+  Bell,
+  BookOpen,
+  Database,
+  LayoutDashboard,
+  Menu,
+  MessageSquare,
+  Settings,
+  Sparkles,
+  User,
+  Workflow,
+  X
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -23,6 +35,7 @@ const navItems = [
   { href: "/", label: "总览", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
   { href: "/data-sources", label: "数据源", icon: Database },
+  { href: "/settings/modeling", label: "数据关系图", icon: Workflow },
   { href: "/dashboards", label: "看板", icon: LayoutDashboard },
   { href: "/glossary", label: "术语库", icon: BookOpen },
   { href: "/prompts", label: "提示词", icon: Sparkles },
@@ -77,8 +90,16 @@ function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function resolveActiveNavHref(pathname: string): string {
+  const matchedNavItem = navItems
+    .filter((item) => isNavActive(pathname, item.href))
+    .sort((left, right) => right.href.length - left.href.length)[0];
+  return matchedNavItem?.href ?? "";
+}
+
 export function PlatformShell({ children }: PlatformShellProps) {
   const pathname = usePathname();
+  const activeNavHref = useMemo(() => resolveActiveNavHref(pathname), [pathname]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [workspaceGateStatus, setWorkspaceGateStatus] =
     useState<WorkspaceGateStatus>("checking");
@@ -87,9 +108,9 @@ export function PlatformShell({ children }: PlatformShellProps) {
   const [workspaceSelection, setWorkspaceSelection] = useState("");
 
   const title = useMemo(() => {
-    const activeItem = navItems.find((item) => isNavActive(pathname, item.href));
+    const activeItem = navItems.find((item) => item.href === activeNavHref);
     return activeItem?.label ?? "工作台";
-  }, [pathname]);
+  }, [activeNavHref]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -152,9 +173,7 @@ export function PlatformShell({ children }: PlatformShellProps) {
   }, [ensureWorkspaceContext]);
 
   const workspaceGateBlocking =
-    workspaceGateStatus === "checking" ||
-    workspaceGateStatus === "selecting" ||
-    workspaceGateStatus === "error";
+    workspaceGateStatus === "selecting" || workspaceGateStatus === "error";
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--surface-page)] font-sans text-[var(--text-primary)] antialiased">
@@ -191,7 +210,7 @@ export function PlatformShell({ children }: PlatformShellProps) {
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6 text-[var(--text-secondary)]">
           {navItems.map((item) => {
-            const active = isNavActive(pathname, item.href);
+            const active = item.href === activeNavHref;
             const Icon = item.icon;
             return (
               <Link
@@ -267,10 +286,6 @@ export function PlatformShell({ children }: PlatformShellProps) {
                 进入平台前先确定本次会话的工作空间。
               </p>
             </div>
-
-            {workspaceGateStatus === "checking" ? (
-              <StateBlock variant="loading">正在加载工作空间...</StateBlock>
-            ) : null}
 
             {workspaceGateStatus === "error" ? (
               <StateBlock variant="error">{workspaceGateError || "加载工作空间失败"}</StateBlock>

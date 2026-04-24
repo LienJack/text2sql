@@ -45,7 +45,7 @@ export function RelationshipModelingCanvas(props: {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-[var(--text-primary)]">Relationship Modeling Canvas</p>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">数据关系图画布</p>
           <p className="text-xs text-[var(--text-secondary)]">
             React Flow 可视化仅展示当前 draft；编辑通过下方关系边列表进行。
           </p>

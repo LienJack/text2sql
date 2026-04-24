@@ -1,11 +1,11 @@
 # Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-24)
 
 ## Corpus Check
-- 654 files · ~894,899 words
+- 654 files · ~895,468 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3165 nodes · 5980 edges · 468 communities detected
+- 3166 nodes · 5981 edges · 468 communities detected
 - Extraction: 78% EXTRACTED · 22% INFERRED · 0% AMBIGUOUS · INFERRED: 1304 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -494,32 +494,32 @@
 ## Surprising Connections (you probably didn't know these)
 - `loadPreviewForDetails()` --calls--> `getWorkspaceModelingPreview()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/modeling/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/admin-api-client.ts
+- `load()` --calls--> `setError()`  [INFERRED]
+  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/glossary/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/components/settings/workspace-management-panel.tsx
 - `load()` --calls--> `listGlossaryTerms()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/glossary/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/admin-api-client.ts
+- `syncWorkspaceContext()` --calls--> `writeActiveWorkspaceId()`  [INFERRED]
+  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/datasource-session-context.ts
 - `resolveWorkspaceId()` --calls--> `readActiveWorkspaceId()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/datasource-session-context.ts
-- `refreshModels()` --calls--> `setError()`  [INFERRED]
-  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/components/settings/workspace-management-panel.tsx
-- `submitCreateAnchor()` --calls--> `createGlossaryAnchor()`  [INFERRED]
-  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/admin-api-client.ts
 
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.02
-Nodes (16): ChatController, ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EvalService, ExecuteMessageUsecase (+8 more)
+Cohesion: 0.03
+Nodes (15): ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EvalService, ExecuteMessageUsecase, ExecuteSqlNode (+7 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.03
+Cohesion: 0.02
 Nodes (23): AppConfigService, DatasourceRegistryService, countTracedRuns(), main(), parseArgs(), computeLangsmithCoverage(), bootstrap(), readWorkspaceIdFromQuery() (+15 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.03
-Nodes (13): ok(), DatasourceController, DatasourceWorkflowService, EvalController, GlossaryController, MemoryController, SettingsController, UserController (+5 more)
+Nodes (13): ok(), ChatController, DatasourceController, EvalController, GlossaryController, MemoryController, SettingsController, UserController (+5 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.04
-Nodes (10): ModelingSchemaChangeRepository, toScopeKey(), SaveViewFromRunUsecase, normalizeName(), SchemaChangeDetectorService, WorkspaceDatasourceController, normalizeName(), WorkspaceModelingSchemaChangeDetectorService (+2 more)
+Nodes (13): BuildRagIndexJob, asActor(), asActor(), LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus(), ProviderCatalogService (+5 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.03
@@ -531,59 +531,59 @@ Nodes (100): addWorkspaceDatasourceBindings(), addWorkspaceMembers(), AdminApiEr
 
 ### Community 6 - "Community 6"
 Cohesion: 0.04
-Nodes (12): BuildRagIndexJob, asActor(), asActor(), LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus(), ProviderCatalogService (+4 more)
+Nodes (9): ModelingSchemaChangeRepository, toScopeKey(), normalizeName(), SchemaChangeDetectorService, WorkspaceDatasourceController, normalizeName(), WorkspaceModelingSchemaChangeDetectorService, normalizeTableName() (+1 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.03
-Nodes (66): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+58 more)
+Cohesion: 0.04
+Nodes (8): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, DatasourceWorkflowService, PostgresExecutorService, RelationshipDryRunService
 
 ### Community 8 - "Community 8"
 Cohesion: 0.06
-Nodes (8): AuditLogRepository, asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey(), toTablePermissionSetKey(), WorkspaceDatasourcePolicyRepository, WorkspaceDatasourceService
+Nodes (8): AuditLogRepository, ModelingGraphRepository, toScopeKey(), ModelingGraphValidator, nonEmpty(), SaveViewFromRunUsecase, normalizeId(), WorkspaceRelationshipService
 
 ### Community 9 - "Community 9"
-Cohesion: 0.05
-Nodes (8): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, loadDatasources(), PostgresExecutorService, RelationshipDryRunService
-
-### Community 10 - "Community 10"
 Cohesion: 0.04
 Nodes (9): ChatPostRunHooksService, HealthController, MysqlExecutorService, RagIngestionMetricsService, RagQualityController, RagQualityService, SemanticSpineShadowService, SqliteExecutorService (+1 more)
 
-### Community 11 - "Community 11"
+### Community 10 - "Community 10"
 Cohesion: 0.05
 Nodes (44): BuildSemanticQueryNode, buildConversationKnowledgeAllowlistSet(), collectFiles(), compactLine(), createLineStarts(), extractImportReferences(), findRepoRoot(), indexToLineColumn() (+36 more)
 
+### Community 11 - "Community 11"
+Cohesion: 0.08
+Nodes (7): asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey(), toTablePermissionSetKey(), WorkspaceDatasourcePolicyRepository, WorkspaceDatasourceService
+
 ### Community 12 - "Community 12"
+Cohesion: 0.04
+Nodes (45): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+37 more)
+
+### Community 13 - "Community 13"
 Cohesion: 0.05
 Nodes (5): MemoryPromotionPolicy, MemoryPromotionService, RagReplayRepository, RagRerankService, RetrieveKnowledgeNode
 
-### Community 13 - "Community 13"
+### Community 14 - "Community 14"
 Cohesion: 0.08
 Nodes (7): normalizeValue(), WorkspaceAdminGuard, toMembershipKey(), toWorkspaceMemberRole(), toWorkspaceStatus(), WorkspaceRepository, WorkspaceService
 
-### Community 14 - "Community 14"
+### Community 15 - "Community 15"
 Cohesion: 0.07
 Nodes (53): createIdempotencyKey(), resolveDatasourceWorkflowApiError(), applySessionView(), dedupeSessions(), extractErrorCode(), init(), loadMessages(), mergeSessionMessages() (+45 more)
 
-### Community 15 - "Community 15"
+### Community 16 - "Community 16"
 Cohesion: 0.08
 Nodes (10): toPlatformUserStatus(), UserRepository, UserService, onConfirmBatchDelete(), onConfirmDeleteOne(), onConfirmResetPassword(), onSubmitEditor(), onToggleStatus() (+2 more)
 
-### Community 16 - "Community 16"
+### Community 17 - "Community 17"
 Cohesion: 0.05
 Nodes (13): GraphBuilderService, createLangGraphNodeHandlers(), createNodeRuntime(), getCallbacks(), summarize(), truncate(), createLangGraphRuntime(), LangGraphRuntimeService (+5 more)
 
-### Community 17 - "Community 17"
+### Community 18 - "Community 18"
 Cohesion: 0.1
 Nodes (1): GlossaryService
 
-### Community 18 - "Community 18"
+### Community 19 - "Community 19"
 Cohesion: 0.08
 Nodes (7): LaneTimeoutError, RagRetrievalService, appendUnique(), fuseWithRrf(), laneOrder(), normalizeRankConstant(), stableSortLaneHits()
-
-### Community 19 - "Community 19"
-Cohesion: 0.1
-Nodes (6): ModelingGraphRepository, toScopeKey(), ModelingGraphValidator, nonEmpty(), normalizeId(), WorkspaceRelationshipService
 
 ### Community 20 - "Community 20"
 Cohesion: 0.08
@@ -599,14 +599,14 @@ Nodes (36): ApiClientRequestError, composeApiUrl(), createDatasource(), createSe
 
 ### Community 23 - "Community 23"
 Cohesion: 0.09
-Nodes (34): createRunId(), withActor(), formatGovernanceError(), patchModel(), readRunIdFromQuery(), readWorkspaceIdFromQuery(), refreshModels(), resolveWorkspaceId() (+26 more)
+Nodes (35): createRunId(), withActor(), formatGovernanceError(), patchModel(), readRunIdFromQuery(), readWorkspaceIdFromQuery(), refreshModels(), resolveWorkspaceId() (+27 more)
 
 ### Community 24 - "Community 24"
 Cohesion: 0.13
 Nodes (1): SemanticSpineRepository
 
 ### Community 25 - "Community 25"
-Cohesion: 0.11
+Cohesion: 0.1
 Nodes (5): GenerateSqlNode, RagCacheKeyFactory, SqlGenerationService, SqlOutputExtractor, SqlPromptBuilder
 
 ### Community 26 - "Community 26"
@@ -615,51 +615,51 @@ Nodes (2): PromptTemplateService, SettingsService
 
 ### Community 27 - "Community 27"
 Cohesion: 0.12
-Nodes (11): GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl(), checkHealth() (+3 more)
+Nodes (21): buildOperationNotice(), closeDialog(), closeDrawer(), createIdempotencyKey(), handleDelete(), handleToggleTerm(), load(), loadTerms() (+13 more)
 
 ### Community 28 - "Community 28"
+Cohesion: 0.12
+Nodes (11): GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl(), checkHealth() (+3 more)
+
+### Community 29 - "Community 29"
 Cohesion: 0.14
 Nodes (2): GraphAccelerationCircuitBreaker, GraphService
 
-### Community 29 - "Community 29"
+### Community 30 - "Community 30"
 Cohesion: 0.25
 Nodes (19): ensureRunLoaded(), isRecord(), mergeRunThinkingSteps(), normalizeArtifact(), normalizeDeliveryContract(), normalizeEvidence(), normalizeRunForVisibility(), normalizeSelectedContext() (+11 more)
 
-### Community 30 - "Community 30"
-Cohesion: 0.25
-Nodes (1): ChatDeliveryEnrichmentService
-
 ### Community 31 - "Community 31"
-Cohesion: 0.3
+Cohesion: 0.24
 Nodes (1): RagAuditReplayService
 
 ### Community 32 - "Community 32"
+Cohesion: 0.25
+Nodes (1): ChatDeliveryEnrichmentService
+
+### Community 33 - "Community 33"
 Cohesion: 0.26
 Nodes (10): createIdempotencyKey(), isConflictError(), isRecord(), normalizeTableNames(), readNumberCandidate(), resolveConflictPolicyVersion(), resolveConflictSummary(), setsEqual() (+2 more)
 
-### Community 33 - "Community 33"
+### Community 34 - "Community 34"
 Cohesion: 0.29
 Nodes (1): FileDatasourceExecutorService
 
-### Community 34 - "Community 34"
+### Community 35 - "Community 35"
 Cohesion: 0.28
 Nodes (4): GraphAccelerationAdapter, GraphAccelerationError, GraphAccelerationTimeoutError, GraphAccelerationUnsupportedOperatorError
 
-### Community 35 - "Community 35"
+### Community 36 - "Community 36"
 Cohesion: 0.26
 Nodes (1): SemanticSpineShadowGateService
 
-### Community 36 - "Community 36"
+### Community 37 - "Community 37"
 Cohesion: 0.19
 Nodes (2): GateMetricsService, TraceService
 
-### Community 37 - "Community 37"
+### Community 38 - "Community 38"
 Cohesion: 0.27
 Nodes (6): createDeliverySandboxPolicy(), isSandboxFilesystemWriteAllowed(), isSandboxNetworkAllowed(), isSandboxProcessSpawnAllowed(), normalizeString(), SandboxRuntimeService
-
-### Community 38 - "Community 38"
-Cohesion: 0.36
-Nodes (1): SkillRegistryService
 
 ### Community 39 - "Community 39"
 Cohesion: 0.29
@@ -3067,17 +3067,17 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ok()` connect `Community 2` to `Community 0`, `Community 10`, `Community 3`?**
-  _High betweenness centrality (0.022) - this node is a cross-community bridge._
-- **Why does `resolveReason()` connect `Community 39` to `Community 4`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+- **Why does `ok()` connect `Community 2` to `Community 0`, `Community 9`, `Community 6`?**
+  _High betweenness centrality (0.035) - this node is a cross-community bridge._
+- **Why does `submit()` connect `Community 12` to `Community 4`?**
+  _High betweenness centrality (0.016) - this node is a cross-community bridge._
 - **Are the 85 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.createSession()`) actually correct?**
   _`ok()` has 85 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `AppModule`, `LlmModule`, `ApplyMemoryFeedbackDto` to the rest of the system?**
   _78 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.02 - nodes in this community are weakly interconnected._
-- **Should `Community 1` be split into smaller, more focused modules?**
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._
+- **Should `Community 1` be split into smaller, more focused modules?**
+  _Cohesion score 0.02 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._

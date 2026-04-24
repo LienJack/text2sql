@@ -1053,7 +1053,7 @@ export default function SettingsPage() {
               {actorRole === "admin" ? (
                 <div className="flex justify-end">
                   <Button asChild variant="outline">
-                    <Link href="/settings/modeling">进入 Relationship Modeling</Link>
+                    <Link href="/settings/modeling">进入数据关系图</Link>
                   </Button>
                 </div>
               ) : null}
