@@ -1362,6 +1362,7 @@ export function ModelingFlowCanvas(props: {
               setFlowInstance(instance);
             }}
             onlyRenderVisibleElements
+            elevateEdgesOnSelect
             minZoom={0.2}
             maxZoom={1.8}
           >

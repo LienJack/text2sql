@@ -436,7 +436,40 @@ describe("ModelingFlowEdge", () => {
 
     await user.hover(edge);
     expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
-    expect(screen.getByText("Many-to-one")).toBeInTheDocument();
+    expect(screen.getByText(/1对多 \(Many-to-one\)/)).toBeInTheDocument();
+  });
+
+  it("renders many-to-many relationship label when cardinality is many-to-many", async () => {
+    const user = userEvent.setup();
+    const edgeProps = {
+      id: "rel-many-to-many",
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 100,
+      targetY: 50,
+      sourcePosition: "right",
+      targetPosition: "left",
+      selected: false,
+      data: {
+        label: "orders_items.product_id = products.id",
+        source: "manual",
+        confidence: 0.9,
+        cardinality: "many-to-many"
+      }
+    } as unknown as Parameters<typeof ModelingFlowEdge>[0];
+
+    render(
+      <svg>
+        <ModelingFlowEdge {...edgeProps} />
+      </svg>
+    );
+
+    const edge = screen.getByTestId("flow-base-edge");
+    expect(edge.getAttribute("data-marker-start")).toContain("-many");
+    expect(edge.getAttribute("data-marker-end")).toContain("-many");
+
+    await user.hover(edge);
+    expect(screen.getByText("多对多 (Many-to-many)")).toBeInTheDocument();
   });
 
   it("marks low-confidence manual edge as dashed warning style", () => {

@@ -15,8 +15,8 @@ export type ModelingFlowEdgeData = {
   label: string;
   source: "manual" | "inferred" | "fk" | "semantic";
   confidence: number;
-  type?: ModelingGraphRelationshipType;
-  cardinality?: ModelingGraphRelationshipType;
+  type?: ModelingGraphRelationshipType | "many-to-many";
+  cardinality?: ModelingGraphRelationshipType | "many-to-many";
   from?: {
     dataset: string;
     table: string;
@@ -33,19 +33,22 @@ export type ModelingFlowEdgeData = {
 
 function resolveEdgeRelationshipType(
   edgeData?: ModelingFlowEdgeData
-): ModelingGraphRelationshipType | null {
+): ModelingGraphRelationshipType | "many-to-many" | null {
   const relationshipType = edgeData?.type ?? edgeData?.cardinality;
   if (
     relationshipType === "many-to-one" ||
     relationshipType === "one-to-many" ||
-    relationshipType === "one-to-one"
+    relationshipType === "one-to-one" ||
+    relationshipType === "many-to-many"
   ) {
     return relationshipType;
   }
   return null;
 }
 
-function resolveEndpointMarkers(relationshipType: ModelingGraphRelationshipType | null): {
+function resolveEndpointMarkers(
+  relationshipType: ModelingGraphRelationshipType | "many-to-many" | null
+): {
   source: "one" | "many" | "none";
   target: "one" | "many" | "none";
 } {
@@ -67,21 +70,32 @@ function resolveEndpointMarkers(relationshipType: ModelingGraphRelationshipType 
       target: "one"
     };
   }
+  if (relationshipType === "many-to-many") {
+    return {
+      source: "many",
+      target: "many"
+    };
+  }
   return {
     source: "none",
     target: "none"
   };
 }
 
-function resolveRelationshipTypeLabel(relationshipType: ModelingGraphRelationshipType | null): string {
+function resolveRelationshipTypeLabel(
+  relationshipType: ModelingGraphRelationshipType | "many-to-many" | null
+): string {
   if (relationshipType === "one-to-many") {
-    return "One-to-many";
+    return "1对多 (One-to-many)";
   }
   if (relationshipType === "many-to-one") {
-    return "Many-to-one";
+    return "1对多 (Many-to-one)";
   }
   if (relationshipType === "one-to-one") {
-    return "One-to-one";
+    return "1对1 (One-to-one)";
+  }
+  if (relationshipType === "many-to-many") {
+    return "多对多 (Many-to-many)";
   }
   return "Unknown";
 }

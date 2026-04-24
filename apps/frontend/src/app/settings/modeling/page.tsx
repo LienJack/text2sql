@@ -822,6 +822,8 @@ export default function ModelingWorkspacePage() {
       setDetailsDirty(false);
       return true;
     }
+    const shouldOpenContextDrawer =
+      showDetailsPanel && (nextNode.kind === "view" || nextNode.kind === "relationship");
     const isSame =
       selectedNode?.kind === nextNode.kind && selectedNode?.id === nextNode.id;
     if (isSame) {
@@ -829,7 +831,7 @@ export default function ModelingWorkspacePage() {
         setModelDrawerOpen(true);
         setContextDrawerOpen(false);
       } else {
-        setContextDrawerOpen(true);
+        setContextDrawerOpen(shouldOpenContextDrawer);
       }
       return true;
     }
@@ -845,7 +847,7 @@ export default function ModelingWorkspacePage() {
     if (nextNode.kind === "model") {
       setContextDrawerOpen(false);
     } else {
-      setContextDrawerOpen(true);
+      setContextDrawerOpen(shouldOpenContextDrawer);
     }
     return true;
   };
