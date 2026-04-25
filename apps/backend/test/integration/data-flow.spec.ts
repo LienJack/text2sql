@@ -10,6 +10,7 @@ import { ChatPolicyGuardService } from "../../src/modules/conversation/chat/appl
 import { ChatRunPersistenceService } from "../../src/modules/conversation/chat/application/shared/chat-run-persistence.service";
 import { ChatDeliveryEnrichmentService } from "../../src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service";
 import { ChatService } from "../../src/modules/conversation/chat/chat.service";
+import { Text2SQLWorkflowRunner } from "../../src/modules/conversation/text2sql/text2sql-workflow-runner.service";
 import { GovernanceChatAccessFacade } from "../../src/modules/governance/governance-chat-access.facade";
 import { KnowledgeChatSupportFacade } from "../../src/modules/knowledge/knowledge-chat-support.facade";
 import { PlatformChatRuntimeFacade } from "../../src/modules/platform/platform-chat-runtime.facade";
@@ -46,6 +47,7 @@ describe("data flow", () => {
     expect(moduleRef.get(SessionLifecycleUsecase, { strict: false })).toBeDefined();
     expect(moduleRef.get(ExecuteMessageUsecase, { strict: false })).toBeDefined();
     expect(moduleRef.get(StreamMessageUsecase, { strict: false })).toBeDefined();
+    expect(moduleRef.get(Text2SQLWorkflowRunner, { strict: false })).toBeDefined();
     expect(moduleRef.get(RunViewUsecase, { strict: false })).toBeDefined();
     expect(moduleRef.get(ChatPostRunHooksService, { strict: false })).toBeDefined();
     expect(moduleRef.get(ChatPolicyGuardService, { strict: false })).toBeDefined();

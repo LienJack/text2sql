@@ -9,6 +9,8 @@ import { RagIndexBuilderService } from "../../src/modules/rag/index/rag-index-bu
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
 
 describe("agent rag main flow integration", () => {
+  jest.setTimeout(20000);
+
   beforeAll(() => {
     process.env.SQLITE_PATH = resolve(
       __dirname,

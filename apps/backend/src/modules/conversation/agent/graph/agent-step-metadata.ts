@@ -1,39 +1,17 @@
 import type { ReasoningStage } from "@text2sql/shared-types";
+import {
+  resolveText2SqlReasoningStage,
+  resolveText2SqlTitle
+} from "../../text2sql/stages/text2sql-stage-catalog";
 
 type AgentStepStatus = "success" | "failed" | "skipped";
 
-const AGENT_STEP_STAGE_MAP: Record<string, ReasoningStage> = {
-  clarify: "analysis",
-  "retrieve-knowledge": "analysis",
-  "build-intent-plan": "analysis",
-  "build-semantic-query": "analysis",
-  "build-physical-plan": "analysis",
-  "resolve-saved-prior-sql": "analysis",
-  "generate-sql": "generation",
-  "safety-check": "validation",
-  "execute-sql": "execution",
-  "format-answer": "response"
-};
-
-const AGENT_STEP_TITLE_MAP: Record<string, string> = {
-  clarify: "理解问题",
-  "retrieve-knowledge": "检索上下文",
-  "build-intent-plan": "意图规划",
-  "build-semantic-query": "语义规划",
-  "build-physical-plan": "物理规划",
-  "resolve-saved-prior-sql": "Prior SQL 复用判断",
-  "generate-sql": "生成 SQL",
-  "safety-check": "安全校验",
-  "execute-sql": "执行查询",
-  "format-answer": "整理回答"
-};
-
 export const resolveAgentReasoningStage = (node: string): ReasoningStage => {
-  return AGENT_STEP_STAGE_MAP[node] ?? "unknown";
+  return resolveText2SqlReasoningStage(node);
 };
 
 export const resolveAgentReasoningTitle = (node: string): string => {
-  return AGENT_STEP_TITLE_MAP[node] ?? node;
+  return resolveText2SqlTitle(node);
 };
 
 export const resolveAgentStepLifecycle = (

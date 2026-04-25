@@ -190,6 +190,34 @@ export class RetrieveKnowledgeNode {
     });
   });
 
+  it("reports conversation/text2sql -> legacy modules/chat imports as violations", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/text2sql/stages/prepare-run.stage.ts",
+      `import { LegacyChatService } from "../../../chat/chat.service";
+export class PrepareRunStage {
+  constructor(private readonly legacyChatService: LegacyChatService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/chat/chat.service.ts",
+      "export class LegacyChatService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "conversation",
+      targetDomain: "conversation",
+      sourceFile:
+        "apps/backend/src/modules/conversation/text2sql/stages/prepare-run.stage.ts",
+      targetFile: "apps/backend/src/modules/chat/chat.service.ts",
+      line: 1
+    });
+  });
+
   it("supports temporary allowlist + baseline counting for conversation -> knowledge/* direct imports", async () => {
     await writeRepoFile(
       repoRoot,

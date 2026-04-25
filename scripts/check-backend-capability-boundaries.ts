@@ -114,6 +114,8 @@ const KNOWLEDGE_MODULE_SUBPATH_PREFIX = `${MODULES_ROOT}/knowledge/`;
 const PLATFORM_DATA_AGGREGATE_MODULE_PATH =
   `${MODULES_ROOT}/platform/data/data.module.ts`;
 const PLATFORM_DATA_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/data/`;
+const CONVERSATION_TEXT2SQL_PREFIX = `${MODULES_ROOT}/conversation/text2sql/`;
+const LEGACY_CHAT_MODULE_PREFIX = `${MODULES_ROOT}/chat/`;
 const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT = 15;
 
 // Transitional cross-domain wiring allowances that are still pending module reshaping.
@@ -253,6 +255,20 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",
     targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
     reason: "Temporary bridge: chat module still imports knowledge module directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/agent/nodes/resolve-saved-prior-sql.node.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason:
+      "Temporary bridge: saved-prior-sql node still imports retrieval bundle types directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/chat/application/save-view-from-run.usecase.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-memory.contract.ts",
+    reason:
+      "Temporary bridge: save-view usecase still injects knowledge memory contract directly."
   }
 ];
 
@@ -573,6 +589,16 @@ function isForbiddenBusinessDomainDependency(input: {
   return input.targetRelativePath.startsWith(PLATFORM_DATA_IMPLEMENTATION_PREFIX);
 }
 
+function isForbiddenText2SqlLegacyChatDependency(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (!input.sourceRelativePath.startsWith(CONVERSATION_TEXT2SQL_PREFIX)) {
+    return false;
+  }
+  return input.targetRelativePath.startsWith(LEGACY_CHAT_MODULE_PREFIX);
+}
+
 export async function runCapabilityBoundaryCheck(
   input: CapabilityBoundaryCheckInput
 ): Promise<CapabilityBoundaryCheckReport> {
@@ -644,6 +670,27 @@ export async function runCapabilityBoundaryCheck(
           continue;
         }
 
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        violations.push({
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        });
+        continue;
+      }
+
+      if (
+        isForbiddenText2SqlLegacyChatDependency({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
         const { line, column } = indexToLineColumn(lineStarts, reference.index);
         const lineText = lines[line - 1] ?? "";
         violations.push({

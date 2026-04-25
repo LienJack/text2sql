@@ -25,6 +25,14 @@ import { ChartBiIntentParser } from "../delivery/chartbi/chartbi-intent-parser";
 import { ChartBiSpecCompiler } from "../delivery/chartbi/chartbi-spec-compiler";
 import { ChartBiValidator } from "../delivery/chartbi/chartbi-validator";
 import { ChartBiGroundingGuard } from "../delivery/chartbi/chartbi-grounding.guard";
+import { Text2SqlModule } from "../text2sql/text2sql.module";
+import { Text2SQLWorkflowRunner } from "../text2sql/text2sql-workflow-runner.service";
+import { EnrichDeliveryStage } from "../text2sql/stages/enrich-delivery.stage";
+import { PersistRunStage } from "../text2sql/stages/persist-run.stage";
+import { PostRunHooksStage } from "../text2sql/stages/post-run-hooks.stage";
+import { PrepareRunStage } from "../text2sql/stages/prepare-run.stage";
+import { RunAgentGraphStage } from "../text2sql/stages/run-agent-graph.stage";
+import { Text2SqlStreamEventMapper } from "../text2sql/stream/text2sql-stream-event.mapper";
 
 @Module({
   imports: [
@@ -34,7 +42,8 @@ import { ChartBiGroundingGuard } from "../delivery/chartbi/chartbi-grounding.gua
     DatasourceModule,
     LlmModule,
     ObservabilityModule,
-    KnowledgeModule
+    KnowledgeModule,
+    Text2SqlModule
   ],
   controllers: [ChatController],
   providers: [
@@ -50,6 +59,13 @@ import { ChartBiGroundingGuard } from "../delivery/chartbi/chartbi-grounding.gua
     ChatPolicyGuardService,
     ChatRunPersistenceService,
     ChatDeliveryEnrichmentService,
+    Text2SQLWorkflowRunner,
+    PrepareRunStage,
+    RunAgentGraphStage,
+    EnrichDeliveryStage,
+    PersistRunStage,
+    PostRunHooksStage,
+    Text2SqlStreamEventMapper,
     ChartBiArtifactService,
     ChartBiResultProfiler,
     ChartBiIntentParser,
