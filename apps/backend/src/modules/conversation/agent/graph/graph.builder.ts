@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   ContextEnvelope,
+  ContextEnvelopePinningEvidence,
   ExecutionTraceStep,
   SqlRun
 } from "@text2sql/shared-types";
@@ -31,11 +32,21 @@ export interface GraphRunOptions {
 }
 
 interface GraphContextEvidence {
-  effectiveContextSummary?: GraphEffectiveContextSummary;
+  effectiveContextSummary?: GraphEffectiveContextSummaryWithPinning;
   conflictHint?: GraphContextConflictHint;
 }
 
 const CONTEXT_CONFLICT_REGEX = /conflict|mismatch|contradict|inconsistent|冲突/i;
+
+interface GraphEffectiveContextSummaryWithPinning extends GraphEffectiveContextSummary {
+  userEnvelope: GraphEffectiveContextSummary["userEnvelope"] & {
+    pinnedTableCount?: number;
+    pinnedColumnCount?: number;
+  };
+  retrievalContext?: GraphEffectiveContextSummary["retrievalContext"] & {
+    pinning?: ContextEnvelopePinningEvidence;
+  };
+}
 
 @Injectable()
 export class GraphBuilderService {
@@ -264,8 +275,10 @@ export class GraphBuilderService {
 
     const includeTableCount = this.countNonEmptyStrings(envelope?.mustIncludeTables);
     const excludeTableCount = this.countNonEmptyStrings(envelope?.mustExcludeTables);
+    const pinnedTableCount = this.countNonEmptyStrings(envelope?.pinnedTables);
+    const pinnedColumnCount = this.countNonEmptyStrings(envelope?.pinnedColumns);
     const entityMappingCount = this.countEntityMappings(envelope?.entityMappings);
-    const effectiveContextSummary: GraphEffectiveContextSummary = {
+    const effectiveContextSummary: GraphEffectiveContextSummaryWithPinning = {
       sourcePriority: "user_explicit_over_system",
       userEnvelope: {
         metricDefinitionProvided: this.hasNonEmptyString(envelope?.metricDefinition),
@@ -273,11 +286,18 @@ export class GraphBuilderService {
         entityMappingCount,
         includeTableCount,
         excludeTableCount,
+        ...(pinnedTableCount > 0 ? { pinnedTableCount } : {}),
+        ...(pinnedColumnCount > 0 ? { pinnedColumnCount } : {}),
         businessConstraintCount: this.countNonEmptyStrings(envelope?.businessConstraints)
       },
       retrievalContext: {
         status: state.retrievalBundle?.status,
-        selectedContextCount: state.retrievalBundle?.selected_context?.length
+        selectedContextCount: state.retrievalBundle?.selected_context?.length,
+        ...(state.retrievedKnowledge?.pinning
+          ? {
+              pinning: state.retrievedKnowledge.pinning
+            }
+          : {})
       }
     };
 
@@ -339,6 +359,8 @@ export class GraphBuilderService {
       this.countEntityMappings(input.entityMappings) > 0 ||
       this.countNonEmptyStrings(input.mustIncludeTables) > 0 ||
       this.countNonEmptyStrings(input.mustExcludeTables) > 0 ||
+      this.countNonEmptyStrings(input.pinnedTables) > 0 ||
+      this.countNonEmptyStrings(input.pinnedColumns) > 0 ||
       this.countNonEmptyStrings(input.businessConstraints) > 0
     );
   }

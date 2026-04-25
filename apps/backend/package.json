@@ -18,6 +18,8 @@
     "prisma:migrate": "node scripts/prisma-with-database-url.cjs migrate dev",
     "prisma:studio": "node scripts/prisma-with-database-url.cjs studio",
     "prisma:verify-empty-db": "node scripts/prisma-verify-empty-db.cjs",
+    "collect:clarification-balance-gate": "TS_NODE_TRANSPILE_ONLY=1 ts-node --project tsconfig.json scripts/collect-clarification-balance-gate.ts",
+    "collect:clarification-balance-gate:strict": "TS_NODE_TRANSPILE_ONLY=1 ts-node --project tsconfig.json scripts/collect-clarification-balance-gate.ts --strict",
     "collect:modeling-parity-shadow-gate": "node scripts/collect-modeling-parity-shadow-gate.mjs",
     "collect:modeling-parity-shadow-gate:strict": "node scripts/collect-modeling-parity-shadow-gate.mjs --fail-on-gate"
   },

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import {
   deployWorkspaceModeling,
@@ -95,10 +95,13 @@ const mockGetWorkspaceModelingPreview = vi.mocked(getWorkspaceModelingPreview);
 const mockUpsertWorkspaceModelingGraph = vi.mocked(upsertWorkspaceModelingGraph);
 const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
 const mockDeployWorkspaceModeling = vi.mocked(deployWorkspaceModeling);
+const originalShowSchemaDeployPanels =
+  process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS;
 
 describe("settings modeling complete parity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = "true";
     window.history.replaceState(
       {},
       "",
@@ -335,6 +338,10 @@ describe("settings modeling complete parity", () => {
       graphHash: "hash-r3",
       blockingReasons: []
     });
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = originalShowSchemaDeployPanels;
   });
 
   it("keeps save-as-view context, supports view delete, and completes deploy gating flow", async () => {

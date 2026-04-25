@@ -19,11 +19,27 @@ export interface RagQualityEvaluationInput {
   mrrAt10: number;
   retrievalRerankP95Ms: number;
   degradeRate: number;
+  priorSqlLane?: RagPriorSqlLaneMetricsInput;
   recordedAt?: string;
+}
+
+export interface RagPriorSqlLaneMetricsInput {
+  totalCount: number;
+  hitCount: number;
+  filteredCount?: number;
+  staleCount?: number;
 }
 
 interface RagQualityEvaluationRecord extends RagQualityEvaluationInput {
   recordedAt: string;
+  priorSqlLane?: RagPriorSqlLaneMetricsRecord;
+}
+
+interface RagPriorSqlLaneMetricsRecord {
+  totalCount: number;
+  hitCount: number;
+  filteredCount: number;
+  staleCount: number;
 }
 
 export interface RagDatasourceOrchestrationSample {
@@ -108,6 +124,7 @@ export interface RagQualityGateReport {
   glossarySelectedContext: GlossarySelectedContextGateReport;
   datasourceOrchestration: RagDatasourceOrchestrationReport;
   cacheBudget: RagCacheBudgetReport;
+  priorSqlLane: RagPriorSqlLaneGateReport;
   latest?: {
     runId: string;
     datasourceId: string;
@@ -123,6 +140,13 @@ export interface RagQualityGateReport {
   reasons: string[];
   r6: RagR6GateReport;
   generatedAt: string;
+}
+
+export interface RagPriorSqlLaneGateReport {
+  sampleSize: number;
+  priorSqlHitRate: number;
+  priorSqlFilteredCount: number;
+  priorSqlStaleRate: number;
 }
 
 interface GlossarySelectedContextSampleRow {
@@ -305,6 +329,7 @@ export class RagQualityService {
       mrrAt10: this.normalizeRatio(input.mrrAt10),
       retrievalRerankP95Ms: Math.max(0, input.retrievalRerankP95Ms),
       degradeRate: this.normalizeRatio(input.degradeRate),
+      priorSqlLane: this.normalizePriorSqlLaneMetrics(input.priorSqlLane),
       recordedAt: this.normalizeIsoTimestamp(input.recordedAt)
     });
   }
@@ -378,6 +403,7 @@ export class RagQualityService {
       glossarySelectedContext,
       datasourceOrchestration: this.snapshotDatasourceOrchestration(),
       cacheBudget: this.snapshotCacheBudget(),
+      priorSqlLane: this.snapshotPriorSqlLane(),
       latest: latest
         ? {
             runId: latest.runId,
@@ -596,6 +622,31 @@ export class RagQualityService {
     return Math.max(0, Math.min(1, Number(input.toFixed(6))));
   }
 
+  private normalizeCount(input: number | undefined): number {
+    if (input === undefined || !Number.isFinite(input)) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(input));
+  }
+
+  private normalizePriorSqlLaneMetrics(
+    input: RagPriorSqlLaneMetricsInput | undefined
+  ): RagPriorSqlLaneMetricsRecord | undefined {
+    if (!input) {
+      return undefined;
+    }
+    const totalCount = this.normalizeCount(input.totalCount);
+    const hitCount = Math.min(totalCount, this.normalizeCount(input.hitCount));
+    const filteredCount = this.normalizeCount(input.filteredCount);
+    const staleCount = Math.min(totalCount, this.normalizeCount(input.staleCount));
+    return {
+      totalCount,
+      hitCount,
+      filteredCount,
+      staleCount
+    };
+  }
+
   private snapshotDatasourceOrchestration(): RagDatasourceOrchestrationReport {
     const now = Date.now();
     const last24h = this.datasourceRecords.filter(
@@ -627,6 +678,40 @@ export class RagQualityService {
         eligible.length === 0 ? 0 : Number((eligibleHits / eligible.length).toFixed(6)),
       budgetDegradeRate:
         samples.length === 0 ? 0 : Number((degraded / samples.length).toFixed(6))
+    };
+  }
+
+  private snapshotPriorSqlLane(): RagPriorSqlLaneGateReport {
+    const summary = this.records.reduce(
+      (accumulator, record) => {
+        if (!record.priorSqlLane) {
+          return accumulator;
+        }
+        return {
+          totalCount: accumulator.totalCount + record.priorSqlLane.totalCount,
+          hitCount: accumulator.hitCount + record.priorSqlLane.hitCount,
+          filteredCount: accumulator.filteredCount + record.priorSqlLane.filteredCount,
+          staleCount: accumulator.staleCount + record.priorSqlLane.staleCount
+        };
+      },
+      {
+        totalCount: 0,
+        hitCount: 0,
+        filteredCount: 0,
+        staleCount: 0
+      }
+    );
+    return {
+      sampleSize: summary.totalCount,
+      priorSqlHitRate:
+        summary.totalCount === 0
+          ? 0
+          : Number((summary.hitCount / summary.totalCount).toFixed(6)),
+      priorSqlFilteredCount: summary.filteredCount,
+      priorSqlStaleRate:
+        summary.totalCount === 0
+          ? 0
+          : Number((summary.staleCount / summary.totalCount).toFixed(6))
     };
   }
 

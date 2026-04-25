@@ -133,6 +133,34 @@ export class AppConfigService {
     return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
   }
 
+  get clarificationHybridEnabled(): boolean {
+    return this.config.get<string>("CLARIFICATION_HYBRID_ENABLED", "true") === "true";
+  }
+
+  get clarificationRulesOnlyKillSwitch(): boolean {
+    return (
+      this.config.get<string>(
+        "CLARIFICATION_HYBRID_KILL_SWITCH_RULES_ONLY",
+        this.config.get<string>("CLARIFICATION_RULES_ONLY_KILL_SWITCH", "false")
+      ) === "true"
+    );
+  }
+
+  get clarificationSemanticTimeoutMs(): number {
+    const raw = this.config.get<string>(
+      "CLARIFICATION_HYBRID_TIMEOUT_MS",
+      this.config.get<string>("CLARIFICATION_SEMANTIC_TIMEOUT_MS", "1200")
+    );
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `CLARIFICATION_HYBRID_TIMEOUT_MS 配置无效（${raw}），已回退默认值 1200。`
+    );
+    return 1200;
+  }
+
   get sqlSafetySoftWarnMaxLength(): number {
     return this.readNumber("SQL_SAFETY_SOFT_WARN_MAX_LENGTH", 600);
   }

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getWorkspaceModelingGraph,
-  precheckWorkspaceModelingDeploy
+  precheckWorkspaceModelingDeploy,
+  recommendModelingSetupRelationships
 } from "@/lib/admin-api-client";
 
 describe("admin-api-client modeling contract parity", () => {
@@ -151,6 +152,62 @@ describe("admin-api-client modeling contract parity", () => {
       draftRevision: 5,
       activeRevision: 4,
       deployState: "undeployed"
+    });
+  });
+
+  it("preserves explicit recommendation cardinality and defaults missing to many-to-one", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          status: "ok",
+          data: {
+            suggestions: [
+              {
+                id: "rel-explicit",
+                name: "orders_to_customers",
+                reason: "foreign_key_constraint",
+                type: "one-to-one",
+                bridge: {
+                  left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                  right: { dataset: "analytics", table: "customers", column: "id" },
+                  operator: "eq",
+                  confidence: 0.98
+                }
+              },
+              {
+                id: "rel-defaulted",
+                name: "payments_to_orders",
+                reason: "fk_naming_suffix",
+                bridge: {
+                  left: { dataset: "analytics", table: "payments", column: "order_id" },
+                  right: { dataset: "analytics", table: "orders", column: "id" },
+                  operator: "eq",
+                  confidence: 0.86
+                }
+              }
+            ]
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    ) as typeof fetch;
+
+    const suggestions = await recommendModelingSetupRelationships("ws-1", "ds-1", {
+      selectedTables: ["orders", "customers", "payments"]
+    });
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions[0]).toMatchObject({
+      id: "rel-explicit",
+      type: "one-to-one",
+      cardinality: "one-to-one"
+    });
+    expect(suggestions[1]).toMatchObject({
+      id: "rel-defaulted",
+      type: "many-to-one",
+      cardinality: "many-to-one"
     });
   });
 });

@@ -91,6 +91,12 @@ vi.mock("@xyflow/react", () => {
           selected?: boolean;
           sourceHandle?: string;
           targetHandle?: string;
+          source?: string;
+          target?: string;
+          data?: {
+            highlightedBySelectedRelationship?: boolean;
+            highlightedBySelectedModel?: boolean;
+          };
         }> | undefined) ?? [];
       const onNodeClick = props.onNodeClick as
         | ((event: unknown, node: { id: string }) => void)
@@ -233,6 +239,26 @@ vi.mock("@xyflow/react", () => {
               .filter((edge) => edge.selected)
               .map((edge) => edge.id)
               .join(",")}
+          </p>
+          <p data-testid="node-highlight-map">
+            {nodes
+              .filter((node) => node.id.startsWith("model:"))
+              .map((node) => {
+                const highlightedRelationshipIds = (
+                  (node.data as { highlightedRelationshipIds?: string[] } | undefined)
+                    ?.highlightedRelationshipIds ?? []
+                ).join(",");
+                return `${node.id}:${highlightedRelationshipIds}`;
+              })
+              .join("|")}
+          </p>
+          <p data-testid="edge-highlight-map">
+            {edges
+              .map(
+                (edge) =>
+                  `${edge.id}:${edge.data?.highlightedBySelectedRelationship ? 1 : 0},${edge.data?.highlightedBySelectedModel ? 1 : 0}`
+              )
+              .join("|")}
           </p>
           <p data-testid="first-edge-handles">
             {edges[0] ? `${edges[0].sourceHandle ?? ""}->${edges[0].targetHandle ?? ""}` : "none"}
@@ -413,6 +439,56 @@ describe("ModelingFlowCanvas", () => {
 
     await user.click(screen.getByRole("button", { name: "trigger-node-click" }));
     expect(onSelectNode).toHaveBeenCalledWith({ kind: "model", id: "model.customers" });
+  });
+
+  it("runs programmatic auto-layout as a one-shot request by request id", async () => {
+    const onNodePositionsChange = vi.fn();
+    const { rerender } = render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:programmatic"
+        programmaticAutoLayoutRequestId={101}
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(1);
+      expect(onNodePositionsChange).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:programmatic"
+        programmaticAutoLayoutRequestId={101}
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={null}
+        autoLayoutKey="ws:ds:programmatic"
+        programmaticAutoLayoutRequestId={102}
+        onSelectNode={vi.fn()}
+        onNodePositionsChange={onNodePositionsChange}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(2);
+      expect(onNodePositionsChange).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("prefers persisted payload positions over default grid fallback", async () => {
@@ -1037,6 +1113,50 @@ describe("ModelingFlowCanvas", () => {
     await waitFor(() => {
       expect(screen.getByTestId("orders-node-calculated-fields")).toHaveTextContent("order_total");
       expect(screen.getByTestId("selected-node-ids")).toHaveTextContent("model:model.orders");
+    });
+  });
+
+  it("highlights selected relationship edge and both endpoint relationship rows", async () => {
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={{ kind: "relationship", id: "rel-orders-customers" }}
+        autoLayoutKey="ws:ds:relationship-highlight"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-edge-ids")).toHaveTextContent("rel-orders-customers");
+      expect(screen.getByTestId("edge-highlight-map")).toHaveTextContent(
+        "rel-orders-customers:1,0"
+      );
+      expect(screen.getByTestId("node-highlight-map")).toHaveTextContent(
+        "model:model.customers:rel-orders-customers"
+      );
+      expect(screen.getByTestId("node-highlight-map")).toHaveTextContent(
+        "model:model.orders:rel-orders-customers"
+      );
+    });
+  });
+
+  it("softly marks incident edges when a model node is selected", async () => {
+    render(
+      <ModelingFlowCanvas
+        graphPayload={baseGraphPayload}
+        selectedNode={{ kind: "model", id: "model.orders" }}
+        autoLayoutKey="ws:ds:model-incident-highlight"
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-edge-ids")).not.toHaveTextContent(/\S/);
+      expect(screen.getByTestId("edge-highlight-map")).toHaveTextContent(
+        "rel-orders-customers:0,1"
+      );
+      expect(screen.getByTestId("node-highlight-map")).toHaveTextContent("model:model.orders:");
+      expect(screen.getByTestId("node-highlight-map")).toHaveTextContent("model:model.customers:");
     });
   });
 });

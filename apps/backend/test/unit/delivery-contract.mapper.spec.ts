@@ -198,6 +198,145 @@ describe("DeliveryContractMapper", () => {
     );
   });
 
+  it("maps clarification decision evidence from trace fields", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      status: "clarification",
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        clarificationDecision: {
+          decision: "clarify",
+          triggerPath: "hybrid",
+          confidenceLevel: "low",
+          missingCriticalSlots: ["metric", "time"],
+          conflictDetected: true,
+          reasonCodes: ["rule_low_confidence", "context_conflict_detected"],
+          question: "请补充要统计的指标口径（例如订单数、退款金额、转化率）。",
+          reason: "关键槽位缺失：指标口径、时间范围"
+        }
+      } as SqlRun["trace"],
+      clarification: {
+        question: "请补充要统计的指标口径（例如订单数、退款金额、转化率）。",
+        reason: "关键槽位缺失：指标口径、时间范围"
+      }
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.clarificationDecision).toEqual({
+      decision: "clarify",
+      triggerPath: "hybrid",
+      confidenceLevel: "low",
+      missingCriticalSlots: ["metric", "time"],
+      conflictDetected: true,
+      reasonCodes: ["rule_low_confidence", "context_conflict_detected"],
+      question: "请补充要统计的指标口径（例如订单数、退款金额、转化率）。",
+      reason: "关键槽位缺失：指标口径、时间范围"
+    });
+  });
+
+  it("reads snake_case clarification decision from clarify step summary", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      status: "clarification",
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [
+          {
+            node: "clarify",
+            status: "success",
+            at: "2026-04-18T00:00:00.500Z",
+            detail: "关键槽位缺失：时间范围",
+            outputSummary: JSON.stringify({
+              clarification_question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
+              clarification_decision: {
+                decision: "clarify",
+                trigger_source: "rule",
+                confidence_level: "low",
+                missing_critical_slots: ["time"],
+                conflict_detected: "false",
+                reason_codes: ["missing_time_slot"]
+              }
+            })
+          }
+        ]
+      } as SqlRun["trace"],
+      clarification: {
+        question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
+        reason: "关键槽位缺失：时间范围"
+      }
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.clarificationDecision).toEqual({
+      decision: "clarify",
+      triggerPath: "rule",
+      confidenceLevel: "low",
+      missingCriticalSlots: ["time"],
+      conflictDetected: false,
+      reasonCodes: ["missing_time_slot"],
+      question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
+      reason: "关键槽位缺失：时间范围"
+    });
+  });
+
+  it("maps SQL coverage evidence from generate-sql step summary", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [
+          {
+            node: "generate-sql",
+            status: "success",
+            at: "2026-04-18T00:00:00.500Z",
+            outputSummary: JSON.stringify({
+              coverage: {
+                gateStatus: "passed",
+                missingObjects: [],
+                triggerSource: "selected_context"
+              }
+            })
+          }
+        ]
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    const evidenceWithCoverage = delivery.evidence as
+      | (NonNullable<typeof delivery.evidence> & {
+          sqlCoverage?: {
+            gateStatus: string;
+            missingObjects: string[];
+            triggerSource: string;
+          };
+        })
+      | undefined;
+    expect(evidenceWithCoverage?.sqlCoverage).toEqual({
+      gateStatus: "passed",
+      missingObjects: [],
+      triggerSource: "selected_context"
+    });
+  });
+
   it("maps modelingRevision from trace into delivery evidence", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
@@ -441,6 +580,16 @@ describe("DeliveryContractMapper", () => {
 
     expect(delivery.answer.text).toBe("暂无可执行 SQL，已提供解释。");
     expect(delivery.evidence?.runId).toBe(run.runId);
+    expect(delivery.evidence?.clarificationDecision).toBeUndefined();
+    expect(
+      (
+        delivery.evidence as
+          | (NonNullable<typeof delivery.evidence> & {
+              sqlCoverage?: unknown;
+            })
+          | undefined
+      )?.sqlCoverage
+    ).toBeUndefined();
     expect(delivery.artifact).toBeUndefined();
   });
 

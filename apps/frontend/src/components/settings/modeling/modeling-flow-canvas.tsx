@@ -81,6 +81,47 @@ export type ModelingFlowNodeActionEvent = {
   action: ModelingFlowNodeAction;
 };
 
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+}
+
+function resolveHighlightedRelationshipIdsForNode(
+  nodeData: ModelingFlowNodeData,
+  selectedRelationshipId: string
+): string[] {
+  const normalizedRelationshipId = selectedRelationshipId.trim();
+  if (!normalizedRelationshipId || nodeData.kind !== "model") {
+    return [];
+  }
+  const hasRelationshipActionId = (nodeData.relationshipActionIds ?? []).some(
+    (relationshipActionId) => relationshipActionId === normalizedRelationshipId
+  );
+  return hasRelationshipActionId ? [normalizedRelationshipId] : [];
+}
+
+function decorateFlowEdgeWithSelectionState(
+  edge: Edge<ModelingFlowEdgeData>,
+  selectedRelationshipId: string,
+  selectedModelFlowNodeId: string
+): Edge<ModelingFlowEdgeData> {
+  const isSelectedRelationship = edge.id === selectedRelationshipId;
+  const isIncidentToSelectedModel = Boolean(selectedModelFlowNodeId) &&
+    (edge.source === selectedModelFlowNodeId || edge.target === selectedModelFlowNodeId);
+  const previousData = edge.data ?? ({} as ModelingFlowEdgeData);
+  return {
+    ...edge,
+    selected: isSelectedRelationship,
+    data: {
+      ...previousData,
+      highlightedBySelectedRelationship: isSelectedRelationship,
+      highlightedBySelectedModel: isIncidentToSelectedModel
+    }
+  };
+}
+
 function resolveModelLabel(model: ModelingGraphPayload["models"][number]): string {
   return model.displayName?.trim() || model.modelName?.trim() || model.tableName;
 }
@@ -960,6 +1001,7 @@ export function ModelingFlowCanvas(props: {
   selectedNode: ModelingSidebarNode | null;
   busy?: boolean;
   autoLayoutKey: string;
+  programmaticAutoLayoutRequestId?: number | null;
   onSelectNode: (node: ModelingSidebarNode | null) => void;
   onNodeAction?: (event: ModelingFlowNodeActionEvent) => void;
   onNodePositionsChange?: (patch: ModelingFlowPositionPatch) => void;
@@ -969,6 +1011,7 @@ export function ModelingFlowCanvas(props: {
     selectedNode,
     busy,
     autoLayoutKey,
+    programmaticAutoLayoutRequestId,
     onSelectNode,
     onNodeAction,
     onNodePositionsChange
@@ -983,8 +1026,11 @@ export function ModelingFlowCanvas(props: {
   const [layoutBusy, setLayoutBusy] = useState(false);
   const [layoutMessage, setLayoutMessage] = useState("");
   const [layoutMessageVariant, setLayoutMessageVariant] = useState<"success" | "error">("success");
+  const [pendingProgrammaticAutoLayoutRequestId, setPendingProgrammaticAutoLayoutRequestId] =
+    useState<number | null>(null);
   const selectionFocusKeyRef = useRef("");
   const latestLayoutRunIdRef = useRef(0);
+  const latestProgrammaticAutoLayoutRequestIdRef = useRef<number | null>(null);
 
   const graph = useMemo(() => {
     try {
@@ -1014,6 +1060,7 @@ export function ModelingFlowCanvas(props: {
     selectedNode?.kind === "model" || selectedNode?.kind === "view"
       ? toFlowNodeId(selectedNode)
       : "";
+  const selectedModelFlowNodeId = selectedNode?.kind === "model" ? toFlowNodeId(selectedNode) : "";
   const selectedRelationshipId = selectedNode?.kind === "relationship" ? selectedNode.id : "";
 
   useEffect(() => {
@@ -1024,53 +1071,89 @@ export function ModelingFlowCanvas(props: {
       const nextNodes = graph.nodes.map((node) => ({
         ...node,
         selected: node.id === selectedFlowNodeId,
+        data: {
+          ...node.data,
+          highlightedRelationshipIds: resolveHighlightedRelationshipIdsForNode(
+            node.data,
+            selectedRelationshipId
+          )
+        },
         position:
           persistedPositionByNodeId.get(node.id) ?? previousPositionById.get(node.id) ?? node.position
       }));
       return nextNodes;
     });
     setFlowEdges(
-      graph.edges.map((edge) => ({
-        ...edge,
-        selected: edge.id === selectedRelationshipId
-      }))
+      graph.edges.map((edge) =>
+        decorateFlowEdgeWithSelectionState(edge, selectedRelationshipId, selectedModelFlowNodeId)
+      )
     );
-  }, [graph, persistedPositionByNodeId, selectedFlowNodeId, selectedRelationshipId]);
+  }, [
+    graph,
+    persistedPositionByNodeId,
+    selectedFlowNodeId,
+    selectedModelFlowNodeId,
+    selectedRelationshipId
+  ]);
 
   useEffect(() => {
     setFlowNodes((previousNodes) =>
       previousNodes.map((node) => {
         const isSelected = node.id === selectedFlowNodeId;
-        if (node.selected === isSelected) {
+        const nextHighlightedRelationshipIds = resolveHighlightedRelationshipIdsForNode(
+          node.data,
+          selectedRelationshipId
+        );
+        const previousHighlightedRelationshipIds = node.data.highlightedRelationshipIds ?? [];
+        const highlightedRelationshipChanged = !areStringArraysEqual(
+          previousHighlightedRelationshipIds,
+          nextHighlightedRelationshipIds
+        );
+        if (node.selected === isSelected && !highlightedRelationshipChanged) {
           return node;
         }
         return {
           ...node,
-          selected: isSelected
+          selected: isSelected,
+          data: highlightedRelationshipChanged
+            ? {
+                ...node.data,
+                highlightedRelationshipIds: nextHighlightedRelationshipIds
+              }
+            : node.data
         };
       })
     );
     setFlowEdges((previousEdges) =>
-      previousEdges.map((edge) => {
-        const isSelected = edge.id === selectedRelationshipId;
-        if (edge.selected === isSelected) {
-          return edge;
-        }
-        return {
-          ...edge,
-          selected: isSelected
-        };
-      })
+      previousEdges.map((edge) =>
+        decorateFlowEdgeWithSelectionState(edge, selectedRelationshipId, selectedModelFlowNodeId)
+      )
     );
-  }, [selectedFlowNodeId, selectedRelationshipId]);
+  }, [selectedFlowNodeId, selectedModelFlowNodeId, selectedRelationshipId]);
 
   useEffect(() => {
     setDidAutoFit(false);
     selectionFocusKeyRef.current = "";
     latestLayoutRunIdRef.current += 1;
+    latestProgrammaticAutoLayoutRequestIdRef.current = null;
+    setPendingProgrammaticAutoLayoutRequestId(null);
     setLayoutBusy(false);
     setLayoutMessage("");
   }, [autoLayoutKey]);
+
+  useEffect(() => {
+    if (
+      typeof programmaticAutoLayoutRequestId !== "number" ||
+      !Number.isFinite(programmaticAutoLayoutRequestId)
+    ) {
+      return;
+    }
+    if (latestProgrammaticAutoLayoutRequestIdRef.current === programmaticAutoLayoutRequestId) {
+      return;
+    }
+    latestProgrammaticAutoLayoutRequestIdRef.current = programmaticAutoLayoutRequestId;
+    setPendingProgrammaticAutoLayoutRequestId(programmaticAutoLayoutRequestId);
+  }, [programmaticAutoLayoutRequestId]);
 
   useEffect(() => {
     if (!layoutMessage || layoutMessageVariant !== "success") {
@@ -1208,6 +1291,22 @@ export function ModelingFlowCanvas(props: {
       });
     }
   }, [busy, flowEdges, flowInstance, flowNodes, graph.handleLookup, layoutBusy, onNodePositionsChange]);
+
+  useEffect(() => {
+    if (pendingProgrammaticAutoLayoutRequestId === null || busy || layoutBusy || flowNodes.length < 2) {
+      return;
+    }
+    setPendingProgrammaticAutoLayoutRequestId((currentRequestId) =>
+      currentRequestId === pendingProgrammaticAutoLayoutRequestId ? null : currentRequestId
+    );
+    void handleAutoLayout();
+  }, [
+    busy,
+    flowNodes.length,
+    handleAutoLayout,
+    layoutBusy,
+    pendingProgrammaticAutoLayoutRequestId
+  ]);
 
   const handleNodeClick = useCallback(
     (_event: unknown, node: Node<ModelingFlowNodeData>) => {

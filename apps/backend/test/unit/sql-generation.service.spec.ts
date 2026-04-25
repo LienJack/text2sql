@@ -167,4 +167,162 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(prompt.systemPrompt).toContain("Structured semantic instruction set");
     expect(prompt.systemPrompt).toContain("Metric bindings: metric.gmv");
   });
+
+  it("prefers selected-context pruning details and prints explainable source/rationale", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT SUM(amount) AS gmv FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("按 GMV 汇总订单", {
+      selectedContext: [
+        {
+          chunk_id: "chunk-orders-pruned",
+          content: "orders schema snapshot with financial columns",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "idx-1",
+            chunkId: "chunk-orders-pruned",
+            domain: "schema_table",
+            tableNames: ["orders"],
+            columnNames: ["order_id", "amount", "status", "created_at"],
+            sourceMetadata: {
+              selected_context_pruning: {
+                source: "column_pruner_v2",
+                table: "orders",
+                selected_columns: [
+                  {
+                    name: "order_id",
+                    reason: "join key"
+                  },
+                  {
+                    name: "amount",
+                    reason: "metric.gmv"
+                  }
+                ],
+                reason: "semantic_metric_binding",
+                confidence: "low",
+                ambiguous: true
+              }
+            }
+          }
+        }
+      ]
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.userPrompt).toContain(
+      "Selected-context pruning view (preferred when available):"
+    );
+    expect(prompt.userPrompt).toContain("table=orders");
+    expect(prompt.userPrompt).toContain("source=column_pruner_v2");
+    expect(prompt.userPrompt).toContain("order_id (join key)");
+    expect(prompt.userPrompt).toContain("amount (metric.gmv)");
+    expect(prompt.userPrompt).toContain("rationale: semantic_metric_binding");
+    expect(prompt.userPrompt).toContain("conservative_note:");
+    expect(prompt.userPrompt).toContain("created_at");
+  });
+
+  it("falls back to legacy context rendering when pruning payload is missing", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT order_id, amount FROM orders LIMIT 5;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("查看订单金额", {
+      selectedContext: [
+        {
+          chunk_id: "chunk-orders-legacy",
+          content: "orders schema: orders(order_id, amount, status)",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "idx-1",
+            chunkId: "chunk-orders-legacy",
+            domain: "schema_table",
+            tableNames: ["orders"],
+            columnNames: ["order_id", "amount", "status"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.userPrompt).toContain("Retrieved context (trusted evidence):");
+    expect(prompt.userPrompt).toContain(
+      "1. [schema_table] chunk-orders-legacy: orders schema: orders(order_id, amount, status)"
+    );
+    expect(prompt.userPrompt).not.toContain(
+      "Selected-context pruning view (preferred when available):"
+    );
+  });
+
+  it("passes evidence coverage gate when SQL tables/columns are covered by selected context", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT amount FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.generate("查询订单金额", {
+      selectedContext: [
+        {
+          chunk_id: "chunk-orders-coverage",
+          content: "orders(order_id, amount, created_at)",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "idx-1",
+            chunkId: "chunk-orders-coverage",
+            domain: "schema_table",
+            tableNames: ["orders"],
+            columnNames: ["order_id", "amount", "created_at"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.coverage?.gateStatus).toBe("passed");
+    expect(draft.coverage?.missingObjects).toEqual([]);
+    expect(draft.coverage?.triggerSource).toBe("selected_context");
+  });
+
+  it("fails evidence coverage gate when SQL references objects outside selected/semantic/pinning evidence", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT total_amount FROM invoices;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await expect(
+      service.generate("查询发票金额", {
+        selectedContext: [],
+        explicitPinning: {
+          source: "context_envelope",
+          tables: ["orders"],
+        columns: ["orders.amount"]
+      }
+    })
+  ).rejects.toMatchObject<Partial<DomainError>>({
+    code: "LLM_SQL_EVIDENCE_COVERAGE_FAILED"
+  });
+});
 });

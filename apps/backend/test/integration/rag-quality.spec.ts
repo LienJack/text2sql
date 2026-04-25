@@ -38,6 +38,12 @@ describe("rag quality gate integration", () => {
     expect(snapshot.sampleReady).toBe(true);
     expect(snapshot.gatePass).toBe(true);
     expect(snapshot.reasons).toEqual([]);
+    expect(snapshot.priorSqlLane).toEqual({
+      sampleSize: 0,
+      priorSqlHitRate: 0,
+      priorSqlFilteredCount: 0,
+      priorSqlStaleRate: 0
+    });
 
     await moduleRef.close();
   });
@@ -63,6 +69,56 @@ describe("rag quality gate integration", () => {
     expect(snapshot.sampleReady).toBe(false);
     expect(snapshot.gatePass).toBe(false);
     expect(snapshot.reasons).toEqual(expect.arrayContaining(["sample_not_ready"]));
+
+    await moduleRef.close();
+  });
+
+  it("aggregates prior SQL lane metrics when data is present", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const quality = moduleRef.get(RagQualityService);
+    quality.reset();
+
+    quality.recordEvaluation({
+      runId: "run-rag-quality-prior-sql-v1",
+      datasourceId: "ds-rag-quality-prior-sql",
+      sampleSize: 32,
+      recallAt20: 0.84,
+      mrrAt10: 0.7,
+      retrievalRerankP95Ms: 620,
+      degradeRate: 0.03,
+      priorSqlLane: {
+        totalCount: 20,
+        hitCount: 15,
+        filteredCount: 2,
+        staleCount: 1
+      }
+    });
+    quality.recordEvaluation({
+      runId: "run-rag-quality-prior-sql-v2",
+      datasourceId: "ds-rag-quality-prior-sql",
+      sampleSize: 36,
+      recallAt20: 0.86,
+      mrrAt10: 0.72,
+      retrievalRerankP95Ms: 600,
+      degradeRate: 0.02,
+      priorSqlLane: {
+        totalCount: 10,
+        hitCount: 5,
+        filteredCount: 1,
+        staleCount: 2
+      }
+    });
+
+    const snapshot = quality.snapshot();
+    expect(snapshot.priorSqlLane).toEqual({
+      sampleSize: 30,
+      priorSqlHitRate: 0.666667,
+      priorSqlFilteredCount: 3,
+      priorSqlStaleRate: 0.1
+    });
+    expect(snapshot.gatePass).toBe(true);
 
     await moduleRef.close();
   });

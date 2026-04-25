@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import {
   deployWorkspaceModeling,
@@ -8,7 +8,8 @@ import {
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces,
-  precheckWorkspaceModelingDeploy
+  precheckWorkspaceModelingDeploy,
+  recommendModelingSetupRelationships
 } from "@/lib/admin-api-client";
 
 vi.mock("@/components/settings/modeling/modeling-flow-canvas", () => ({
@@ -45,7 +46,8 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     listWorkspaceDatasourceTablePermissions: vi.fn(),
     getWorkspaceModelingGraph: vi.fn(),
     precheckWorkspaceModelingDeploy: vi.fn(),
-    deployWorkspaceModeling: vi.fn()
+    deployWorkspaceModeling: vi.fn(),
+    recommendModelingSetupRelationships: vi.fn()
   };
 });
 
@@ -57,10 +59,14 @@ const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
 const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
 const mockDeployWorkspaceModeling = vi.mocked(deployWorkspaceModeling);
+const mockRecommendModelingSetupRelationships = vi.mocked(recommendModelingSetupRelationships);
+const originalShowSchemaDeployPanels =
+  process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS;
 
 describe("settings modeling deploy flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = "true";
     window.history.replaceState({}, "", "/modeling?workspaceId=ws-1&datasourceId=ds-1");
 
     mockListWorkspaces.mockResolvedValue({
@@ -85,6 +91,11 @@ describe("settings modeling deploy flow", () => {
       tableNames: ["orders"],
       policyVersion: 11
     });
+    mockRecommendModelingSetupRelationships.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = originalShowSchemaDeployPanels;
   });
 
   it("shows policy_version_conflict guidance and dry-run failure details", async () => {
@@ -305,10 +316,12 @@ describe("settings modeling deploy flow", () => {
 
     await screen.findByRole("button", { name: "选择 model Orders Model" });
     expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(/Deploy State synced/);
+    await user.click(screen.getByRole("button", { name: "选择 model Orders Model" }));
+    await user.click(screen.getByRole("button", { name: "编辑 metadata" }));
 
-    await user.clear(screen.getByRole("textbox", { name: "显示名称" }));
-    await user.type(screen.getByRole("textbox", { name: "显示名称" }), "订单模型未保存");
-    await user.click(screen.getByRole("button", { name: "保存 Metadata" }));
+    await user.clear(screen.getByRole("textbox", { name: "Model alias" }));
+    await user.type(screen.getByRole("textbox", { name: "Model alias" }), "订单模型未保存");
+    await user.click(screen.getByRole("button", { name: "Submit" }));
 
     const topStatusBar = screen.getByTestId("modeling-top-status-bar");
     expect(topStatusBar).toHaveTextContent(/Deploy State undeployed/);

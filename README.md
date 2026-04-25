@@ -252,6 +252,10 @@ pnpm test:frontend
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
 - 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
+- clarification hybrid balance gate：
+  - 观测模式：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate`
+  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
+  - 样本定义：`apps/backend/test/fixtures/clarification-balance-cases.json`
 - modeling parity shadow gate：
   - 观测模式：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
   - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
@@ -264,6 +268,24 @@ pnpm test:frontend
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
 - CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+
+## Clarification Hybrid Balanced Rollout Runbook
+
+1. 混合门控质量信号采集（观测）：
+```bash
+pnpm --filter @text2sql/backend run collect:clarification-balance-gate
+```
+2. 发布门禁（严格）：
+```bash
+pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict
+```
+3. 一键回退（rules-only）：
+  - 设置 `CLARIFICATION_HYBRID_KILL_SWITCH_RULES_ONLY=true`
+  - 重启后端
+4. 回退后验证：
+  - `node tests/smoke/nginx-dev-gateway-smoke.mjs`
+  - `pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
+5. 详细步骤与阈值说明：`docs/runbooks/clarification-hybrid-balanced-rollout.md`
 
 ## Modeling Parity Shadow Gate Rollout Runbook
 

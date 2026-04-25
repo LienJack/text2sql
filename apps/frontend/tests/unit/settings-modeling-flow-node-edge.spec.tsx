@@ -29,6 +29,7 @@ vi.mock("@xyflow/react", () => ({
     onMouseLeave?: () => void;
     "data-confidence-band"?: string;
     "data-selected"?: string;
+    "data-visual-state"?: string;
   }) => (
     <div
       data-testid="flow-base-edge"
@@ -38,6 +39,7 @@ vi.mock("@xyflow/react", () => ({
       data-marker-end={markerEnd ?? ""}
       data-confidence-band={props["data-confidence-band"]}
       data-selected={props["data-selected"]}
+      data-visual-state={props["data-visual-state"]}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     />
@@ -265,6 +267,40 @@ describe("ModelingFlowNode", () => {
     });
   });
 
+  it("highlights relationship rows when selected relationship ids are provided", () => {
+    const nodeProps = {
+      id: "model.orders",
+      data: {
+        kind: "model",
+        title: "Orders",
+        subtitle: "orders",
+        sections: {
+          columns: ["id"],
+          calculatedFields: [],
+          relationships: ["rel-orders-customers", "rel-orders-invoices"]
+        },
+        relationshipDisplayMeta: [
+          {
+            primaryText: "customers"
+          },
+          {
+            primaryText: "invoices"
+          }
+        ],
+        relationshipActionIds: ["rel-orders-customers", "rel-orders-invoices"],
+        highlightedRelationshipIds: ["rel-orders-customers"]
+      },
+      selected: false
+    } as unknown as Parameters<typeof ModelingFlowNode>[0];
+
+    render(<ModelingFlowNode {...nodeProps} />);
+
+    const customersRow = screen.getByText("customers").closest("li");
+    const invoicesRow = screen.getByText("invoices").closest("li");
+    expect(customersRow).toHaveAttribute("data-relationship-highlighted", "true");
+    expect(invoicesRow).toHaveAttribute("data-relationship-highlighted", "false");
+  });
+
   it("keeps action buttons disabled-safe and ignores keyboard triggers when actions are disabled", async () => {
     const user = userEvent.setup();
     const onNodeAction = vi.fn();
@@ -361,6 +397,7 @@ describe("ModelingFlowEdge", () => {
     expect(edgeClass).toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-confidence-band", "low");
     expect(edge).toHaveAttribute("data-selected", "false");
+    expect(edge).toHaveAttribute("data-visual-state", "inferred-or-low-confidence");
     expect(edge).toHaveAttribute("data-marker-start", "");
     expect(edge).toHaveAttribute("data-marker-end", "");
     expect(screen.queryByTestId("modeling-flow-edge-hover-card")).not.toBeInTheDocument();
@@ -397,12 +434,13 @@ describe("ModelingFlowEdge", () => {
     const edge = screen.getByTestId("flow-base-edge");
     const edgeClass = edge.getAttribute("data-class") ?? "";
     expect(edgeClass).toContain("stroke-[var(--action-primary)]");
-    expect(edgeClass).toContain("stroke-[2.5]");
+    expect(edgeClass).toContain("stroke-[2.7]");
     expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
     expect(screen.getByText("Description")).toBeInTheDocument();
     expect(screen.getAllByText("-").length).toBeGreaterThan(0);
     expect(edgeClass).not.toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-selected", "true");
+    expect(edge).toHaveAttribute("data-visual-state", "selected-relationship");
   });
 
   it("renders one/many markers based on relationship cardinality", async () => {
@@ -431,8 +469,8 @@ describe("ModelingFlowEdge", () => {
     );
 
     const edge = screen.getByTestId("flow-base-edge");
-    expect(edge.getAttribute("data-marker-start")).toContain("-many");
-    expect(edge.getAttribute("data-marker-end")).toContain("-one");
+    expect(screen.getByTestId("modeling-flow-edge-source-cardinality")).toHaveTextContent("N");
+    expect(screen.getByTestId("modeling-flow-edge-target-cardinality")).toHaveTextContent("1");
 
     await user.hover(edge);
     expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
@@ -464,10 +502,10 @@ describe("ModelingFlowEdge", () => {
       </svg>
     );
 
-    const edge = screen.getByTestId("flow-base-edge");
-    expect(edge.getAttribute("data-marker-start")).toContain("-many");
-    expect(edge.getAttribute("data-marker-end")).toContain("-many");
+    expect(screen.getByTestId("modeling-flow-edge-source-cardinality")).toHaveTextContent("N");
+    expect(screen.getByTestId("modeling-flow-edge-target-cardinality")).toHaveTextContent("N");
 
+    const edge = screen.getByTestId("flow-base-edge");
     await user.hover(edge);
     expect(screen.getByText("多对多 (Many-to-many)")).toBeInTheDocument();
   });
@@ -528,13 +566,78 @@ describe("ModelingFlowEdge", () => {
 
     const edge = screen.getByTestId("flow-base-edge");
     const edgeClass = edge.getAttribute("data-class") ?? "";
-    expect(edgeClass).toContain("stroke-red-500");
-    expect(edgeClass).toContain("stroke-[2.2]");
+    expect(edgeClass).toContain("stroke-red-600");
+    expect(edgeClass).toContain("stroke-[2.8]");
     expect(edgeClass).toContain("[stroke-dasharray:6_4]");
     expect(edge).toHaveAttribute("data-confidence-band", "invalid");
+    expect(edge).toHaveAttribute("data-visual-state", "invalid");
 
     await user.hover(edge);
     expect(screen.getByTestId("modeling-flow-edge-hover-card")).toBeInTheDocument();
     expect(screen.getByText("Unknown")).toBeInTheDocument();
+  });
+
+  it("uses soft incident style when selected model highlights an edge", () => {
+    const edgeProps = {
+      id: "rel-selected-model-incident",
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 100,
+      targetY: 50,
+      sourcePosition: "right",
+      targetPosition: "left",
+      selected: false,
+      data: {
+        label: "orders.customer_id = customers.id",
+        source: "manual",
+        confidence: 0.92,
+        highlightedBySelectedModel: true
+      }
+    } as unknown as Parameters<typeof ModelingFlowEdge>[0];
+
+    render(
+      <svg>
+        <ModelingFlowEdge {...edgeProps} />
+      </svg>
+    );
+
+    const edge = screen.getByTestId("flow-base-edge");
+    const edgeClass = edge.getAttribute("data-class") ?? "";
+    expect(edgeClass).toContain("stroke-slate-400");
+    expect(edgeClass).toContain("stroke-[2.1]");
+    expect(edgeClass).toContain("[stroke-dasharray:6_4]");
+    expect(edge).toHaveAttribute("data-visual-state", "selected-model-incident");
+  });
+
+  it("keeps invalid edge priority above selected-relationship style", () => {
+    const edgeProps = {
+      id: "rel-invalid-selected",
+      sourceX: 0,
+      sourceY: 0,
+      targetX: 100,
+      targetY: 50,
+      sourcePosition: "right",
+      targetPosition: "left",
+      selected: true,
+      data: {
+        label: "orders.customer_id = missing.id",
+        source: "inferred",
+        confidence: 0.12,
+        invalid: true
+      }
+    } as unknown as Parameters<typeof ModelingFlowEdge>[0];
+
+    render(
+      <svg>
+        <ModelingFlowEdge {...edgeProps} />
+      </svg>
+    );
+
+    const edge = screen.getByTestId("flow-base-edge");
+    const edgeClass = edge.getAttribute("data-class") ?? "";
+    expect(edgeClass).toContain("stroke-red-600");
+    expect(edgeClass).toContain("stroke-[2.8]");
+    expect(edge).toHaveAttribute("data-visual-state", "invalid");
+    expect(edge).toHaveAttribute("data-selected", "true");
   });
 });

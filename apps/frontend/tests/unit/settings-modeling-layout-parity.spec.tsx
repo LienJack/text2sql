@@ -1,7 +1,7 @@
 import React from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import {
   getWorkspaceModelingGraph,
@@ -143,11 +143,16 @@ const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
   listWorkspaceDatasourceTablePermissions
 );
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
+const originalShowDetailsPanel = process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL;
+const originalShowSchemaDeployPanels =
+  process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS;
 
 describe("Modeling layout parity", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fitViewMock.mockClear();
+    process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL = "true";
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = "true";
     Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1280 });
     Element.prototype.scrollIntoView = vi.fn();
     Object.defineProperty(window, "ResizeObserver", {
@@ -228,6 +233,11 @@ describe("Modeling layout parity", () => {
         }
       }
     });
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL = originalShowDetailsPanel;
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = originalShowSchemaDeployPanels;
   });
 
   it("renders flowchart-first workbench layout as left tree, center canvas, and right context", async () => {

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import { SaveAsViewDialog } from "@/components/chat/save-as-view-dialog";
 import {
@@ -8,6 +8,7 @@ import {
   listWorkspaceDatasourceBindings,
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces,
+  recommendModelingSetupRelationships,
   saveModelingViewFromRun
 } from "@/lib/admin-api-client";
 
@@ -27,7 +28,8 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     listWorkspaces: vi.fn(),
     listWorkspaceDatasourceBindings: vi.fn(),
     listWorkspaceDatasourceTablePermissions: vi.fn(),
-    getWorkspaceModelingGraph: vi.fn()
+    getWorkspaceModelingGraph: vi.fn(),
+    recommendModelingSetupRelationships: vi.fn()
   };
 });
 
@@ -38,6 +40,7 @@ const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
   listWorkspaceDatasourceTablePermissions
 );
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
+const mockRecommendModelingSetupRelationships = vi.mocked(recommendModelingSetupRelationships);
 
 describe("settings modeling view sync from chat", () => {
   beforeEach(() => {
@@ -109,8 +112,11 @@ describe("settings modeling view sync from chat", () => {
 });
 
 describe("settings modeling page view selection sync", () => {
+  const originalShowDetailsPanel = process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL = "true";
     window.sessionStorage.clear();
     mockListWorkspaces.mockResolvedValue({
       items: [{ id: "ws-sync", name: "Workspace Sync", isDefault: true }],
@@ -134,6 +140,7 @@ describe("settings modeling page view selection sync", () => {
       tableNames: ["orders"],
       policyVersion: 4
     });
+    mockRecommendModelingSetupRelationships.mockResolvedValue([]);
     mockGetWorkspaceModelingGraph.mockResolvedValue({
       workspaceId: "ws-sync",
       datasourceId: "ds-sync",
@@ -169,6 +176,10 @@ describe("settings modeling page view selection sync", () => {
         }
       }
     });
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL = originalShowDetailsPanel;
   });
 
   it("prefers query viewId and selects target view on page load", async () => {

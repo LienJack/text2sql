@@ -4,15 +4,69 @@ import {
 } from "../../src/modules/conversation/agent/graph/langgraph.state";
 import { createLangGraphRuntime } from "../../src/modules/conversation/agent/graph/langgraph.runtime";
 
+const createMockIntentPlan = () => ({
+  status: "ready" as const,
+  intent: "aggregate" as const,
+  constraints: [],
+  summary: "stub",
+  uncertaintySignal: {
+    level: "low" as const,
+    needsStrictSemanticPath: false,
+    reasonCodes: ["rule_slots_sufficient"]
+  },
+  clarificationDecision: {
+    decision: "continue" as const,
+    triggerPath: "rule" as const,
+    confidenceLevel: "high" as const,
+    missingCriticalSlots: [],
+    conflictDetected: false,
+    reasonCodes: ["rule_slots_sufficient"],
+    question: "",
+    reason: "问题信息充足"
+  },
+  riskTags: [],
+  planningWarnings: []
+});
+
+const createMockSemanticPlan = () => ({
+  status: "ready" as const,
+  semanticHints: [],
+  semanticVersion: 1,
+  lockStatus: "locked" as const,
+  fallbackApplied: false,
+  riskTags: [],
+  intentRiskTags: [],
+  semanticRiskTags: [],
+  planningWarnings: {
+    intent: [],
+    semantic: []
+  },
+  strictMode: false,
+  strictModeReasons: [],
+  summary: "stub"
+});
+
 describe("langgraph runtime", () => {
   it("passes contextEnvelope into clarify node", async () => {
     const clarifyRun = jest.fn().mockReturnValue({
+      decision: "clarify",
+      action: "ask_clarification",
+      source: "rule",
+      decisionSource: "rule",
+      triggerPath: "rule",
+      bypassed: false,
+      confidence: "low",
+      confidenceLevel: "low",
+      missingSlots: ["metric"],
+      shouldClarify: true,
+      missingCriticalSlots: ["metric"],
+      reasonCodes: ["missing_metric_slot"],
       reason: "need clarification",
       question: "请补充指标口径"
     });
     const runtime = createLangGraphRuntime({
       clarifyNode: {
-        run: clarifyRun
+        evaluate: clarifyRun
       },
       retrieveKnowledgeNode: {
         run: async () => ({
@@ -22,23 +76,10 @@ describe("langgraph runtime", () => {
         })
       },
       buildIntentPlanNode: {
-        run: () => ({
-          status: "ready",
-          intent: "aggregate",
-          constraints: [],
-          summary: "stub"
-        })
+        run: async () => createMockIntentPlan()
       },
       buildSemanticQueryNode: {
-        run: async () => ({
-          status: "ready",
-          semanticHints: [],
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          riskTags: [],
-          summary: "stub"
-        })
+        run: async () => createMockSemanticPlan()
       },
       buildPhysicalPlanNode: {
         run: async () => ({
@@ -98,12 +139,28 @@ describe("langgraph runtime", () => {
 
     expect(clarifyRun).toHaveBeenCalledWith("这个趋势怎么样", contextEnvelope);
     expect(output.terminalStatus).toBe("clarification");
+    expect(output.trace.clarificationDecision?.decision).toBe("clarify");
   });
 
   it("should run through executionResult path with expected node steps", async () => {
     const runtime = createLangGraphRuntime({
       clarifyNode: {
-        run: () => undefined
+        evaluate: () => ({
+          decision: "continue",
+          action: "proceed",
+          source: "rule",
+          decisionSource: "rule",
+          triggerPath: "rule",
+          bypassed: false,
+          confidence: "high",
+          confidenceLevel: "high",
+          missingSlots: [],
+          shouldClarify: false,
+          missingCriticalSlots: [],
+          reasonCodes: ["rule_slots_sufficient"],
+          reason: "问题信息充足",
+          question: ""
+        })
       },
       retrieveKnowledgeNode: {
         run: async () => ({
@@ -113,23 +170,10 @@ describe("langgraph runtime", () => {
         })
       },
       buildIntentPlanNode: {
-        run: () => ({
-          status: "ready",
-          intent: "aggregate",
-          constraints: [],
-          summary: "stub"
-        })
+        run: async () => createMockIntentPlan()
       },
       buildSemanticQueryNode: {
-        run: async () => ({
-          status: "ready",
-          semanticHints: [],
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          riskTags: [],
-          summary: "stub"
-        })
+        run: async () => createMockSemanticPlan()
       },
       buildPhysicalPlanNode: {
         run: async () => ({
@@ -203,6 +247,7 @@ describe("langgraph runtime", () => {
     expect(output.trace.steps[0]?.lifecycle).toBe("skipped");
     expect(output.trace.steps[5]?.sequence).toBe(6);
     expect(output.trace.steps[5]?.lifecycle).toBe("completed");
+    expect(output.trace.clarificationDecision?.decision).toBe("continue");
   });
 
   it("should normalize missing trace context", () => {
@@ -215,7 +260,22 @@ describe("langgraph runtime", () => {
   it("should capture fatal llm error into state without throwing from runtime", async () => {
     const runtime = createLangGraphRuntime({
       clarifyNode: {
-        run: () => undefined
+        evaluate: () => ({
+          decision: "continue",
+          action: "proceed",
+          source: "rule",
+          decisionSource: "rule",
+          triggerPath: "rule",
+          bypassed: false,
+          confidence: "high",
+          confidenceLevel: "high",
+          missingSlots: [],
+          shouldClarify: false,
+          missingCriticalSlots: [],
+          reasonCodes: ["rule_slots_sufficient"],
+          reason: "问题信息充足",
+          question: ""
+        })
       },
       retrieveKnowledgeNode: {
         run: async () => ({
@@ -225,23 +285,10 @@ describe("langgraph runtime", () => {
         })
       },
       buildIntentPlanNode: {
-        run: () => ({
-          status: "ready",
-          intent: "aggregate",
-          constraints: [],
-          summary: "stub"
-        })
+        run: async () => createMockIntentPlan()
       },
       buildSemanticQueryNode: {
-        run: async () => ({
-          status: "ready",
-          semanticHints: [],
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          riskTags: [],
-          summary: "stub"
-        })
+        run: async () => createMockSemanticPlan()
       },
       buildPhysicalPlanNode: {
         run: async () => ({

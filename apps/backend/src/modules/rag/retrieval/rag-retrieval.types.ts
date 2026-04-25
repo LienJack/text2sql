@@ -14,6 +14,7 @@ export interface RagRetrievalRequest {
   datasourceId: string;
   runId: string;
   workspaceId?: string;
+  allowedTables?: string[];
   activeIndexVersionId?: string;
   perLaneLimit?: number;
   finalCandidateLimit?: number;
@@ -140,6 +141,18 @@ export interface RagContextPack {
   riskTags?: string[];
 }
 
+export interface RagPriorSqlLaneEvidence {
+  status: "hit" | "miss" | "filtered";
+  matched_count: number;
+  selected_count: number;
+  filtered_count: number;
+  degrade_reasons?: string[];
+  matchedCount?: number;
+  selectedCount?: number;
+  filteredCount?: number;
+  degradeReasons?: string[];
+}
+
 export interface RagRetrievalBundle {
   query: string;
   run_id: string;
@@ -154,6 +167,8 @@ export interface RagRetrievalBundle {
   risk_tags?: string[];
   skill_context?: RagSkillContext;
   context_pack?: RagContextPack;
+  prior_sql_lane?: RagPriorSqlLaneEvidence;
+  priorSqlLane?: RagPriorSqlLaneEvidence;
   decision_reasons?: string[];
 }
 

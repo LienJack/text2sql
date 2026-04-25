@@ -8,6 +8,19 @@ type RagRetrievalChunkPayload = NonNullable<
   NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
 >[number];
 
+interface SqlPruningColumnHint {
+  name: string;
+  reason?: string;
+}
+
+interface SqlPruningEntryHint {
+  sourceLabel: string;
+  tableName?: string;
+  columns: SqlPruningColumnHint[];
+  reasons: string[];
+  ambiguousOrLowConfidence: boolean;
+}
+
 export type SqlSemanticIntent = "count" | "metadata" | "general";
 
 const DIALECT_HINT: Record<DatasourceType, string> = {
@@ -111,14 +124,356 @@ export class SqlPromptBuilder {
     if (!selectedContext || selectedContext.length === 0) {
       return "";
     }
-    const lines = selectedContext.slice(0, 5).map((item, index) => {
+    const legacyLines = this.buildLegacyContextLines(selectedContext);
+    const pruningLines = this.buildPruningContextLines(selectedContext);
+    if (pruningLines.length === 0) {
+      return ["Retrieved context (trusted evidence):", ...legacyLines].join("\n");
+    }
+    return [
+      "Retrieved context (trusted evidence):",
+      "Selected-context pruning view (preferred when available):",
+      ...pruningLines,
+      "Raw context snippets (compatibility fallback):",
+      ...legacyLines
+    ].join("\n");
+  }
+
+  private buildLegacyContextLines(selectedContext: RagRetrievalChunkPayload[]): string[] {
+    return selectedContext.slice(0, 5).map((item, index) => {
       const domain = item.metadata.domain;
       const chunkId = item.chunk_id;
       const compact = item.content.replace(/\s+/g, " ").trim();
       const excerpt = compact.length > 260 ? `${compact.slice(0, 260)}...` : compact;
       return `${index + 1}. [${domain}] ${chunkId}: ${excerpt}`;
     });
-    return ["Retrieved context (trusted evidence):", ...lines].join("\n");
+  }
+
+  private buildPruningContextLines(selectedContext: RagRetrievalChunkPayload[]): string[] {
+    return selectedContext
+      .slice(0, 5)
+      .flatMap((item, index) => this.toPruningContextLines(item, index));
+  }
+
+  private toPruningContextLines(
+    item: RagRetrievalChunkPayload,
+    index: number
+  ): string[] {
+    const hint = this.readPruningHint(item);
+    if (!hint) {
+      return [];
+    }
+    const header = [
+      `${index + 1}. [${item.metadata.domain}] ${item.chunk_id}`,
+      `table=${hint.tableName ?? "unknown"}`,
+      `columns=${this.formatColumnHints(hint.columns)}`,
+      `source=${hint.sourceLabel}`
+    ].join(" | ");
+    const lines = [header];
+    if (hint.reasons.length > 0) {
+      lines.push(`   rationale: ${hint.reasons.slice(0, 3).join("; ")}`);
+    }
+    if (hint.ambiguousOrLowConfidence) {
+      lines.push(
+        "   conservative_note: low-confidence/ambiguous pruning detected, full chunk columns retained to avoid dropping required fields."
+      );
+    }
+    return lines;
+  }
+
+  private formatColumnHints(columns: SqlPruningColumnHint[]): string {
+    if (columns.length === 0) {
+      return "none";
+    }
+    return columns
+      .map((column) =>
+        column.reason ? `${column.name} (${column.reason})` : column.name
+      )
+      .join(", ");
+  }
+
+  private readPruningHint(item: RagRetrievalChunkPayload): SqlPruningEntryHint | undefined {
+    const sourceMetadata = this.asRecord(item.metadata.sourceMetadata);
+    if (!sourceMetadata) {
+      return undefined;
+    }
+    const source = this.readPruningSource(sourceMetadata);
+    if (!source) {
+      return undefined;
+    }
+
+    const perTableSource = this.readPerTablePruningSource(source, item.metadata.tableNames);
+    const effectiveSource = perTableSource ?? source;
+    const tableName =
+      this.readString(effectiveSource.tableName) ??
+      this.readString(effectiveSource.table_name) ??
+      this.readString(effectiveSource.table) ??
+      this.readString(source.tableName) ??
+      this.readString(source.table_name) ??
+      this.readString(source.table) ??
+      item.metadata.tableNames[0];
+
+    const explicitColumns = this.readColumns(effectiveSource);
+    const fallbackColumns = this.readStringArray(item.metadata.columnNames).map((name) => ({
+      name
+    }));
+    const hasAmbiguousOrLowConfidence =
+      this.readAmbiguousOrLowConfidence(source) ||
+      this.readAmbiguousOrLowConfidence(effectiveSource);
+    const columns = this.mergeColumnHints(
+      explicitColumns,
+      fallbackColumns,
+      hasAmbiguousOrLowConfidence
+    );
+    if (columns.length === 0) {
+      return undefined;
+    }
+
+    const reasons = this.unique(
+      [
+        ...this.readReasonList(source.reason),
+        ...this.readReasonList(source.reasons),
+        ...this.readReasonList(source.selectionReason),
+        ...this.readReasonList(source.selection_reason),
+        ...this.readReasonList(source.evidence),
+        ...this.readReasonList(source.evidences),
+        ...this.readReasonList(effectiveSource.reason),
+        ...this.readReasonList(effectiveSource.reasons),
+        ...this.readReasonList(effectiveSource.selectionReason),
+        ...this.readReasonList(effectiveSource.selection_reason),
+        ...this.readReasonList(effectiveSource.evidence),
+        ...this.readReasonList(effectiveSource.evidences)
+      ]
+        .map((reason) => reason.trim())
+        .filter((reason) => reason.length > 0)
+    );
+    return {
+      sourceLabel:
+        this.readString(source.source) ??
+        this.readString(source.sourceLabel) ??
+        this.readString(source.source_label) ??
+        "selected_context_pruning",
+      tableName,
+      columns,
+      reasons,
+      ambiguousOrLowConfidence: hasAmbiguousOrLowConfidence
+    };
+  }
+
+  private readPruningSource(
+    sourceMetadata: Record<string, unknown>
+  ): Record<string, unknown> | undefined {
+    const directKeys = [
+      "selectedContextPruning",
+      "selected_context_pruning",
+      "prunedContext",
+      "pruned_context",
+      "pruning"
+    ];
+    for (const key of directKeys) {
+      const nested = this.asRecord(sourceMetadata[key]);
+      if (nested) {
+        return nested;
+      }
+    }
+    if (this.readColumns(sourceMetadata).length > 0) {
+      return sourceMetadata;
+    }
+    return undefined;
+  }
+
+  private readPerTablePruningSource(
+    source: Record<string, unknown>,
+    tableNames: string[]
+  ): Record<string, unknown> | undefined {
+    const tables = source.tables;
+    if (!Array.isArray(tables) || tables.length === 0) {
+      return undefined;
+    }
+    const normalizedTargets = tableNames.map((name) => name.trim().toLowerCase());
+    const records = tables
+      .map((item) => this.asRecord(item))
+      .filter((item): item is Record<string, unknown> => Boolean(item));
+    if (records.length === 0) {
+      return undefined;
+    }
+    const exactMatch = records.find((entry) => {
+      const tableName =
+        this.readString(entry.tableName) ??
+        this.readString(entry.table_name) ??
+        this.readString(entry.table);
+      if (!tableName) {
+        return false;
+      }
+      return normalizedTargets.includes(tableName.toLowerCase());
+    });
+    return exactMatch ?? records[0];
+  }
+
+  private readColumns(source: Record<string, unknown>): SqlPruningColumnHint[] {
+    const columnKeys = [
+      "selectedColumns",
+      "selected_columns",
+      "retainedColumns",
+      "retained_columns",
+      "columns",
+      "columnNames",
+      "column_names",
+      "keptColumns",
+      "kept_columns"
+    ];
+    for (const key of columnKeys) {
+      const parsed = this.parseColumnHintList(source[key]);
+      if (parsed.length > 0) {
+        return parsed;
+      }
+    }
+    return [];
+  }
+
+  private parseColumnHintList(raw: unknown): SqlPruningColumnHint[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const parsed: SqlPruningColumnHint[] = [];
+    for (const item of raw) {
+      if (typeof item === "string") {
+        const name = item.trim();
+        if (name.length > 0) {
+          parsed.push({ name });
+        }
+        continue;
+      }
+      const record = this.asRecord(item);
+      if (!record) {
+        continue;
+      }
+      const name =
+        this.readString(record.name) ??
+        this.readString(record.column) ??
+        this.readString(record.columnName) ??
+        this.readString(record.column_name);
+      if (!name) {
+        continue;
+      }
+      const reason =
+        this.readString(record.reason) ??
+        this.readString(record.selectionReason) ??
+        this.readString(record.selection_reason) ??
+        this.readString(record.evidence);
+      parsed.push({
+        name,
+        ...(reason ? { reason } : {})
+      });
+    }
+    return parsed;
+  }
+
+  private mergeColumnHints(
+    explicitColumns: SqlPruningColumnHint[],
+    fallbackColumns: SqlPruningColumnHint[],
+    includeFallbackColumns: boolean
+  ): SqlPruningColumnHint[] {
+    const merged = [...explicitColumns];
+    if (includeFallbackColumns || explicitColumns.length === 0) {
+      for (const fallback of fallbackColumns) {
+        if (merged.some((entry) => entry.name === fallback.name)) {
+          continue;
+        }
+        merged.push(fallback);
+      }
+    }
+    return merged;
+  }
+
+  private readAmbiguousOrLowConfidence(source: Record<string, unknown>): boolean {
+    if (this.readBoolean(source.ambiguous) || this.readBoolean(source.lowConfidence)) {
+      return true;
+    }
+    if (
+      this.readBoolean(source.low_confidence) ||
+      this.readBoolean(source.ambiguity)
+    ) {
+      return true;
+    }
+    const confidence =
+      this.readString(source.confidenceLevel) ??
+      this.readString(source.confidence_level) ??
+      this.readString(source.confidence);
+    if (confidence === "low") {
+      return true;
+    }
+    if (typeof source.confidence === "number" && source.confidence < 0.6) {
+      return true;
+    }
+    return false;
+  }
+
+  private readReasonList(raw: unknown): string[] {
+    if (typeof raw === "string") {
+      return raw.trim().length > 0 ? [raw] : [];
+    }
+    if (Array.isArray(raw)) {
+      return raw
+        .map((item) => {
+          const direct = this.readString(item);
+          if (direct) {
+            return direct;
+          }
+          const record = this.asRecord(item);
+          if (!record) {
+            return undefined;
+          }
+          return (
+            this.readString(record.reason) ??
+            this.readString(record.text) ??
+            this.readString(record.message)
+          );
+        })
+        .filter((item): item is string => Boolean(item));
+    }
+    return [];
+  }
+
+  private readBoolean(value: unknown): boolean {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) && value > 0;
+    }
+    if (typeof value !== "string") {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    return value as Record<string, unknown>;
+  }
+
+  private readString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => this.readString(item))
+      .filter((item): item is string => Boolean(item));
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values));
   }
 
   private buildSemanticInstructionBlock(contextPack?: RagContextPack): string {

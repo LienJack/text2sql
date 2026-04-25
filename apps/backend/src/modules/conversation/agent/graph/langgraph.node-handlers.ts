@@ -1,5 +1,6 @@
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
+import { DomainError } from "../../../../common/domain-error";
 import { BuildIntentPlanNode } from "../nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "../nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "../nodes/build-semantic-query.node";
@@ -18,6 +19,7 @@ import {
   appendStep,
   type LangGraphState
 } from "./langgraph.state";
+import type { SqlGenerationExplicitPinningEvidence } from "../sql/sql-generation.service";
 
 interface RuntimeCallbacks {
   streamMode?: boolean;
@@ -116,8 +118,82 @@ const appendPlanningWarning = (
   return [...(state.planningWarnings ?? []), warning];
 };
 
+const appendPlanningWarnings = (
+  state: LangGraphState,
+  stage: "intent" | "semantic",
+  warnings: string[]
+): string[] => {
+  const normalized = warnings
+    .map((warning) => warning.trim())
+    .filter((warning) => warning.length > 0)
+    .map((warning) => `${stage}:${warning}`);
+  return [...(state.planningWarnings ?? []), ...normalized];
+};
+
+const normalizeIdentifier = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value
+    .trim()
+    .replace(/^[`"'[\]]+|[`"'[\]]+$/g, "")
+    .replace(/\s+/g, "");
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.toLowerCase();
+};
+
+const extractQualifiedColumns = (value: string | undefined): string[] => {
+  if (!value) {
+    return [];
+  }
+  const result: string[] = [];
+  const regex = /\b([a-zA-Z_][\w$]*)\.([a-zA-Z_][\w$]*)\b/g;
+  for (const match of value.matchAll(regex)) {
+    const table = normalizeIdentifier(match[1]);
+    const column = normalizeIdentifier(match[2]);
+    if (!table || !column) {
+      continue;
+    }
+    result.push(`${table}.${column}`);
+  }
+  return result;
+};
+
+const unique = (values: string[]): string[] => Array.from(new Set(values));
+
+const buildExplicitPinningEvidence = (
+  state: LangGraphState
+): SqlGenerationExplicitPinningEvidence | undefined => {
+  const envelopePinnedTables = state.contextEnvelope?.pinnedTables ?? [];
+  const envelopePinnedColumns = state.contextEnvelope?.pinnedColumns ?? [];
+  const tables = unique(
+    envelopePinnedTables
+      .map((item) => normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item))
+  );
+  const mappedColumns = unique([
+    ...envelopePinnedColumns
+      .map((item) => normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item)),
+    ...((state.contextEnvelope?.entityMappings ?? [])
+      .map((item) => extractQualifiedColumns(item.mappedTo))
+      .flat()),
+    ...extractQualifiedColumns(state.contextEnvelope?.metricDefinition)
+  ]);
+  if (tables.length === 0 && mappedColumns.length === 0) {
+    return undefined;
+  }
+  return {
+    source: "context_envelope",
+    tables,
+    columns: mappedColumns
+  };
+};
+
 export interface LangGraphNodeDependencies {
-  clarifyNode: Pick<ClarifyNode, "run">;
+  clarifyNode: Pick<ClarifyNode, "evaluate">;
   retrieveKnowledgeNode: Pick<RetrieveKnowledgeNode, "run">;
   buildIntentPlanNode: Pick<BuildIntentPlanNode, "run">;
   buildSemanticQueryNode: Pick<BuildSemanticQueryNode, "run">;
@@ -138,14 +214,33 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     await runtime.emitStep(
       buildRunningStep(state, "clarify", startedAt, "正在理解问题")
     );
-    const clarification = deps.clarifyNode.run(
+    const decision = deps.clarifyNode.evaluate(
       state.question,
       state.contextEnvelope
     );
+    const clarificationDecision = {
+      decision: decision.decision,
+      triggerPath: decision.triggerPath,
+      decisionSource: decision.decisionSource,
+      bypassed: decision.bypassed,
+      ...(decision.bypassReasonCode ? { bypassReasonCode: decision.bypassReasonCode } : {}),
+      confidenceLevel: decision.confidenceLevel,
+      missingCriticalSlots: decision.missingCriticalSlots,
+      conflictDetected: false,
+      ...(decision.reasonCodes.length > 0 ? { reasonCodes: decision.reasonCodes } : {}),
+      question: decision.question,
+      reason: decision.reason
+    };
+    const clarification = decision.shouldClarify
+      ? {
+          ...clarificationDecision
+        }
+      : undefined;
     const endedAt = new Date().toISOString();
     if (clarification) {
       const outputs = {
-        clarificationQuestion: clarification.question
+        clarificationQuestion: clarification.question,
+        clarificationDecision
       };
       const trace = appendStep(state, {
         step: {
@@ -161,6 +256,10 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision
+        },
         clarification,
         answer: clarification.question,
         terminalStatus: "clarification"
@@ -170,12 +269,20 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       step: {
         node: "clarify",
         status: "skipped",
-        detail: "问题信息充足，跳过澄清。",
-        ...withTiming(startedAt, endedAt)
-      }
+        detail: decision.reason || "问题信息充足，跳过澄清。",
+        ...withTiming(startedAt, endedAt),
+        outputSummary: summarize({ clarificationDecision })
+      },
+      outputs: { clarificationDecision }
     });
     await runtime.emitStep(latestStep(trace));
-    return trace;
+    return {
+      ...trace,
+      trace: {
+        ...trace.trace,
+        clarificationDecision
+      }
+    };
   };
 
   const retrieveKnowledge = async (
@@ -210,6 +317,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         datasourceId: state.datasourceId,
         runId: state.runId,
         workspaceId: state.accessContext?.workspaceId,
+        allowedTables: state.accessContext?.allowedTables,
+        pinnedTables: state.contextEnvelope?.pinnedTables ?? state.contextEnvelope?.mustIncludeTables,
+        pinnedColumns: state.contextEnvelope?.pinnedColumns,
         modelCatalogId: state.modelCatalogId
       });
       const endedAt = new Date().toISOString();
@@ -312,15 +422,19 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     }
 
     try {
-      const intentPlan = deps.buildIntentPlanNode.run(
+      const intentPlan = await deps.buildIntentPlanNode.run(
         state.question,
-        state.retrievedKnowledge
+        state.retrievedKnowledge,
+        state.trace.clarificationDecision
       );
       const endedAt = new Date().toISOString();
       const outputs = {
         status: intentPlan.status,
         intent: intentPlan.intent,
-        constraints: intentPlan.constraints
+        constraints: intentPlan.constraints,
+        uncertaintySignal: intentPlan.uncertaintySignal,
+        clarificationDecision: intentPlan.clarificationDecision,
+        riskTags: intentPlan.riskTags
       };
       const trace = appendStep(state, {
         step: {
@@ -335,12 +449,24 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision:
+            intentPlan.clarificationDecision ?? state.trace.clarificationDecision
+        },
         intentPlan,
         planningStatus: intentPlan.status === "ready" ? state.planningStatus : "degraded",
         planningWarnings:
-          intentPlan.status === "ready"
+          intentPlan.status === "ready" &&
+          (intentPlan.planningWarnings?.length ?? 0) === 0
             ? state.planningWarnings
-            : appendPlanningWarning(state, intentPlan.summary)
+            : appendPlanningWarnings(
+                state,
+                "intent",
+                (intentPlan.planningWarnings?.length ?? 0) > 0
+                  ? (intentPlan.planningWarnings ?? [])
+                  : [intentPlan.summary]
+              )
       };
     } catch (error) {
       const message = toErrorMessage(error);
@@ -417,7 +543,8 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       const semanticQueryPlan = await deps.buildSemanticQueryNode.run({
         intentPlan: state.intentPlan,
         question: state.question,
-        retrievalBundle: state.retrievalBundle
+        retrievalBundle: state.retrievalBundle,
+        clarificationDecision: state.trace.clarificationDecision
       });
       const endedAt = new Date().toISOString();
       const outputs = {
@@ -430,7 +557,11 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         lockStatus: semanticQueryPlan.lockStatus,
         fallbackApplied: semanticQueryPlan.fallbackApplied,
         degradeReason: semanticQueryPlan.degradeReason,
-        riskTags: semanticQueryPlan.riskTags
+        riskTags: semanticQueryPlan.riskTags,
+        strictMode: semanticQueryPlan.strictMode,
+        strictModeReasons: semanticQueryPlan.strictModeReasons,
+        planningWarnings: semanticQueryPlan.planningWarnings,
+        clarificationDecision: semanticQueryPlan.clarificationDecision
       };
       const trace = appendStep(state, {
         step: {
@@ -445,13 +576,25 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision:
+            semanticQueryPlan.clarificationDecision ?? state.trace.clarificationDecision
+        },
         semanticQueryPlan,
         planningStatus:
           semanticQueryPlan.status === "ready" ? state.planningStatus : "degraded",
         planningWarnings:
-          semanticQueryPlan.status === "ready"
+          semanticQueryPlan.status === "ready" &&
+          (semanticQueryPlan.planningWarnings?.semantic.length ?? 0) === 0
             ? state.planningWarnings
-            : appendPlanningWarning(state, semanticQueryPlan.summary)
+            : appendPlanningWarnings(
+                state,
+                "semantic",
+                (semanticQueryPlan.planningWarnings?.semantic.length ?? 0) > 0
+                  ? (semanticQueryPlan.planningWarnings?.semantic ?? [])
+                  : [semanticQueryPlan.summary]
+              )
       };
     } catch (error) {
       const message = toErrorMessage(error);
@@ -594,6 +737,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     );
     const callbacks = runtime.callbacks;
     try {
+      const explicitPinning = buildExplicitPinningEvidence(state);
       const generated = await deps.generateSqlNode.run(
         state.question,
         state.datasourceType,
@@ -606,13 +750,15 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
               selectedContext: state.retrievalBundle?.selected_context,
               semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
-              workspaceId: state.accessContext?.workspaceId
+              workspaceId: state.accessContext?.workspaceId,
+              explicitPinning
             }
           : {
               selectedContext: state.retrievalBundle?.selected_context,
               semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
-              workspaceId: state.accessContext?.workspaceId
+              workspaceId: state.accessContext?.workspaceId,
+              explicitPinning
             }
       );
       const endedAt = new Date().toISOString();
@@ -632,6 +778,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         retrieveSummary: state.retrievedKnowledge?.summary,
         intent: state.intentPlan?.intent,
         semanticHints: state.semanticQueryPlan?.semanticHints,
+        semanticStrictMode: state.semanticQueryPlan?.strictMode,
+        semanticStrictModeReasons: state.semanticQueryPlan?.strictModeReasons,
+        clarificationDecision: state.trace.clarificationDecision,
         physicalStrategy: state.physicalPlan?.strategy,
         semanticConstraintMode: state.physicalPlan?.semanticConstraintMode,
         contextPackStatus: state.contextPack?.status ?? state.retrievalBundle?.context_pack?.status
@@ -640,11 +789,10 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         provider: generated.provider,
         model: generated.model,
         modelCatalogId: generated.modelCatalogId,
-        sql: generated.sql,
-        rawText: generated.rawText,
         promptTemplate: generated.promptTemplate,
         retryCount: generated.retryCount ?? 0,
-        semanticIntent: generated.semanticIntent
+        semanticIntent: generated.semanticIntent,
+        coverage: generated.coverage
       };
       const trace = appendStep(state, {
         step: {
@@ -696,6 +844,13 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       const inputs = {
         question: state.question
       };
+      const outputs =
+        error instanceof DomainError
+          ? {
+              errorCode: error.code,
+              errorDetails: error.details
+            }
+          : undefined;
       const trace = appendStep(state, {
         step: {
           node: "generate-sql",
@@ -703,10 +858,12 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
           detail: message,
           ...withTiming(startedAt, endedAt),
           inputSummary: summarize(inputs),
+          outputSummary: summarize(outputs),
           errorSummary: summarize(message)
         },
         runType: "llm",
         inputs,
+        outputs,
         error: message
       });
       await runtime.emitStep(latestStep(trace));

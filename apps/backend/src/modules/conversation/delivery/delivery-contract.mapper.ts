@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  ClarificationDecisionEvidence,
   DeliveryContract,
   DeliveryEvidenceReplayLog,
   SqlRun
@@ -97,9 +98,25 @@ interface TraceContextEvidence {
   conflictHint?: ContextConflictHint;
 }
 
+interface SqlCoverageEvidenceSnapshot {
+  gateStatus:
+    | "passed"
+    | "failed"
+    | "skipped_no_evidence"
+    | "skipped_metadata_intent"
+    | "skipped_no_sql_objects";
+  missingObjects: string[];
+  triggerSource: "selected_context" | "semantic_context" | "explicit_pinning" | "none";
+}
+
+type ClarificationDecisionLayer = NonNullable<
+  NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+>;
+
 type DeliveryEvidenceWithContext = NonNullable<DeliveryContract["evidence"]> & {
   effectiveContextSummary?: EffectiveContextSummary;
   conflictHint?: ContextConflictHint;
+  sqlCoverage?: SqlCoverageEvidenceSnapshot;
 };
 
 interface SandboxPostProcessOutcome {
@@ -120,6 +137,8 @@ export class DeliveryContractMapper {
     const fusedSnapshot = this.readRetrievalFusedSnapshot(replayIndex.retrievalFused);
     const semanticSnapshot = this.readSemanticSnapshot(input.run);
     const traceContextEvidence = this.readTraceContextEvidence(input.run);
+    const clarificationDecision = this.readClarificationDecisionEvidence(input.run);
+    const sqlCoverage = this.readSqlCoverageEvidence(input.run);
     const invalidInput = replayIndex.invalidPayload;
     const artifact = this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
@@ -134,6 +153,7 @@ export class DeliveryContractMapper {
       ...(traceContextEvidence.conflictHint?.hasConflict
         ? ["context_conflict_detected"]
         : []),
+      ...(sqlCoverage?.gateStatus === "failed" ? ["sql_coverage_gate_failed"] : []),
       ...sandboxOutcome.riskTags
     ]);
 
@@ -189,7 +209,9 @@ export class DeliveryContractMapper {
       skillContextSummary: fusedSnapshot.skillContextSummary,
       evidenceStale: evidenceStale || undefined,
       effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
-      conflictHint: traceContextEvidence.conflictHint
+      conflictHint: traceContextEvidence.conflictHint,
+      clarificationDecision,
+      sqlCoverage
     };
 
     return {
@@ -593,6 +615,224 @@ export class DeliveryContractMapper {
     };
   }
 
+  private readClarificationDecisionEvidence(
+    run: SqlRun
+  ): ClarificationDecisionLayer | undefined {
+    const traceWithCompat = run.trace as SqlRun["trace"] & {
+      clarificationDecision?: unknown;
+      clarification_decision?: unknown;
+    };
+    const traceDecision = this.readClarificationDecision(
+      traceWithCompat.clarificationDecision ?? traceWithCompat.clarification_decision
+    );
+    if (traceDecision) {
+      return traceDecision;
+    }
+
+    const stepDecision = this.readClarificationDecisionFromSteps(run.trace.steps);
+    if (stepDecision) {
+      return stepDecision;
+    }
+
+    return this.readClarificationDecision(run.clarification);
+  }
+
+  private readSqlCoverageEvidence(run: SqlRun): SqlCoverageEvidenceSnapshot | undefined {
+    const steps = run.trace.steps ?? [];
+    for (const step of [...steps].reverse()) {
+      if (step.node !== "generate-sql") {
+        continue;
+      }
+      const output = this.parseSummaryObject(step.outputSummary);
+      if (!output) {
+        continue;
+      }
+      const directCoverage = this.readSqlCoverageFromRecord(
+        output.coverage ?? output.sqlCoverage ?? output.sql_coverage
+      );
+      if (directCoverage) {
+        return directCoverage;
+      }
+      const errorCode = this.readString(output.errorCode ?? output.error_code);
+      if (errorCode !== "LLM_SQL_EVIDENCE_COVERAGE_FAILED") {
+        continue;
+      }
+      const errorDetails = this.readRecord(output.errorDetails ?? output.error_details);
+      const detailsCoverage = this.readSqlCoverageFromRecord(
+        errorDetails?.coverage ?? errorDetails?.sqlCoverage ?? errorDetails?.sql_coverage
+      );
+      if (detailsCoverage) {
+        return detailsCoverage;
+      }
+    }
+    return undefined;
+  }
+
+  private readSqlCoverageFromRecord(
+    value: unknown
+  ): SqlCoverageEvidenceSnapshot | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const gateStatusRaw = this.readString(value.gateStatus ?? value.gate_status);
+    const gateStatus =
+      gateStatusRaw === "passed" ||
+      gateStatusRaw === "failed" ||
+      gateStatusRaw === "skipped_no_evidence" ||
+      gateStatusRaw === "skipped_metadata_intent" ||
+      gateStatusRaw === "skipped_no_sql_objects"
+        ? gateStatusRaw
+        : undefined;
+    const triggerSourceRaw = this.readString(
+      value.triggerSource ?? value.trigger_source
+    );
+    const triggerSource =
+      triggerSourceRaw === "selected_context" ||
+      triggerSourceRaw === "semantic_context" ||
+      triggerSourceRaw === "explicit_pinning" ||
+      triggerSourceRaw === "none"
+        ? triggerSourceRaw
+        : undefined;
+    if (!gateStatus || !triggerSource) {
+      return undefined;
+    }
+    return {
+      gateStatus,
+      missingObjects: this.readStringArray(
+        value.missingObjects ?? value.missing_objects
+      ),
+      triggerSource
+    };
+  }
+
+  private readClarificationDecisionFromSteps(
+    steps: SqlRun["trace"]["steps"] | undefined
+  ): ClarificationDecisionLayer | undefined {
+    if (!steps || steps.length === 0) {
+      return undefined;
+    }
+
+    for (const step of [...steps].reverse()) {
+      if (step.node !== "clarify") {
+        continue;
+      }
+      const output = this.parseSummaryObject(step.outputSummary);
+      if (!output) {
+        continue;
+      }
+      const question = this.readString(
+        output.clarificationQuestion ?? output.clarification_question
+      );
+      const stepDecision = this.readClarificationDecision(
+        output.clarificationDecision ?? output.clarification_decision ?? output,
+        {
+          question,
+          reason: this.readString(step.detail)
+        }
+      );
+      if (stepDecision) {
+        return stepDecision;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readClarificationDecision(
+    value: unknown,
+    fallback?: {
+      question?: string;
+      reason?: string;
+    }
+  ): ClarificationDecisionLayer | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+
+    const decisionRaw = this.readString(value.decision)?.toLowerCase();
+    const decision =
+      decisionRaw === "continue" || decisionRaw === "clarify"
+        ? (decisionRaw as ClarificationDecisionEvidence["decision"])
+        : undefined;
+    const triggerPathRaw = this.readString(
+      value.triggerPath ??
+        value.trigger_path ??
+        value.triggerSource ??
+        value.trigger_source
+    )?.toLowerCase();
+    const triggerPath =
+      triggerPathRaw === "rule" ||
+      triggerPathRaw === "semantic" ||
+      triggerPathRaw === "hybrid"
+        ? (triggerPathRaw as ClarificationDecisionEvidence["triggerPath"])
+        : undefined;
+    const decisionSource = this.readString(
+      value.decisionSource ?? value.decision_source ?? value.source
+    );
+    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed ?? value.is_bypassed);
+    const bypassReasonCode = this.readString(
+      value.bypassReasonCode ?? value.bypass_reason_code
+    );
+    const confidenceLevelRaw = this.readString(
+      value.confidenceLevel ?? value.confidence_level ?? value.confidence
+    )?.toLowerCase();
+    const confidenceLevel =
+      confidenceLevelRaw === "high" ||
+      confidenceLevelRaw === "medium" ||
+      confidenceLevelRaw === "low"
+        ? (confidenceLevelRaw as ClarificationDecisionEvidence["confidenceLevel"])
+        : undefined;
+    const missingCriticalSlots = this.readStringArray(
+      value.missingCriticalSlots ??
+        value.missing_critical_slots ??
+        value.missingSlots ??
+        value.missing_slots
+    );
+    const conflictDetected = this.readBoolean(
+      value.conflictDetected ??
+        value.conflict_detected ??
+        value.hasConflict ??
+        value.has_conflict
+    );
+    const reasonCodes = this.readStringArray(value.reasonCodes ?? value.reason_codes);
+    const question = this.readString(
+      value.question ??
+        value.clarificationQuestion ??
+        value.clarification_question ??
+        fallback?.question
+    );
+    const reason = this.readString(value.reason ?? fallback?.reason);
+    const hasStructuredPayload = Boolean(
+      decision ||
+        triggerPath ||
+        decisionSource ||
+        bypassed !== undefined ||
+        bypassReasonCode ||
+        confidenceLevel ||
+        missingCriticalSlots.length > 0 ||
+        conflictDetected !== undefined ||
+        reasonCodes.length > 0
+    );
+
+    if (!hasStructuredPayload) {
+      return undefined;
+    }
+
+    return {
+      ...(decision ? { decision } : {}),
+      ...(triggerPath ? { triggerPath } : {}),
+      ...(decisionSource ? { decisionSource } : {}),
+      ...(bypassed !== undefined ? { bypassed } : {}),
+      ...(bypassReasonCode ? { bypassReasonCode } : {}),
+      ...(confidenceLevel ? { confidenceLevel } : {}),
+      ...(missingCriticalSlots.length > 0 ? { missingCriticalSlots } : {}),
+      ...(conflictDetected !== undefined ? { conflictDetected } : {}),
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+      ...(question ? { question } : {}),
+      ...(reason ? { reason } : {})
+    };
+  }
+
   private readEffectiveContextSummary(value: unknown): EffectiveContextSummary | undefined {
     if (!this.isRecord(value)) {
       return undefined;
@@ -765,6 +1005,22 @@ export class DeliveryContractMapper {
     }
     const normalized = value.trim();
     return normalized ? normalized : undefined;
+  }
+
+  private readBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") {
+        return true;
+      }
+      if (normalized === "false") {
+        return false;
+      }
+    }
+    return undefined;
   }
 
   private readNonNegativeInt(value: unknown): number {

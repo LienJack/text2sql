@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import {
   detectWorkspaceModelingSchemaChanges,
@@ -36,9 +36,12 @@ const mockDetectWorkspaceModelingSchemaChanges = vi.mocked(
 const mockResolveWorkspaceModelingSchemaChange = vi.mocked(
   resolveWorkspaceModelingSchemaChange
 );
+const originalShowSchemaDeployPanels =
+  process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS;
 
 describe("settings modeling schema change flow", () => {
   beforeEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = "true";
     vi.clearAllMocks();
     window.history.replaceState({}, "", "/modeling?workspaceId=ws-1&datasourceId=ds-1");
 
@@ -231,6 +234,10 @@ describe("settings modeling schema change flow", () => {
         unresolvedHighRiskCount: 1
       };
     });
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = originalShowSchemaDeployPanels;
   });
 
   it("supports detect -> resolve -> re-detect and keeps residual count clear", async () => {

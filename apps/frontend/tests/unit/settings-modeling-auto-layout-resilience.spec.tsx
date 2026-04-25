@@ -200,4 +200,58 @@ describe("ModelingFlowCanvas auto layout resilience", () => {
       expect(autoLayoutButton).toBeEnabled();
     });
   });
+
+  it("queues programmatic layout requests as one-shot triggers keyed by request id", async () => {
+    computeElkLayoutMock.mockResolvedValue({
+      ok: true,
+      elapsedMs: 180,
+      positions: {
+        "model:model.a": { x: 120, y: 80 },
+        "model:model.b": { x: 420, y: 80 }
+      }
+    });
+
+    const { rerender } = render(
+      <ModelingFlowCanvas
+        graphPayload={graphPayload}
+        selectedNode={null}
+        autoLayoutKey="workspace-programmatic"
+        programmaticAutoLayoutRequestId={1}
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("resilience-first-position")).toHaveTextContent("120,80");
+    });
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={graphPayload}
+        selectedNode={null}
+        autoLayoutKey="workspace-programmatic"
+        programmaticAutoLayoutRequestId={1}
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(
+      <ModelingFlowCanvas
+        graphPayload={graphPayload}
+        selectedNode={null}
+        autoLayoutKey="workspace-programmatic"
+        programmaticAutoLayoutRequestId={2}
+        onSelectNode={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      expect(computeElkLayoutMock).toHaveBeenCalledTimes(2);
+    });
+  });
 });

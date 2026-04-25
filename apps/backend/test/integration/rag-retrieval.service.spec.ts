@@ -180,6 +180,295 @@ describe("rag retrieval service integration", () => {
     await moduleRef.close();
   });
 
+  it("marks trusted prior SQL as hit and promotes it into retrieval candidates", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+    const replayRepository = moduleRef.get(RagReplayRepository);
+
+    const datasourceId = "ds-rag-retrieval-prior-sql-hit";
+    const workspaceId = "ws-rag-prior-hit";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-prior-hit-schema",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount, status)",
+        metadata: JSON.stringify({
+          tableNames: ["orders"],
+          columnNames: ["id", "amount", "status"]
+        })
+      },
+      {
+        id: "chunk-prior-hit-sql",
+        datasourceId,
+        domain: "sql_example",
+        content: "SELECT SUM(amount) FROM orders WHERE status = 'paid'",
+        metadata: JSON.stringify({
+          trusted: true,
+          priorSql: true,
+          workspaceId,
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"]
+        })
+      },
+      {
+        id: "chunk-prior-hit-semantic",
+        datasourceId,
+        domain: "semantic_term",
+        content: "GMV maps to SUM(amount) for paid orders.",
+        metadata: JSON.stringify({
+          tableNames: ["orders"],
+          columnNames: ["amount"]
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-prior-sql-hit-v1",
+      createdByRunId: "run-rag-retrieval-prior-sql-hit-build-v1",
+      activatedByRunId: "run-rag-retrieval-prior-sql-hit-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "orders paid gmv",
+      datasourceId,
+      workspaceId,
+      allowedTables: ["orders"],
+      runId: "run-rag-retrieval-prior-sql-hit-v1"
+    });
+
+    const priorSqlLane = response.retrieval_bundle.prior_sql_lane;
+    expect(priorSqlLane).toBeDefined();
+    expect(priorSqlLane?.status).toBe("hit");
+    expect(priorSqlLane?.matched_count).toBe(1);
+    expect(priorSqlLane?.selected_count).toBe(1);
+    expect(response.retrieval_bundle.candidates[0]?.chunk_id).toBe("chunk-prior-hit-sql");
+    expect(response.retrieval_bundle.candidates[0]?.evidence).toEqual(
+      expect.arrayContaining(["prior_sql:trusted"])
+    );
+
+    const replayEvents = await replayRepository.listByRunId("run-rag-retrieval-prior-sql-hit-v1");
+    const fusedReplay = replayEvents.find((item) => item.replayKey === "retrieval:fused");
+    expect(fusedReplay).toBeDefined();
+    const fusedPayload = JSON.parse(fusedReplay?.payload ?? "{}") as {
+      priorSqlLane?: { status?: string; selectedCount?: number };
+    };
+    expect(fusedPayload.priorSqlLane?.status).toBe("hit");
+    expect(fusedPayload.priorSqlLane?.selectedCount).toBe(1);
+
+    await moduleRef.close();
+  });
+
+  it("filters trusted prior SQL by workspace and allowed tables while preserving fallback candidates", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const datasourceId = "ds-rag-retrieval-prior-sql-filtered";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-prior-filter-schema",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount, status)",
+        metadata: JSON.stringify({
+          tableNames: ["orders"],
+          columnNames: ["id", "amount", "status"]
+        })
+      },
+      {
+        id: "chunk-prior-filter-workspace",
+        datasourceId,
+        domain: "sql_example",
+        content: "SELECT SUM(amount) FROM orders WHERE status = 'paid'",
+        metadata: JSON.stringify({
+          trusted: true,
+          priorSql: true,
+          workspaceId: "workspace-other",
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"]
+        })
+      },
+      {
+        id: "chunk-prior-filter-tables",
+        datasourceId,
+        domain: "sql_example",
+        content: "SELECT COUNT(*) FROM secret_orders",
+        metadata: JSON.stringify({
+          trusted: true,
+          verified: true,
+          workspaceId: "workspace-current",
+          tableNames: ["secret_orders"],
+          columnNames: ["id"]
+        })
+      },
+      {
+        id: "chunk-prior-filter-semantic",
+        datasourceId,
+        domain: "semantic_term",
+        content: "GMV maps to order amount.",
+        metadata: JSON.stringify({
+          tableNames: ["orders"],
+          columnNames: ["amount"]
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-prior-sql-filtered-v1",
+      createdByRunId: "run-rag-retrieval-prior-sql-filtered-build-v1",
+      activatedByRunId: "run-rag-retrieval-prior-sql-filtered-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "orders paid gmv",
+      datasourceId,
+      workspaceId: "workspace-current",
+      allowedTables: ["orders"],
+      runId: "run-rag-retrieval-prior-sql-filtered-v1"
+    });
+
+    const priorSqlLane = response.retrieval_bundle.prior_sql_lane;
+    expect(priorSqlLane).toBeDefined();
+    expect(priorSqlLane?.status).toBe("filtered");
+    expect(priorSqlLane?.matched_count).toBe(2);
+    expect(priorSqlLane?.selected_count).toBe(0);
+    expect(priorSqlLane?.filtered_count).toBe(2);
+    expect(priorSqlLane?.degrade_reasons).toEqual(
+      expect.arrayContaining([
+        "prior_sql_filtered_workspace_mismatch",
+        "prior_sql_filtered_not_in_allowed_tables"
+      ])
+    );
+    expect(
+      response.retrieval_bundle.candidates.some(
+        (item) => item.chunk_id === "chunk-prior-filter-workspace"
+      )
+    ).toBe(false);
+    expect(
+      response.retrieval_bundle.candidates.some(
+        (item) => item.chunk_id === "chunk-prior-filter-tables"
+      )
+    ).toBe(false);
+    expect(response.retrieval_bundle.candidates.length).toBeGreaterThan(0);
+    expect(response.retrieval_bundle.lane_results.lexical.status).toBe("ok");
+    expect(response.retrieval_bundle.lane_results.dense.status).toBe("ok");
+    expect(response.retrieval_bundle.lane_results.graph.status).toBe("ok");
+
+    await moduleRef.close();
+  });
+
+  it("uses conservative table-first/field-second pruning on wide tables and safely degrades when evidence is weak", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+    const replayRepository = moduleRef.get(RagReplayRepository);
+
+    const datasourceId = "ds-rag-retrieval-column-pruning";
+    const wideColumns = [
+      "id",
+      "customer_id",
+      "amount",
+      "status",
+      "order_date",
+      "shipping_city",
+      "sales_region",
+      "discount_rate",
+      "internal_note",
+      "legacy_flag",
+      "created_at",
+      "updated_at"
+    ];
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-wide-schema-orders",
+        datasourceId,
+        domain: "schema",
+        content: `table orders_wide(${wideColumns.join(", ")})`,
+        metadata: JSON.stringify({
+          chunkProfile: "schema_table",
+          tableNames: ["orders_wide"],
+          columnNames: wideColumns
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-column-pruning-v1",
+      createdByRunId: "run-rag-retrieval-column-pruning-build-v1",
+      activatedByRunId: "run-rag-retrieval-column-pruning-build-v1"
+    });
+
+    const strongSignal = await retrievalService.retrieve({
+      query: "orders_wide amount status",
+      datasourceId,
+      runId: "run-rag-retrieval-column-pruning-strong-v1"
+    });
+    const strongColumns =
+      strongSignal.retrieval_bundle.candidates.find(
+        (candidate) => candidate.chunk_id === "chunk-wide-schema-orders"
+      )?.chunk.metadata.columnNames ?? [];
+    expect(strongColumns.length).toBeGreaterThan(0);
+    expect(strongColumns.length).toBeLessThan(wideColumns.length);
+    expect(strongColumns).toEqual(expect.arrayContaining(["amount", "status"]));
+    expect(strongColumns).not.toContain("internal_note");
+
+    const uncertainSignal = await retrievalService.retrieve({
+      query: "orders_wide customer profile",
+      datasourceId,
+      runId: "run-rag-retrieval-column-pruning-uncertain-v1"
+    });
+    const uncertainColumns =
+      uncertainSignal.retrieval_bundle.candidates.find(
+        (candidate) => candidate.chunk_id === "chunk-wide-schema-orders"
+      )?.chunk.metadata.columnNames ?? [];
+    expect(uncertainColumns.length).toBeGreaterThan(1);
+    expect(uncertainColumns.length).toBeLessThanOrEqual(wideColumns.length);
+
+    const weakSignal = await retrievalService.retrieve({
+      query: "orders_wide overview",
+      datasourceId,
+      runId: "run-rag-retrieval-column-pruning-weak-v1"
+    });
+    const weakColumns =
+      weakSignal.retrieval_bundle.candidates.find(
+        (candidate) => candidate.chunk_id === "chunk-wide-schema-orders"
+      )?.chunk.metadata.columnNames ?? [];
+    expect(weakColumns).toHaveLength(wideColumns.length);
+
+    const replayEvents = await replayRepository.listByRunId(
+      "run-rag-retrieval-column-pruning-strong-v1"
+    );
+    const fusedReplay = replayEvents.find((item) => item.replayKey === "retrieval:fused");
+    const fusedPayload = JSON.parse(fusedReplay?.payload ?? "{}") as {
+      columnPruning?: {
+        status?: string;
+        tables?: Array<{
+          table_name?: string;
+          mode?: string;
+        }>;
+      };
+    };
+    expect(fusedPayload.columnPruning?.status).toBe("applied");
+    expect(fusedPayload.columnPruning?.tables?.[0]?.table_name).toBe("orders_wide");
+    expect(fusedPayload.columnPruning?.tables?.[0]?.mode).toBe("conservative");
+
+    await moduleRef.close();
+  });
+
   it("returns degraded bundle when datasource has no active index", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]

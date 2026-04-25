@@ -27,8 +27,16 @@ interface SqlGenerationSelection {
   datasourceType?: DatasourceType;
   modelCatalogId?: string;
   selectedContext?: RagRetrievalChunkPayload[];
+  selected_context?: RagRetrievalChunkPayload[];
   semanticContextPack?: RagContextPack;
   semanticIntent?: SqlSemanticIntent;
+  explicitPinning?: SqlGenerationExplicitPinningEvidence;
+}
+
+export interface SqlGenerationExplicitPinningEvidence {
+  source?: string;
+  tables?: string[];
+  columns?: string[];
 }
 
 const MAX_SEMANTIC_REPAIR_RETRY = 1;
@@ -39,6 +47,27 @@ const METADATA_INTENT_REGEX =
 const COUNT_SQL_REGEX = /\bcount\s*\(/i;
 const METADATA_SQL_REGEX =
   /\bsqlite_master\b|\bsqlite_schema\b|\binformation_schema\b|\bpg_catalog\b|\bshow\s+tables\b|\bdescribe\b|\bpragma\b/i;
+const SQL_TABLE_REF_REGEX = /\b(?:from|join)\s+([`"'[\]]?[a-zA-Z_][\w$]*(?:\.[a-zA-Z_][\w$]*)?[`"'[\]]?)/gi;
+const SQL_QUALIFIED_COLUMN_REGEX = /\b([a-zA-Z_][\w$]*)\.([a-zA-Z_][\w$]*)\b/g;
+const SQL_CTE_REGEX = /(?:\bwith\b|,)\s*([a-zA-Z_][\w$]*)\s+as\s*\(/gi;
+
+export type SqlCoverageTriggerSource =
+  | "selected_context"
+  | "semantic_context"
+  | "explicit_pinning"
+  | "none";
+
+export interface SqlEvidenceCoverage {
+  gateStatus:
+    | "passed"
+    | "failed"
+    | "skipped_no_evidence"
+    | "skipped_metadata_intent"
+    | "skipped_no_sql_objects";
+  missingObjects: string[];
+  triggerSource: SqlCoverageTriggerSource;
+  usedObjects: string[];
+}
 
 export interface SqlDraft {
   provider: string;
@@ -51,6 +80,7 @@ export interface SqlDraft {
   promptTemplate?: PromptTemplateTraceEvidence;
   retryCount?: number;
   semanticIntent?: SqlSemanticIntent;
+  coverage?: SqlEvidenceCoverage;
 }
 
 @Injectable()
@@ -149,7 +179,7 @@ export class SqlGenerationService {
     return this.promptBuilder.build(
       question,
       selection?.datasourceType,
-      selection?.selectedContext,
+      this.resolveSelectedContext(selection),
       {
         templateOverlay,
         semanticGuardrail: {
@@ -159,6 +189,12 @@ export class SqlGenerationService {
         semanticContextPack: selection?.semanticContextPack
       }
     );
+  }
+
+  private resolveSelectedContext(
+    selection?: SqlGenerationSelection
+  ): RagRetrievalChunkPayload[] | undefined {
+    return selection?.selectedContext ?? selection?.selected_context;
   }
 
   private async finalizeWithSemanticGuardrails(input: {
@@ -182,6 +218,22 @@ export class SqlGenerationService {
           extracted.sql
         );
         if (validation.valid) {
+          const coverage = this.validateEvidenceCoverage({
+            sql: extracted.sql,
+            semanticIntent: input.semanticIntent,
+            selection: input.selection
+          });
+          if (!coverage.valid) {
+            throw new DomainError(
+              "LLM_SQL_EVIDENCE_COVERAGE_FAILED",
+              "SQL 证据覆盖校验失败，已阻止不具备证据覆盖的 SQL 输出。",
+              422,
+              {
+                reason: coverage.reason,
+                coverage: coverage.evidence
+              }
+            );
+          }
           return {
             provider: completion.provider,
             model: completion.model,
@@ -192,7 +244,8 @@ export class SqlGenerationService {
             prompt,
             promptTemplate: input.promptTemplate,
             retryCount,
-            semanticIntent: input.semanticIntent
+            semanticIntent: input.semanticIntent,
+            coverage: coverage.evidence
           };
         }
 
@@ -289,6 +342,421 @@ export class SqlGenerationService {
       };
     }
     return { valid: true };
+  }
+
+  private validateEvidenceCoverage(input: {
+    sql: string;
+    semanticIntent: SqlSemanticIntent;
+    selection: SqlGenerationSelection | undefined;
+  }): {
+    valid: boolean;
+    reason?: string;
+    evidence: SqlEvidenceCoverage;
+  } {
+    if (input.semanticIntent === "metadata") {
+      return {
+        valid: true,
+        evidence: {
+          gateStatus: "skipped_metadata_intent",
+          missingObjects: [],
+          triggerSource: "none",
+          usedObjects: []
+        }
+      };
+    }
+
+    const evidenceIndex = this.buildCoverageEvidenceIndex(input.selection);
+    const triggerSource = this.resolveCoverageTriggerSource(evidenceIndex);
+    if (!evidenceIndex.hasEvidence) {
+      return {
+        valid: true,
+        evidence: {
+          gateStatus: "skipped_no_evidence",
+          missingObjects: [],
+          triggerSource,
+          usedObjects: []
+        }
+      };
+    }
+
+    const references = this.extractSqlReferences(input.sql);
+    const usedObjects = this.unique([
+      ...Array.from(references.tables).map((table) => `table:${table}`),
+      ...Array.from(references.tableColumns).map((tableColumn) => `column:${tableColumn}`),
+      ...Array.from(references.columns).map((column) => `column:${column}`)
+    ]);
+
+    if (usedObjects.length === 0) {
+      return {
+        valid: true,
+        evidence: {
+          gateStatus: "skipped_no_sql_objects",
+          missingObjects: [],
+          triggerSource,
+          usedObjects: []
+        }
+      };
+    }
+
+    const missingObjects = this.unique([
+      ...Array.from(references.tables)
+        .filter((table) => !evidenceIndex.tables.has(table))
+        .map((table) => `table:${table}`),
+      ...Array.from(references.tableColumns)
+        .filter((tableColumn) => {
+          const column = tableColumn.split(".")[1];
+          return (
+            !evidenceIndex.tableColumns.has(tableColumn) &&
+            !evidenceIndex.columns.has(column)
+          );
+        })
+        .map((tableColumn) => `column:${tableColumn}`),
+      ...Array.from(references.columns)
+        .filter(
+          (column) =>
+            !evidenceIndex.columns.has(column) &&
+            !this.hasTableColumnFallback(evidenceIndex.tableColumns, column)
+        )
+        .map((column) => `column:${column}`)
+    ]);
+
+    if (missingObjects.length > 0) {
+      const shouldEnforceBlock =
+        evidenceIndex.hasExplicitPinning &&
+        !evidenceIndex.hasSelectedContext &&
+        !evidenceIndex.hasSemanticContext;
+      if (!shouldEnforceBlock) {
+        return {
+          valid: true,
+          evidence: {
+            gateStatus: "failed",
+            missingObjects,
+            triggerSource,
+            usedObjects
+          }
+        };
+      }
+      return {
+        valid: false,
+        reason: `missing evidence for ${missingObjects.join(", ")}`,
+        evidence: {
+          gateStatus: "failed",
+          missingObjects,
+          triggerSource,
+          usedObjects
+        }
+      };
+    }
+
+    return {
+      valid: true,
+      evidence: {
+        gateStatus: "passed",
+        missingObjects: [],
+        triggerSource,
+        usedObjects
+      }
+    };
+  }
+
+  private buildCoverageEvidenceIndex(selection?: SqlGenerationSelection): {
+    hasEvidence: boolean;
+    tables: Set<string>;
+    columns: Set<string>;
+    tableColumns: Set<string>;
+    hasSelectedContext: boolean;
+    hasSemanticContext: boolean;
+    hasExplicitPinning: boolean;
+  } {
+    const tables = new Set<string>();
+    const columns = new Set<string>();
+    const tableColumns = new Set<string>();
+    const selectedContext = this.resolveSelectedContext(selection);
+    let hasSelectedContext = false;
+    for (const chunk of selectedContext ?? []) {
+      const chunkTables = (chunk.metadata.tableNames ?? [])
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item));
+      const chunkColumns = (chunk.metadata.columnNames ?? [])
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item));
+      if (chunkTables.length > 0 || chunkColumns.length > 0) {
+        hasSelectedContext = true;
+      }
+      for (const table of chunkTables) {
+        tables.add(table);
+      }
+      for (const column of chunkColumns) {
+        columns.add(column);
+      }
+      if (chunkTables.length === 1) {
+        const table = chunkTables[0];
+        for (const column of chunkColumns) {
+          tableColumns.add(`${table}.${column}`);
+        }
+      }
+    }
+
+    const semanticEvidence = this.extractSemanticEvidence(selection?.semanticContextPack);
+    for (const table of semanticEvidence.tables) {
+      tables.add(table);
+    }
+    for (const column of semanticEvidence.columns) {
+      columns.add(column);
+    }
+    for (const tableColumn of semanticEvidence.tableColumns) {
+      tableColumns.add(tableColumn);
+    }
+
+    const explicitPinning = selection?.explicitPinning;
+    const explicitTables = (explicitPinning?.tables ?? [])
+      .map((item) => this.normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item));
+    const explicitColumns = (explicitPinning?.columns ?? [])
+      .map((item) => this.normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item));
+    const hasExplicitPinning = explicitTables.length > 0 || explicitColumns.length > 0;
+    for (const table of explicitTables) {
+      tables.add(table);
+    }
+    for (const column of explicitColumns) {
+      columns.add(column);
+      if (column.includes(".")) {
+        const [table, field] = column.split(".");
+        if (table && field) {
+          tables.add(table);
+          columns.add(field);
+          tableColumns.add(`${table}.${field}`);
+        }
+      }
+    }
+
+    return {
+      hasEvidence: hasSelectedContext || semanticEvidence.hasSemanticContext || hasExplicitPinning,
+      tables,
+      columns,
+      tableColumns,
+      hasSelectedContext,
+      hasSemanticContext: semanticEvidence.hasSemanticContext,
+      hasExplicitPinning
+    };
+  }
+
+  private extractSemanticEvidence(contextPack?: RagContextPack): {
+    hasSemanticContext: boolean;
+    tables: Set<string>;
+    columns: Set<string>;
+    tableColumns: Set<string>;
+  } {
+    const tables = new Set<string>();
+    const columns = new Set<string>();
+    const tableColumns = new Set<string>();
+    if (!contextPack || contextPack.status === "degraded") {
+      return {
+        hasSemanticContext: false,
+        tables,
+        columns,
+        tableColumns
+      };
+    }
+
+    const contextPackCompat = contextPack as RagContextPack & {
+      semanticBindings?: RagContextPack["semantic_bindings"];
+      instructionSets?: RagContextPack["instruction_sets"];
+    };
+    const semanticBindingsRecord = (contextPack.semantic_bindings ??
+      contextPackCompat.semanticBindings) as unknown as
+      | Record<string, unknown>
+      | undefined;
+    const instructionSetsRecord = (contextPack.instruction_sets ??
+      contextPackCompat.instructionSets) as unknown as
+      | Record<string, unknown>
+      | undefined;
+    const candidates = this.unique([
+      ...this.readStringArray(semanticBindingsRecord?.model_keys),
+      ...this.readStringArray(semanticBindingsRecord?.relationship_keys),
+      ...this.readStringArray(semanticBindingsRecord?.metric_keys),
+      ...this.readStringArray(semanticBindingsRecord?.calculated_field_keys),
+      ...this.readStringArray(instructionSetsRecord?.model_bindings),
+      ...this.readStringArray(instructionSetsRecord?.relationship_bindings),
+      ...this.readStringArray(instructionSetsRecord?.metric_bindings),
+      ...this.readStringArray(instructionSetsRecord?.calculated_field_bindings)
+    ]);
+
+    for (const candidate of candidates) {
+      for (const pair of this.extractQualifiedPairs(candidate)) {
+        tables.add(pair.table);
+        columns.add(pair.column);
+        tableColumns.add(`${pair.table}.${pair.column}`);
+      }
+      const modelMatch = /(?:^|[^\w])(model|table)[.:]([a-zA-Z_][\w$]*)/i.exec(candidate);
+      if (modelMatch?.[2]) {
+        const table = this.normalizeIdentifier(modelMatch[2]);
+        if (table) {
+          tables.add(table);
+        }
+      }
+    }
+
+    return {
+      hasSemanticContext: candidates.length > 0,
+      tables,
+      columns,
+      tableColumns
+    };
+  }
+
+  private resolveCoverageTriggerSource(input: {
+    hasSelectedContext: boolean;
+    hasSemanticContext: boolean;
+    hasExplicitPinning: boolean;
+  }): SqlCoverageTriggerSource {
+    if (input.hasExplicitPinning) {
+      return "explicit_pinning";
+    }
+    if (input.hasSelectedContext) {
+      return "selected_context";
+    }
+    if (input.hasSemanticContext) {
+      return "semantic_context";
+    }
+    return "none";
+  }
+
+  private extractSqlReferences(sql: string): {
+    tables: Set<string>;
+    columns: Set<string>;
+    tableColumns: Set<string>;
+  } {
+    const tables = new Set<string>();
+    const columns = new Set<string>();
+    const tableColumns = new Set<string>();
+    const cteNames = new Set<string>();
+    const cteRegex = new RegExp(SQL_CTE_REGEX.source, "gi");
+    for (const match of sql.matchAll(cteRegex)) {
+      const cteName = this.normalizeIdentifier(match[1]);
+      if (cteName) {
+        cteNames.add(cteName);
+      }
+    }
+
+    const tableRegex = new RegExp(SQL_TABLE_REF_REGEX.source, "gi");
+    for (const match of sql.matchAll(tableRegex)) {
+      const table = this.normalizeIdentifier(match[1]);
+      if (!table || cteNames.has(table)) {
+        continue;
+      }
+      tables.add(table);
+    }
+
+    const qualifiedRegex = new RegExp(SQL_QUALIFIED_COLUMN_REGEX.source, "gi");
+    for (const match of sql.matchAll(qualifiedRegex)) {
+      const table = this.normalizeIdentifier(match[1]);
+      const column = this.normalizeIdentifier(match[2]);
+      if (!table || !column) {
+        continue;
+      }
+      if (!cteNames.has(table)) {
+        tables.add(table);
+      }
+      columns.add(column);
+      tableColumns.add(`${table}.${column}`);
+    }
+
+    for (const column of this.extractSimpleSelectColumns(sql)) {
+      columns.add(column);
+    }
+
+    return { tables, columns, tableColumns };
+  }
+
+  private extractSimpleSelectColumns(sql: string): string[] {
+    const selectMatch = /\bselect\b([\s\S]*?)\bfrom\b/i.exec(sql);
+    if (!selectMatch?.[1]) {
+      return [];
+    }
+    const chunks = selectMatch[1].split(",");
+    const parsed: string[] = [];
+    for (const chunk of chunks) {
+      let candidate = chunk.trim();
+      if (!candidate || candidate === "*") {
+        continue;
+      }
+      if (candidate.includes(".") || candidate.includes("(")) {
+        continue;
+      }
+      candidate = candidate.replace(/\bas\s+[a-zA-Z_][\w$]*$/i, "").trim();
+      candidate = candidate.replace(/^distinct\s+/i, "").trim();
+      const match = /^([a-zA-Z_][\w$]*)/.exec(candidate);
+      if (!match?.[1]) {
+        continue;
+      }
+      const normalized = this.normalizeIdentifier(match[1]);
+      if (normalized) {
+        parsed.push(normalized);
+      }
+    }
+    return this.unique(parsed);
+  }
+
+  private extractQualifiedPairs(value: string): Array<{ table: string; column: string }> {
+    const normalized = value.replace(/->/g, " ").replace(/:/g, " ");
+    const regex = new RegExp(SQL_QUALIFIED_COLUMN_REGEX.source, "gi");
+    const pairs: Array<{ table: string; column: string }> = [];
+    for (const match of normalized.matchAll(regex)) {
+      const table = this.normalizeIdentifier(match[1]);
+      const column = this.normalizeIdentifier(match[2]);
+      if (!table || !column) {
+        continue;
+      }
+      if (["model", "table", "metric", "relationship", "calculated"].includes(table)) {
+        continue;
+      }
+      pairs.push({ table, column });
+    }
+    return pairs;
+  }
+
+  private normalizeIdentifier(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = value
+      .trim()
+      .replace(/^[`"'[\]]+|[`"'[\]]+$/g, "")
+      .replace(/\s+/g, "");
+    if (!normalized) {
+      return undefined;
+    }
+    const token = normalized.includes(".")
+      ? normalized.split(".").at(-1)
+      : normalized;
+    return token?.toLowerCase();
+  }
+
+  private hasTableColumnFallback(
+    tableColumns: Set<string>,
+    column: string
+  ): boolean {
+    for (const tableColumn of tableColumns) {
+      if (tableColumn.endsWith(`.${column}`)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item): item is string => item.length > 0);
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values));
   }
 
   private async resolvePromptTemplate(selection?: {

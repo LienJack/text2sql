@@ -145,6 +145,9 @@ describe("DataSourcesPage modeling setup wizard", () => {
         id: "rel-orders-customers",
         name: "orders.customer_id = customers.id",
         confidence: 0.92,
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        reason: "foreign_key_constraint",
         left: { dataset: "analytics", table: "orders", column: "customer_id" },
         right: { dataset: "analytics", table: "customers", column: "id" }
       }
@@ -255,5 +258,152 @@ describe("DataSourcesPage modeling setup wizard", () => {
     await waitFor(() => {
       expect(mockListModelingSetupTables).toHaveBeenCalledWith("ws-existing", "mysql_main");
     });
+  });
+
+  it("shows relationship card metadata with cardinality/source/bridge/confidence", async () => {
+    const user = userEvent.setup();
+    await createDatasourceAndOpenSetupWizard(user);
+
+    await user.click(screen.getByRole("button", { name: "下一步：确认关系" }));
+
+    expect(await screen.findByText("orders.customer_id = customers.id")).toBeInTheDocument();
+    expect(screen.getByText("1:N")).toBeInTheDocument();
+    expect(screen.getByText("FK")).toBeInTheDocument();
+    expect(
+      screen.getByText("Bridge: analytics.orders.customer_id = analytics.customers.id")
+    ).toBeInTheDocument();
+    expect(screen.getByText("置信度 92%")).toBeInTheDocument();
+  });
+
+  it("preserves existing suggestion selection and auto-selects newly added suggestions", async () => {
+    const user = userEvent.setup();
+    mockRecommendModelingSetupRelationships
+      .mockResolvedValueOnce([
+        {
+          id: "rel-orders-customers",
+          name: "orders.customer_id = customers.id",
+          confidence: 0.92,
+          type: "many-to-one",
+          cardinality: "many-to-one",
+          reason: "foreign_key_constraint",
+          left: { dataset: "analytics", table: "orders", column: "customer_id" },
+          right: { dataset: "analytics", table: "customers", column: "id" }
+        },
+        {
+          id: "rel-orders-users",
+          name: "orders.user_id = users.id",
+          confidence: 0.88,
+          type: "many-to-one",
+          cardinality: "many-to-one",
+          reason: "fk_naming_suffix",
+          left: { dataset: "analytics", table: "orders", column: "user_id" },
+          right: { dataset: "analytics", table: "users", column: "id" }
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "rel-orders-customers",
+          name: "orders.customer_id = customers.id",
+          confidence: 0.92,
+          type: "many-to-one",
+          cardinality: "many-to-one",
+          reason: "foreign_key_constraint",
+          left: { dataset: "analytics", table: "orders", column: "customer_id" },
+          right: { dataset: "analytics", table: "customers", column: "id" }
+        },
+        {
+          id: "rel-orders-users",
+          name: "orders.user_id = users.id",
+          confidence: 0.88,
+          type: "many-to-one",
+          cardinality: "many-to-one",
+          reason: "fk_naming_suffix",
+          left: { dataset: "analytics", table: "orders", column: "user_id" },
+          right: { dataset: "analytics", table: "users", column: "id" }
+        },
+        {
+          id: "rel-orders-regions",
+          name: "orders.region_id = regions.id",
+          confidence: 0.81,
+          type: "many-to-one",
+          cardinality: "many-to-one",
+          reason: "fk_naming_suffix",
+          left: { dataset: "analytics", table: "orders", column: "region_id" },
+          right: { dataset: "analytics", table: "regions", column: "id" }
+        }
+      ]);
+
+    await createDatasourceAndOpenSetupWizard(user);
+    await user.click(screen.getByRole("button", { name: "下一步：确认关系" }));
+
+    const preservedCheckbox = await screen.findByRole("checkbox", {
+      name: "选择关系建议 orders.user_id = users.id"
+    });
+    expect(preservedCheckbox).toBeChecked();
+    await user.click(preservedCheckbox);
+    expect(preservedCheckbox).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "上一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步：确认关系" }));
+
+    const customersCheckbox = await screen.findByRole("checkbox", {
+      name: "选择关系建议 orders.customer_id = customers.id"
+    });
+    const usersCheckbox = screen.getByRole("checkbox", {
+      name: "选择关系建议 orders.user_id = users.id"
+    });
+    const regionsCheckbox = screen.getByRole("checkbox", {
+      name: "选择关系建议 orders.region_id = regions.id"
+    });
+
+    expect(customersCheckbox).toBeChecked();
+    expect(usersCheckbox).not.toBeChecked();
+    expect(regionsCheckbox).toBeChecked();
+  });
+
+  it("keeps select-all and clear-all behavior on relationship step", async () => {
+    const user = userEvent.setup();
+    mockRecommendModelingSetupRelationships.mockResolvedValueOnce([
+      {
+        id: "rel-orders-customers",
+        name: "orders.customer_id = customers.id",
+        confidence: 0.92,
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        reason: "foreign_key_constraint",
+        left: { dataset: "analytics", table: "orders", column: "customer_id" },
+        right: { dataset: "analytics", table: "customers", column: "id" }
+      },
+      {
+        id: "rel-orders-users",
+        name: "orders.user_id = users.id",
+        confidence: 0.88,
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        reason: "fk_naming_suffix",
+        left: { dataset: "analytics", table: "orders", column: "user_id" },
+        right: { dataset: "analytics", table: "users", column: "id" }
+      }
+    ]);
+
+    await createDatasourceAndOpenSetupWizard(user);
+    await user.click(screen.getByRole("button", { name: "下一步：确认关系" }));
+
+    const checkboxA = await screen.findByRole("checkbox", {
+      name: "选择关系建议 orders.customer_id = customers.id"
+    });
+    const checkboxB = screen.getByRole("checkbox", {
+      name: "选择关系建议 orders.user_id = users.id"
+    });
+    expect(checkboxA).toBeChecked();
+    expect(checkboxB).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "全不选" }));
+    expect(checkboxA).not.toBeChecked();
+    expect(checkboxB).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "全选" }));
+    expect(checkboxA).toBeChecked();
+    expect(checkboxB).toBeChecked();
   });
 });

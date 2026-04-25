@@ -75,7 +75,39 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>;
 }
 
-export interface ClarificationPrompt {
+export type ClarificationDecision = "continue" | "clarify";
+export type ClarificationTriggerPath = "rule" | "semantic" | "hybrid";
+export type ClarificationConfidenceLevel = "high" | "medium" | "low";
+export type ClarificationDecisionSource =
+  | "rule"
+  | "metadata-intent"
+  | "sql-write-intent"
+  | "short-input-fallback"
+  | "exception-fallback"
+  | (string & {});
+export type ClarificationSlotKey =
+  | "subject"
+  | "metric"
+  | "time"
+  | "dimension"
+  | "filter"
+  | (string & {});
+
+export interface ClarificationDecisionEvidence {
+  decision?: ClarificationDecision;
+  triggerPath?: ClarificationTriggerPath;
+  decisionSource?: ClarificationDecisionSource;
+  bypassed?: boolean;
+  bypassReasonCode?: string;
+  confidenceLevel?: ClarificationConfidenceLevel;
+  missingCriticalSlots?: ClarificationSlotKey[];
+  conflictDetected?: boolean;
+  reasonCodes?: string[];
+  question?: string;
+  reason?: string;
+}
+
+export interface ClarificationPrompt extends ClarificationDecisionEvidence {
   question: string;
   reason: string;
 }
@@ -97,7 +129,16 @@ export interface ContextEnvelope {
   entityMappings?: ContextEnvelopeEntityMapping[];
   mustIncludeTables?: string[];
   mustExcludeTables?: string[];
+  pinnedTables?: string[];
+  pinnedColumns?: string[];
   businessConstraints?: string[];
+}
+
+export interface ContextEnvelopePinningEvidence {
+  enabled: boolean;
+  status: "applied" | "inactive";
+  candidateFilteredCount?: number;
+  selectedContextFilteredCount?: number;
 }
 
 export interface SendMessageRequest {
@@ -163,11 +204,14 @@ export interface ExecutionTrace {
       entityMappingCount: number;
       includeTableCount: number;
       excludeTableCount: number;
+      pinnedTableCount?: number;
+      pinnedColumnCount?: number;
       businessConstraintCount: number;
     };
     retrievalContext?: {
       status?: "ready" | "degraded";
       selectedContextCount?: number;
+      pinning?: ContextEnvelopePinningEvidence;
     };
   };
   conflictHint?: {
@@ -175,6 +219,7 @@ export interface ExecutionTrace {
     preferredSource: "user_explicit";
     reasonCodes?: string[];
   };
+  clarificationDecision?: ClarificationDecisionEvidence;
 }
 
 export interface LlmRawOutput {
@@ -234,11 +279,14 @@ export interface DeliveryEvidenceLayer {
       entityMappingCount: number;
       includeTableCount: number;
       excludeTableCount: number;
+      pinnedTableCount?: number;
+      pinnedColumnCount?: number;
       businessConstraintCount: number;
     };
     retrievalContext?: {
       status?: "ready" | "degraded";
       selectedContextCount?: number;
+      pinning?: ContextEnvelopePinningEvidence;
     };
   };
   conflictHint?: {
@@ -246,6 +294,7 @@ export interface DeliveryEvidenceLayer {
     preferredSource: "user_explicit";
     reasonCodes?: string[];
   };
+  clarificationDecision?: ClarificationDecisionEvidence;
   evidenceStale?: boolean;
 }
 

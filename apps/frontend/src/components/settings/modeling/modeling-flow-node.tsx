@@ -60,6 +60,7 @@ export type ModelingFlowNodeData = {
   columnDisplayMeta?: ModelingFlowColumnDisplayMeta[];
   relationshipDisplayMeta?: ModelingFlowRelationshipDisplayMeta[];
   relationshipActionIds?: Array<string | null>;
+  highlightedRelationshipIds?: string[];
   actionsDisabled?: boolean;
   onNodeAction?: (action: ModelingFlowNodeAction) => void;
 };
@@ -165,6 +166,11 @@ export function ModelingFlowNode({
     }
     nodeData.onNodeAction?.(action);
   };
+  const highlightedRelationshipIdSet = new Set(
+    (nodeData.highlightedRelationshipIds ?? [])
+      .map((relationshipId) => relationshipId.trim())
+      .filter((relationshipId) => relationshipId.length > 0)
+  );
 
   return (
     <div
@@ -369,8 +375,20 @@ export function ModelingFlowNode({
                         return (
                           <li
                             key={`${section.key}-${item}-${index}`}
-                            className="relative truncate px-2 py-1 text-[15px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]"
+                            className={cn(
+                              "relative truncate px-2 py-1 text-[15px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
+                              hasRelationshipActionEntry &&
+                                highlightedRelationshipIdSet.has(relationshipActionId as string)
+                                ? "bg-[var(--action-primary)]/10 ring-1 ring-inset ring-[var(--action-primary)]/30"
+                                : ""
+                            )}
                             title={title}
+                            data-relationship-highlighted={
+                              hasRelationshipActionEntry &&
+                              highlightedRelationshipIdSet.has(relationshipActionId as string)
+                                ? "true"
+                                : "false"
+                            }
                           >
                             {hasRelationshipActionEntry ? (
                               <>

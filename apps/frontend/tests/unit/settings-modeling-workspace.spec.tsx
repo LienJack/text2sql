@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ModelingWorkspacePage from "@/app/settings/modeling/page";
 import { ModelingCalculatedFieldEditor } from "@/components/settings/modeling/modeling-calculated-field-editor";
 import {
@@ -11,6 +11,7 @@ import {
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces,
   precheckWorkspaceModelingDeploy,
+  recommendModelingSetupRelationships,
   upsertWorkspaceModelingGraph
 } from "@/lib/admin-api-client";
 
@@ -130,6 +131,7 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
     getWorkspaceModelingPreview: vi.fn(),
     getWorkspaceModelingGraph: vi.fn(),
     precheckWorkspaceModelingDeploy: vi.fn(),
+    recommendModelingSetupRelationships: vi.fn(),
     upsertWorkspaceModelingGraph: vi.fn()
   };
 });
@@ -142,7 +144,10 @@ const mockListWorkspaceDatasourceTablePermissions = vi.mocked(
 const mockGetWorkspaceModelingPreview = vi.mocked(getWorkspaceModelingPreview);
 const mockGetWorkspaceModelingGraph = vi.mocked(getWorkspaceModelingGraph);
 const mockPrecheckWorkspaceModelingDeploy = vi.mocked(precheckWorkspaceModelingDeploy);
+const mockRecommendModelingSetupRelationships = vi.mocked(recommendModelingSetupRelationships);
 const mockUpsertWorkspaceModelingGraph = vi.mocked(upsertWorkspaceModelingGraph);
+const originalShowSchemaDeployPanels =
+  process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS;
 
 async function waitForWorkspaceDatasourceReady(): Promise<void> {
   await waitFor(() => {
@@ -153,6 +158,7 @@ async function waitForWorkspaceDatasourceReady(): Promise<void> {
 
 describe("ModelingWorkspacePage", () => {
   beforeEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = "true";
     vi.clearAllMocks();
     window.history.replaceState(
       {},
@@ -257,6 +263,7 @@ describe("ModelingWorkspacePage", () => {
         unresolvedSchemaChangeIds: []
       }
     });
+    mockRecommendModelingSetupRelationships.mockResolvedValue([]);
 
     mockUpsertWorkspaceModelingGraph.mockImplementation(async (workspaceId, datasourceId, input) => ({
       workspaceId,
@@ -276,6 +283,426 @@ describe("ModelingWorkspacePage", () => {
         }
       }
     }));
+  });
+
+  it("bootstraps recommendations once when draft has models but no relationships", async () => {
+    const user = userEvent.setup();
+    mockRecommendModelingSetupRelationships.mockResolvedValueOnce([
+      {
+        id: "rel-orders-customers",
+        name: "orders.customer_id -> customers.id",
+        confidence: 0.96,
+        reason: "foreign_key_constraint",
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        left: {
+          dataset: "analytics",
+          table: "orders",
+          column: "customer_id"
+        },
+        right: {
+          dataset: "analytics",
+          table: "customers",
+          column: "id"
+        }
+      }
+    ]);
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await waitFor(() => {
+      expect(mockRecommendModelingSetupRelationships).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        selectedTables: ["orders"]
+      });
+    });
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          relationships: [
+            expect.objectContaining({
+              id: "rel-orders-customers",
+              source: "fk",
+              bridge: expect.objectContaining({
+                operator: "eq"
+              })
+            })
+          ]
+        })
+      );
+    });
+    expect(
+      await screen.findByText("已自动补全 1 条关系（跳过 0 条）。")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "trigger-node-action-add-calculated-field" }));
+    await waitFor(() => {
+      expect(mockRecommendModelingSetupRelationships).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS = originalShowSchemaDeployPanels;
+  });
+
+  it("does not auto-bootstrap when draft already has relationships", async () => {
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-with-relationships",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.customers",
+              tableName: "customers",
+              modelName: "customers",
+              displayName: "Customers",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-orders-customers",
+              source: "manual",
+              confidence: 0.9,
+              bridge: {
+                left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                right: { dataset: "analytics", table: "customers", column: "id" },
+                operator: "eq",
+                confidence: 0.9
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    expect(await screen.findByText("orders.customer_id = customers.id")).toBeInTheDocument();
+    expect(mockRecommendModelingSetupRelationships).not.toHaveBeenCalled();
+  });
+
+  it("syncs database non-destructively and keeps manual reverse relationship unchanged", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-manual-reverse",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.customers",
+              tableName: "customers",
+              modelName: "customers",
+              displayName: "Customers",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.regions",
+              tableName: "regions",
+              modelName: "regions",
+              displayName: "Regions",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-manual-customers-orders",
+              source: "manual",
+              confidence: 0.91,
+              bridge: {
+                left: { dataset: "analytics", table: "customers", column: "id" },
+                right: { dataset: "analytics", table: "orders", column: "customer_id" },
+                operator: "eq",
+                confidence: 0.91
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+    mockRecommendModelingSetupRelationships.mockResolvedValueOnce([
+      {
+        id: "rel-orders-customers-recommended",
+        name: "orders.customer_id -> customers.id",
+        confidence: 0.95,
+        reason: "foreign_key_constraint",
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        left: {
+          dataset: "analytics",
+          table: "orders",
+          column: "customer_id"
+        },
+        right: {
+          dataset: "analytics",
+          table: "customers",
+          column: "id"
+        }
+      },
+      {
+        id: "rel-orders-regions",
+        name: "orders.region_id -> regions.id",
+        confidence: 0.84,
+        reason: "name_inference",
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        left: {
+          dataset: "analytics",
+          table: "orders",
+          column: "region_id"
+        },
+        right: {
+          dataset: "analytics",
+          table: "regions",
+          column: "id"
+        }
+      }
+    ]);
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "同步数据库" }));
+
+    await waitFor(() => {
+      expect(mockRecommendModelingSetupRelationships).toHaveBeenCalledWith("ws-2", "ds-2b", {
+        selectedTables: ["customers", "orders", "regions"]
+      });
+    });
+    await waitFor(() => {
+      expect(mockUpsertWorkspaceModelingGraph).toHaveBeenCalledWith(
+        "ws-2",
+        "ds-2b",
+        expect.objectContaining({
+          relationships: [
+            expect.objectContaining({
+              id: "rel-manual-customers-orders",
+              source: "manual",
+              bridge: expect.objectContaining({
+                left: expect.objectContaining({
+                  table: "customers",
+                  column: "id"
+                }),
+                right: expect.objectContaining({
+                  table: "orders",
+                  column: "customer_id"
+                }),
+                operator: "eq"
+              })
+            }),
+            expect.objectContaining({
+              id: "rel-orders-regions",
+              source: "inferred"
+            })
+          ]
+        })
+      );
+    });
+    expect(await screen.findByText("同步数据库完成：新增 1 条，跳过 1 条。")).toBeInTheDocument();
+    expect(screen.getByText("customers.id = orders.customer_id")).toBeInTheDocument();
+    expect(screen.getByText("orders.region_id = regions.id")).toBeInTheDocument();
+  });
+
+  it("shows no-op feedback and skips save when sync finds no missing relationships", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 1,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-sync-noop",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.customers",
+              tableName: "customers",
+              modelName: "customers",
+              displayName: "Customers",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-orders-customers",
+              source: "manual",
+              confidence: 0.9,
+              bridge: {
+                left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                right: { dataset: "analytics", table: "customers", column: "id" },
+                operator: "eq",
+                confidence: 0.9
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+    mockRecommendModelingSetupRelationships.mockResolvedValueOnce([
+      {
+        id: "rel-orders-customers-recommended",
+        name: "orders.customer_id -> customers.id",
+        confidence: 0.95,
+        reason: "foreign_key_constraint",
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        left: {
+          dataset: "analytics",
+          table: "orders",
+          column: "customer_id"
+        },
+        right: {
+          dataset: "analytics",
+          table: "customers",
+          column: "id"
+        }
+      }
+    ]);
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "同步数据库" }));
+
+    expect(
+      await screen.findByText("同步数据库完成：无新增关系（跳过 1 条）。")
+    ).toBeInTheDocument();
+    expect(mockUpsertWorkspaceModelingGraph).not.toHaveBeenCalled();
+  });
+
+  it("keeps graph/pending state unchanged when sync save fails", async () => {
+    const user = userEvent.setup();
+    mockGetWorkspaceModelingGraph.mockResolvedValueOnce({
+      workspaceId: "ws-2",
+      datasourceId: "ds-2b",
+      activeRevision: 2,
+      draft: {
+        policyVersion: 7,
+        revision: 2,
+        graphHash: "hash-r2-sync-fail",
+        updatedAt: "2026-04-23T00:00:00.000Z",
+        graphPayload: {
+          models: [
+            {
+              id: "model.orders",
+              tableName: "orders",
+              modelName: "orders",
+              displayName: "Orders",
+              description: null,
+              columns: []
+            },
+            {
+              id: "model.regions",
+              tableName: "regions",
+              modelName: "regions",
+              displayName: "Regions",
+              description: null,
+              columns: []
+            }
+          ],
+          relationships: [
+            {
+              id: "rel-orders-customers",
+              source: "manual",
+              confidence: 0.9,
+              bridge: {
+                left: { dataset: "analytics", table: "orders", column: "customer_id" },
+                right: { dataset: "analytics", table: "customers", column: "id" },
+                operator: "eq",
+                confidence: 0.9
+              }
+            }
+          ],
+          calculatedFields: [],
+          views: [],
+          schemaChanges: []
+        }
+      }
+    });
+    mockRecommendModelingSetupRelationships.mockResolvedValueOnce([
+      {
+        id: "rel-orders-regions",
+        name: "orders.region_id -> regions.id",
+        confidence: 0.84,
+        reason: "name_inference",
+        type: "many-to-one",
+        cardinality: "many-to-one",
+        left: {
+          dataset: "analytics",
+          table: "orders",
+          column: "region_id"
+        },
+        right: {
+          dataset: "analytics",
+          table: "regions",
+          column: "id"
+        }
+      }
+    ]);
+    mockUpsertWorkspaceModelingGraph.mockRejectedValueOnce(new Error("sync save failed"));
+
+    render(<ModelingWorkspacePage />);
+
+    await waitForWorkspaceDatasourceReady();
+    await user.click(screen.getByRole("button", { name: "同步数据库" }));
+
+    expect(await screen.findByText("sync save failed")).toBeInTheDocument();
+    expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent("Deploy State synced");
+    expect(screen.queryByText("orders.region_id = regions.id")).not.toBeInTheDocument();
   });
 
   it("updates model metadata in workspace and saves via modeling graph upsert", async () => {

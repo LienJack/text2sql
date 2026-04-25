@@ -1,5 +1,6 @@
 import { access, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import yaml from "js-yaml";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
@@ -70,7 +71,7 @@ describe("stage1 acceptance", () => {
 
     for (const item of parsed.cases) {
       const run = await graph.run({
-        runId: `stage1-${item.id}`,
+        runId: randomUUID(),
         sessionId: "stage1",
         question: item.question,
         datasourceId: "sqlite_main",

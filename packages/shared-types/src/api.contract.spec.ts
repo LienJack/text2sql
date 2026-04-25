@@ -1,6 +1,8 @@
 import type {
   AgentRunResponse,
   ChatStreamEvent,
+  ClarificationPrompt,
+  ContextEnvelopePinningEvidence,
   ContextEnvelope,
   CreatePromptTemplateRequest,
   DeletePromptTemplateResponse,
@@ -74,6 +76,8 @@ const contextEnvelopeSample: ContextEnvelope = {
   ],
   mustIncludeTables: ["orders", "refunds"],
   mustExcludeTables: ["internal_audit_logs"],
+  pinnedTables: ["orders"],
+  pinnedColumns: ["amount"],
   businessConstraints: ["仅统计已支付订单"]
 };
 
@@ -84,6 +88,19 @@ const sendMessageRequestWithEnvelopeSample: SendMessageRequest = {
 
 const sendMessageRequestLegacySample: SendMessageRequest = {
   message: "统计订单状态分布"
+};
+
+const clarificationPromptSample: ClarificationPrompt = {
+  question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
+  reason: "关键槽位缺失：时间范围",
+  decision: "clarify",
+  triggerPath: "rule",
+  decisionSource: "rule",
+  bypassed: false,
+  confidenceLevel: "low",
+  missingCriticalSlots: ["time"],
+  conflictDetected: false,
+  reasonCodes: ["missing_time_slot"]
 };
 
 const updatePromptTemplateRequestSample: UpdatePromptTemplateRequest = {
@@ -128,16 +145,36 @@ const deliverySample: DeliveryContract = {
         entityMappingCount: 1,
         includeTableCount: 1,
         excludeTableCount: 0,
+        pinnedTableCount: 1,
+        pinnedColumnCount: 1,
         businessConstraintCount: 1
       },
       retrievalContext: {
         status: "ready",
-        selectedContextCount: 1
+        selectedContextCount: 1,
+        pinning: {
+          enabled: true,
+          status: "applied",
+          candidateFilteredCount: 1,
+          selectedContextFilteredCount: 0
+        }
       }
     },
     conflictHint: {
       hasConflict: false,
       preferredSource: "user_explicit"
+    },
+    clarificationDecision: {
+      decision: "clarify",
+      triggerPath: "rule",
+      decisionSource: "rule",
+      bypassed: false,
+      confidenceLevel: "low",
+      missingCriticalSlots: ["time"],
+      conflictDetected: false,
+      reasonCodes: ["missing_time_slot"],
+      question: clarificationPromptSample.question,
+      reason: clarificationPromptSample.reason
     }
   },
   artifact: {
@@ -303,6 +340,51 @@ type DeliveryConflictHintPreferredSourceShape = Expect<
     NonNullable<NonNullable<DeliveryContract["evidence"]>["conflictHint"]>["preferredSource"]
   >
 >;
+type ClarificationPromptDecisionShape = Expect<
+  IsAssignable<"clarify" | undefined, ClarificationPrompt["decision"]>
+>;
+type ClarificationPromptSlotShape = Expect<
+  IsAssignable<string[] | undefined, ClarificationPrompt["missingCriticalSlots"]>
+>;
+type ClarificationPromptBypassShape = Expect<
+  IsAssignable<boolean | undefined, ClarificationPrompt["bypassed"]>
+>;
+type ClarificationPromptDecisionSourceShape = Expect<
+  IsAssignable<string | undefined, ClarificationPrompt["decisionSource"]>
+>;
+type ClarificationPromptBypassReasonCodeShape = Expect<
+  IsAssignable<string | undefined, ClarificationPrompt["bypassReasonCode"]>
+>;
+type TraceClarificationDecisionPathShape = Expect<
+  IsAssignable<
+    "rule" | "semantic" | "hybrid" | undefined,
+    NonNullable<SqlRun["trace"]["clarificationDecision"]>["triggerPath"]
+  >
+>;
+type DeliveryClarificationDecisionConfidenceShape = Expect<
+  IsAssignable<
+    "high" | "medium" | "low" | undefined,
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+    >["confidenceLevel"]
+  >
+>;
+type DeliveryClarificationDecisionSourceShape = Expect<
+  IsAssignable<
+    string | undefined,
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+    >["decisionSource"]
+  >
+>;
+type DeliveryClarificationDecisionBypassShape = Expect<
+  IsAssignable<
+    boolean | undefined,
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+    >["bypassed"]
+  >
+>;
 type PromptTemplateCreateRequestShape = Expect<
   IsAssignable<"datasource", CreatePromptTemplateRequest["scope"]>
 >;
@@ -322,6 +404,20 @@ type ContextEnvelopeEntityMappingShape = Expect<
   IsAssignable<
     string,
     NonNullable<ContextEnvelope["entityMappings"]>[number]["entity"]
+  >
+>;
+type ContextEnvelopePinnedTablesShape = Expect<
+  IsAssignable<string[] | undefined, ContextEnvelope["pinnedTables"]>
+>;
+type ContextEnvelopePinnedColumnsShape = Expect<
+  IsAssignable<string[] | undefined, ContextEnvelope["pinnedColumns"]>
+>;
+type TracePinningEvidenceShape = Expect<
+  IsAssignable<
+    ContextEnvelopePinningEvidence | undefined,
+    NonNullable<
+      NonNullable<SqlRun["trace"]["effectiveContextSummary"]>["retrievalContext"]
+    >["pinning"]
   >
 >;
 type SendMessageRequestContextOptional = Expect<
@@ -349,6 +445,7 @@ void listPromptTemplatesResponseSample;
 void createPromptTemplateRequestSample;
 void updatePromptTemplateRequestSample;
 void deletePromptTemplateResponseSample;
+void clarificationPromptSample;
 void contextEnvelopeSample;
 void sendMessageRequestWithEnvelopeSample;
 void sendMessageRequestLegacySample;

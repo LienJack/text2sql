@@ -176,4 +176,49 @@ describe("rag rerank service", () => {
     expect(response.retrieval_bundle.reranked?.[0]?.chunk_id).toBe("chunk-b");
     expect(response.retrieval_bundle.reranked?.[0]?.secondary_score).toBeCloseTo(0.95);
   });
+
+  it("keeps retrieval column pruning evidence visible in rerank replay payload", async () => {
+    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
+      rerank: jest.fn().mockResolvedValue([])
+    };
+    const replay: Pick<RagReplayRepository, "writeReplay"> = {
+      writeReplay: jest.fn().mockResolvedValue(undefined)
+    };
+    const service = createService(adapter, replay);
+    const bundle = createBundle() as RagRetrievalBundle & {
+      column_pruning?: Record<string, unknown>;
+    };
+    bundle.column_pruning = {
+      strategy: "table_first_field_second_conservative",
+      status: "applied",
+      tables: [
+        {
+          table_name: "orders",
+          mode: "conservative"
+        }
+      ]
+    };
+
+    await service.rerank({
+      retrievalBundle: bundle,
+      secondaryMinCandidates: 10
+    });
+
+    const finalReplayCall = (replay.writeReplay as jest.Mock).mock.calls
+      .map(([payload]) => payload)
+      .find((payload) => payload.replayKey === "rerank:final") as
+      | {
+          payload?: {
+            columnPruning?: {
+              status?: string;
+              tables?: Array<{ table_name?: string; mode?: string }>;
+            };
+          };
+        }
+      | undefined;
+    expect(finalReplayCall).toBeDefined();
+    expect(finalReplayCall?.payload?.columnPruning?.status).toBe("applied");
+    expect(finalReplayCall?.payload?.columnPruning?.tables?.[0]?.table_name).toBe("orders");
+    expect(finalReplayCall?.payload?.columnPruning?.tables?.[0]?.mode).toBe("conservative");
+  });
 });
