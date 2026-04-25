@@ -309,10 +309,27 @@ function readRunStatus(value: unknown): RunStatus {
 
 function detectMetadataBypass(run: {
   status: RunStatus;
-  trace?: { steps?: unknown[] };
+  trace?: {
+    steps?: unknown[];
+    clarificationDecision?: {
+      decisionSource?: unknown;
+      bypassed?: unknown;
+      bypassReasonCode?: unknown;
+    };
+  };
 }): boolean {
   if (run.status === "clarification") {
     return false;
+  }
+  const decisionSource = run.trace?.clarificationDecision?.decisionSource;
+  const bypassed = run.trace?.clarificationDecision?.bypassed;
+  const bypassReasonCode = run.trace?.clarificationDecision?.bypassReasonCode;
+  if (
+    decisionSource === "metadata-intent" ||
+    bypassed === true ||
+    bypassReasonCode === "bypass_metadata_intent"
+  ) {
+    return true;
   }
   const generateSqlStep = findTraceStep(run, "generate-sql");
   const outputSummary = parseOutputSummary(
