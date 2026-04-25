@@ -30,15 +30,20 @@ export class AppConfigService {
 
   get sqlitePath(): string {
     const raw = this.config.get<string>("SQLITE_PATH", "data/sqlite/text2sql.db");
-    if (isAbsolute(raw)) {
-      return raw;
-    }
-    const direct = resolve(process.cwd(), raw);
-    if (existsSync(direct)) {
-      return direct;
-    }
-    const fallback = resolve(process.cwd(), "../../", raw);
-    return fallback;
+    return this.resolveConfiguredPath(raw);
+  }
+
+  get sqliteAllowedDirs(): string[] {
+    const raw = this.config.get<string>(
+      "SQLITE_ALLOWED_DIRS",
+      "data/sqlite,data/uploads/datasources"
+    );
+    const parsed = raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => this.resolveConfiguredPath(item));
+    return Array.from(new Set(parsed));
   }
 
   get redisUrl(): string {
@@ -50,14 +55,7 @@ export class AppConfigService {
       "DATASOURCE_UPLOAD_DIR",
       "data/uploads/datasources"
     );
-    if (isAbsolute(raw)) {
-      return raw;
-    }
-    const direct = resolve(process.cwd(), raw);
-    if (existsSync(direct)) {
-      return direct;
-    }
-    return resolve(process.cwd(), "../../", raw);
+    return this.resolveConfiguredPath(raw);
   }
 
   get datasourceUploadMaxBytes(): number {
@@ -274,5 +272,18 @@ export class AppConfigService {
     }
     this.logger.warn(`${key} 配置无效（${raw}），已回退默认值 ${defaultValue}。`);
     return defaultValue;
+  }
+
+  private resolveConfiguredPath(raw: string): string {
+    if (isAbsolute(raw)) {
+      return resolve(raw);
+    }
+
+    const direct = resolve(process.cwd(), raw);
+    const fallback = resolve(process.cwd(), "../../", raw);
+    if (existsSync(direct) || !existsSync(fallback)) {
+      return direct;
+    }
+    return fallback;
   }
 }

@@ -249,10 +249,10 @@ export class WorkspaceModelingService {
         datasourceId
       )
     ]);
-    const discoveredSet = new Set(tableResult.items.map((item) => item.toLowerCase()));
-    const allowedTables = permissionResult.tableNames
-      .filter((tableName) => discoveredSet.has(tableName))
-      .sort((left, right) => left.localeCompare(right));
+    const allowedTables = this.buildEffectiveAllowedTables({
+      discoveredTables: tableResult.items,
+      permissionResult
+    });
 
     return {
       stage: "table_selection_ready",
@@ -292,19 +292,34 @@ export class WorkspaceModelingService {
       datasourceId,
       body
     );
+    const replaced = await this.workspaceDatasourceService.replaceDatasourceTablePermissions(
+      actor,
+      workspaceId,
+      datasourceId,
+      {
+        policyVersion: context.policyVersion,
+        tableNames: context.selectedTables
+      },
+      this.buildSetupTablePermissionIdempotencyKey({
+        workspaceId,
+        datasourceId,
+        policyVersion: context.policyVersion,
+        selectedTables: context.selectedTables
+      })
+    );
 
     return {
       stage: "setup_tables_saved",
       workspaceId,
       datasourceId,
-      policyVersion: context.policyVersion,
+      policyVersion: replaced.policyVersion,
       selectedTableNames: context.selectedTables,
       impactSummary: {
-        beforeCount: context.selectedTables.length,
-        afterCount: context.selectedTables.length,
-        addedCount: context.selectedTables.length,
-        removedCount: 0,
-        retainedCount: context.selectedTables.length
+        beforeCount: replaced.impactSummary.beforeCount,
+        afterCount: replaced.impactSummary.afterCount,
+        addedCount: replaced.impactSummary.addedCount,
+        removedCount: replaced.impactSummary.removedCount,
+        retainedCount: replaced.impactSummary.retainedCount
       }
     };
   }
@@ -2160,7 +2175,10 @@ export class WorkspaceModelingService {
 
     const discoveredSet = new Set(tableResult.items.map((item) => item.toLowerCase()));
     const allowedSet = new Set(
-      permissionResult.tableNames.filter((tableName) => discoveredSet.has(tableName))
+      this.buildEffectiveAllowedTables({
+        discoveredTables: tableResult.items,
+        permissionResult
+      })
     );
     const selectedTables = Array.from(
       new Set(body.selectedTables.map((tableName) => normalizeTableName(tableName)))
@@ -2183,6 +2201,31 @@ export class WorkspaceModelingService {
       policyVersion: permissionResult.policyVersion,
       selectedTables: selectedTables.sort((left, right) => left.localeCompare(right))
     };
+  }
+
+  private buildEffectiveAllowedTables(input: {
+    discoveredTables: string[];
+    permissionResult: {
+      policyVersion: number;
+      tableNames: string[];
+    };
+  }): string[] {
+    const discoveredTables = input.discoveredTables.map((item) => normalizeTableName(item));
+    const discoveredSet = new Set(discoveredTables);
+    const permissionTables = input.permissionResult.tableNames
+      .map((item) => normalizeTableName(item))
+      .filter((item) => discoveredSet.has(item))
+      .sort((left, right) => left.localeCompare(right));
+
+    if (permissionTables.length > 0) {
+      return permissionTables;
+    }
+
+    if (input.permissionResult.policyVersion === 0) {
+      return [...discoveredSet].sort((left, right) => left.localeCompare(right));
+    }
+
+    return [];
   }
 
   private async loadDatasourceOrThrow(datasourceId: string): Promise<Datasource> {
@@ -2609,6 +2652,26 @@ ORDER BY kcu.table_name, kcu.column_name, ccu.table_name, ccu.column_name
       "POST",
       input.idempotencyKey
     ].join("::");
+  }
+
+  private buildSetupTablePermissionIdempotencyKey(input: {
+    workspaceId: string;
+    datasourceId: string;
+    policyVersion: number;
+    selectedTables: string[];
+  }): string {
+    const signature = createHash("sha256")
+      .update(
+        JSON.stringify({
+          workspaceId: input.workspaceId,
+          datasourceId: input.datasourceId,
+          policyVersion: input.policyVersion,
+          selectedTables: input.selectedTables
+        })
+      )
+      .digest("hex")
+      .slice(0, 24);
+    return `modeling-setup-tables-${signature}`;
   }
 
   private readCommitIdempotencyRecord(input: {

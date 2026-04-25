@@ -39,16 +39,22 @@ export class SqliteQueryService {
     }
   }
 
-  async query(sql: string): Promise<{
+  async query(
+    sql: string,
+    options?: {
+      filePath?: string;
+    }
+  ): Promise<{
     columns: string[];
     rows: Array<Record<string, unknown>>;
   }> {
     const safeSql = this.ensureSelectQuery(sql);
     const finalSql = this.withLimit(safeSql);
+    const dbPath = options?.filePath?.trim() || this.dbPath;
     try {
       const { stdout, stderr } = await execFileAsync("sqlite3", [
         "-json",
-        this.dbPath,
+        dbPath,
         finalSql
       ]);
       if (stderr?.trim()) {
@@ -68,6 +74,7 @@ export class SqliteQueryService {
         "SQLite 查询执行失败",
         400,
         {
+          dbPath,
           originalMessage: error instanceof Error ? error.message : String(error)
         }
       );

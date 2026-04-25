@@ -83,6 +83,7 @@ type WizardState = {
   uploadedDatasourceId: string;
   type: WizardType | "";
   name: string;
+  filePath: string;
   host: string;
   port: string;
   database: string;
@@ -115,6 +116,7 @@ const WIZARD_TYPES: Array<{
 }> = [
   { type: "csv", title: "本地 CSV", description: "上传 CSV 并生成可复用数据源" },
   { type: "excel", title: "本地 Excel", description: "上传 Excel 并生成可复用数据源" },
+  { type: "sqlite", title: "SQLite", description: "手动输入 SQLite 绝对路径并创建连接" },
   { type: "mysql", title: "MySQL", description: "配置连接信息并创建连接" },
   { type: "postgresql", title: "PostgreSQL", description: "配置连接信息并创建连接" }
 ];
@@ -220,6 +222,7 @@ function createEmptyWizardState(defaultWorkspaceId: string): WizardState {
     uploadedDatasourceId: "",
     type: "",
     name: "",
+    filePath: "",
     host: "127.0.0.1",
     port: "",
     database: "",
@@ -295,6 +298,22 @@ function readConfigString(config: Datasource["config"], key: string): string {
     return String(value);
   }
   return "";
+}
+
+function isFakeBrowserPath(filePath: string): boolean {
+  return /^([a-zA-Z]:)?[\\/]+fakepath[\\/]+/i.test(filePath.trim());
+}
+
+function isAbsolutePath(input: string): boolean {
+  const normalized = input.trim();
+  if (!normalized) {
+    return false;
+  }
+  return (
+    normalized.startsWith("/") ||
+    normalized.startsWith("\\\\") ||
+    /^[a-zA-Z]:[\\/]/.test(normalized)
+  );
 }
 
 function resolveWizardFailure(error: unknown): WizardFailure {
@@ -728,6 +747,7 @@ function DataSourcesPageContent() {
         uploadedDatasourceId: datasource.id,
         type: toWizardType(datasource.type),
         name: datasource.name,
+        filePath: readConfigString(datasource.config, "path"),
         host: readConfigString(datasource.config, "host"),
         port: defaultPort,
         database: readConfigString(datasource.config, "database"),
@@ -789,6 +809,22 @@ function DataSourcesPageContent() {
       return "";
     }
 
+    if (wizard.type === "sqlite") {
+      if (!wizard.name.trim()) {
+        return "请输入数据源名称";
+      }
+      if (wizard.mode === "create" && !wizard.filePath.trim()) {
+        return "请输入 SQLite 文件绝对路径";
+      }
+      if (wizard.filePath.trim() && !isAbsolutePath(wizard.filePath)) {
+        return "SQLite 路径必须是绝对路径（例如 /Users/name/data/demo.db）。";
+      }
+      if (isFakeBrowserPath(wizard.filePath)) {
+        return "检测到 fakepath，请手动输入服务可访问的真实绝对路径。";
+      }
+      return "";
+    }
+
     if (wizard.mode === "create" && (wizard.type === "csv" || wizard.type === "excel") && !wizard.file) {
       return "请先选择 CSV/Excel 文件";
     }
@@ -815,6 +851,13 @@ function DataSourcesPageContent() {
     if (wizard.mode === "create") {
       payload.type = wizard.type as DatasourceType;
       payload.shared = true;
+    }
+
+    if (wizard.type === "sqlite") {
+      const filePath = wizard.filePath.trim();
+      if (filePath) {
+        payload.filePath = filePath;
+      }
     }
 
     if (wizard.type === "mysql" || wizard.type === "postgresql") {
@@ -1180,12 +1223,16 @@ function DataSourcesPageContent() {
                       <span
                         className={cn(
                           "inline-flex h-10 w-10 items-center justify-center rounded-lg",
-                          item.type === "mysql" || item.type === "postgresql"
+                          item.type === "mysql" ||
+                            item.type === "postgresql" ||
+                            item.type === "sqlite"
                             ? "bg-blue-100 text-blue-700"
                             : "bg-emerald-100 text-emerald-700"
                         )}
                       >
-                        {item.type === "mysql" || item.type === "postgresql" ? (
+                        {item.type === "mysql" ||
+                        item.type === "postgresql" ||
+                        item.type === "sqlite" ? (
                           <Database className="h-5 w-5" />
                         ) : (
                           <FileSpreadsheet className="h-5 w-5" />
@@ -1194,7 +1241,11 @@ function DataSourcesPageContent() {
                       <div className="min-w-0">
                         <p className="text-base font-semibold text-[var(--text-primary)]">{item.title}</p>
                         <p className="text-xs text-[var(--text-tertiary)]">
-                          {item.type === "mysql" || item.type === "postgresql" ? "数据库连接" : "文件上传"}
+                          {item.type === "mysql" ||
+                          item.type === "postgresql" ||
+                          item.type === "sqlite"
+                            ? "数据库连接"
+                            : "文件上传"}
                         </p>
                       </div>
                     </div>
@@ -1224,6 +1275,26 @@ function DataSourcesPageContent() {
                           placeholder="数据源名称"
                         />
                       </label>
+
+                      {wizard.type === "sqlite" && (
+                        <label className="space-y-1 md:col-span-2">
+                          <span className="text-xs text-[var(--text-tertiary)]">
+                            SQLite 文件绝对路径
+                          </span>
+                          <Input
+                            value={wizard.filePath}
+                            onChange={(event) => patchWizard({ filePath: event.target.value })}
+                            placeholder="例如 /Users/alice/data/sqlite/chinook.db"
+                          />
+                          <p className="text-xs text-[var(--text-tertiary)]">
+                            仅支持绝对路径；路径需落在服务端允许目录（默认 `data/sqlite`、
+                            `data/uploads/datasources`）内。
+                          </p>
+                          <p className="text-xs text-[var(--text-tertiary)]">
+                            常见失败原因：路径不存在、无读取权限、路径不在白名单目录。
+                          </p>
+                        </label>
+                      )}
 
                       {(wizard.type === "mysql" || wizard.type === "postgresql") && (
                         <label className="space-y-1">
