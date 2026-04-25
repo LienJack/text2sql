@@ -14,6 +14,7 @@ import { SaveViewFromRunUsecase } from "./application/save-view-from-run.usecase
 import { SessionLifecycleUsecase } from "./application/session-lifecycle.usecase";
 import { StreamMessageUsecase } from "./application/stream-message.usecase";
 import type { SessionListView } from "./dto/list-sessions.dto";
+import type { ChatPolicyActorInput } from "./application/shared/chat-policy-guard.service";
 
 @Injectable()
 export class ChatService {
@@ -99,13 +100,15 @@ export class ChatService {
     sessionId: string,
     message: string,
     requestId?: string,
-    contextEnvelope?: ContextEnvelope
+    contextEnvelope?: ContextEnvelope,
+    actor?: ChatPolicyActorInput
   ): Promise<SqlRun> {
     return this.executeMessageUsecase.executeMessage({
       sessionId,
       message,
       requestId,
-      contextEnvelope
+      contextEnvelope,
+      actor
     });
   }
 
@@ -114,14 +117,16 @@ export class ChatService {
     message: string,
     requestId: string | undefined,
     onEvent: (event: ChatStreamEvent) => Promise<void> | void,
-    contextEnvelope?: ContextEnvelope
+    contextEnvelope?: ContextEnvelope,
+    actor?: ChatPolicyActorInput
   ): Promise<SqlRun> {
     return this.streamMessageUsecase.streamMessage({
       sessionId,
       message,
       requestId,
       onEvent,
-      contextEnvelope
+      contextEnvelope,
+      actor
     });
   }
 

@@ -1,10 +1,10 @@
 "use client";
 
 import type { KeyboardEventHandler, ReactNode } from "react";
-import { BarChart3, Code2, MessageSquare, Table2 } from "lucide-react";
+import { BarChart3, Code2, MessageSquare } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-export type ChatBIResultTabValue = "summary" | "chart" | "table" | "sql";
+export type ChatBIResultTabValue = "answer" | "chart" | "sql";
 
 interface ChatBIResultTabsProps {
   value: ChatBIResultTabValue;
@@ -21,24 +21,19 @@ interface TabDefinition {
 
 const TAB_DEFINITIONS: TabDefinition[] = [
   {
-    value: "summary",
-    label: "Summary",
+    value: "answer",
+    label: "Answer",
     icon: MessageSquare
+  },
+  {
+    value: "sql",
+    label: "View SQL",
+    icon: Code2
   },
   {
     value: "chart",
     label: "Chart",
     icon: BarChart3
-  },
-  {
-    value: "table",
-    label: "Table",
-    icon: Table2
-  },
-  {
-    value: "sql",
-    label: "SQL",
-    icon: Code2
   }
 ];
 
@@ -69,8 +64,9 @@ export function ChatBIResultTabs({
     >
       <TabsList
         variant="line"
-        aria-label="ChatBI 结果分区"
-        className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-md border border-[var(--border-default)] bg-[var(--surface-subtle)] px-1 py-1"
+        aria-label="ChatBI result partitions"
+        data-testid="chatbi-result-tablist"
+        className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-md border border-[var(--border-default)] bg-[var(--surface-subtle)] px-1 py-1 [scrollbar-width:none]"
       >
         {TAB_DEFINITIONS.map((item) => {
           const Icon = item.icon;
@@ -81,8 +77,8 @@ export function ChatBIResultTabs({
               value={item.value}
               disabled={disabled}
               onKeyDown={buildKeyboardHandler(item.value, onValueChange)}
-              aria-label={`切换到 ${item.label} 分区`}
-              className="h-8 min-w-[88px] shrink-0 justify-start gap-1.5 rounded-md px-2 text-xs sm:text-sm"
+              aria-label={`Switch to ${item.label} partition`}
+              className="h-8 min-w-[96px] shrink-0 justify-start gap-1.5 rounded-md px-2 text-xs sm:text-sm"
             >
               <Icon className="h-3.5 w-3.5" aria-hidden />
               <span>{item.label}</span>

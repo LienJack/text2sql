@@ -5,6 +5,42 @@ import { AssistantThinkingPanel } from "@/components/chat/assistant-thinking-pan
 import { createMockRun } from "./fixtures";
 
 describe("AssistantThinkingPanel", () => {
+  it("shows active step and progress in collapsed header during in-progress run", () => {
+    render(
+      <AssistantThinkingPanel
+        run={null}
+        streamSteps={[
+          {
+            node: "clarify",
+            status: "success",
+            stepId: "step-1",
+            sequence: 1,
+            lifecycle: "completed",
+            stage: "analysis",
+            at: "2026-04-10T00:00:00.000Z"
+          },
+          {
+            node: "generate-sql",
+            status: "success",
+            stepId: "step-2",
+            sequence: 2,
+            lifecycle: "running",
+            stage: "generation",
+            at: "2026-04-10T00:00:01.000Z"
+          }
+        ]}
+        inProgress
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "展开思考过程" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    expect(screen.getByText("活跃步骤：生成 SQL（进行中）")).toBeInTheDocument();
+    expect(screen.getByText(/已完成 1\/2 步/)).toBeInTheDocument();
+  });
+
   it("supports keyboard toggle with synced aria-expanded state", async () => {
     const user = userEvent.setup();
     render(
@@ -28,6 +64,7 @@ describe("AssistantThinkingPanel", () => {
 
     const trigger = screen.getByRole("button", { name: "展开思考过程" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("aria-controls");
 
     trigger.focus();
     await user.keyboard("{Enter}");
@@ -57,7 +94,7 @@ describe("AssistantThinkingPanel", () => {
     });
   });
 
-  it("auto-collapses when stream returns to in-progress", async () => {
+  it("keeps panel expanded when stream returns to in-progress for runtime visibility", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <AssistantThinkingPanel
@@ -99,8 +136,67 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    await waitFor(() => {
-      expect(trigger).toHaveAttribute("aria-expanded", "false");
-    });
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "true"));
+  });
+
+  it("shows failed steps in expanded list for post-run review", async () => {
+    const user = userEvent.setup();
+    render(
+      <AssistantThinkingPanel
+        run={createMockRun()}
+        streamSteps={[
+          {
+            node: "safety-check",
+            status: "failed",
+            stepId: "step-failed",
+            sequence: 2,
+            lifecycle: "failed",
+            errorSummary: "sql contains forbidden keyword",
+            at: "2026-04-10T00:00:02.000Z"
+          }
+        ]}
+        inProgress={false}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("失败")).toBeInTheDocument();
+    expect(screen.getByText("Error: sql contains forbidden keyword")).toBeInTheDocument();
+  });
+
+  it("keeps completed steps visible after finish and does not regress to loading placeholder", async () => {
+    const user = userEvent.setup();
+    const completedStep = {
+      node: "generate-sql",
+      status: "success" as const,
+      stepId: "step-terminal",
+      sequence: 1,
+      lifecycle: "completed" as const,
+      title: "生成 SQL",
+      at: "2026-04-10T00:00:02.000Z"
+    };
+    const { rerender } = render(
+      <AssistantThinkingPanel
+        run={null}
+        streamSteps={[completedStep]}
+        inProgress={false}
+        runLoading={false}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
+
+    rerender(
+      <AssistantThinkingPanel
+        run={null}
+        streamSteps={[completedStep]}
+        inProgress={false}
+        runLoading
+      />
+    );
+
+    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
+    expect(screen.queryByText("正在加载该轮思考轨迹...")).not.toBeInTheDocument();
   });
 });

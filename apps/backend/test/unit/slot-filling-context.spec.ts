@@ -23,6 +23,42 @@ describe("slot-filling-context", () => {
     });
   });
 
+  it("treats count-style phrasing as a metric slot", () => {
+    const decision = decideSlotFilling("一共有多少订单");
+
+    expect(decision).toMatchObject({
+      decision: "continue",
+      action: "proceed",
+      source: "rule",
+      missingSlots: [],
+      shouldClarify: false
+    });
+  });
+
+  it("recognizes customer synonym subject in count questions", () => {
+    const decision = decideSlotFilling("一共有多少位顾客");
+
+    expect(decision).toMatchObject({
+      decision: "continue",
+      action: "proceed",
+      source: "rule",
+      missingSlots: [],
+      shouldClarify: false
+    });
+  });
+
+  it("keeps clarifying when only count metric exists without subject", () => {
+    const decision = decideSlotFilling("一共有多少位");
+
+    expect(decision).toMatchObject({
+      decision: "clarify",
+      action: "ask_clarification",
+      source: "rule",
+      missingSlots: ["subject"],
+      shouldClarify: true
+    });
+  });
+
   it("bypasses clarification for metadata intent", () => {
     const decision = decideSlotFilling("show tables");
 

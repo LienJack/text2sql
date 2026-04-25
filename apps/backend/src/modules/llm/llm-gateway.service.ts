@@ -158,12 +158,13 @@ export class LlmGatewayService implements LlmGateway {
     try {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
+      const streamTimeoutMs = runtime.streamTimeoutMs ?? runtime.timeoutMs;
       const result = streamText({
         model,
         system: prompt.systemPrompt,
         prompt: prompt.userPrompt,
         temperature: 0.2,
-        abortSignal: AbortSignal.timeout(runtime.timeoutMs),
+        abortSignal: AbortSignal.timeout(streamTimeoutMs),
         tools: normalizedTools
       });
 
@@ -199,12 +200,24 @@ export class LlmGatewayService implements LlmGateway {
           continue;
         }
         if (chunk.type === "tool-error") {
+          const toolMessage = toErrorMessage(chunk.error);
           await options?.onEvent?.({
             type: "tool-error",
             toolName: chunk.toolName,
             toolCallId: chunk.toolCallId,
-            message: toErrorMessage(chunk.error)
+            message: toolMessage
           });
+          throw new DomainError(
+            "LLM_TOOL_CALL_EXECUTION_FAILED",
+            `LLM 工具调用失败: ${toolMessage}`,
+            502,
+            {
+              provider: runtime.provider,
+              toolName: chunk.toolName,
+              toolCallId: chunk.toolCallId,
+              toolSql: toolCallSql?.slice(0, 500)
+            }
+          );
         }
       }
 

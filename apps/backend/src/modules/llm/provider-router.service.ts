@@ -146,7 +146,8 @@ export class ProviderRouterService {
           model: resolved.model.model,
           baseUrl: resolved.runtime.baseUrl?.trim() || this.config.llmBaseUrl || "",
           apiKey: resolved.runtime.apiKey?.trim() || this.config.llmApiKey || "",
-          timeoutMs: this.config.llmTimeoutMs
+          timeoutMs: this.config.llmTimeoutMs,
+          streamTimeoutMs: this.config.llmStreamTimeoutMs
         }
       };
     }
@@ -163,7 +164,8 @@ export class ProviderRouterService {
           model: defaultModel.model,
           baseUrl: defaultRuntime.baseUrl?.trim() || this.config.llmBaseUrl || "",
           apiKey: defaultRuntime.apiKey?.trim() || this.config.llmApiKey || "",
-          timeoutMs: this.config.llmTimeoutMs
+          timeoutMs: this.config.llmTimeoutMs,
+          streamTimeoutMs: this.config.llmStreamTimeoutMs
         }
       };
     } catch {
@@ -173,7 +175,8 @@ export class ProviderRouterService {
           model: this.config.llmModel,
           baseUrl: this.config.llmBaseUrl,
           apiKey: this.config.llmApiKey,
-          timeoutMs: this.config.llmTimeoutMs
+          timeoutMs: this.config.llmTimeoutMs,
+          streamTimeoutMs: this.config.llmStreamTimeoutMs
         }
       };
     }

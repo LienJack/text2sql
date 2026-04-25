@@ -283,6 +283,68 @@ describe("run-visibility-mapper", () => {
     expect(merged[0]?.lifecycle).toBe("completed");
   });
 
+  it("deduplicates duplicate stream updates and keeps terminal lifecycle monotonic", () => {
+    const merged = mergeRunThinkingSteps(
+      undefined,
+      [
+        {
+          node: "build-semantic-query",
+          status: "success",
+          stepId: "step-1",
+          sequence: 1,
+          lifecycle: "completed",
+          detail: "terminal snapshot",
+          at: "2026-04-10T00:00:01.000Z"
+        },
+        {
+          node: "build-semantic-query",
+          status: "success",
+          stepId: "step-1",
+          sequence: 1,
+          lifecycle: "running",
+          detail: "stale running replay",
+          at: "2026-04-10T00:00:00.500Z"
+        }
+      ]
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.lifecycle).toBe("completed");
+    expect(merged[0]?.detail).toBe("terminal snapshot");
+  });
+
+  it("keeps failed terminal step status when out-of-order running event arrives later", () => {
+    const merged = mergeRunThinkingSteps(
+      [
+        {
+          node: "safety-check",
+          status: "failed",
+          stepId: "step-failed",
+          sequence: 3,
+          lifecycle: "failed",
+          errorSummary: "policy rejected",
+          at: "2026-04-10T00:00:03.000Z"
+        }
+      ],
+      [
+        {
+          node: "safety-check",
+          status: "success",
+          stepId: "step-failed",
+          sequence: 3,
+          lifecycle: "running",
+          detail: "late stream event",
+          at: "2026-04-10T00:00:02.000Z"
+        }
+      ]
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.lifecycle).toBe("failed");
+    expect(merged[0]?.status).toBe("failed");
+    expect(merged[0]?.errorSummary).toBe("policy rejected");
+  });
+
   it("builds fallback delivery when answer exists but run delivery is temporarily unavailable", () => {
     const fallback = resolveVisibleDelivery({
       answerText: "已为你生成 SQL，并展示结果。",

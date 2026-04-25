@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -188,6 +188,9 @@ describe("ChatPanel", () => {
 
     expect(screen.queryByText("发送成功，已收到后端响应。")).not.toBeInTheDocument();
     expect(screen.getByText("AI 思考过程")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-result-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-result-shell-steps")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-result-shell-answer")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "展开思考过程" }));
     expect(screen.getByText("生成 SQL")).toBeInTheDocument();
     expect(screen.getByText("已为你生成 SQL，并展示结果。")).toBeInTheDocument();
@@ -199,6 +202,57 @@ describe("ChatPanel", () => {
     expect(
       screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
     ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+  });
+
+  it("submits by pressing Enter in chat input", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    expect(mockStreamMessageEvents).not.toHaveBeenCalled();
+    const input = screen.getByLabelText("聊天输入");
+    await user.type(input, "有多少订单");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("submits immediately after IME composition confirms with Enter", async () => {
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    expect(mockStreamMessageEvents).not.toHaveBeenCalled();
+    const input = screen.getByLabelText("聊天输入");
+
+    fireEvent.change(input, { target: { value: "有多少订单" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter", isComposing: true });
+    fireEvent.compositionEnd(input);
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("submits after IME confirm emits Process key before composition end", async () => {
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    expect(mockStreamMessageEvents).not.toHaveBeenCalled();
+    const input = screen.getByLabelText("聊天输入");
+
+    fireEvent.change(input, { target: { value: "有多少订单" } });
+    fireEvent.keyDown(input, {
+      key: "Process",
+      code: "Enter",
+      isComposing: true
+    });
+    fireEvent.compositionEnd(input);
+
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("does not render debug switch control", async () => {
@@ -221,11 +275,105 @@ describe("ChatPanel", () => {
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     await screen.findByText("已为你生成 SQL，并展示结果。");
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
     await user.click(await screen.findByRole("button", { name: "展开思考过程" }));
 
     await waitFor(() => {
       expect(mockGetRun).toHaveBeenCalledWith("run-1");
     });
+  });
+
+  it("keeps unified assistant result shell readable when historical run load fails", async () => {
+    const user = userEvent.setup();
+    mockGetMessages.mockResolvedValueOnce({
+      session,
+      messages: createMockMessages(),
+      latestRun: undefined
+    });
+    mockGetRun.mockRejectedValueOnce(new Error("run not found"));
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await screen.findByText("已为你生成 SQL，并展示结果。");
+    const resultShell = screen.getByTestId("assistant-result-shell");
+    expect(resultShell).toHaveAttribute("data-run-id", "run-1");
+
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    await waitFor(() => {
+      expect(mockGetRun).toHaveBeenCalledWith("run-1");
+    });
+
+    expect(screen.getByText("已为你生成 SQL，并展示结果。")).toBeInTheDocument();
+    expect(screen.getByText("暂未加载到该轮思考轨迹。")).toBeInTheDocument();
+  });
+
+  it("keeps run link bindings isolated per assistant message", async () => {
+    const run2 = createMockRun({
+      runId: "run-2",
+      question: "近7天支付方式分布",
+      sql: "SELECT payment_method, COUNT(*) AS cnt FROM recent_orders GROUP BY payment_method"
+    });
+    mockGetMessages.mockResolvedValueOnce({
+      session,
+      messages: [
+        {
+          id: "msg-1",
+          sessionId: "session-1",
+          role: "user",
+          content: "近30天支付方式分布",
+          createdAt: "2026-04-10T00:00:00.000Z"
+        },
+        {
+          id: "msg-2",
+          sessionId: "session-1",
+          role: "assistant",
+          content: "第一轮回答",
+          metadata: {
+            runId: "run-1",
+            status: "executionResult"
+          },
+          createdAt: "2026-04-10T00:00:01.000Z"
+        },
+        {
+          id: "msg-3",
+          sessionId: "session-1",
+          role: "user",
+          content: "近7天支付方式分布",
+          createdAt: "2026-04-10T00:01:00.000Z"
+        },
+        {
+          id: "msg-4",
+          sessionId: "session-1",
+          role: "assistant",
+          content: "第二轮回答",
+          metadata: {
+            runId: "run-2",
+            status: "executionResult"
+          },
+          createdAt: "2026-04-10T00:01:01.000Z"
+        }
+      ],
+      latestRun: run2
+    });
+
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await screen.findByText("第一轮回答");
+    await screen.findByText("第二轮回答");
+
+    const runLinks = screen.getAllByRole("link", {
+      name: "设置 / RAG 运行与记忆治理"
+    });
+    expect(runLinks).toHaveLength(2);
+    expect(runLinks[0]).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+    expect(runLinks[1]).toHaveAttribute("href", "/settings?tab=rag&runId=run-2");
+
+    const resultShells = screen.getAllByTestId("assistant-result-shell");
+    expect(resultShells).toHaveLength(2);
+    expect(resultShells[0]).toHaveAttribute("data-run-id", "run-1");
+    expect(resultShells[1]).toHaveAttribute("data-run-id", "run-2");
   });
 
   it("shows initialization failure when session creation fails", async () => {
@@ -321,6 +469,9 @@ describe("ChatPanel", () => {
           getMessagesCallsBeforeSend
         );
       });
+      expect(
+        await screen.findByText("LLM 输出中未提取到可执行 SQL。")
+      ).toBeInTheDocument();
       expect(unhandledRejections).toEqual([]);
     } finally {
       window.removeEventListener("unhandledrejection", onUnhandledRejection);

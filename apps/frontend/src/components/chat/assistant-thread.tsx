@@ -178,10 +178,8 @@ export function AssistantThread({
                 }
                 if (message.role === "assistant") {
                   const isLatestAssistant = message.id === latestAssistantMessageId;
-                  const metadata = (message as { metadata?: unknown }).metadata;
                   const resolvedRunId =
                     runIdByMessageId[message.id] ??
-                    resolveMessageRunId(metadata) ??
                     (isLatestAssistant ? activeStreamRunId ?? undefined : undefined);
                   const run = resolvedRunId ? runsById[resolvedRunId] ?? null : null;
                   const streamSteps = resolvedRunId

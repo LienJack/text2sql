@@ -379,7 +379,7 @@ describe("chat demo flow", () => {
       };
     });
 
-    render(<ChatPage />);
+    const { unmount } = render(<ChatPage />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     const initialGetMessagesCalls = mockGetMessages.mock.calls.length;
@@ -412,20 +412,19 @@ describe("chat demo flow", () => {
     expect(screen.getByText("知识检索")).toBeInTheDocument();
     expect(screen.getByText("意图规划")).toBeInTheDocument();
     expect(screen.getByText("语义检索构建")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
 
     const resultPanel = await screen.findByTestId("chatbi-result-panel");
     const resultQueries = within(resultPanel);
-    const summaryTab = resultQueries.getByRole("tab", { name: /summary/i });
-    expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    const answerTab = resultQueries.getByRole("tab", { name: /answer/i });
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
     expect(resultQueries.getByText("近 30 天订单主要由 card 支付。")).toBeInTheDocument();
+    expect(resultQueries.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
 
     await user.click(resultQueries.getByRole("tab", { name: /chart/i }));
     expect(resultQueries.getByTestId("chatbi-bar-chart")).toBeInTheDocument();
 
-    await user.click(resultQueries.getByRole("tab", { name: /table/i }));
-    expect(resultQueries.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
-
-    await user.click(resultQueries.getByRole("tab", { name: /SQL 分区/i }));
+    await user.click(resultQueries.getByRole("tab", { name: /view sql/i }));
     await user.click(resultQueries.getByRole("button", { name: "打开运行详情" }));
     expect(screen.getByText("运行详情")).toBeInTheDocument();
     expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
@@ -439,5 +438,12 @@ describe("chat demo flow", () => {
     expect(
       screen.getAllByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method").length
     ).toBeGreaterThan(0);
+
+    unmount();
+    render(<ChatPage />);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    const replayShell = await screen.findByTestId("assistant-result-shell");
+    expect(replayShell).toHaveAttribute("data-run-id", "run-1");
+    expect(screen.getByRole("tab", { name: /answer/i })).toHaveAttribute("aria-selected", "true");
   });
 });

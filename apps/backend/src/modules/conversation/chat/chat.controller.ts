@@ -143,7 +143,8 @@ export class ChatController {
         sessionId,
         body.message,
         req.requestId,
-        body.contextEnvelope
+        body.contextEnvelope,
+        req.actor
       );
       return ok(req.requestId, {
         kind: "agent-run",
@@ -212,7 +213,8 @@ export class ChatController {
         async (event) => {
           sendEvent(event.type, event);
         },
-        body.contextEnvelope
+        body.contextEnvelope,
+        req.actor
       );
     } catch (error) {
       const fallbackEvent: ChatStreamEvent = {

@@ -39,6 +39,7 @@ export interface LlmGatewayRuntimeConfig {
   baseUrl: string;
   apiKey: string;
   timeoutMs: number;
+  streamTimeoutMs?: number;
 }
 
 export interface LlmGatewayGenerateOutput {

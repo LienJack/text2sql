@@ -5,7 +5,7 @@ import { ChatBIResultPanel } from "@/components/chat/chatbi-result-panel";
 import { createMockRun } from "./fixtures";
 
 describe("ChatBIResultPanel", () => {
-  it("supports Summary/Chart/Table/SQL partition switching and keeps SQL quick entry secondary", async () => {
+  it("supports Answer/View SQL/Chart partition switching and keeps table evidence in Answer", async () => {
     const user = userEvent.setup();
     const onRequestSqlDetails = vi.fn();
 
@@ -65,26 +65,23 @@ describe("ChatBIResultPanel", () => {
       />
     );
 
-    const summaryTab = screen.getByRole("tab", { name: /summary/i });
+    const answerTab = screen.getByRole("tab", { name: /answer/i });
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
     const chartTab = screen.getByRole("tab", { name: /chart/i });
-    const tableTab = screen.getByRole("tab", { name: /table/i });
-    const sqlTab = screen.getByRole("tab", { name: /SQL 分区/i });
 
-    expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText("近三个月收入持续增长。")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "month" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "revenue" })).toBeInTheDocument();
     expect(screen.queryByText(/xss/i)).not.toBeInTheDocument();
 
     await user.click(chartTab);
     expect(chartTab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("chatbi-bar-chart")).toBeInTheDocument();
 
-    await user.click(tableTab);
-    expect(screen.getByRole("columnheader", { name: "month" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "revenue" })).toBeInTheDocument();
-
     await user.click(sqlTab);
     expect(sqlTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText(/SQL 为次级证据层/i)).toBeInTheDocument();
+    expect(screen.getByText(/View SQL 为次级证据入口/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "打开运行详情" }));
     expect(onRequestSqlDetails).toHaveBeenCalledTimes(1);
@@ -185,7 +182,42 @@ describe("ChatBIResultPanel", () => {
     expect(screen.getByText(/图表已降级为表格/i)).toBeInTheDocument();
     expect(screen.queryByTestId("chatbi-chart-canvas")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "查看 Table 分区" }));
+    await user.click(screen.getByRole("button", { name: "查看 Answer 分区中的表格证据" }));
     expect(screen.getByRole("columnheader", { name: "region" })).toBeInTheDocument();
+  });
+
+  it("switches to View SQL tab when openSqlSignal increments", () => {
+    const run = createMockRun({
+      delivery: {
+        answer: {
+          text: "返回了 SQL 证据。",
+          status: "executionResult",
+          provider: "mock"
+        },
+        artifact: {
+          sql: "select * from metrics_daily",
+          rowCount: 1,
+          hasError: false,
+          summary: {
+            text: "返回了 SQL 证据。"
+          }
+        }
+      }
+    });
+
+    const { rerender } = render(
+      <ChatBIResultPanel run={run} runId={run.runId} openSqlSignal={0} />
+    );
+
+    expect(screen.getByRole("tab", { name: /answer/i })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+
+    rerender(<ChatBIResultPanel run={run} runId={run.runId} openSqlSignal={1} />);
+
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
+    expect(sqlTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText(/select \* from metrics_daily/i)).toBeInTheDocument();
   });
 });

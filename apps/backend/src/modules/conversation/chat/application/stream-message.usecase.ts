@@ -19,7 +19,10 @@ import { DatasourceService } from "../../../governance/datasource/datasource.ser
 import { RedisBufferService } from "../../../platform/data/cache/index";
 import { ChatRepository } from "../../../platform/data/persistence/index";
 import { ChatDeliveryEnrichmentService } from "./shared/chat-delivery-enrichment.service";
-import { ChatPolicyGuardService } from "./shared/chat-policy-guard.service";
+import {
+  ChatPolicyGuardService,
+  type ChatPolicyActorInput
+} from "./shared/chat-policy-guard.service";
 import { ChatPostRunHooksService } from "./shared/chat-post-run-hooks.service";
 import { ChatRunPersistenceService } from "./shared/chat-run-persistence.service";
 
@@ -28,6 +31,7 @@ export interface StreamMessageInput {
   message: string;
   requestId?: string;
   contextEnvelope?: ContextEnvelope;
+  actor?: ChatPolicyActorInput;
   onEvent: (event: ChatStreamEvent) => Promise<void> | void;
 }
 
@@ -58,7 +62,8 @@ export class StreamMessageUsecase {
       session.datasource
     );
     const sqlAccessContext = await this.chatPolicyGuardService.resolveSqlAccessContext(
-      session
+      session,
+      input.actor
     );
 
     const runId = uuidv4();

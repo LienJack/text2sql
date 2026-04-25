@@ -35,6 +35,49 @@ describe("ClarificationSemanticEvaluatorService", () => {
     expect(result.metadata.fallbackApplied).toBe(false);
   });
 
+  it("recognizes count-style phrasing as metric-complete when subject exists", async () => {
+    const service = createService();
+    const result = await service.evaluate({
+      question: "一共有多少订单",
+      ruleDecision: {
+        decision: "clarify",
+        triggerPath: "rule",
+        confidenceLevel: "low",
+        missingCriticalSlots: ["metric"],
+        reasonCodes: ["missing_metric_slot"]
+      }
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.decision).toMatchObject({
+      decision: "continue",
+      missingCriticalSlots: []
+    });
+    expect(result.reasonCodes).toEqual(
+      expect.arrayContaining(["semantic_classifier_v1", "semantic_ready_to_continue"])
+    );
+  });
+
+  it("recognizes customer synonym subject in count phrasing", async () => {
+    const service = createService();
+    const result = await service.evaluate({
+      question: "一共有多少位顾客",
+      ruleDecision: {
+        decision: "clarify",
+        triggerPath: "rule",
+        confidenceLevel: "low",
+        missingCriticalSlots: ["subject", "metric"],
+        reasonCodes: ["missing_subject_slot", "missing_metric_slot"]
+      }
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.decision).toMatchObject({
+      decision: "continue",
+      missingCriticalSlots: []
+    });
+  });
+
   it("falls back with timeout when semantic evaluator times out", async () => {
     class TimeoutEvaluator extends ClarificationSemanticEvaluatorService {
       protected override async runSemanticArbitration(): Promise<never> {

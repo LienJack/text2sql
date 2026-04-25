@@ -9,32 +9,29 @@ import {
 import { TabsContent } from "@/components/ui/tabs";
 
 function ChatBIResultTabsHarness() {
-  const [value, setValue] = useState<ChatBIResultTabValue>("summary");
+  const [value, setValue] = useState<ChatBIResultTabValue>("answer");
 
   return (
     <ChatBIResultTabs value={value} onValueChange={setValue}>
-      <TabsContent value="summary">Summary pane</TabsContent>
+      <TabsContent value="answer">Answer pane</TabsContent>
       <TabsContent value="chart">Chart pane</TabsContent>
-      <TabsContent value="table">Table pane</TabsContent>
       <TabsContent value="sql">SQL pane</TabsContent>
     </ChatBIResultTabs>
   );
 }
 
 describe("ChatBIResultTabs", () => {
-  it("renders four icon tabs and switches sections with click", async () => {
+  it("renders Answer/View SQL/Chart tabs and switches sections with click", async () => {
     const user = userEvent.setup();
     render(<ChatBIResultTabsHarness />);
 
-    const summaryTab = screen.getByRole("tab", { name: /summary/i });
+    const answerTab = screen.getByRole("tab", { name: /answer/i });
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
     const chartTab = screen.getByRole("tab", { name: /chart/i });
-    const tableTab = screen.getByRole("tab", { name: /table/i });
-    const sqlTab = screen.getByRole("tab", { name: /SQL 分区/i });
 
-    expect(summaryTab).toHaveAttribute("aria-selected", "true");
-    expect(chartTab).toHaveAttribute("aria-selected", "false");
-    expect(tableTab).toHaveAttribute("aria-selected", "false");
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
     expect(sqlTab).toHaveAttribute("aria-selected", "false");
+    expect(chartTab).toHaveAttribute("aria-selected", "false");
 
     await user.click(chartTab);
     expect(chartTab).toHaveAttribute("aria-selected", "true");
@@ -49,16 +46,16 @@ describe("ChatBIResultTabs", () => {
     const user = userEvent.setup();
     render(<ChatBIResultTabsHarness />);
 
-    const tableTab = screen.getByRole("tab", { name: /table/i });
-    const sqlTab = screen.getByRole("tab", { name: /SQL 分区/i });
+    const chartTab = screen.getByRole("tab", { name: /chart/i });
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
 
-    expect(tableTab).toHaveAttribute("aria-controls");
+    expect(chartTab).toHaveAttribute("aria-controls");
     expect(sqlTab).toHaveAttribute("aria-controls");
 
-    tableTab.focus();
+    chartTab.focus();
     await user.keyboard("{Enter}");
-    expect(tableTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Table pane")).toBeInTheDocument();
+    expect(chartTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Chart pane")).toBeInTheDocument();
 
     sqlTab.focus();
     await user.keyboard("[Space]");

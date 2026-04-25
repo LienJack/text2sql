@@ -739,6 +739,74 @@ function stepKey(step: RunVisibilityThinkingStep): string {
   );
 }
 
+function isTerminalStep(step: RunVisibilityThinkingStep): boolean {
+  if (
+    step.lifecycle === "completed" ||
+    step.lifecycle === "failed" ||
+    step.lifecycle === "skipped"
+  ) {
+    return true;
+  }
+  if (step.lifecycle === "running") {
+    return false;
+  }
+  return step.status === "success" || step.status === "failed" || step.status === "skipped";
+}
+
+function stepEventTimestamp(step: RunVisibilityThinkingStep): number {
+  const candidate = step.endedAt ?? step.at ?? step.startedAt;
+  if (!candidate) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const parsed = Date.parse(candidate);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+function mergeThinkingStep(
+  current: RunVisibilityThinkingStep,
+  incoming: RunVisibilityThinkingStep
+): RunVisibilityThinkingStep {
+  const currentTerminal = isTerminalStep(current);
+  const incomingTerminal = isTerminalStep(incoming);
+
+  if (currentTerminal !== incomingTerminal) {
+    const terminal = currentTerminal ? current : incoming;
+    const nonTerminal = currentTerminal ? incoming : current;
+    return {
+      ...nonTerminal,
+      ...terminal
+    };
+  }
+
+  const currentTime = stepEventTimestamp(current);
+  const incomingTime = stepEventTimestamp(incoming);
+  const preferIncoming =
+    incomingTime > currentTime ||
+    (incomingTime === currentTime &&
+      (incoming.sequence ?? Number.NEGATIVE_INFINITY) >=
+        (current.sequence ?? Number.NEGATIVE_INFINITY));
+  const preferred = preferIncoming ? incoming : current;
+  const fallback = preferIncoming ? current : incoming;
+  const merged = {
+    ...fallback,
+    ...preferred
+  };
+
+  if (
+    currentTerminal &&
+    incomingTerminal &&
+    (current.status === "failed" ||
+      current.lifecycle === "failed" ||
+      incoming.status === "failed" ||
+      incoming.lifecycle === "failed")
+  ) {
+    merged.status = "failed";
+    merged.lifecycle = "failed";
+  }
+
+  return merged;
+}
+
 export function mergeRunThinkingSteps(
   syncSteps: ExecutionTraceStep[] | undefined,
   streamSteps: RunVisibilityThinkingStep[] | undefined
@@ -751,7 +819,7 @@ export function mergeRunThinkingSteps(
   for (const step of streamSteps ?? []) {
     const key = stepKey(step);
     const current = merged.get(key);
-    merged.set(key, current ? { ...current, ...step } : step);
+    merged.set(key, current ? mergeThinkingStep(current, step) : step);
   }
 
   return Array.from(merged.values()).sort((left, right) => {

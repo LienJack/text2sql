@@ -33,6 +33,7 @@ interface ChatBIResultPanelProps {
 type JsonRecord = Record<string, unknown>;
 
 type DeliveryDisplayType =
+  | "answer"
   | "summary"
   | "chart"
   | "table"
@@ -64,6 +65,7 @@ interface ChatBIArtifactView {
 }
 
 const DISPLAY_ALLOWLIST: ReadonlySet<DeliveryDisplayType> = new Set([
+  "answer",
   "summary",
   "chart",
   "table",
@@ -370,10 +372,11 @@ export function ChatBIResultPanel({
       artifactView?.sql
   );
 
-  const [activeTab, setActiveTab] = useState<ChatBIResultTabValue>("summary");
+  const [activeTab, setActiveTab] = useState<ChatBIResultTabValue>("answer");
+  const hasTableEvidence = Boolean(artifactView?.table);
 
   useEffect(() => {
-    setActiveTab("summary");
+    setActiveTab("answer");
   }, [runId]);
 
   useEffect(() => {
@@ -396,7 +399,7 @@ export function ChatBIResultPanel({
 
   return (
     <section
-      className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-subtle)]"
+      className="rounded-xl border border-[var(--chat-result-panel-border)] bg-[var(--chat-result-panel-bg)]"
       data-testid="chatbi-result-panel"
     >
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2">
@@ -418,11 +421,24 @@ export function ChatBIResultPanel({
 
       <div className="space-y-3 p-3">
         <ChatBIResultTabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsContent value="summary" className="mt-0">
-            <ChatBISummary
-              summary={artifactView.summary}
-              fallbackText={summaryFallbackText}
-            />
+          <TabsContent value="answer" className="mt-0">
+            <section className="space-y-3" aria-label="Answer partition">
+              <ChatBISummary
+                summary={artifactView.summary}
+                fallbackText={summaryFallbackText}
+              />
+              {hasTableEvidence ? (
+                <section
+                  className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)] p-3"
+                  aria-label="Table evidence"
+                >
+                  <h4 className="text-[11px] font-semibold tracking-wider text-[var(--text-tertiary)] uppercase">
+                    Table evidence
+                  </h4>
+                  <ChatBIResultTable table={artifactView.table} />
+                </section>
+              ) : null}
+            </section>
           </TabsContent>
 
           <TabsContent value="chart" className="mt-0" data-testid="chatbi-chart-tab-panel">
@@ -433,9 +449,9 @@ export function ChatBIResultPanel({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setActiveTab("table")}
+                  onClick={() => setActiveTab("answer")}
                 >
-                  查看 Table 分区
+                  查看 Answer 分区中的表格证据
                 </Button>
               </div>
             ) : (
@@ -443,14 +459,10 @@ export function ChatBIResultPanel({
             )}
           </TabsContent>
 
-          <TabsContent value="table" className="mt-0">
-            <ChatBIResultTable table={artifactView.table} />
-          </TabsContent>
-
           <TabsContent value="sql" className="mt-0">
-            <section className="space-y-2" aria-label="SQL 结果分区">
+            <section className="space-y-2" aria-label="View SQL partition">
               <p className="text-xs text-[var(--text-secondary)]">
-                SQL 为次级证据层，可快速跳转到运行详情查看执行链路、RAG 证据与调试信息。
+                View SQL 为次级证据入口，可快速跳转到运行详情查看执行链路、RAG 证据与调试信息。
               </p>
               {artifactView.sql || run?.sql ? (
                 <pre className="max-h-36 overflow-auto rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-[var(--text-primary)]">

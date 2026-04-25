@@ -216,7 +216,7 @@ export function SqlInlinePanel({
                 结果预览
               </h4>
               <StateBlock variant="idle">
-                主回答面板已展示 Summary/Chart/Table 结果，这里保留 SQL 与执行证据链详情。
+                主回答面板已展示 Answer / View SQL / Chart 主分区（含表格证据），这里保留 SQL 与执行证据链详情。
               </StateBlock>
             </section>
           ) : (

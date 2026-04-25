@@ -199,6 +199,7 @@ describe("chat mobile smoke", () => {
     expect(screen.getByRole("button", { name: "切换 Artifact 区块" })).toBeInTheDocument();
 
     expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(evidenceTrigger).toHaveAttribute("aria-controls");
     evidenceTrigger.focus();
     await user.keyboard("{Enter}");
     expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
@@ -213,13 +214,16 @@ describe("chat mobile smoke", () => {
     await waitFor(() => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
 
-    const summaryTab = screen.getByRole("tab", { name: /summary/i });
+    const answerTab = screen.getByRole("tab", { name: /answer/i });
     const chartTab = screen.getByRole("tab", { name: /chart/i });
-    const sqlTab = screen.getByRole("tab", { name: /SQL 分区/i });
-    expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
+    const tabList = screen.getByTestId("chatbi-result-tablist");
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
     expect(chartTab).toHaveAttribute("aria-controls");
     expect(sqlTab).toHaveAttribute("aria-controls");
+    expect(tabList).toHaveClass("overflow-x-auto");
 
     chartTab.focus();
     await user.keyboard("{Enter}");

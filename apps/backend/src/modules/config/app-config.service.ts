@@ -123,6 +123,19 @@ export class AppConfigService {
     return Number(this.config.get<string>("LLM_TIMEOUT_MS", "30000"));
   }
 
+  get llmStreamTimeoutMs(): number {
+    const fallback = this.llmTimeoutMs;
+    const raw = this.config.get<string>("LLM_STREAM_TIMEOUT_MS", String(fallback));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `LLM_STREAM_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${fallback}。`
+    );
+    return fallback;
+  }
+
   get llmMockMode(): boolean {
     return this.config.get<string>("LLM_MOCK_MODE", "false") === "true";
   }
