@@ -165,7 +165,8 @@ export class SqlGenerationService {
     }
     return (
       error.code === "LLM_TOOL_CALL_ONLY_RESPONSE" ||
-      error.code === "LLM_SQL_EXTRACT_FAILED"
+      error.code === "LLM_SQL_EXTRACT_FAILED" ||
+      error.code === "LLM_TOOL_CALL_EXECUTION_FAILED"
     );
   }
 

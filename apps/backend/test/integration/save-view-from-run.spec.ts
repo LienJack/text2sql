@@ -1,9 +1,10 @@
 import { ChatRepository } from "../../src/modules/data/persistence/chat.repository";
 import { SaveViewFromRunUsecase } from "../../src/modules/conversation/chat/application/save-view-from-run.usecase";
+import type { KnowledgeMemoryContract } from "../../src/modules/knowledge/contracts/knowledge-memory.contract";
 import { ModelingGraphRepository } from "../../src/modules/platform/data/persistence/modeling-graph.repository";
 import { ModelingGraphValidator } from "../../src/modules/platform/data/persistence/modeling-graph.validator";
 
-const buildUsecase = () => {
+const buildUsecase = (knowledgeMemoryContract?: KnowledgeMemoryContract) => {
   const chatRepository = new ChatRepository({
     databaseUrl: ""
   } as never);
@@ -14,7 +15,8 @@ const buildUsecase = () => {
   const usecase = new SaveViewFromRunUsecase(
     chatRepository,
     modelingGraphRepository,
-    modelingGraphValidator
+    modelingGraphValidator,
+    knowledgeMemoryContract
   );
   return {
     usecase,
@@ -242,5 +244,78 @@ describe("save view from run integration", () => {
     ).rejects.toMatchObject({
       code: "RUN_NOT_FOUND"
     });
+  });
+
+  it("keeps save-as-view successful when saved prior sql capture throws", async () => {
+    const captureFromSavedView = jest
+      .fn()
+      .mockRejectedValue(new Error("replay write failed"));
+    const { usecase, chatRepository, modelingGraphRepository } = buildUsecase({
+      promotion: {
+        promoteFromRun: jest.fn(),
+        getRecord: jest.fn(),
+        listCompensations: jest.fn(),
+        buildCandidateIdForRun: jest.fn(),
+        applyFeedback: jest.fn()
+      } as never,
+      savedPriorSql: {
+        captureFromSavedView,
+        getRecord: jest.fn(),
+        listRecords: jest.fn(),
+        buildPriorId: jest
+          .fn()
+          .mockReturnValue("saved_prior_sql.test-prior-id")
+      }
+    } as KnowledgeMemoryContract);
+
+    await chatRepository.createSession({
+      id: "session-1",
+      datasource: "ds-1",
+      workspaceId: "ws-1",
+      title: "test",
+      createdAt: "2026-04-23T00:00:00.000Z"
+    });
+    await chatRepository.persistRun({
+      runId: "run-1",
+      sessionId: "session-1",
+      question: "recent orders",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT * FROM orders LIMIT 10",
+      trace: {
+        runId: "run-1",
+        provider: "openai",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-23T01:00:00.000Z"
+    });
+
+    const result = await usecase.execute({
+      runId: "run-1",
+      name: "orders_recent_10",
+      actorId: "user-admin"
+    });
+
+    expect(result.replayed).toBe(false);
+    expect(result.savedPriorSql).toEqual(
+      expect.objectContaining({
+        outcome: "capture_failed",
+        priorId: "saved_prior_sql.test-prior-id",
+        reason: "saved_prior_sql_capture_exception"
+      })
+    );
+    expect(captureFromSavedView).toHaveBeenCalledTimes(1);
+
+    const snapshot = await modelingGraphRepository.getLatestScopeState({
+      workspaceId: "ws-1",
+      datasourceId: "ds-1"
+    });
+    expect(snapshot.draft?.graphPayload.views).toEqual([
+      expect.objectContaining({
+        id: "view.chat_run.run-1",
+        name: "orders_recent_10"
+      })
+    ]);
   });
 });

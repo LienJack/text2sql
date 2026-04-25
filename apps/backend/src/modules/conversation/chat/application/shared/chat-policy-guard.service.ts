@@ -98,19 +98,21 @@ export class ChatPolicyGuardService {
   }
 
   async resolveSqlAccessContext(
-    session: Session
+    session: Session,
+    actor?: ChatPolicyActorInput
   ): Promise<ChatSqlAccessContext | undefined> {
     const workspaceId = session.workspaceId?.trim();
-    const actorId = session.createdByUserId?.trim();
+    const actorId = actor?.id?.trim() || session.createdByUserId?.trim();
     if (!workspaceId || !actorId) {
       return undefined;
     }
 
     const context = await this.resolveAccessContext({
       actor: {
+        ...(actor ?? {}),
         id: actorId,
-        role: "user",
-        requestedWorkspaceId: workspaceId
+        role: actor?.role ?? "user",
+        requestedWorkspaceId: actor?.requestedWorkspaceId ?? workspaceId
       },
       workspaceId
     });

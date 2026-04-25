@@ -8,6 +8,7 @@ import { ClarifyNode } from "../nodes/clarify.node";
 import { ExecuteSqlNode } from "../nodes/execute-sql.node";
 import { FormatAnswerNode } from "../nodes/format-answer.node";
 import { GenerateSqlNode } from "../nodes/generate-sql.node";
+import { ResolveSavedPriorSqlNode } from "../nodes/resolve-saved-prior-sql.node";
 import { RetrieveKnowledgeNode } from "../nodes/retrieve-knowledge.node";
 import { SafetyCheckNode } from "../nodes/safety-check.node";
 import type {
@@ -198,6 +199,7 @@ export interface LangGraphNodeDependencies {
   buildIntentPlanNode: Pick<BuildIntentPlanNode, "run">;
   buildSemanticQueryNode: Pick<BuildSemanticQueryNode, "run">;
   buildPhysicalPlanNode: Pick<BuildPhysicalPlanNode, "run">;
+  resolveSavedPriorSqlNode: Pick<ResolveSavedPriorSqlNode, "run">;
   generateSqlNode: Pick<GenerateSqlNode, "run">;
   safetyNode: Pick<SafetyCheckNode, "run">;
   executeNode: Pick<ExecuteSqlNode, "run">;
@@ -835,6 +837,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         },
         sql: generated.sql,
         explanation: generated.explanation,
+        savedPriorSqlFallbackRequested: false,
         error: undefined,
         fatalError: undefined
       };
@@ -920,6 +923,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       workspaceId: state.accessContext?.workspaceId
     };
     if (!safety.allowed) {
+      const shouldFallbackToGeneration =
+        state.savedPriorSqlResolution?.status === "hit" &&
+        state.savedPriorSqlResolution.fallbackToGeneration === false;
       const trace = appendStep(state, {
         step: {
           node: "safety-check",
@@ -939,10 +945,28 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         error: safety.reason
       });
       await runtime.emitStep(latestStep(trace));
+      if (shouldFallbackToGeneration) {
+        return {
+          ...trace,
+          error: safety.reason,
+          safetyDecision: safety,
+          savedPriorSqlResolution: {
+            ...state.savedPriorSqlResolution,
+            safetyRejected: true,
+            fallbackToGeneration: true,
+            reused: true
+          },
+          savedPriorSqlFallbackRequested: true,
+          sql: undefined,
+          explanation: undefined,
+          terminalStatus: undefined
+        };
+      }
       return {
         ...trace,
         error: safety.reason,
         safetyDecision: safety,
+        savedPriorSqlFallbackRequested: false,
         terminalStatus: "rejected"
       };
     }
@@ -973,7 +997,82 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     await runtime.emitStep(latestStep(trace));
     return {
       ...trace,
-      safetyDecision: safety
+      safetyDecision: safety,
+      savedPriorSqlFallbackRequested: false
+    };
+  };
+
+  const resolveSavedPriorSql = async (
+    state: LangGraphState,
+    config?: LangGraphRunnableConfig
+  ) => {
+    const startedAt = new Date().toISOString();
+    const runtime = createNodeRuntime(config);
+    await runtime.emitStep(
+      buildRunningStep(
+        state,
+        "resolve-saved-prior-sql",
+        startedAt,
+        "正在评估是否复用已保存 SQL"
+      )
+    );
+    const resolution = deps.resolveSavedPriorSqlNode.run({
+      retrievalBundle: state.retrievalBundle,
+      question: state.question
+    });
+    const endedAt = new Date().toISOString();
+    const detail =
+      resolution.status === "hit"
+        ? "命中已保存 SQL，跳过 LLM SQL 生成。"
+        : `未命中 saved prior shortcut，状态=${resolution.status}。`;
+    const trace = appendStep(state, {
+      step: {
+        node: "resolve-saved-prior-sql",
+        status: resolution.status === "hit" ? "success" : "skipped",
+        detail,
+        ...withTiming(startedAt, endedAt),
+        outputSummary: summarize({
+          status: resolution.status,
+          reasonCodes: resolution.reasonCodes,
+          selectedChunkId: resolution.selectedChunkId,
+          selectedViewId: resolution.selectedViewId,
+          selectedSourceRunId: resolution.selectedSourceRunId
+        })
+      },
+      outputs: {
+        status: resolution.status,
+        reasonCodes: resolution.reasonCodes,
+        selectedChunkId: resolution.selectedChunkId,
+        selectedViewId: resolution.selectedViewId,
+        selectedSourceRunId: resolution.selectedSourceRunId
+      }
+    });
+    await runtime.emitStep(latestStep(trace));
+    if (resolution.status !== "hit" || !resolution.sql) {
+      return {
+        ...trace,
+        savedPriorSqlResolution: {
+          ...resolution,
+          reused: false,
+          safetyRejected: false,
+          fallbackToGeneration: false
+        },
+        savedPriorSqlFallbackRequested: false
+      };
+    }
+    return {
+      ...trace,
+      model: "saved-prior-sql",
+      sql: resolution.sql,
+      explanation: resolution.explanation,
+      error: undefined,
+      savedPriorSqlResolution: {
+        ...resolution,
+        reused: true,
+        safetyRejected: false,
+        fallbackToGeneration: false
+      },
+      savedPriorSqlFallbackRequested: false
     };
   };
 
@@ -1144,6 +1243,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     buildIntentPlan,
     buildSemanticQuery,
     buildPhysicalPlan,
+    resolveSavedPriorSql,
     generateSql,
     safetyCheck,
     executeSql,

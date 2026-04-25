@@ -125,6 +125,31 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(providerRouter.generate).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to non-stream generation when tool execution fails in stream mode", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT COUNT(*) AS total FROM orders;\n```"
+      }),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_TOOL_CALL_EXECUTION_FAILED",
+          "LLM 工具调用失败: 当前工作空间无权访问表: sqlite_master",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("一共有多少订单");
+
+    expect(draft.semanticIntent).toBe("count");
+    expect(draft.sql).toBe("SELECT COUNT(*) AS total FROM orders;");
+    expect(providerRouter.stream).toHaveBeenCalledTimes(1);
+    expect(providerRouter.generate).toHaveBeenCalledTimes(1);
+  });
+
   it("prioritizes structured semantic instructions when context pack is provided", async () => {
     const providerRouter = {
       generate: jest.fn().mockResolvedValue({

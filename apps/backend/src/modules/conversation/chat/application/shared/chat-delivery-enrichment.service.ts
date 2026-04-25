@@ -1,9 +1,14 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { PromptTemplateTraceEvidenceCompat, SqlRun } from "@text2sql/shared-types";
+import type {
+  DeliveryContract,
+  PromptTemplateTraceEvidenceCompat,
+  SqlRun
+} from "@text2sql/shared-types";
 import {
   DeliveryContractMapper,
   type DeliveryReplayRecordInput
 } from "../../../delivery/delivery-contract.mapper";
+import { ChartBiArtifactService } from "../../../delivery/chartbi/chartbi-artifact.service";
 import {
   KNOWLEDGE_FACADE_CONTRACT,
   type KnowledgeFacadeContract
@@ -13,6 +18,7 @@ import {
 export class ChatDeliveryEnrichmentService {
   constructor(
     private readonly deliveryContractMapper: DeliveryContractMapper,
+    private readonly chartBiArtifactService: ChartBiArtifactService,
     @Inject(KNOWLEDGE_FACADE_CONTRACT)
     private readonly knowledgeFacade: KnowledgeFacadeContract
   ) {}
@@ -20,23 +26,79 @@ export class ChatDeliveryEnrichmentService {
   async attachDeliveryContract(run: SqlRun): Promise<SqlRun> {
     try {
       const replayRecords = await this.loadReplayRecords(run.runId);
+      const chartBiOutcome = this.buildChartBiArtifact(run);
       const delivery = this.deliveryContractMapper.map({
         run,
-        replayRecords
+        replayRecords,
+        artifactOverride: chartBiOutcome.artifact,
+        additionalRiskTags: chartBiOutcome.riskTags
       });
       return this.withPromptTemplateEvidence({
         ...run,
+        answer: delivery.answer.text,
         delivery
       });
     } catch {
+      const fallback = this.deliveryContractMapper.buildFallback(
+        run,
+        "delivery_mapper_failed"
+      );
       return this.withPromptTemplateEvidence({
         ...run,
-        delivery: this.deliveryContractMapper.buildFallback(
-          run,
-          "delivery_mapper_failed"
-        )
+        answer: fallback.answer.text,
+        delivery: fallback
       });
     }
+  }
+
+  private buildChartBiArtifact(run: SqlRun): {
+    artifact?: DeliveryContract["artifact"];
+    riskTags: string[];
+  } {
+    if (!this.shouldBuildChartBiArtifact(run)) {
+      return {
+        artifact: undefined,
+        riskTags: []
+      };
+    }
+
+    try {
+      return {
+        artifact: this.chartBiArtifactService.buildFromRun(run),
+        riskTags: []
+      };
+    } catch {
+      return {
+        artifact: this.buildLegacyArtifact(run),
+        riskTags: ["chartbi_artifact_failed"]
+      };
+    }
+  }
+
+  private shouldBuildChartBiArtifact(run: SqlRun): boolean {
+    if (run.status !== "executionResult") {
+      return false;
+    }
+    if (run.error) {
+      return false;
+    }
+    return true;
+  }
+
+  private buildLegacyArtifact(run: SqlRun): DeliveryContract["artifact"] | undefined {
+    const hasArtifact = Boolean(
+      run.sql || (run.columns?.length ?? 0) > 0 || (run.rows?.length ?? 0) > 0 || run.error
+    );
+    if (!hasArtifact) {
+      return undefined;
+    }
+    return {
+      sql: run.sql,
+      columns: run.columns,
+      rowCount: run.rows?.length ?? 0,
+      rowsPreview: run.rows?.slice(0, 3),
+      hasError: Boolean(run.error)
+    };
   }
 
   withPromptTemplateEvidence(run: SqlRun): SqlRun {

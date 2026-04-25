@@ -30,6 +30,9 @@ describe("SqlPromptBuilder", () => {
     expect(prompt.systemPrompt).toContain("business count-intent query");
     expect(prompt.systemPrompt).toContain("must contain COUNT(...) aggregation");
     expect(prompt.systemPrompt).toContain("Do not return schema/metadata introspection SQL.");
+    expect(prompt.systemPrompt).toContain(
+      "Do not query schema system tables via tools"
+    );
   });
 
   it("adds explicit metadata-intent guardrail instructions", () => {

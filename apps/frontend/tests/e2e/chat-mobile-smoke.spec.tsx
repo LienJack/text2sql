@@ -62,9 +62,29 @@ describe("chat mobile smoke", () => {
         }
       },
       artifact: {
+        sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
         rowCount: 1,
         hasError: false,
-        columns: ["value"]
+        summary: {
+          text: "移动端默认展示 Summary，支持快速切换到 SQL。"
+        },
+        table: {
+          columns: ["payment_method", "cnt"],
+          rowCount: 1,
+          rowsPreview: [{ payment_method: "card", cnt: 12 }],
+          previewRowCount: 1
+        },
+        chart: {
+          type: "bar",
+          mappings: {
+            x: "payment_method",
+            y: "cnt"
+          }
+        },
+        display: "bar",
+        validation: {
+          status: "valid"
+        }
       }
     }
   });
@@ -179,6 +199,7 @@ describe("chat mobile smoke", () => {
     expect(screen.getByRole("button", { name: "切换 Artifact 区块" })).toBeInTheDocument();
 
     expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(evidenceTrigger).toHaveAttribute("aria-controls");
     evidenceTrigger.focus();
     await user.keyboard("{Enter}");
     expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
@@ -193,6 +214,25 @@ describe("chat mobile smoke", () => {
     await waitFor(() => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
+
+    const answerTab = screen.getByRole("tab", { name: /answer/i });
+    const chartTab = screen.getByRole("tab", { name: /chart/i });
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
+    const tabList = screen.getByTestId("chatbi-result-tablist");
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
+    expect(chartTab).toHaveAttribute("aria-controls");
+    expect(sqlTab).toHaveAttribute("aria-controls");
+    expect(tabList).toHaveClass("overflow-x-auto");
+
+    chartTab.focus();
+    await user.keyboard("{Enter}");
+    expect(chartTab).toHaveAttribute("aria-selected", "true");
+
+    sqlTab.focus();
+    await user.keyboard("[Space]");
+    expect(sqlTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "打开运行详情" })).toBeInTheDocument();
 
     expect(
       screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })

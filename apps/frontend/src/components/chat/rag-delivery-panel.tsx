@@ -142,6 +142,42 @@ function resolvePromptTemplateSummary(delivery?: DeliveryContract): {
   };
 }
 
+function resolveSavedPriorSqlSummary(delivery?: DeliveryContract): {
+  summary: string;
+  detail: string;
+} {
+  const savedPriorSql = delivery?.evidence?.savedPriorSql;
+  if (!savedPriorSql) {
+    return {
+      summary: "未命中 saved prior",
+      detail: "未记录 saved prior SQL 复用信息。"
+    };
+  }
+  if (savedPriorSql.status === "hit" && savedPriorSql.safetyResult === "passed") {
+    return {
+      summary: "shortcut hit",
+      detail: "已复用保存的 SQL，并已通过安全校验。"
+    };
+  }
+  if (savedPriorSql.status === "hit" && savedPriorSql.safetyResult === "fallback_generated") {
+    return {
+      summary: "shortcut fallback",
+      detail: "命中保存 SQL，但安全校验拒绝，已回退到常规 SQL 生成。"
+    };
+  }
+  if (savedPriorSql.status === "hit" && savedPriorSql.safetyResult === "rejected") {
+    return {
+      summary: "shortcut rejected",
+      detail: "命中保存 SQL，但安全校验拒绝，未执行该 SQL。"
+    };
+  }
+  const reasons = savedPriorSql.reasonCodes?.join("，") ?? "unknown";
+  return {
+    summary: `shortcut ${savedPriorSql.status}`,
+    detail: `saved prior 状态：${savedPriorSql.status}（${reasons}）。`
+  };
+}
+
 function renderSelectedContextState(
   delivery: DeliveryContract
 ): { state: SelectedContextState; node: JSX.Element } {
@@ -204,6 +240,7 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
   const evidence = delivery?.evidence;
   const artifact = delivery?.artifact;
   const promptTemplateSummary = resolvePromptTemplateSummary(delivery);
+  const savedPriorSqlSummary = resolveSavedPriorSqlSummary(delivery);
   const runLifecycleKey = runId?.trim() || evidence?.runId?.trim() || "__unknown-run__";
   const semanticVersionText = evidence?.semanticVersion ?? "版本不可用（字段缺失）";
   const semanticLockStatusText =
@@ -333,7 +370,20 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
             <p>selected_context 状态：{selectedContextState.state}</p>
             <p>模板命中摘要：{promptTemplateSummary.summary}</p>
             <p>模板降级原因：{promptTemplateSummary.fallbackReasonText}</p>
+            <p>Saved Prior SQL：{savedPriorSqlSummary.summary}</p>
           </div>
+          <StateBlock
+            variant={
+              evidence?.savedPriorSql?.status === "hit" &&
+              evidence?.savedPriorSql?.safetyResult === "passed"
+                ? "success"
+                : evidence?.savedPriorSql?.safetyResult === "rejected"
+                  ? "error"
+                  : "idle"
+            }
+          >
+            {savedPriorSqlSummary.detail}
+          </StateBlock>
           {selectedContextState.node}
           {(evidence?.degradeReasons?.length ?? 0) > 0 ? (
             <p className="text-xs text-[var(--text-secondary)]">

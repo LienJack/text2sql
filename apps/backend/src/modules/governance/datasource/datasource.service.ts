@@ -1,4 +1,7 @@
 import { Injectable } from "@nestjs/common";
+import { constants as fsConstants } from "node:fs";
+import { access, realpath, stat } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
 import type {
   Datasource,
   DatasourceStatus,
@@ -10,6 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 import { DomainError } from "../../../common/domain-error";
 import { encryptSecret } from "../../../common/secret-crypto";
 import { AppConfigService } from "../../config/app-config.service";
+import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
 import { DatasourceRepository } from "../../platform/data/persistence/index";
 import { QueryExecutorRouterService } from "../../platform/data/query/index";
 import type { AccessContext } from "../access/datasource-access-policy.service";
@@ -96,7 +100,8 @@ export class DatasourceService {
     private readonly datasourceRepository: DatasourceRepository,
     private readonly policyEvaluatorService: PolicyEvaluatorService,
     private readonly appConfig: AppConfigService,
-    private readonly queryExecutorRouter: QueryExecutorRouterService
+    private readonly queryExecutorRouter: QueryExecutorRouterService,
+    private readonly sqliteQuery: SqliteQueryService
   ) {}
 
   async listDatasources(options?: {
@@ -173,7 +178,7 @@ export class DatasourceService {
     }
 
     const normalizedType = input.type;
-    if (normalizedType === "mysql" || normalizedType === "postgresql") {
+    if (this.isRelationalDatasourceType(normalizedType)) {
       await this.preflightDatasourceConnection({
         type: normalizedType,
         host: input.host,
@@ -184,15 +189,31 @@ export class DatasourceService {
       });
     }
 
-    const config = this.buildConnectionConfig({
-      type: normalizedType,
-      host: input.host,
-      port: input.port,
-      database: input.database,
-      username: input.username,
-      password: input.password,
-      filePath: input.filePath
-    });
+    let config: Record<string, unknown>;
+    if (normalizedType === "sqlite") {
+      config = await this.buildSqliteConnectionConfig({
+        mode: "create",
+        filePath: input.filePath
+      });
+    } else if (this.isRelationalDatasourceType(normalizedType)) {
+      config = this.buildRelationalConnectionConfig({
+        type: normalizedType,
+        host: input.host,
+        port: input.port,
+        database: input.database,
+        username: input.username,
+        password: input.password
+      });
+    } else {
+      throw new DomainError(
+        "DATASOURCE_TYPE_UNSUPPORTED",
+        `create 接口暂不支持 ${normalizedType} 类型。`,
+        400,
+        {
+          datasourceType: normalizedType
+        }
+      );
+    }
 
     const datasource = await this.datasourceRepository.upsertDatasource({
       id: `ds-${uuidv4()}`,
@@ -361,23 +382,14 @@ export class DatasourceService {
     return datasource;
   }
 
-  private buildConnectionConfig(input: {
-    type: DatasourceType;
+  private buildRelationalConnectionConfig(input: {
+    type: RelationalDatasourceType;
     host?: string;
     port?: number;
     database?: string;
     username?: string;
     password?: string;
-    filePath?: string;
   }): Record<string, unknown> {
-    if (input.type === "sqlite") {
-      const path = input.filePath?.trim() || this.appConfig.sqlitePath;
-      if (!path) {
-        throw new DomainError("VALIDATION_ERROR", "SQLite 文件路径不能为空", 400);
-      }
-      return { path };
-    }
-
     const host = input.host?.trim();
     const database = input.database?.trim();
     const username = input.username?.trim();
@@ -404,6 +416,19 @@ export class DatasourceService {
     };
   }
 
+  private async buildSqliteConnectionConfig(input: {
+    mode: "create" | "update" | "preview";
+    filePath?: string;
+    datasourceId?: string;
+  }): Promise<Record<string, unknown>> {
+    const normalizedPath = await this.preflightSqlitePath({
+      mode: input.mode,
+      filePath: input.filePath,
+      datasourceId: input.datasourceId
+    });
+    return { path: normalizedPath };
+  }
+
   private async buildUpdatedConfig(
     existing: Datasource,
     patch: DatasourceUpdateInput
@@ -417,13 +442,22 @@ export class DatasourceService {
       this.assertNoRelationalDatasourceFields(patch, existing.type);
       const filePath = patch.filePath?.trim();
       if (patch.filePath !== undefined && !filePath) {
-        throw new DomainError("VALIDATION_ERROR", "filePath 不能为空。", 400, {
+        throw new DomainError("SQLITE_PATH_REQUIRED", "SQLite 文件路径不能为空。", 400, {
           field: "filePath"
         });
       }
+
+      const pathConfig = filePath
+        ? await this.buildSqliteConnectionConfig({
+            mode: "update",
+            filePath,
+            datasourceId: existing.id
+          })
+        : {};
+
       return {
         ...(existing.config ?? {}),
-        ...(filePath ? { path: filePath } : {})
+        ...pathConfig
       };
     }
 
@@ -489,7 +523,7 @@ export class DatasourceService {
       password
     });
 
-    return this.buildConnectionConfig({
+    return this.buildRelationalConnectionConfig({
       type: relationalType,
       host,
       port,
@@ -651,15 +685,31 @@ export class DatasourceService {
       };
     }
 
-    const config = this.buildConnectionConfig({
-      type,
-      host: datasourcePayload.host,
-      port: datasourcePayload.port,
-      database: datasourcePayload.database,
-      username: datasourcePayload.username,
-      password: datasourcePayload.password,
-      filePath: datasourcePayload.filePath
-    });
+    let config: Record<string, unknown>;
+    if (type === "sqlite") {
+      config = await this.buildSqliteConnectionConfig({
+        mode: "preview",
+        filePath: datasourcePayload.filePath
+      });
+    } else if (this.isRelationalDatasourceType(type)) {
+      config = this.buildRelationalConnectionConfig({
+        type,
+        host: datasourcePayload.host,
+        port: datasourcePayload.port,
+        database: datasourcePayload.database,
+        username: datasourcePayload.username,
+        password: datasourcePayload.password
+      });
+    } else {
+      throw new DomainError(
+        "DATASOURCE_TYPE_UNSUPPORTED",
+        `create 预览不支持 ${type} 类型。`,
+        400,
+        {
+          datasourceType: type
+        }
+      );
+    }
 
     return {
       id: `preview-${uuidv4()}`,
@@ -718,6 +768,284 @@ ORDER BY name
       }
     }
     return null;
+  }
+
+  private async preflightSqlitePath(input: {
+    mode: "create" | "update" | "preview";
+    filePath?: string;
+    datasourceId?: string;
+  }): Promise<string> {
+    const validated = await this.validateSqlitePath(input);
+
+    try {
+      await this.sqliteQuery.query(
+        `
+SELECT name
+FROM sqlite_master
+WHERE type = 'table'
+ORDER BY name
+LIMIT 1
+        `.trim(),
+        {
+          filePath: validated.normalizedPath
+        }
+      );
+    } catch (error) {
+      if (error instanceof DomainError && error.code.startsWith("SQLITE_PATH_")) {
+        throw error;
+      }
+      throw new DomainError(
+        "SQLITE_PRECHECK_FAILED",
+        "SQLite 文件连通性校验失败，请确认文件有效且当前服务具备读取权限。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: validated.normalizedPath,
+          resolvedPath: validated.resolvedPath,
+          originalCode: error instanceof DomainError ? error.code : undefined,
+          originalMessage: error instanceof Error ? error.message : String(error),
+          suggestedAction: "previous"
+        }
+      );
+    }
+
+    return validated.normalizedPath;
+  }
+
+  private async validateSqlitePath(input: {
+    mode: "create" | "update" | "preview";
+    filePath?: string;
+    datasourceId?: string;
+  }): Promise<{
+    normalizedPath: string;
+    resolvedPath: string;
+  }> {
+    const rawPath = input.filePath?.trim() ?? "";
+    if (!rawPath) {
+      throw new DomainError("SQLITE_PATH_REQUIRED", "SQLite 文件路径不能为空。", 400, {
+        field: "filePath",
+        mode: input.mode,
+        datasourceId: input.datasourceId,
+        suggestedAction: "previous"
+      });
+    }
+    if (!isAbsolute(rawPath)) {
+      throw new DomainError(
+        "SQLITE_PATH_NOT_ABSOLUTE",
+        "请填写 SQLite 文件绝对路径。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: rawPath,
+          suggestedAction: "previous"
+        }
+      );
+    }
+
+    const normalizedPath = resolve(rawPath);
+    const resolvedPath = await this.resolveSqliteRealPath({
+      normalizedPath,
+      mode: input.mode,
+      datasourceId: input.datasourceId
+    });
+    await this.assertSqliteReadableFile({
+      normalizedPath,
+      resolvedPath,
+      mode: input.mode,
+      datasourceId: input.datasourceId
+    });
+    await this.assertSqlitePathAllowed({
+      normalizedPath,
+      resolvedPath,
+      mode: input.mode,
+      datasourceId: input.datasourceId
+    });
+
+    return {
+      normalizedPath,
+      resolvedPath
+    };
+  }
+
+  private async resolveSqliteRealPath(input: {
+    normalizedPath: string;
+    mode: "create" | "update" | "preview";
+    datasourceId?: string;
+  }): Promise<string> {
+    try {
+      return await realpath(input.normalizedPath);
+    } catch (error) {
+      const code = this.readNodeErrorCode(error);
+      if (code === "ENOENT") {
+        throw new DomainError(
+          "SQLITE_PATH_NOT_FOUND",
+          "SQLite 文件不存在，请确认路径后重试。",
+          400,
+          {
+            field: "filePath",
+            mode: input.mode,
+            datasourceId: input.datasourceId,
+            path: input.normalizedPath,
+            suggestedAction: "previous"
+          }
+        );
+      }
+      if (code === "EACCES" || code === "EPERM") {
+        throw new DomainError(
+          "SQLITE_PATH_UNREADABLE",
+          "无法读取 SQLite 文件，请检查文件权限后重试。",
+          400,
+          {
+            field: "filePath",
+            mode: input.mode,
+            datasourceId: input.datasourceId,
+            path: input.normalizedPath,
+            suggestedAction: "previous"
+          }
+        );
+      }
+      throw new DomainError(
+        "SQLITE_PATH_INVALID",
+        "SQLite 文件路径解析失败，请确认路径格式正确。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: input.normalizedPath,
+          originalMessage: error instanceof Error ? error.message : String(error),
+          suggestedAction: "previous"
+        }
+      );
+    }
+  }
+
+  private async assertSqliteReadableFile(input: {
+    normalizedPath: string;
+    resolvedPath: string;
+    mode: "create" | "update" | "preview";
+    datasourceId?: string;
+  }): Promise<void> {
+    let fileStat: Awaited<ReturnType<typeof stat>>;
+    try {
+      fileStat = await stat(input.resolvedPath);
+    } catch (error) {
+      throw new DomainError(
+        "SQLITE_PATH_NOT_FOUND",
+        "SQLite 文件不存在，请确认路径后重试。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: input.normalizedPath,
+          resolvedPath: input.resolvedPath,
+          suggestedAction: "previous"
+        }
+      );
+    }
+
+    if (!fileStat.isFile()) {
+      throw new DomainError(
+        "SQLITE_PATH_INVALID",
+        "SQLite 路径必须指向文件，当前路径不是文件。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: input.normalizedPath,
+          resolvedPath: input.resolvedPath,
+          suggestedAction: "previous"
+        }
+      );
+    }
+
+    try {
+      await access(input.resolvedPath, fsConstants.R_OK);
+    } catch (error) {
+      throw new DomainError(
+        "SQLITE_PATH_UNREADABLE",
+        "无法读取 SQLite 文件，请检查文件权限后重试。",
+        400,
+        {
+          field: "filePath",
+          mode: input.mode,
+          datasourceId: input.datasourceId,
+          path: input.normalizedPath,
+          resolvedPath: input.resolvedPath,
+          originalMessage: error instanceof Error ? error.message : String(error),
+          suggestedAction: "previous"
+        }
+      );
+    }
+  }
+
+  private async assertSqlitePathAllowed(input: {
+    normalizedPath: string;
+    resolvedPath: string;
+    mode: "create" | "update" | "preview";
+    datasourceId?: string;
+  }): Promise<void> {
+    const allowedDirs = await this.resolveAllowedSqliteDirs();
+    const matched = allowedDirs.some((allowedDir) =>
+      this.isPathWithinDirectory(input.resolvedPath, allowedDir)
+    );
+
+    if (matched) {
+      return;
+    }
+
+    throw new DomainError(
+      "SQLITE_PATH_NOT_ALLOWED",
+      "SQLite 文件路径不在允许目录内，请调整路径或联系管理员配置 SQLITE_ALLOWED_DIRS。",
+      400,
+      {
+        field: "filePath",
+        mode: input.mode,
+        datasourceId: input.datasourceId,
+        path: input.normalizedPath,
+        resolvedPath: input.resolvedPath,
+        allowedDirs,
+        suggestedAction: "previous"
+      }
+    );
+  }
+
+  private async resolveAllowedSqliteDirs(): Promise<string[]> {
+    const roots = this.appConfig.sqliteAllowedDirs;
+    const resolved = await Promise.all(
+      roots.map(async (item) => {
+        const normalized = resolve(item);
+        try {
+          return await realpath(normalized);
+        } catch {
+          return normalized;
+        }
+      })
+    );
+    return Array.from(new Set(resolved));
+  }
+
+  private isPathWithinDirectory(targetPath: string, dirPath: string): boolean {
+    const relation = relative(dirPath, targetPath);
+    return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
+  }
+
+  private readNodeErrorCode(error: unknown): string | undefined {
+    if (!error || typeof error !== "object") {
+      return undefined;
+    }
+    const candidate = (error as Record<string, unknown>).code;
+    return typeof candidate === "string" ? candidate : undefined;
+  }
+
+  private isRelationalDatasourceType(type: DatasourceType): type is RelationalDatasourceType {
+    return type === "mysql" || type === "postgresql";
   }
 
   protected async loadMysqlModule(): Promise<MysqlPreflightModule> {

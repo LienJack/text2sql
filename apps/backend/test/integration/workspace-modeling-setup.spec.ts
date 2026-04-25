@@ -8,6 +8,8 @@ const actor = {
 
 const buildService = (options?: {
   permissionError?: DomainError;
+  permissionPolicyVersion?: number;
+  permissionTableNames?: string[];
 }) => {
   const workspaceDatasourceService = {
     listDatasourceTables: jest.fn(async () => ({
@@ -22,10 +24,34 @@ const buildService = (options?: {
       return {
         workspaceId: "ws-1",
         datasourceId: "ds-1",
-        policyVersion: 7,
-        tableNames: ["customers", "orders"]
+        policyVersion: options?.permissionPolicyVersion ?? 7,
+        tableNames: options?.permissionTableNames ?? ["customers", "orders"]
       };
-    })
+    }),
+    replaceDatasourceTablePermissions: jest.fn(
+      async (
+        _actor: unknown,
+        workspaceId: string,
+        datasourceId: string,
+        body: { policyVersion: number; tableNames: string[] }
+      ) => ({
+        workspaceId,
+        datasourceId,
+        policyVersion: body.policyVersion + 1,
+        tableNames: body.tableNames,
+        impactSummary: {
+          beforeCount: 0,
+          afterCount: body.tableNames.length,
+          addedCount: body.tableNames.length,
+          removedCount: 0,
+          retainedCount: 0,
+          addedTables: body.tableNames,
+          removedTables: []
+        },
+        idempotencyKey: "mock-key",
+        replayed: false
+      })
+    )
   };
   const workspaceRelationshipService = {
     getDraft: jest.fn(async () => ({
@@ -109,7 +135,8 @@ const buildService = (options?: {
       datasourceRepository as never,
       queryExecutorRouter as never
     ),
-    workspaceRelationshipService
+    workspaceRelationshipService,
+    workspaceDatasourceService
   };
 };
 
@@ -196,6 +223,62 @@ describe("workspace modeling setup integration", () => {
     ).rejects.toMatchObject({
       code: "WORKSPACE_DATASOURCE_NOT_BOUND"
     });
+  });
+
+  it("falls back to discovered tables when policyVersion is 0 and permissions are empty", async () => {
+    const { service } = buildService({
+      permissionPolicyVersion: 0,
+      permissionTableNames: []
+    });
+
+    const list = await service.listSetupTables(actor, "ws-1", "ds-1");
+    expect(list.items).toEqual(["customers", "orders", "payments"]);
+    expect(list.policyVersion).toBe(0);
+
+    const preview = await service.previewSetup(actor, "ws-1", "ds-1", {
+      policyVersion: 0,
+      selectedTables: ["orders"],
+      selectedRecommendationIds: undefined
+    });
+    expect(preview.selectedTables).toEqual(["orders"]);
+  });
+
+  it("keeps explicit empty permissions when policyVersion is greater than 0", async () => {
+    const { service } = buildService({
+      permissionPolicyVersion: 3,
+      permissionTableNames: []
+    });
+
+    const list = await service.listSetupTables(actor, "ws-1", "ds-1");
+    expect(list.items).toEqual([]);
+    expect(list.policyVersion).toBe(3);
+  });
+
+  it("persists selected tables into table permissions during setup save", async () => {
+    const { service, workspaceDatasourceService } = buildService({
+      permissionPolicyVersion: 0,
+      permissionTableNames: []
+    });
+
+    const saved = await service.saveSelectedTables(actor, "ws-1", "ds-1", {
+      policyVersion: 0,
+      selectedTables: ["orders", "customers"]
+    });
+
+    expect(
+      workspaceDatasourceService.replaceDatasourceTablePermissions
+    ).toHaveBeenCalledWith(
+      actor,
+      "ws-1",
+      "ds-1",
+      expect.objectContaining({
+        policyVersion: 0,
+        tableNames: ["customers", "orders"]
+      }),
+      expect.stringMatching(/^modeling-setup-tables-/)
+    );
+    expect(saved.policyVersion).toBe(1);
+    expect(saved.selectedTableNames).toEqual(["customers", "orders"]);
   });
 
   it("replays commit response with same idempotency key and payload", async () => {

@@ -142,15 +142,45 @@ export interface RagContextPack {
 }
 
 export interface RagPriorSqlLaneEvidence {
-  status: "hit" | "miss" | "filtered";
+  status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";
   matched_count: number;
   selected_count: number;
   filtered_count: number;
+  stale_count?: number;
+  ambiguous_count?: number;
+  eligible_count?: number;
   degrade_reasons?: string[];
+  shortcut?: RagPriorSqlShortcutDecision;
   matchedCount?: number;
   selectedCount?: number;
   filteredCount?: number;
+  staleCount?: number;
+  ambiguousCount?: number;
+  eligibleCount?: number;
   degradeReasons?: string[];
+  shortcutDecision?: RagPriorSqlShortcutDecision;
+}
+
+export interface RagPriorSqlShortcutDecision {
+  status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";
+  reason_codes: string[];
+  matched_count: number;
+  eligible_count: number;
+  filtered_count: number;
+  stale_count: number;
+  ambiguous_count: number;
+  selected_chunk_id?: string;
+  selected_view_id?: string;
+  selected_source_run_id?: string;
+  reasonCodes?: string[];
+  matchedCount?: number;
+  eligibleCount?: number;
+  filteredCount?: number;
+  staleCount?: number;
+  ambiguousCount?: number;
+  selectedChunkId?: string;
+  selectedViewId?: string;
+  selectedSourceRunId?: string;
 }
 
 export interface RagRetrievalBundle {

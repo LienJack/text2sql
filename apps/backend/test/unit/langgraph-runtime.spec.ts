@@ -93,6 +93,12 @@ describe("langgraph runtime", () => {
           summary: "stub"
         })
       },
+      resolveSavedPriorSqlNode: {
+        run: () => ({
+          status: "miss" as const,
+          reasonCodes: ["prior_sql_no_trusted_match"]
+        })
+      },
       generateSqlNode: {
         run: async () => ({
           provider: "mock-provider",
@@ -187,6 +193,12 @@ describe("langgraph runtime", () => {
           summary: "stub"
         })
       },
+      resolveSavedPriorSqlNode: {
+        run: () => ({
+          status: "miss" as const,
+          reasonCodes: ["prior_sql_no_trusted_match"]
+        })
+      },
       generateSqlNode: {
         run: async () => ({
           provider: "mock-provider",
@@ -237,6 +249,7 @@ describe("langgraph runtime", () => {
       "build-intent-plan",
       "build-semantic-query",
       "build-physical-plan",
+      "resolve-saved-prior-sql",
       "generate-sql",
       "safety-check",
       "execute-sql",
@@ -245,8 +258,8 @@ describe("langgraph runtime", () => {
     expect(output.trace.steps[0]?.sequence).toBe(1);
     expect(output.trace.steps[0]?.stepId).toBe("run-1:clarify:1");
     expect(output.trace.steps[0]?.lifecycle).toBe("skipped");
-    expect(output.trace.steps[5]?.sequence).toBe(6);
-    expect(output.trace.steps[5]?.lifecycle).toBe("completed");
+    expect(output.trace.steps[6]?.sequence).toBe(7);
+    expect(output.trace.steps[6]?.lifecycle).toBe("completed");
     expect(output.trace.clarificationDecision?.decision).toBe("continue");
   });
 
@@ -302,6 +315,12 @@ describe("langgraph runtime", () => {
           summary: "stub"
         })
       },
+      resolveSavedPriorSqlNode: {
+        run: () => ({
+          status: "miss" as const,
+          reasonCodes: ["prior_sql_no_trusted_match"]
+        })
+      },
       generateSqlNode: {
         run: async () => {
           throw new Error("llm failed");
@@ -343,12 +362,13 @@ describe("langgraph runtime", () => {
       "build-intent-plan",
       "build-semantic-query",
       "build-physical-plan",
+      "resolve-saved-prior-sql",
       "generate-sql"
     ]);
-    expect(output.trace.steps[5]?.status).toBe("failed");
-    expect(output.trace.steps[5]?.sequence).toBe(6);
-    expect(output.trace.steps[5]?.stepId).toBe("run-2:generate-sql:6");
-    expect(output.trace.steps[5]?.lifecycle).toBe("failed");
-    expect(output.trace.steps[5]?.errorSummary).toContain("llm failed");
+    expect(output.trace.steps[6]?.status).toBe("failed");
+    expect(output.trace.steps[6]?.sequence).toBe(7);
+    expect(output.trace.steps[6]?.stepId).toBe("run-2:generate-sql:7");
+    expect(output.trace.steps[6]?.lifecycle).toBe("failed");
+    expect(output.trace.steps[6]?.errorSummary).toContain("llm failed");
   });
 });

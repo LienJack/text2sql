@@ -13,6 +13,7 @@ import {
   type KnowledgeSemanticSpineContract
 } from "./contracts/knowledge-semantic-registry.contract";
 import { MemoryPromotionService } from "./memory/memory-promotion.service";
+import { SavedPriorSqlService } from "./memory/saved-prior-sql.service";
 import { RagReplayRepository } from "./rag/observability/rag-replay.repository";
 import { RagRetrievalService } from "./rag/retrieval/rag-retrieval.service";
 import { RagRerankService } from "./rag/rerank/rag-rerank.service";
@@ -28,6 +29,7 @@ export class KnowledgeChatSupportFacade implements KnowledgeFacadeContract {
 
   constructor(
     readonly memoryPromotionService: MemoryPromotionService,
+    readonly savedPriorSqlService: SavedPriorSqlService,
     readonly ragReplayRepository: RagReplayRepository,
     readonly ragRetrievalService: RagRetrievalService,
     readonly ragRerankService: RagRerankService,
@@ -63,7 +65,8 @@ export class KnowledgeChatSupportFacade implements KnowledgeFacadeContract {
       semanticSpine: semanticSpineContract
     };
     this.memoryContract = {
-      promotion: this.memoryPromotionService
+      promotion: this.memoryPromotionService,
+      savedPriorSql: this.savedPriorSqlService
     };
   }
 

@@ -16,6 +16,7 @@ import { Menu } from "lucide-react";
 import { AssistantThread } from "@/components/chat/assistant-thread";
 import { SaveAsViewDialog } from "@/components/chat/save-as-view-dialog";
 import {
+  mergeRunThinkingSteps,
   normalizeDeliveryContract,
   normalizeRunForVisibility,
   toRunVisibilityStatusFromRunStatus,
@@ -146,36 +147,7 @@ function appendThinkingStep(
   incoming: ThinkingStep
 ): Record<string, ThinkingStep[]> {
   const current = previous[runId] ?? [];
-  const stepKey =
-    incoming.stepId ??
-    `${incoming.node}:${incoming.sequence ?? "na"}:${incoming.at ?? "na"}`;
-  const existingIndex = current.findIndex((step) => {
-    const existingKey =
-      step.stepId ??
-      `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
-    return existingKey === stepKey;
-  });
-
-  const nextForRun = [...current];
-  if (existingIndex >= 0) {
-    nextForRun[existingIndex] = {
-      ...nextForRun[existingIndex],
-      ...incoming
-    };
-  } else {
-    nextForRun.push(incoming);
-  }
-
-  nextForRun.sort((left, right) => {
-    const leftSequence = left.sequence ?? 0;
-    const rightSequence = right.sequence ?? 0;
-    if (leftSequence !== rightSequence) {
-      return leftSequence - rightSequence;
-    }
-    const leftTime = left.at ?? left.startedAt ?? "";
-    const rightTime = right.at ?? right.startedAt ?? "";
-    return leftTime.localeCompare(rightTime);
-  });
+  const nextForRun = mergeRunThinkingSteps(undefined, [...current, incoming]) as ThinkingStep[];
 
   return {
     ...previous,
@@ -836,9 +808,10 @@ export function ChatPanel() {
             }
             await refreshSessionBuckets();
           }}
-          onRunError={async () => {
+          onRunError={async (error) => {
             setActiveStreamRunId(null);
             setThinkingRequestPending(false);
+            setSessionError(error.message || "消息发送失败，请稍后重试。");
             if (sessionId) {
               await loadMessages(sessionId, datasourceId).catch(() => undefined);
             }

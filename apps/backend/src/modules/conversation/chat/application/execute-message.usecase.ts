@@ -7,7 +7,10 @@ import { DatasourceService } from "../../../governance/datasource/datasource.ser
 import { RedisBufferService } from "../../../platform/data/cache/index";
 import { ChatRepository } from "../../../platform/data/persistence/index";
 import { ChatDeliveryEnrichmentService } from "./shared/chat-delivery-enrichment.service";
-import { ChatPolicyGuardService } from "./shared/chat-policy-guard.service";
+import {
+  ChatPolicyGuardService,
+  type ChatPolicyActorInput
+} from "./shared/chat-policy-guard.service";
 import { ChatPostRunHooksService } from "./shared/chat-post-run-hooks.service";
 import { ChatRunPersistenceService } from "./shared/chat-run-persistence.service";
 import { DomainError } from "../../../../common/domain-error";
@@ -17,6 +20,7 @@ export interface ExecuteMessageInput {
   message: string;
   requestId?: string;
   contextEnvelope?: ContextEnvelope;
+  actor?: ChatPolicyActorInput;
 }
 
 @Injectable()
@@ -45,7 +49,8 @@ export class ExecuteMessageUsecase {
       session.datasource
     );
     const sqlAccessContext = await this.chatPolicyGuardService.resolveSqlAccessContext(
-      session
+      session,
+      input.actor
     );
 
     const userMessage: ChatMessage = {

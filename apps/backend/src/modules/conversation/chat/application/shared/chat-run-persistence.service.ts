@@ -18,11 +18,16 @@ export class ChatRunPersistenceService {
   ) {}
 
   async persistAssistantAndRun(input: ChatRunPersistenceInput): Promise<void> {
+    const assistantContent =
+      input.run.delivery?.answer.text ??
+      input.run.answer ??
+      input.run.error ??
+      "系统未返回结果。";
     const assistantMessage: ChatMessage = {
       id: uuidv4(),
       sessionId: input.sessionId,
       role: "assistant",
-      content: input.run.answer ?? input.run.error ?? "系统未返回结果。",
+      content: assistantContent,
       metadata: {
         runId: input.run.runId,
         status: input.run.status

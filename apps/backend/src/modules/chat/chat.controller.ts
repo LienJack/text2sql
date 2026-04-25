@@ -133,7 +133,9 @@ export class ChatController {
       const run = await this.chatService.sendMessage(
         sessionId,
         body.message,
-        req.requestId
+        req.requestId,
+        undefined,
+        req.actor
       );
       return ok(req.requestId, {
         kind: "agent-run",
@@ -195,7 +197,9 @@ export class ChatController {
         req.requestId,
         async (event) => {
           sendEvent(event.type, event);
-        }
+        },
+        undefined,
+        req.actor
       );
     } catch (error) {
       const fallbackEvent: ChatStreamEvent = {

@@ -183,6 +183,25 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  upsertChunksForDatasource(datasourceId: string, chunks: RagChunkBuildInput[]): void {
+    if (chunks.length === 0) {
+      return;
+    }
+    const existing = this.chunksByDatasource.get(datasourceId) ?? [];
+    const merged = new Map<string, RagChunkBuildInput>();
+    for (const chunk of existing) {
+      merged.set(chunk.id, {
+        ...chunk
+      });
+    }
+    for (const chunk of chunks) {
+      merged.set(chunk.id, {
+        ...chunk
+      });
+    }
+    this.chunksByDatasource.set(datasourceId, [...merged.values()]);
+  }
+
   async listChunksForBuild(datasourceId: string): Promise<RagChunkBuildInput[]> {
     const memory = this.chunksByDatasource.get(datasourceId) ?? [];
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {

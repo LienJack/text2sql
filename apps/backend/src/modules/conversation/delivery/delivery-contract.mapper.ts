@@ -23,6 +23,8 @@ export interface DeliveryReplayRecordInput {
 export interface DeliveryContractMapperInput {
   run: SqlRun;
   replayRecords?: DeliveryReplayRecordInput[];
+  artifactOverride?: DeliveryContract["artifact"];
+  additionalRiskTags?: string[];
 }
 
 interface RerankFinalSnapshot {
@@ -109,6 +111,17 @@ interface SqlCoverageEvidenceSnapshot {
   triggerSource: "selected_context" | "semantic_context" | "explicit_pinning" | "none";
 }
 
+interface SavedPriorSqlEvidenceSnapshot {
+  status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";
+  shortcutUsed: boolean;
+  reasonCodes?: string[];
+  selectedChunkId?: string;
+  selectedViewId?: string;
+  selectedViewName?: string;
+  selectedSourceRunId?: string;
+  safetyResult?: "passed" | "rejected" | "fallback_generated";
+}
+
 type ClarificationDecisionLayer = NonNullable<
   NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
 >;
@@ -117,6 +130,7 @@ type DeliveryEvidenceWithContext = NonNullable<DeliveryContract["evidence"]> & {
   effectiveContextSummary?: EffectiveContextSummary;
   conflictHint?: ContextConflictHint;
   sqlCoverage?: SqlCoverageEvidenceSnapshot;
+  savedPriorSql?: SavedPriorSqlEvidenceSnapshot;
 };
 
 interface SandboxPostProcessOutcome {
@@ -139,8 +153,9 @@ export class DeliveryContractMapper {
     const traceContextEvidence = this.readTraceContextEvidence(input.run);
     const clarificationDecision = this.readClarificationDecisionEvidence(input.run);
     const sqlCoverage = this.readSqlCoverageEvidence(input.run);
+    const savedPriorSql = this.readSavedPriorSqlEvidence(input.run);
     const invalidInput = replayIndex.invalidPayload;
-    const artifact = this.buildArtifact(input.run);
+    const artifact = input.artifactOverride ?? this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
       artifact,
       sandboxPayload: replayIndex.sandboxPostprocess,
@@ -154,6 +169,10 @@ export class DeliveryContractMapper {
         ? ["context_conflict_detected"]
         : []),
       ...(sqlCoverage?.gateStatus === "failed" ? ["sql_coverage_gate_failed"] : []),
+      ...(savedPriorSql?.safetyResult === "rejected"
+        ? ["saved_prior_sql_safety_rejected"]
+        : []),
+      ...(input.additionalRiskTags ?? []),
       ...sandboxOutcome.riskTags
     ]);
 
@@ -211,7 +230,8 @@ export class DeliveryContractMapper {
       effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
       conflictHint: traceContextEvidence.conflictHint,
       clarificationDecision,
-      sqlCoverage
+      sqlCoverage,
+      savedPriorSql
     };
 
     return {
@@ -666,6 +686,76 @@ export class DeliveryContractMapper {
       }
     }
     return undefined;
+  }
+
+  private readSavedPriorSqlEvidence(
+    run: SqlRun
+  ): SavedPriorSqlEvidenceSnapshot | undefined {
+    const steps = run.trace.steps ?? [];
+    if (steps.length === 0) {
+      return undefined;
+    }
+    const resolutionStepIndex = [...steps]
+      .map((step, index) => ({ step, index }))
+      .reverse()
+      .find((entry) => entry.step.node === "resolve-saved-prior-sql");
+    if (!resolutionStepIndex) {
+      return undefined;
+    }
+    const output = this.parseSummaryObject(resolutionStepIndex.step.outputSummary);
+    const statusRaw = this.readString(output?.status);
+    const status =
+      statusRaw === "hit" ||
+      statusRaw === "miss" ||
+      statusRaw === "filtered" ||
+      statusRaw === "stale" ||
+      statusRaw === "ambiguous"
+        ? statusRaw
+        : undefined;
+    if (!status) {
+      return undefined;
+    }
+
+    const reasonCodes = this.readStringArray(
+      output?.reasonCodes ?? output?.reason_codes
+    );
+    const selectedChunkId = this.readString(
+      output?.selectedChunkId ?? output?.selected_chunk_id
+    );
+    const selectedViewId = this.readString(
+      output?.selectedViewId ?? output?.selected_view_id
+    );
+    const selectedSourceRunId = this.readString(
+      output?.selectedSourceRunId ?? output?.selected_source_run_id
+    );
+
+    const subsequentSteps = steps.slice(resolutionStepIndex.index + 1);
+    const safetyStep = subsequentSteps.find((step) => step.node === "safety-check");
+    const hasFallbackGeneration = subsequentSteps.some(
+      (step) => step.node === "generate-sql"
+    );
+    const safetyResult: SavedPriorSqlEvidenceSnapshot["safetyResult"] | undefined =
+      status !== "hit"
+        ? undefined
+        : safetyStep?.status === "success"
+          ? "passed"
+          : safetyStep?.status === "failed"
+            ? hasFallbackGeneration
+              ? "fallback_generated"
+              : "rejected"
+            : undefined;
+
+    const shortcutUsed = status === "hit" && safetyResult === "passed";
+
+    return {
+      status,
+      shortcutUsed,
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+      ...(selectedChunkId ? { selectedChunkId } : {}),
+      ...(selectedViewId ? { selectedViewId } : {}),
+      ...(selectedSourceRunId ? { selectedSourceRunId } : {}),
+      ...(safetyResult ? { safetyResult } : {})
+    };
   }
 
   private readSqlCoverageFromRecord(

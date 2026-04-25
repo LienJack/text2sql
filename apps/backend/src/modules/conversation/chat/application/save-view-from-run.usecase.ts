@@ -1,12 +1,22 @@
 import { createHash } from "node:crypto";
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { DomainError } from "../../../../common/domain-error";
 import { ChatRepository } from "../../../platform/data/persistence";
 import { ModelingGraphRepository } from "../../../platform/data/persistence/modeling-graph.repository";
 import { ModelingGraphValidator } from "../../../platform/data/persistence/modeling-graph.validator";
 import type { ModelingGraphPayload, ModelingGraphView } from "../../../platform/data/persistence/modeling-graph.types";
+import {
+  KNOWLEDGE_MEMORY_CONTRACT,
+  type KnowledgeMemoryContract,
+  type SavedPriorSqlCaptureResult
+} from "../../../knowledge/contracts/knowledge-memory.contract";
 
 const VIEW_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export interface SaveViewFromRunSavedPriorSqlDiagnostics
+  extends SavedPriorSqlCaptureResult {
+  message?: string;
+}
 
 export interface SaveViewFromRunInput {
   runId: string;
@@ -25,6 +35,7 @@ export interface SaveViewFromRunResult {
   activeRevision?: number;
   draftRevision: number;
   view: ModelingGraphView;
+  savedPriorSql?: SaveViewFromRunSavedPriorSqlDiagnostics;
 }
 
 @Injectable()
@@ -32,7 +43,10 @@ export class SaveViewFromRunUsecase {
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly modelingGraphRepository: ModelingGraphRepository,
-    private readonly modelingGraphValidator: ModelingGraphValidator
+    private readonly modelingGraphValidator: ModelingGraphValidator,
+    @Optional()
+    @Inject(KNOWLEDGE_MEMORY_CONTRACT)
+    private readonly knowledgeMemoryContract?: KnowledgeMemoryContract
   ) {}
 
   async execute(input: SaveViewFromRunInput): Promise<SaveViewFromRunResult> {
@@ -79,6 +93,20 @@ export class SaveViewFromRunUsecase {
     const viewId = this.buildViewId(runId);
     const existingById = basePayload.views.find((item) => item.id === viewId);
     if (existingById) {
+      const savedPriorSql = await this.captureSavedPriorSql({
+        workspaceId,
+        datasourceId,
+        run: {
+          runId: run.runId,
+          status: run.status,
+          createdAt: run.createdAt,
+          question: run.question,
+          sql,
+          columns: run.columns
+        },
+        view: existingById,
+        replayed: true
+      });
       return {
         stage: "chat_run_view_saved",
         workspaceId,
@@ -87,7 +115,8 @@ export class SaveViewFromRunUsecase {
         replayed: true,
         activeRevision: current.activeRevision,
         draftRevision: current.draft?.revision ?? 0,
-        view: existingById
+        view: existingById,
+        savedPriorSql
       };
     }
 
@@ -135,6 +164,20 @@ export class SaveViewFromRunUsecase {
       graphPayload: nextPayload,
       actorId: this.normalizeOptional(input.actorId) ?? undefined
     });
+    const savedPriorSql = await this.captureSavedPriorSql({
+      workspaceId,
+      datasourceId,
+      run: {
+        runId: run.runId,
+        status: run.status,
+        createdAt: run.createdAt,
+        question: run.question,
+        sql,
+        columns: run.columns
+      },
+      view: normalizedView,
+      replayed: false
+    });
 
     return {
       stage: "chat_run_view_saved",
@@ -144,8 +187,80 @@ export class SaveViewFromRunUsecase {
       replayed: false,
       activeRevision: current.activeRevision,
       draftRevision: nextRevision.revision,
-      view: normalizedView
+      view: normalizedView,
+      savedPriorSql
     };
+  }
+
+  private async captureSavedPriorSql(input: {
+    workspaceId: string;
+    datasourceId: string;
+    run: {
+      runId: string;
+      status: string;
+      createdAt: string;
+      question?: string;
+      sql: string;
+      columns?: string[];
+    };
+    view: Pick<ModelingGraphView, "id" | "name" | "sql">;
+    replayed: boolean;
+  }): Promise<SaveViewFromRunSavedPriorSqlDiagnostics | undefined> {
+    const service = this.knowledgeMemoryContract?.savedPriorSql;
+    if (!service) {
+      return undefined;
+    }
+    try {
+      return await service.captureFromSavedView({
+        workspaceId: input.workspaceId,
+        datasourceId: input.datasourceId,
+        sourceRunId: input.run.runId,
+        sourceRunStatus: input.run.status,
+        sourceRunCreatedAt: input.run.createdAt,
+        question: this.normalizeOptional(input.run.question) ?? undefined,
+        sql: input.run.sql,
+        viewId: input.view.id,
+        viewName: input.view.name,
+        viewSql: input.view.sql,
+        tableNames: [],
+        columnNames: Array.isArray(input.run.columns)
+          ? input.run.columns.filter(
+              (column): column is string =>
+                typeof column === "string" && column.trim().length > 0
+            )
+          : [],
+        replayed: input.replayed,
+        savedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      return {
+        outcome: "capture_failed",
+        priorId: this.safeBuildPriorId(input),
+        replayKey: "saved_prior_sql:capture_failed",
+        reason: "saved_prior_sql_capture_exception",
+        message: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  private safeBuildPriorId(input: {
+    workspaceId: string;
+    datasourceId: string;
+    view: Pick<ModelingGraphView, "id">;
+  }): string {
+    const service = this.knowledgeMemoryContract?.savedPriorSql;
+    if (!service) {
+      return "saved_prior_sql.unavailable";
+    }
+    try {
+      return service.buildPriorId({
+        workspaceId: input.workspaceId,
+        datasourceId: input.datasourceId,
+        viewId: input.view.id
+      });
+    } catch {
+      return "saved_prior_sql.unresolved";
+    }
   }
 
   private createEmptyPayload(): ModelingGraphPayload {

@@ -10,6 +10,8 @@ describe("AppConfigService", () => {
     delete process.env.LLM_BASE_URL;
     delete process.env.LLM_API_KEY;
     delete process.env.LLM_MODEL;
+    delete process.env.LLM_TIMEOUT_MS;
+    delete process.env.LLM_STREAM_TIMEOUT_MS;
     delete process.env.SQLITE_PATH;
     delete process.env.REDIS_URL;
     delete process.env.DATABASE_URL;
@@ -39,7 +41,35 @@ describe("AppConfigService", () => {
     const config = moduleRef.get(AppConfigService);
     expect(config.port).toBe(3002);
     expect(config.llmProvider).toBe("volcengine");
+    expect(config.llmTimeoutMs).toBe(30000);
+    expect(config.llmStreamTimeoutMs).toBe(30000);
     expect(config.sqlitePath).toContain("data/sqlite/text2sql.db");
+  });
+
+  it("should use LLM_STREAM_TIMEOUT_MS when configured", async () => {
+    process.env.LLM_TIMEOUT_MS = "30000";
+    process.env.LLM_STREAM_TIMEOUT_MS = "90000";
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppConfigModule]
+    }).compile();
+
+    const config = moduleRef.get(AppConfigService);
+    expect(config.llmTimeoutMs).toBe(30000);
+    expect(config.llmStreamTimeoutMs).toBe(90000);
+  });
+
+  it("should fallback to LLM_TIMEOUT_MS when LLM_STREAM_TIMEOUT_MS is invalid", async () => {
+    process.env.LLM_TIMEOUT_MS = "45000";
+    process.env.LLM_STREAM_TIMEOUT_MS = "invalid";
+
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppConfigModule]
+    }).compile();
+
+    const config = moduleRef.get(AppConfigService);
+    expect(config.llmTimeoutMs).toBe(45000);
+    expect(config.llmStreamTimeoutMs).toBe(45000);
   });
 
   it("should build database url from POSTGRES_* env variables", async () => {

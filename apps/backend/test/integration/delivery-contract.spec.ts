@@ -82,9 +82,28 @@ describe("delivery contract integration", () => {
     expect(syncRes.body.data.delivery).toBeTruthy();
     expect(syncRes.body.data.run.delivery).toEqual(syncRes.body.data.delivery);
     expect(syncRes.body.data.delivery.answer).toBeTruthy();
+    expect(syncRes.body.data.run.answer).toBe(syncRes.body.data.delivery.answer.text);
     expect(syncRes.body.data.delivery.evidence.runId).toBe(
       syncRes.body.data.run.runId as string
     );
+    const syncArtifact = syncRes.body.data.delivery.artifact as
+      | {
+          rowCount: number;
+          summary?: { text?: string };
+          table?: {
+            rowCount?: number;
+          };
+          validation?: {
+            status?: string;
+          };
+          display?: string;
+        }
+      | undefined;
+    expect(syncArtifact).toBeTruthy();
+    expect(syncArtifact?.summary?.text).toBe(syncRes.body.data.run.answer);
+    expect(syncArtifact?.table?.rowCount).toBe(syncArtifact?.rowCount);
+    expect(syncArtifact?.validation?.status).toBeTruthy();
+    expect(syncArtifact?.display).toBeTruthy();
 
     const streamRes = await request(app.getHttpServer())
       .post(`/api/v1/sessions/${sessionId}/messages/stream`)
@@ -104,6 +123,13 @@ describe("delivery contract integration", () => {
     expect(finishData.delivery).toBeTruthy();
     expect(finishData.delivery).toHaveProperty("answer");
     expect(finishData.delivery).toHaveProperty("evidence");
+    expect((finishData.delivery as { answer?: { text?: string } }).answer?.text).toBe(
+      syncRes.body.data.run.answer
+    );
+    expect((finishData.delivery as { artifact?: { summary?: { text?: string } } }).artifact?.summary?.text).toBeTruthy();
+    expect(
+      (finishData.delivery as { evidence?: { runId?: string } }).evidence?.runId
+    ).toBe(finish?.event.runId);
 
     const messagesRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)
@@ -116,6 +142,9 @@ describe("delivery contract integration", () => {
     );
     expect(messagesRes.body.data.latestRun.delivery.artifact).toEqual(
       (finishData.delivery as { artifact?: unknown })?.artifact
+    );
+    expect(messagesRes.body.data.latestRun.answer).toBe(
+      messagesRes.body.data.latestRun.delivery.answer.text
     );
     expect(messagesRes.body.data.latestRun.delivery.evidence.runId).toBe(
       finish?.event.runId
@@ -141,6 +170,7 @@ describe("delivery contract integration", () => {
     expect(syncRes.body.data.delivery.evidence.riskTags).toEqual(
       expect.arrayContaining(["delivery_mapper_failed"])
     );
+    expect(syncRes.body.data.run.answer).toBe(syncRes.body.data.delivery.answer.text);
     expect(syncRes.body.data.run.delivery.evidence.riskTags).toEqual(
       expect.arrayContaining(["delivery_mapper_failed"])
     );

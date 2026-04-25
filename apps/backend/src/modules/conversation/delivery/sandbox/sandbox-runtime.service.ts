@@ -85,7 +85,23 @@ export class SandboxRuntimeService {
             "rows_preview_limit maxRows must be a non-negative number."
           );
         }
-        cloned.rowsPreview = cloned.rowsPreview?.slice(0, Math.floor(operation.maxRows));
+        const maxRows = Math.floor(operation.maxRows);
+        cloned.rowsPreview = cloned.rowsPreview?.slice(0, maxRows);
+        const tableWithCompat = cloned.table as
+          | (NonNullable<DeliveryArtifactLayer["table"]> & {
+              truncated?: boolean;
+            })
+          | undefined;
+        if (tableWithCompat) {
+          const tableRowsPreview = tableWithCompat.rowsPreview?.slice(0, maxRows);
+          tableWithCompat.rowsPreview = tableRowsPreview;
+          tableWithCompat.previewRowCount = tableRowsPreview?.length ?? 0;
+          const tableRowCount =
+            typeof tableWithCompat.rowCount === "number"
+              ? tableWithCompat.rowCount
+              : cloned.rowCount;
+          tableWithCompat.truncated = tableRowCount > tableWithCompat.previewRowCount;
+        }
         continue;
       }
 
@@ -142,10 +158,62 @@ export class SandboxRuntimeService {
   private cloneArtifact(artifact: DeliveryArtifactLayer): DeliveryArtifactLayer {
     return {
       ...artifact,
+      summary: artifact.summary
+        ? {
+            ...artifact.summary,
+            metrics: artifact.summary.metrics?.map((item) => ({ ...item })),
+            dimensions: artifact.summary.dimensions
+              ? [...artifact.summary.dimensions]
+              : undefined
+          }
+        : undefined,
+      table: artifact.table
+        ? {
+            ...artifact.table,
+            columns: artifact.table.columns ? [...artifact.table.columns] : undefined,
+            rowsPreview: artifact.table.rowsPreview
+              ? artifact.table.rowsPreview.map((row) => ({ ...row }))
+              : undefined
+          }
+        : undefined,
+      chart: artifact.chart
+        ? {
+            ...artifact.chart,
+            mappings: artifact.chart.mappings ? { ...artifact.chart.mappings } : undefined,
+            series: artifact.chart.series
+              ? artifact.chart.series.map((series) => ({ ...series }))
+              : undefined,
+            meta: artifact.chart.meta ? { ...artifact.chart.meta } : undefined
+          }
+        : undefined,
+      validation: artifact.validation
+        ? {
+            ...artifact.validation,
+            reasonCodes: artifact.validation.reasonCodes
+              ? [...artifact.validation.reasonCodes]
+              : undefined
+          }
+        : undefined,
+      fallback: artifact.fallback ? { ...artifact.fallback } : undefined,
+      visualIntent: artifact.visualIntent
+        ? {
+            ...artifact.visualIntent,
+            mappings: artifact.visualIntent.mappings
+              ? { ...artifact.visualIntent.mappings }
+              : undefined,
+            normalizedIntent: this.cloneRecord(artifact.visualIntent.normalizedIntent)
+          }
+        : undefined,
       columns: artifact.columns ? [...artifact.columns] : undefined,
       rowsPreview: artifact.rowsPreview
         ? artifact.rowsPreview.map((row) => ({ ...row }))
         : undefined
     };
+  }
+
+  private cloneRecord(
+    value: Record<string, unknown> | undefined
+  ): Record<string, unknown> | undefined {
+    return value ? { ...value } : undefined;
   }
 }

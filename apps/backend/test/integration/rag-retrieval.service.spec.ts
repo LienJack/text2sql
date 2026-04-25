@@ -367,6 +367,132 @@ describe("rag retrieval service integration", () => {
     await moduleRef.close();
   });
 
+  it("marks trusted prior SQL as ambiguous when multiple high-confidence candidates remain", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const datasourceId = "ds-rag-retrieval-prior-sql-ambiguous";
+    const workspaceId = "ws-rag-prior-ambiguous";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-prior-ambiguous-schema",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount, status)"
+      },
+      {
+        id: "chunk-prior-ambiguous-sql-1",
+        datasourceId,
+        domain: "sql_example",
+        content: "Question: paid orders\\nSQL:\\nSELECT SUM(amount) FROM orders WHERE status = 'paid'",
+        metadata: JSON.stringify({
+          trusted: true,
+          priorSql: true,
+          workspaceId,
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"]
+        })
+      },
+      {
+        id: "chunk-prior-ambiguous-sql-2",
+        datasourceId,
+        domain: "sql_example",
+        content: "Question: paid order gmv\\nSQL:\\nSELECT AVG(amount) FROM orders WHERE status = 'paid'",
+        metadata: JSON.stringify({
+          trusted: true,
+          priorSql: true,
+          workspaceId,
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"]
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-prior-sql-ambiguous-v1",
+      createdByRunId: "run-rag-retrieval-prior-sql-ambiguous-build-v1",
+      activatedByRunId: "run-rag-retrieval-prior-sql-ambiguous-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "orders paid gmv",
+      datasourceId,
+      workspaceId,
+      allowedTables: ["orders"],
+      runId: "run-rag-retrieval-prior-sql-ambiguous-v1"
+    });
+
+    const priorSqlLane = response.retrieval_bundle.prior_sql_lane;
+    expect(priorSqlLane?.status).toBe("ambiguous");
+    expect(priorSqlLane?.selected_count).toBe(0);
+    expect(priorSqlLane?.eligible_count).toBe(2);
+    expect(priorSqlLane?.shortcut?.status).toBe("ambiguous");
+
+    await moduleRef.close();
+  });
+
+  it("marks trusted prior SQL as stale when stale flags exist in source metadata", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const datasourceId = "ds-rag-retrieval-prior-sql-stale";
+    const workspaceId = "ws-rag-prior-stale";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-prior-stale-schema",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount, status)"
+      },
+      {
+        id: "chunk-prior-stale-sql-1",
+        datasourceId,
+        domain: "sql_example",
+        content: "Question: paid orders\\nSQL:\\nSELECT SUM(amount) FROM orders WHERE status = 'paid'",
+        metadata: JSON.stringify({
+          trusted: true,
+          priorSql: true,
+          stale: true,
+          workspaceId,
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"]
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-prior-sql-stale-v1",
+      createdByRunId: "run-rag-retrieval-prior-sql-stale-build-v1",
+      activatedByRunId: "run-rag-retrieval-prior-sql-stale-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "orders paid gmv",
+      datasourceId,
+      workspaceId,
+      allowedTables: ["orders"],
+      runId: "run-rag-retrieval-prior-sql-stale-v1"
+    });
+
+    const priorSqlLane = response.retrieval_bundle.prior_sql_lane;
+    expect(priorSqlLane?.status).toBe("stale");
+    expect(priorSqlLane?.selected_count).toBe(0);
+    expect(priorSqlLane?.stale_count).toBe(1);
+    expect(priorSqlLane?.shortcut?.status).toBe("stale");
+
+    await moduleRef.close();
+  });
+
   it("uses conservative table-first/field-second pruning on wide tables and safely degrades when evidence is weak", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]

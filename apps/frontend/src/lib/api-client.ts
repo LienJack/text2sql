@@ -108,6 +108,176 @@ function readNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+type DeliveryDisplayType = "table" | "metric" | "bar" | "line" | "pie";
+type DeliveryArtifactCompat = NonNullable<
+  NonNullable<AgentRunResponse["run"]["delivery"]>["artifact"]
+> &
+  Record<string, unknown>;
+
+const DISPLAY_TYPE_ALLOWLIST: ReadonlySet<DeliveryDisplayType> = new Set([
+  "table",
+  "metric",
+  "bar",
+  "line",
+  "pie"
+]);
+const CHART_TYPE_ALLOWLIST: ReadonlySet<Exclude<DeliveryDisplayType, "table">> = new Set([
+  "metric",
+  "bar",
+  "line",
+  "pie"
+]);
+
+function normalizeDisplayType(value: unknown): DeliveryDisplayType | undefined {
+  const normalized = readString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return DISPLAY_TYPE_ALLOWLIST.has(normalized as DeliveryDisplayType)
+    ? (normalized as DeliveryDisplayType)
+    : undefined;
+}
+
+function normalizeChartMappings(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const normalized = Object.entries(value).reduce<Record<string, string>>(
+    (acc, [key, mapping]) => {
+      const next = readString(mapping);
+      if (next) {
+        acc[key] = next;
+      }
+      return acc;
+    },
+    {}
+  );
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeDeliveryArtifactCompatibility(
+  value: unknown
+): DeliveryArtifactCompat | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const normalizedRecord: Record<string, unknown> = {
+    ...(value as Record<string, unknown>)
+  };
+
+  if (
+    normalizedRecord.summary !== undefined &&
+    typeof normalizedRecord.summary !== "string" &&
+    !isRecord(normalizedRecord.summary)
+  ) {
+    delete normalizedRecord.summary;
+  }
+  if (normalizedRecord.table !== undefined && !isRecord(normalizedRecord.table)) {
+    delete normalizedRecord.table;
+  }
+  if (
+    normalizedRecord.display !== undefined &&
+    typeof normalizedRecord.display !== "string" &&
+    !isRecord(normalizedRecord.display)
+  ) {
+    delete normalizedRecord.display;
+  }
+  if (
+    normalizedRecord.validation !== undefined &&
+    typeof normalizedRecord.validation !== "string" &&
+    !isRecord(normalizedRecord.validation)
+  ) {
+    delete normalizedRecord.validation;
+  }
+  if (
+    normalizedRecord.fallback !== undefined &&
+    typeof normalizedRecord.fallback !== "string" &&
+    !isRecord(normalizedRecord.fallback)
+  ) {
+    delete normalizedRecord.fallback;
+  }
+  if (normalizedRecord.visualIntent !== undefined && !isRecord(normalizedRecord.visualIntent)) {
+    delete normalizedRecord.visualIntent;
+  }
+
+  const chart = isRecord(normalizedRecord.chart) ? normalizedRecord.chart : undefined;
+  const chartType = chart
+    ? normalizeDisplayType(chart.type ?? chart.chartType ?? chart.chart_type)
+    : undefined;
+  const chartMappings = chart
+    ? normalizeChartMappings(chart.mappings ?? chart.mapping ?? chart.fields)
+    : undefined;
+  const chartInvalidReason = chart
+    ? !chartType || !CHART_TYPE_ALLOWLIST.has(chartType as Exclude<DeliveryDisplayType, "table">)
+      ? "invalid_chart_type"
+      : !chartMappings
+        ? "missing_chart_mappings"
+        : undefined
+    : undefined;
+
+  if (chartInvalidReason) {
+    delete normalizedRecord.chart;
+
+    const displayRecord: Record<string, unknown> =
+      typeof normalizedRecord.display === "string"
+        ? { type: normalizeDisplayType(normalizedRecord.display) ?? "table" }
+        : isRecord(normalizedRecord.display)
+          ? { ...normalizedRecord.display }
+          : {};
+    displayRecord.type = "table";
+    normalizedRecord.display = displayRecord;
+
+    const fallbackRecord: Record<string, unknown> =
+      typeof normalizedRecord.fallback === "string"
+        ? { reason: normalizedRecord.fallback }
+        : isRecord(normalizedRecord.fallback)
+          ? { ...normalizedRecord.fallback }
+          : {};
+    if (!readString(fallbackRecord.reason)) {
+      fallbackRecord.reason = chartInvalidReason;
+    }
+    const fallbackTarget = normalizeDisplayType(
+      fallbackRecord.target ?? fallbackRecord.displayType ?? fallbackRecord.to
+    );
+    if (!fallbackTarget) {
+      fallbackRecord.target = "table";
+    }
+    normalizedRecord.fallback = fallbackRecord;
+  } else if (chart && chartType && chartMappings) {
+    normalizedRecord.chart = {
+      ...chart,
+      type: chartType,
+      mappings: chartMappings
+    };
+  }
+
+  const hasErrorRaw =
+    readBoolean(normalizedRecord.hasError) ?? readBoolean(normalizedRecord.has_error);
+  if (hasErrorRaw !== undefined) {
+    normalizedRecord.hasError = hasErrorRaw;
+  }
+
+  const rowCountRaw =
+    readNumber(normalizedRecord.rowCount) ?? readNumber(normalizedRecord.row_count);
+  if (rowCountRaw !== undefined) {
+    normalizedRecord.rowCount = Math.max(0, Math.floor(rowCountRaw));
+  }
+
+  if (
+    typeof normalizedRecord.rowCount !== "number" ||
+    typeof normalizedRecord.hasError !== "boolean"
+  ) {
+    return undefined;
+  }
+
+  return normalizedRecord as unknown as DeliveryArtifactCompat;
+}
+
 function normalizeSkillContextSummary(
   value: unknown
 ): DeliveryEvidenceLayer["skillContextSummary"] | undefined {
@@ -183,6 +353,7 @@ function normalizeRunSemanticEvidenceCompatibility(
         promptTemplate: resolvedPromptTemplate
       }
     : run.trace;
+  const normalizedArtifact = normalizeDeliveryArtifactCompatibility(delivery?.artifact);
 
   if (!delivery) {
     return nextTrace === run.trace ? run : { ...run, trace: nextTrace };
@@ -206,7 +377,8 @@ function normalizeRunSemanticEvidenceCompatibility(
     trace: nextTrace,
     delivery: {
       ...delivery,
-      ...(nextEvidence ? { evidence: nextEvidence } : {})
+      ...(nextEvidence ? { evidence: nextEvidence } : {}),
+      ...(normalizedArtifact ? { artifact: normalizedArtifact } : {})
     }
   };
 }

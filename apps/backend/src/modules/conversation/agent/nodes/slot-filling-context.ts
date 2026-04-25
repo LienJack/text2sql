@@ -133,8 +133,9 @@ function resolveConfidence(missingSlots: SlotKey[]): SlotFillingConfidence {
 
 const METRIC_HINT_REGEX =
   /(总数|数量|计数|count|金额|交易额|销售额|gmv|平均|均值|占比|比例|转化率|留存|退款率|分布|top|排行|环比|同比)/i;
+const COUNT_METRIC_HINT_REGEX = /(有多少|多少|几(个|笔|单|条|次|家|人|位))/i;
 const SUBJECT_HINT_REGEX =
-  /(订单|用户|客户|商品|sku|门店|支付|退款|交易|会话|工单|发票|供应商|渠道|地区|市场|销售|商家|账单)/i;
+  /(订单|用户|客户|顾客|消费者|商品|sku|门店|支付|退款|交易|会话|工单|发票|供应商|渠道|地区|市场|销售|商家|账单)/i;
 const TIME_HINT_REGEX =
   /(今天|昨日|昨天|本周|上周|本月|上月|本季度|上季度|本年|去年|近\d+\s*(天|周|月|年)|最近|过去|between|from|to|日期|时间)/i;
 const DIMENSION_HINT_REGEX =
@@ -185,8 +186,9 @@ function resolveSlots(question: string, contextEnvelope?: ContextEnvelope): Slot
     hasStringArray(contextEnvelope?.mustExcludeTables);
   const subjectFromEnvelope = dimensionFromEnvelope;
 
-  const metricFromQuestion = METRIC_HINT_REGEX.test(trimmedQuestion);
   const subjectFromQuestion = SUBJECT_HINT_REGEX.test(trimmedQuestion);
+  const metricFromQuestion =
+    METRIC_HINT_REGEX.test(trimmedQuestion) || COUNT_METRIC_HINT_REGEX.test(trimmedQuestion);
   const timeFromQuestion = TIME_HINT_REGEX.test(trimmedQuestion);
   const dimensionFromQuestion = DIMENSION_HINT_REGEX.test(trimmedQuestion);
   const filterFromQuestion = FILTER_HINT_REGEX.test(trimmedQuestion);

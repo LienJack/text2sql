@@ -97,6 +97,19 @@ async function openCreateToStep2(user: ReturnType<typeof userEvent.setup>): Prom
   await user.type(screen.getByPlaceholderText("Password"), "secret");
 }
 
+async function openCreateSqliteToStep2(
+  user: ReturnType<typeof userEvent.setup>
+): Promise<void> {
+  await user.click(screen.getByRole("button", { name: "新增" }));
+  await user.click(screen.getByRole("button", { name: /SQLite 数据库连接/i }));
+  await user.click(screen.getByRole("button", { name: "下一步" }));
+  await user.type(screen.getByPlaceholderText("数据源名称"), "测试 SQLite");
+  await user.type(
+    screen.getByPlaceholderText("例如 /Users/alice/data/sqlite/chinook.db"),
+    "/tmp/chinook.db"
+  );
+}
+
 describe("DataSourcesPage workflow closure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -226,6 +239,62 @@ describe("DataSourcesPage workflow closure", () => {
     const secondKey = mockSubmitDatasourceWorkflow.mock.calls[1]?.[1]?.idempotencyKey;
     expect(firstKey).toBeTruthy();
     expect(secondKey).toBe(firstKey);
+    },
+    15000
+  );
+
+  it(
+    "supports creating sqlite datasource from wizard",
+    async () => {
+      const user = userEvent.setup();
+      render(<DataSourcesPage />);
+
+      await screen.findByText("MySQL 主数据源");
+      await openCreateSqliteToStep2(user);
+      await user.click(screen.getByRole("button", { name: "完成创建" }));
+
+      await waitFor(() => {
+        expect(mockSubmitDatasourceWorkflow).toHaveBeenCalledTimes(1);
+      });
+
+      const workflowPayload = mockSubmitDatasourceWorkflow.mock.calls[0]?.[0];
+      expect(workflowPayload).toMatchObject({
+        mode: "create",
+        workspaceId: "ws-new",
+        datasource: {
+          name: "测试 SQLite",
+          type: "sqlite",
+          shared: true,
+          filePath: "/tmp/chinook.db"
+        }
+      });
+    },
+    15000
+  );
+
+  it(
+    "blocks sqlite create when file path is not absolute",
+    async () => {
+      const user = userEvent.setup();
+      render(<DataSourcesPage />);
+
+      await screen.findByText("MySQL 主数据源");
+      await user.click(screen.getByRole("button", { name: "新增" }));
+      await user.click(screen.getByRole("button", { name: /SQLite 数据库连接/i }));
+      await user.click(screen.getByRole("button", { name: "下一步" }));
+      await user.type(screen.getByPlaceholderText("数据源名称"), "测试 SQLite");
+      await user.type(
+        screen.getByPlaceholderText("例如 /Users/alice/data/sqlite/chinook.db"),
+        "relative/chinook.db"
+      );
+      await user.click(screen.getByRole("button", { name: "完成创建" }));
+
+      expect(
+        await screen.findByText(
+          "SQLite 路径必须是绝对路径（例如 /Users/name/data/demo.db）。"
+        )
+      ).toBeInTheDocument();
+      expect(mockSubmitDatasourceWorkflow).not.toHaveBeenCalled();
     },
     15000
   );

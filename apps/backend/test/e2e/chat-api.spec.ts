@@ -54,6 +54,24 @@ describe("chat api (e2e)", () => {
     expect(runRes.body.data.run.llmRaw).toBeTruthy();
     expect(runRes.body.data.run.llmRaw.provider).toBe("volcengine");
     expect(runRes.body.data.run.llmRaw.model).toBeTruthy();
+    expect(runRes.body.data.delivery).toBeTruthy();
+    expect(runRes.body.data.run.delivery).toEqual(runRes.body.data.delivery);
+    expect(runRes.body.data.run.answer).toBe(runRes.body.data.delivery.answer.text);
+    expect(runRes.body.data.delivery.evidence.runId).toBe(runRes.body.data.run.runId);
+    const syncArtifact = runRes.body.data.delivery.artifact as
+      | {
+          rowCount?: number;
+          summary?: { text?: string };
+          table?: { rowCount?: number };
+          display?: string;
+          validation?: { status?: string };
+        }
+      | undefined;
+    expect(syncArtifact).toBeTruthy();
+    expect(syncArtifact?.summary?.text).toBeTruthy();
+    expect(syncArtifact?.table?.rowCount).toBe(syncArtifact?.rowCount);
+    expect(syncArtifact?.display).toBeTruthy();
+    expect(syncArtifact?.validation?.status).toBeTruthy();
     const contextPackStatus = runRes.body.data.delivery?.evidence?.contextPackStatus;
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
@@ -67,6 +85,13 @@ describe("chat api (e2e)", () => {
     expect(messageViewRes.body.data.session.id).toBe(sessionId);
     expect(Array.isArray(messageViewRes.body.data.messages)).toBe(true);
     expect(messageViewRes.body.data.latestRun.runId).toBe(runRes.body.data.run.runId);
+    expect(messageViewRes.body.data.latestRun.answer).toBe(
+      messageViewRes.body.data.latestRun.delivery.answer.text
+    );
+    expect(messageViewRes.body.data.latestRun.delivery.evidence.runId).toBe(
+      messageViewRes.body.data.latestRun.runId
+    );
+    expect(messageViewRes.body.data.latestRun.delivery.artifact.summary.text).toBeTruthy();
   });
 
   it("should accept optional contextEnvelope on sync message endpoint", async () => {
