@@ -1,7 +1,7 @@
-# Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-25)
+# Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-26)
 
 ## Corpus Check
-- 697 files · ~1,065,188 words
+- 697 files · ~1,066,672 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -3208,9 +3208,11 @@ Nodes (0):
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `ok()` connect `Community 3` to `Community 0`, `Community 1`, `Community 21`, `Community 17`?**
-  _High betweenness centrality (0.022) - this node is a cross-community bridge._
-- **Why does `RagRetrievalService` connect `Community 12` to `Community 32`, `Community 14`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+- **Why does `setError()` connect `Community 9` to `Community 28`, `Community 4`, `Community 31`?**
+  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+- **Why does `WorkspaceModelingService` connect `Community 0` to `Community 5`?**
+  _High betweenness centrality (0.021) - this node is a cross-community bridge._
 - **Are the 85 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.createSession()`) actually correct?**
   _`ok()` has 85 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ELK`, `ElkLayoutTimeoutError`, `AppModule` to the rest of the system?**
@@ -3218,6 +3220,4 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.02 - nodes in this community are weakly interconnected._
-- **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._

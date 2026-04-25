@@ -98,7 +98,9 @@ export class SqlPromptBuilder {
       return [
         "Semantic guardrail: this is a business count-intent query.",
         "The final SQL must contain COUNT(...) aggregation over business data.",
-        "Do not return schema/metadata introspection SQL."
+        "Do not return schema/metadata introspection SQL.",
+        "Do not query schema system tables via tools",
+        "(sqlite_master/sqlite_schema/information_schema/pg_catalog/pragma) unless the user explicitly asks metadata."
       ].join(" ");
     }
     if (intent === "metadata") {
@@ -109,7 +111,11 @@ export class SqlPromptBuilder {
         "Do not return business row counting SQL."
       ].join(" ");
     }
-    return "Semantic guardrail: ensure SQL semantics strictly match the user question intent.";
+    return [
+      "Semantic guardrail: ensure SQL semantics strictly match the user question intent.",
+      "Do not query schema system tables via tools",
+      "(sqlite_master/sqlite_schema/information_schema/pg_catalog/pragma) unless the user explicitly asks metadata."
+    ].join(" ");
   }
 
   private buildRepairHintBlock(retryReason?: string): string {
