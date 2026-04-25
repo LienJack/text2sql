@@ -13,11 +13,18 @@ export class BuildIntentPlanNode {
   run(question: string, knowledge: RetrievedKnowledge): IntentPlan {
     const normalized = question.toLowerCase();
     const selectedContextCount = knowledge.retrievalBundle?.selected_context?.length ?? 0;
+    const pinnedConstraint =
+      knowledge.pinning?.enabled && knowledge.pinning.status === "applied"
+        ? ["require_pinned_table_alignment"]
+        : [];
     if (knowledge.status === "degraded") {
       return {
         status: "degraded",
         intent: "unknown",
-        constraints: selectedContextCount > 0 ? ["fallback_with_partial_context"] : [],
+        constraints: [
+          ...(selectedContextCount > 0 ? ["fallback_with_partial_context"] : []),
+          ...pinnedConstraint
+        ],
         summary: "检索上下文不可用，意图规划降级。"
       };
     }
@@ -28,7 +35,8 @@ export class BuildIntentPlanNode {
         intent: "aggregate",
         constraints: [
           "prefer_group_by",
-          ...(selectedContextCount > 0 ? ["must_use_selected_context"] : [])
+          ...(selectedContextCount > 0 ? ["must_use_selected_context"] : []),
+          ...pinnedConstraint
         ],
         summary: "意图识别为聚合统计。"
       };
@@ -39,7 +47,8 @@ export class BuildIntentPlanNode {
         intent: "compare",
         constraints: [
           "require_two_dimensions",
-          ...(selectedContextCount > 0 ? ["must_use_selected_context"] : [])
+          ...(selectedContextCount > 0 ? ["must_use_selected_context"] : []),
+          ...pinnedConstraint
         ],
         summary: "意图识别为对比分析。"
       };
@@ -48,7 +57,10 @@ export class BuildIntentPlanNode {
     return {
       status: "ready",
       intent: "detail",
-      constraints: selectedContextCount > 0 ? ["must_use_selected_context"] : [],
+      constraints: [
+        ...(selectedContextCount > 0 ? ["must_use_selected_context"] : []),
+        ...pinnedConstraint
+      ],
       summary: "意图识别为明细查询。"
     };
   }

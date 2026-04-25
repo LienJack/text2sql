@@ -15,6 +15,7 @@ import { ModelingGraphRepository } from "../../platform/data/persistence/modelin
 import { fuseWithRrf } from "./fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
+  type RagPriorSqlLaneEvidence,
   type RagRetrievalCandidate,
   type RagRetrievalChunkMetadata,
   type RagRetrievalChunkPayload,
@@ -53,6 +54,55 @@ type LaneExecutionOutput =
       degradeReason?: string;
     };
 
+interface PriorSqlSelectionResult {
+  lane: RagPriorSqlLaneEvidence;
+  selectedCandidates: RagRetrievalCandidate[];
+  blockedChunkIds: Set<string>;
+}
+
+interface ColumnPruningTableDecision {
+  table_name: string;
+  mode: "none" | "light" | "conservative";
+  evidence_strength: "weak" | "medium" | "strong";
+  total_columns: number;
+  kept_columns: string[];
+  pruned_columns: string[];
+  reason_codes: string[];
+}
+
+interface ColumnPruningEvidence {
+  strategy: "table_first_field_second_conservative";
+  status: "applied" | "skipped";
+  query_tokens: string[];
+  affected_candidate_count: number;
+  tables: ColumnPruningTableDecision[];
+  reason_codes: string[];
+}
+
+interface ColumnPruningResult {
+  candidates: RagRetrievalCandidate[];
+  evidence?: ColumnPruningEvidence;
+}
+
+interface WideTableProfile {
+  tableName: string;
+  normalizedTableName: string;
+  columns: string[];
+}
+
+interface TablePruningPlan {
+  tableName: string;
+  normalizedTableName: string;
+  keepColumns: Set<string>;
+  decision: ColumnPruningTableDecision;
+}
+
+const WIDE_TABLE_COLUMN_THRESHOLD = 8;
+const LIGHT_PRUNING_KEEP_RATIO = 0.7;
+const CONSERVATIVE_PRUNING_MAX_KEEP = 6;
+const MIN_COLUMN_KEEP_COUNT = 3;
+const COLUMN_HINT_PREFIX = "column:";
+
 @Injectable()
 export class RagRetrievalService {
   constructor(
@@ -71,6 +121,8 @@ export class RagRetrievalService {
     const query = input.query.trim();
     const datasourceId = input.datasourceId.trim();
     const runId = input.runId.trim();
+    const workspaceId = input.workspaceId?.trim() || undefined;
+    const allowedTables = this.normalizeAllowedTables(input.allowedTables);
     const requestedPerLaneLimit = this.normalizeLimit(input.perLaneLimit, DEFAULT_PER_LANE_LIMIT);
     const requestedFinalCandidateLimit = this.normalizeLimit(
       input.finalCandidateLimit,
@@ -90,7 +142,7 @@ export class RagRetrievalService {
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "invalid_retrieval_input"),
           candidates: [],
           context_pack: await this.buildContextPack({
-            workspaceId: input.workspaceId,
+            workspaceId,
             datasourceId,
             status: "degraded",
             degradeReasons
@@ -115,7 +167,7 @@ export class RagRetrievalService {
           lane_results: this.createEmptyLaneResults(laneTimeoutMs, "no_active_index"),
           candidates: [],
           context_pack: await this.buildContextPack({
-            workspaceId: input.workspaceId,
+            workspaceId,
             datasourceId,
             status: "degraded",
             degradeReasons
@@ -134,7 +186,11 @@ export class RagRetrievalService {
     });
     const perLaneLimit = budgetDecision.perLaneLimit;
     const finalCandidateLimit = budgetDecision.finalCandidateLimit;
-    const budgetLaneProfile = budgetDecision.enabledLanes.join("+");
+    const budgetLaneProfile = this.buildBudgetLaneProfile({
+      enabledLanes: budgetDecision.enabledLanes,
+      workspaceId,
+      allowedTables
+    });
     await this.writeBudgetReplay({
       runId,
       datasourceId,
@@ -160,7 +216,7 @@ export class RagRetrievalService {
         cachedBundle: cacheRead.value,
         query,
         datasourceId,
-        workspaceId: input.workspaceId,
+        workspaceId,
         runId,
         decisionReasons: budgetDecision.decisionReasons
       });
@@ -192,12 +248,31 @@ export class RagRetrievalService {
       graph: laneResults.graph.hits
     };
     const fused = fuseWithRrf({ laneHits });
-    const coveredCandidates = this.applyDomainCoverage(
+    const priorSqlSelection = this.selectTrustedPriorSqlCandidates({
+      candidates: fused,
+      datasourceId,
+      workspaceId,
+      allowedTables
+    });
+    const priorSqlFiltered = this.filterBlockedPriorSqlCandidates(
       fused,
+      priorSqlSelection.blockedChunkIds
+    );
+    const fusedWithPrior = this.injectTrustedPriorSqlCandidates(
+      priorSqlFiltered,
+      priorSqlSelection.selectedCandidates
+    );
+    const coveredCandidates = this.applyDomainCoverage(
+      fusedWithPrior,
       finalCandidateLimit,
       REQUIRED_DOMAIN_COVERAGE
     );
-    const candidates = this.decorateSemanticCandidates(coveredCandidates);
+    const decoratedCandidates = this.decorateSemanticCandidates(coveredCandidates);
+    const columnPruning = this.applyConservativeColumnPruning({
+      query,
+      candidates: decoratedCandidates
+    });
+    const candidates = columnPruning.candidates;
     const skillContext = await this.resolveSkillContext(query, candidates);
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
@@ -224,12 +299,15 @@ export class RagRetrievalService {
         lane_results: laneResults,
         candidates,
         skill_context: skillContext,
+        prior_sql_lane: priorSqlSelection.lane,
+        priorSqlLane: priorSqlSelection.lane,
         decision_reasons: budgetDecision.decisionReasons
       }
     };
+    this.attachColumnPruningEvidence(response.retrieval_bundle, columnPruning.evidence);
     response.retrieval_bundle.context_pack = await this.buildContextPack({
       bundle: response.retrieval_bundle,
-      workspaceId: input.workspaceId,
+      workspaceId,
       datasourceId,
       status: response.retrieval_bundle.status,
       degradeReasons: uniqueDegradeReasons
@@ -261,11 +339,15 @@ export class RagRetrievalService {
     runId: string;
     decisionReasons: string[];
   }): Promise<RagRetrievalResponse["retrieval_bundle"]> {
+    const priorSqlLane = this.readPriorSqlLaneEvidence(input.cachedBundle);
+    const columnPruning = this.readColumnPruningEvidence(input.cachedBundle);
     const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
       datasource_id: input.datasourceId,
       run_id: input.runId,
+      prior_sql_lane: priorSqlLane,
+      priorSqlLane: priorSqlLane,
       decision_reasons: this.unique([
         ...(input.cachedBundle.decision_reasons ?? []),
         ...input.decisionReasons,
@@ -276,6 +358,7 @@ export class RagRetrievalService {
         ...input.decisionReasons
       ])
     };
+    this.attachColumnPruningEvidence(hydratedBundle, columnPruning);
     hydratedBundle.context_pack = await this.buildContextPack({
       bundle: hydratedBundle,
       workspaceId: input.workspaceId,
@@ -600,6 +683,204 @@ export class RagRetrievalService {
     };
   }
 
+  private buildBudgetLaneProfile(input: {
+    enabledLanes: RagRetrievalLane[];
+    workspaceId?: string;
+    allowedTables: string[];
+  }): string {
+    const workspacePart = input.workspaceId?.trim().toLowerCase() || "none";
+    const tableDigest = createHash("sha256")
+      .update(input.allowedTables.join("|"))
+      .digest("hex")
+      .slice(0, 12);
+    return `${input.enabledLanes.join("+")}::ws:${workspacePart}::tables:${tableDigest}`;
+  }
+
+  private normalizeAllowedTables(raw: string[] | undefined): string[] {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return [];
+    }
+    return this.unique(
+      raw
+        .map((tableName) => this.readString(tableName))
+        .filter((tableName): tableName is string => Boolean(tableName))
+        .map((tableName) => tableName.toLowerCase())
+    ).sort();
+  }
+
+  private selectTrustedPriorSqlCandidates(input: {
+    candidates: RagRetrievalCandidate[];
+    datasourceId: string;
+    workspaceId?: string;
+    allowedTables: string[];
+  }): PriorSqlSelectionResult {
+    const trustedSqlExampleCandidates = input.candidates.filter(
+      (candidate) =>
+        candidate.chunk.metadata.domain === "sql_example" &&
+        this.isTrustedPriorSqlCandidate(candidate)
+    );
+    const selectedCandidates: RagRetrievalCandidate[] = [];
+    const blockedChunkIds = new Set<string>();
+    const degradeReasons: string[] = [];
+    const allowedTables = new Set(input.allowedTables);
+    const workspaceId = input.workspaceId?.trim();
+
+    for (const candidate of trustedSqlExampleCandidates) {
+      const filterReasons = this.collectPriorSqlFilterReasons({
+        candidate,
+        datasourceId: input.datasourceId,
+        workspaceId,
+        allowedTables
+      });
+      if (filterReasons.length > 0) {
+        blockedChunkIds.add(candidate.chunk_id);
+        degradeReasons.push(...filterReasons);
+        continue;
+      }
+      selectedCandidates.push({
+        ...candidate,
+        evidence: this.unique([...candidate.evidence, "prior_sql:trusted"])
+      });
+    }
+
+    if (selectedCandidates.length > 0) {
+      const lane: RagPriorSqlLaneEvidence = {
+        status: "hit",
+        matched_count: trustedSqlExampleCandidates.length,
+        selected_count: selectedCandidates.length,
+        filtered_count: blockedChunkIds.size,
+        ...(degradeReasons.length > 0
+          ? {
+              degrade_reasons: this.unique(degradeReasons)
+            }
+          : {})
+      };
+      return {
+        lane: this.withPriorSqlLaneCompatFields(lane),
+        selectedCandidates,
+        blockedChunkIds
+      };
+    }
+
+    const lane: RagPriorSqlLaneEvidence = {
+      status: trustedSqlExampleCandidates.length > 0 ? "filtered" : "miss",
+      matched_count: trustedSqlExampleCandidates.length,
+      selected_count: 0,
+      filtered_count: blockedChunkIds.size,
+      degrade_reasons:
+        trustedSqlExampleCandidates.length > 0
+          ? this.unique(degradeReasons)
+          : ["prior_sql_no_trusted_match"]
+    };
+    return {
+      lane: this.withPriorSqlLaneCompatFields(lane),
+      selectedCandidates: [],
+      blockedChunkIds
+    };
+  }
+
+  private isTrustedPriorSqlCandidate(candidate: RagRetrievalCandidate): boolean {
+    const sourceMetadata = candidate.chunk.metadata.sourceMetadata;
+    if (!this.isRecord(sourceMetadata)) {
+      return false;
+    }
+    return (
+      this.readBooleanFlag(sourceMetadata.trusted) ||
+      this.readBooleanFlag(sourceMetadata.verified) ||
+      this.readBooleanFlag(sourceMetadata.priorSql) ||
+      this.readBooleanFlag(sourceMetadata.prior_sql)
+    );
+  }
+
+  private readBooleanFlag(value: unknown): boolean {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) && value > 0;
+    }
+    if (typeof value !== "string") {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+
+  private collectPriorSqlFilterReasons(input: {
+    candidate: RagRetrievalCandidate;
+    datasourceId: string;
+    workspaceId?: string;
+    allowedTables: Set<string>;
+  }): string[] {
+    const reasons: string[] = [];
+    const normalizedDatasourceId = input.datasourceId.trim().toLowerCase();
+    if (input.candidate.chunk.metadata.datasourceId.trim().toLowerCase() !== normalizedDatasourceId) {
+      reasons.push("prior_sql_filtered_datasource_mismatch");
+    }
+
+    const sourceMetadata = input.candidate.chunk.metadata.sourceMetadata;
+    const metadataWorkspaceId = this.readWorkspaceIdFromSourceMetadata(sourceMetadata);
+    if (metadataWorkspaceId && metadataWorkspaceId !== (input.workspaceId?.trim() || "")) {
+      reasons.push("prior_sql_filtered_workspace_mismatch");
+    }
+
+    if (input.allowedTables.size > 0) {
+      const tableNames = input.candidate.chunk.metadata.tableNames.map((tableName) =>
+        tableName.trim().toLowerCase()
+      );
+      const isAllowedSubset = tableNames.every((tableName) => input.allowedTables.has(tableName));
+      if (!isAllowedSubset) {
+        reasons.push("prior_sql_filtered_not_in_allowed_tables");
+      }
+    }
+    return reasons;
+  }
+
+  private readWorkspaceIdFromSourceMetadata(sourceMetadata: unknown): string | undefined {
+    if (!this.isRecord(sourceMetadata)) {
+      return undefined;
+    }
+    return this.readString(sourceMetadata.workspaceId) ?? this.readString(sourceMetadata.workspace_id);
+  }
+
+  private filterBlockedPriorSqlCandidates(
+    candidates: RagRetrievalCandidate[],
+    blockedChunkIds: Set<string>
+  ): RagRetrievalCandidate[] {
+    if (blockedChunkIds.size === 0) {
+      return candidates;
+    }
+    return candidates.filter((candidate) => !blockedChunkIds.has(candidate.chunk_id));
+  }
+
+  private injectTrustedPriorSqlCandidates(
+    candidates: RagRetrievalCandidate[],
+    trustedCandidates: RagRetrievalCandidate[]
+  ): RagRetrievalCandidate[] {
+    if (trustedCandidates.length === 0) {
+      return candidates;
+    }
+    const trustedByChunkId = new Map(
+      trustedCandidates.map((candidate) => [candidate.chunk_id, candidate])
+    );
+    const promoted: RagRetrievalCandidate[] = [];
+    const seen = new Set<string>();
+    for (const candidate of trustedCandidates) {
+      if (!seen.has(candidate.chunk_id)) {
+        promoted.push(candidate);
+        seen.add(candidate.chunk_id);
+      }
+    }
+    for (const candidate of candidates) {
+      if (seen.has(candidate.chunk_id)) {
+        continue;
+      }
+      promoted.push(trustedByChunkId.get(candidate.chunk_id) ?? candidate);
+      seen.add(candidate.chunk_id);
+    }
+    return promoted;
+  }
+
   private applyDomainCoverage(
     candidates: RagRetrievalCandidate[],
     limit: number,
@@ -721,6 +1002,335 @@ export class RagRetrievalService {
     });
   }
 
+  private applyConservativeColumnPruning(input: {
+    query: string;
+    candidates: RagRetrievalCandidate[];
+  }): ColumnPruningResult {
+    if (input.candidates.length === 0) {
+      return {
+        candidates: input.candidates
+      };
+    }
+    const queryTokens = this.extractTokens(input.query);
+    const wideTableProfiles = this.collectWideTableProfiles(input.candidates);
+    if (wideTableProfiles.length === 0) {
+      return {
+        candidates: input.candidates
+      };
+    }
+
+    const tablePlans = wideTableProfiles.map((profile) =>
+      this.buildTablePruningPlan({
+        profile,
+        queryTokens,
+        candidates: input.candidates
+      })
+    );
+    const planByTable = new Map(
+      tablePlans.map((plan) => [plan.normalizedTableName, plan])
+    );
+    let affectedCandidateCount = 0;
+    const candidates = input.candidates.map((candidate) => {
+      const candidateTableNames = candidate.chunk.metadata.tableNames
+        .map((tableName) => tableName.trim().toLowerCase())
+        .filter((tableName) => tableName.length > 0);
+      const keepColumns = new Set<string>();
+      for (const tableName of candidateTableNames) {
+        const plan = planByTable.get(tableName);
+        if (!plan) {
+          continue;
+        }
+        for (const columnName of plan.keepColumns) {
+          keepColumns.add(columnName);
+        }
+      }
+      if (keepColumns.size === 0) {
+        return candidate;
+      }
+
+      const originalColumns = candidate.chunk.metadata.columnNames;
+      if (originalColumns.length === 0) {
+        return candidate;
+      }
+      const nextColumns = originalColumns.filter((columnName) =>
+        keepColumns.has(columnName.trim().toLowerCase())
+      );
+      if (nextColumns.length === 0 || nextColumns.length === originalColumns.length) {
+        return candidate;
+      }
+      affectedCandidateCount += 1;
+      return {
+        ...candidate,
+        chunk: {
+          ...candidate.chunk,
+          metadata: {
+            ...candidate.chunk.metadata,
+            columnNames: nextColumns
+          }
+        }
+      };
+    });
+
+    const reasonCodes = this.unique(
+      tablePlans.flatMap((plan) => plan.decision.reason_codes)
+    );
+    const evidence: ColumnPruningEvidence = {
+      strategy: "table_first_field_second_conservative",
+      status: affectedCandidateCount > 0 ? "applied" : "skipped",
+      query_tokens: queryTokens,
+      affected_candidate_count: affectedCandidateCount,
+      tables: tablePlans.map((plan) => plan.decision),
+      reason_codes: reasonCodes
+    };
+    return {
+      candidates,
+      evidence
+    };
+  }
+
+  private collectWideTableProfiles(candidates: RagRetrievalCandidate[]): WideTableProfile[] {
+    const profileByTable = new Map<
+      string,
+      {
+        tableName: string;
+        columnOrder: string[];
+        seenColumns: Set<string>;
+      }
+    >();
+    for (const candidate of candidates) {
+      const tableNames = candidate.chunk.metadata.tableNames;
+      const columns = candidate.chunk.metadata.columnNames;
+      if (tableNames.length === 0 || columns.length === 0) {
+        continue;
+      }
+      for (const tableName of tableNames) {
+        const normalizedTableName = tableName.trim().toLowerCase();
+        if (!normalizedTableName) {
+          continue;
+        }
+        const existing = profileByTable.get(normalizedTableName) ?? {
+          tableName,
+          columnOrder: [],
+          seenColumns: new Set<string>()
+        };
+        for (const columnName of columns) {
+          const normalizedColumnName = columnName.trim().toLowerCase();
+          if (!normalizedColumnName || existing.seenColumns.has(normalizedColumnName)) {
+            continue;
+          }
+          existing.seenColumns.add(normalizedColumnName);
+          existing.columnOrder.push(columnName);
+        }
+        profileByTable.set(normalizedTableName, existing);
+      }
+    }
+    return Array.from(profileByTable.entries())
+      .filter(([, profile]) => profile.columnOrder.length >= WIDE_TABLE_COLUMN_THRESHOLD)
+      .map(([normalizedTableName, profile]) => ({
+        tableName: profile.tableName,
+        normalizedTableName,
+        columns: profile.columnOrder
+      }));
+  }
+
+  private buildTablePruningPlan(input: {
+    profile: WideTableProfile;
+    queryTokens: string[];
+    candidates: RagRetrievalCandidate[];
+  }): TablePruningPlan {
+    const fieldIntentTokens = this.buildFieldIntentTokens(
+      input.queryTokens,
+      input.profile.normalizedTableName
+    );
+    const scoreByColumn = new Map<string, number>();
+    const evidenceByColumn = new Map<string, string[]>();
+    const columnHints = this.collectColumnHintsForTable(input.candidates, input.profile.normalizedTableName);
+    for (const columnName of input.profile.columns) {
+      const normalizedColumnName = columnName.trim().toLowerCase();
+      const signalReasons: string[] = [];
+      const tokenScore = this.scoreColumnByQueryTokens(normalizedColumnName, fieldIntentTokens);
+      if (tokenScore >= 2) {
+        signalReasons.push("query_token_strong_match");
+      } else if (tokenScore > 0) {
+        signalReasons.push("query_token_partial_match");
+      }
+      const columnHintMatched = columnHints.has(normalizedColumnName) && tokenScore > 0;
+      if (columnHintMatched) {
+        signalReasons.push("lane_column_evidence");
+      }
+      const score = tokenScore + (columnHintMatched ? 1 : 0);
+      scoreByColumn.set(normalizedColumnName, score);
+      evidenceByColumn.set(normalizedColumnName, signalReasons);
+    }
+
+    const rankedColumns = [...input.profile.columns].sort((left, right) => {
+      const leftScore = scoreByColumn.get(left.trim().toLowerCase()) ?? 0;
+      const rightScore = scoreByColumn.get(right.trim().toLowerCase()) ?? 0;
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
+      }
+      return left.localeCompare(right);
+    });
+    const strongMatches = rankedColumns.filter(
+      (columnName) => (scoreByColumn.get(columnName.trim().toLowerCase()) ?? 0) >= 2
+    );
+    const weakMatches = rankedColumns.filter(
+      (columnName) =>
+        (scoreByColumn.get(columnName.trim().toLowerCase()) ?? 0) === 1
+    );
+    const anchorColumns = input.profile.columns.filter((columnName) =>
+      this.isAnchorColumn(columnName.trim().toLowerCase())
+    );
+    const totalColumns = input.profile.columns.length;
+
+    let mode: ColumnPruningTableDecision["mode"] = "none";
+    let evidenceStrength: ColumnPruningTableDecision["evidence_strength"] = "weak";
+    let reasonCodes: string[] = ["column_pruning_weak_evidence"];
+    let keepTarget = totalColumns;
+    if (strongMatches.length > 0) {
+      mode = "conservative";
+      evidenceStrength = "strong";
+      reasonCodes = ["column_pruning_strong_field_evidence"];
+      keepTarget = Math.max(
+        MIN_COLUMN_KEEP_COUNT,
+        Math.min(
+          totalColumns,
+          Math.max(strongMatches.length + anchorColumns.length, CONSERVATIVE_PRUNING_MAX_KEEP)
+        )
+      );
+    } else if (weakMatches.length > 0) {
+      mode = "light";
+      evidenceStrength = "medium";
+      reasonCodes = ["column_pruning_uncertain_field_evidence"];
+      keepTarget = Math.max(
+        MIN_COLUMN_KEEP_COUNT,
+        Math.min(totalColumns, Math.ceil(totalColumns * LIGHT_PRUNING_KEEP_RATIO))
+      );
+    }
+
+    const keepColumns = new Set<string>();
+    for (const columnName of [...strongMatches, ...weakMatches, ...anchorColumns, ...rankedColumns]) {
+      if (keepColumns.size >= keepTarget) {
+        break;
+      }
+      keepColumns.add(columnName.trim().toLowerCase());
+    }
+    if (keepColumns.size === 0) {
+      for (const columnName of input.profile.columns) {
+        keepColumns.add(columnName.trim().toLowerCase());
+      }
+    }
+
+    const keptColumns = input.profile.columns.filter((columnName) =>
+      keepColumns.has(columnName.trim().toLowerCase())
+    );
+    const prunedColumns =
+      mode === "none"
+        ? []
+        : input.profile.columns.filter(
+            (columnName) => !keepColumns.has(columnName.trim().toLowerCase())
+          );
+    const signalReasons = this.unique(
+      keptColumns.flatMap((columnName) =>
+        evidenceByColumn.get(columnName.trim().toLowerCase()) ?? []
+      )
+    );
+    if (mode !== "none" && signalReasons.length > 0) {
+      reasonCodes = this.unique([...reasonCodes, ...signalReasons]);
+    }
+
+    return {
+      tableName: input.profile.tableName,
+      normalizedTableName: input.profile.normalizedTableName,
+      keepColumns,
+      decision: {
+        table_name: input.profile.tableName,
+        mode,
+        evidence_strength: evidenceStrength,
+        total_columns: totalColumns,
+        kept_columns: keptColumns,
+        pruned_columns: prunedColumns,
+        reason_codes: reasonCodes
+      }
+    };
+  }
+
+  private buildFieldIntentTokens(
+    queryTokens: string[],
+    normalizedTableName: string
+  ): string[] {
+    const tableTokens = normalizedTableName
+      .split(/[_\s]+/g)
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    const blocked = new Set([normalizedTableName, ...tableTokens]);
+    return queryTokens.filter((token) => !blocked.has(token));
+  }
+
+  private collectColumnHintsForTable(
+    candidates: RagRetrievalCandidate[],
+    normalizedTableName: string
+  ): Set<string> {
+    const hints = new Set<string>();
+    for (const candidate of candidates) {
+      const belongsToTable = candidate.chunk.metadata.tableNames.some(
+        (tableName) => tableName.trim().toLowerCase() === normalizedTableName
+      );
+      if (!belongsToTable) {
+        continue;
+      }
+      for (const evidence of candidate.evidence) {
+        if (!evidence.startsWith(COLUMN_HINT_PREFIX)) {
+          continue;
+        }
+        const rawColumnName = evidence.slice(COLUMN_HINT_PREFIX.length).trim().toLowerCase();
+        if (rawColumnName) {
+          hints.add(rawColumnName);
+        }
+      }
+    }
+    return hints;
+  }
+
+  private scoreColumnByQueryTokens(
+    normalizedColumnName: string,
+    queryTokens: string[]
+  ): number {
+    if (queryTokens.length === 0) {
+      return 0;
+    }
+    const columnParts = normalizedColumnName.split(/[_\s]+/g).filter((part) => part.length > 0);
+    const substantialParts = columnParts.filter((part) => part.length >= 3);
+    let score = 0;
+    for (const token of queryTokens) {
+      if (token === normalizedColumnName || columnParts.includes(token)) {
+        score += 2;
+        continue;
+      }
+      if (
+        token.length >= 3 &&
+        (normalizedColumnName.includes(token) ||
+          substantialParts.some((part) => part.includes(token) || token.includes(part)))
+      ) {
+        score += 1;
+      }
+    }
+    return score;
+  }
+
+  private isAnchorColumn(normalizedColumnName: string): boolean {
+    if (
+      normalizedColumnName === "id" ||
+      normalizedColumnName.endsWith("_id") ||
+      normalizedColumnName === "created_at" ||
+      normalizedColumnName === "updated_at" ||
+      normalizedColumnName === "deleted_at"
+    ) {
+      return true;
+    }
+    return normalizedColumnName.endsWith("_at");
+  }
+
   private resolveLaneTimeoutMs(
     input: RagRetrievalRequest
   ): Record<RagRetrievalLane, number> {
@@ -823,6 +1433,60 @@ export class RagRetrievalService {
 
   private unique(values: string[]): string[] {
     return Array.from(new Set(values));
+  }
+
+  private attachColumnPruningEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"],
+    evidence: ColumnPruningEvidence | undefined
+  ): void {
+    const target = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      column_pruning?: ColumnPruningEvidence;
+      columnPruning?: ColumnPruningEvidence;
+    };
+    if (!evidence) {
+      delete target.column_pruning;
+      delete target.columnPruning;
+      return;
+    }
+    target.column_pruning = evidence;
+    target.columnPruning = evidence;
+  }
+
+  private readColumnPruningEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"]
+  ): ColumnPruningEvidence | undefined {
+    const source = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      column_pruning?: ColumnPruningEvidence;
+      columnPruning?: ColumnPruningEvidence;
+    };
+    return source.column_pruning ?? source.columnPruning;
+  }
+
+  private readPriorSqlLaneEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"]
+  ): RagPriorSqlLaneEvidence | undefined {
+    const priorSqlLane = bundle.prior_sql_lane ?? bundle.priorSqlLane;
+    if (!priorSqlLane) {
+      return undefined;
+    }
+    return this.withPriorSqlLaneCompatFields(priorSqlLane);
+  }
+
+  private withPriorSqlLaneCompatFields(
+    lane: RagPriorSqlLaneEvidence
+  ): RagPriorSqlLaneEvidence {
+    const degradeReasons = lane.degrade_reasons ?? lane.degradeReasons;
+    return {
+      ...lane,
+      matched_count: lane.matched_count,
+      selected_count: lane.selected_count,
+      filtered_count: lane.filtered_count,
+      ...(degradeReasons ? { degrade_reasons: degradeReasons } : {}),
+      matchedCount: lane.matched_count,
+      selectedCount: lane.selected_count,
+      filteredCount: lane.filtered_count,
+      ...(degradeReasons ? { degradeReasons } : {})
+    };
   }
 
   private async buildContextPack(input: {
@@ -991,6 +1655,8 @@ export class RagRetrievalService {
         degradeReasons: bundle.degrade_reasons,
         decisionReasons: bundle.decision_reasons ?? [],
         candidateCount: bundle.candidates.length,
+        priorSqlLane: this.readPriorSqlLaneEvidence(bundle),
+        columnPruning: this.readColumnPruningEvidence(bundle),
         skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
           chunkId: candidate.chunk_id,

@@ -429,6 +429,7 @@ export class RagRerankService {
         rerankedCount: bundle.reranked?.length ?? 0,
         selectedContextCount: bundle.selected_context?.length ?? 0,
         riskTags: bundle.risk_tags ?? [],
+        columnPruning: this.readColumnPruningEvidence(bundle),
         contextPack: bundle.context_pack
           ? {
               status: bundle.context_pack.status,
@@ -471,6 +472,21 @@ export class RagRerankService {
         secondaryTopK: input.secondaryTopK
       }
     });
+  }
+
+  private readColumnPruningEvidence(
+    bundle: RagRetrievalBundle
+  ): Record<string, unknown> | undefined {
+    const record = bundle as RagRetrievalBundle & {
+      column_pruning?: unknown;
+      columnPruning?: unknown;
+    };
+    const candidate = record.column_pruning ?? record.columnPruning;
+    return this.isRecord(candidate) ? candidate : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
   private normalizePositiveInt(value: number | undefined, fallback: number): number {

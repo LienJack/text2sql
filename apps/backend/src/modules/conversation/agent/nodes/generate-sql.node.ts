@@ -4,7 +4,11 @@ import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
 } from "../../../llm/llm-gateway.interface";
-import { SqlGenerationService } from "../sql/sql-generation.service";
+import {
+  SqlGenerationService,
+  type SqlEvidenceCoverage,
+  type SqlGenerationExplicitPinningEvidence
+} from "../sql/sql-generation.service";
 import type { SqlSemanticIntent } from "../sql/sql-prompt.builder";
 import type {
   RagContextPack,
@@ -28,6 +32,7 @@ export class GenerateSqlNode {
       datasourceId?: string;
       workspaceId?: string;
       semanticIntent?: SqlSemanticIntent;
+      explicitPinning?: SqlGenerationExplicitPinningEvidence;
     }
   ): Promise<{
     provider: string;
@@ -43,6 +48,7 @@ export class GenerateSqlNode {
     promptTemplate?: PromptTemplateTraceEvidence;
     retryCount?: number;
     semanticIntent?: SqlSemanticIntent;
+    coverage?: SqlEvidenceCoverage;
   }> {
     if (options?.stream) {
       return this.sqlGeneration.stream(
@@ -54,7 +60,8 @@ export class GenerateSqlNode {
           modelCatalogId,
           selectedContext: options.selectedContext,
           semanticContextPack: options.semanticContextPack,
-          semanticIntent: options.semanticIntent
+          semanticIntent: options.semanticIntent,
+          explicitPinning: options.explicitPinning
         },
         {
           tools: options.tools,
@@ -69,7 +76,8 @@ export class GenerateSqlNode {
       modelCatalogId,
       selectedContext: options?.selectedContext,
       semanticContextPack: options?.semanticContextPack,
-      semanticIntent: options?.semanticIntent
+      semanticIntent: options?.semanticIntent,
+      explicitPinning: options?.explicitPinning
     });
   }
 }

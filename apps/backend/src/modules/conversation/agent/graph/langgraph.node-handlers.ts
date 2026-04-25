@@ -1,5 +1,6 @@
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import type { ExecutionTraceStep } from "@text2sql/shared-types";
+import { DomainError } from "../../../../common/domain-error";
 import { BuildIntentPlanNode } from "../nodes/build-intent-plan.node";
 import { BuildPhysicalPlanNode } from "../nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "../nodes/build-semantic-query.node";
@@ -18,6 +19,7 @@ import {
   appendStep,
   type LangGraphState
 } from "./langgraph.state";
+import type { SqlGenerationExplicitPinningEvidence } from "../sql/sql-generation.service";
 
 interface RuntimeCallbacks {
   streamMode?: boolean;
@@ -116,6 +118,68 @@ const appendPlanningWarning = (
   return [...(state.planningWarnings ?? []), warning];
 };
 
+const normalizeIdentifier = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  const normalized = value
+    .trim()
+    .replace(/^[`"'[\]]+|[`"'[\]]+$/g, "")
+    .replace(/\s+/g, "");
+  if (!normalized) {
+    return undefined;
+  }
+  return normalized.toLowerCase();
+};
+
+const extractQualifiedColumns = (value: string | undefined): string[] => {
+  if (!value) {
+    return [];
+  }
+  const result: string[] = [];
+  const regex = /\b([a-zA-Z_][\w$]*)\.([a-zA-Z_][\w$]*)\b/g;
+  for (const match of value.matchAll(regex)) {
+    const table = normalizeIdentifier(match[1]);
+    const column = normalizeIdentifier(match[2]);
+    if (!table || !column) {
+      continue;
+    }
+    result.push(`${table}.${column}`);
+  }
+  return result;
+};
+
+const unique = (values: string[]): string[] => Array.from(new Set(values));
+
+const buildExplicitPinningEvidence = (
+  state: LangGraphState
+): SqlGenerationExplicitPinningEvidence | undefined => {
+  const envelopePinnedTables = state.contextEnvelope?.pinnedTables ?? [];
+  const envelopePinnedColumns = state.contextEnvelope?.pinnedColumns ?? [];
+  const tables = unique(
+    envelopePinnedTables
+      .map((item) => normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item))
+  );
+  const mappedColumns = unique([
+    ...envelopePinnedColumns
+      .map((item) => normalizeIdentifier(item))
+      .filter((item): item is string => Boolean(item)),
+    ...((state.contextEnvelope?.entityMappings ?? [])
+      .map((item) => extractQualifiedColumns(item.mappedTo))
+      .flat()),
+    ...extractQualifiedColumns(state.contextEnvelope?.metricDefinition)
+  ]);
+  if (tables.length === 0 && mappedColumns.length === 0) {
+    return undefined;
+  }
+  return {
+    source: "context_envelope",
+    tables,
+    columns: mappedColumns
+  };
+};
+
 export interface LangGraphNodeDependencies {
   clarifyNode: Pick<ClarifyNode, "run">;
   retrieveKnowledgeNode: Pick<RetrieveKnowledgeNode, "run">;
@@ -210,6 +274,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         datasourceId: state.datasourceId,
         runId: state.runId,
         workspaceId: state.accessContext?.workspaceId,
+        allowedTables: state.accessContext?.allowedTables,
+        pinnedTables: state.contextEnvelope?.pinnedTables ?? state.contextEnvelope?.mustIncludeTables,
+        pinnedColumns: state.contextEnvelope?.pinnedColumns,
         modelCatalogId: state.modelCatalogId
       });
       const endedAt = new Date().toISOString();
@@ -594,6 +661,7 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     );
     const callbacks = runtime.callbacks;
     try {
+      const explicitPinning = buildExplicitPinningEvidence(state);
       const generated = await deps.generateSqlNode.run(
         state.question,
         state.datasourceType,
@@ -606,13 +674,15 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
               selectedContext: state.retrievalBundle?.selected_context,
               semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
-              workspaceId: state.accessContext?.workspaceId
+              workspaceId: state.accessContext?.workspaceId,
+              explicitPinning
             }
           : {
               selectedContext: state.retrievalBundle?.selected_context,
               semanticContextPack: state.contextPack ?? state.retrievalBundle?.context_pack,
               datasourceId: state.datasourceId,
-              workspaceId: state.accessContext?.workspaceId
+              workspaceId: state.accessContext?.workspaceId,
+              explicitPinning
             }
       );
       const endedAt = new Date().toISOString();
@@ -640,11 +710,10 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         provider: generated.provider,
         model: generated.model,
         modelCatalogId: generated.modelCatalogId,
-        sql: generated.sql,
-        rawText: generated.rawText,
         promptTemplate: generated.promptTemplate,
         retryCount: generated.retryCount ?? 0,
-        semanticIntent: generated.semanticIntent
+        semanticIntent: generated.semanticIntent,
+        coverage: generated.coverage
       };
       const trace = appendStep(state, {
         step: {
@@ -696,6 +765,13 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       const inputs = {
         question: state.question
       };
+      const outputs =
+        error instanceof DomainError
+          ? {
+              errorCode: error.code,
+              errorDetails: error.details
+            }
+          : undefined;
       const trace = appendStep(state, {
         step: {
           node: "generate-sql",
@@ -703,10 +779,12 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
           detail: message,
           ...withTiming(startedAt, endedAt),
           inputSummary: summarize(inputs),
+          outputSummary: summarize(outputs),
           errorSummary: summarize(message)
         },
         runType: "llm",
         inputs,
+        outputs,
         error: message
       });
       await runtime.emitStep(latestStep(trace));

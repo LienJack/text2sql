@@ -99,6 +99,28 @@ describe("chat context envelope accuracy integration", () => {
       expect.arrayContaining(["context_conflict_detected"])
     );
 
+    const pinnedContextRun = await graphBuilder.run({
+      runId: "run-context-accuracy-pinning",
+      sessionId: "session-context-accuracy-pinning",
+      question: "数据库有哪些表",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite",
+      contextEnvelope: {
+        pinnedTables: ["orders"],
+        pinnedColumns: ["amount"]
+      },
+      planningScaffoldEnabled: true
+    });
+    expect(
+      pinnedContextRun.trace.effectiveContextSummary?.userEnvelope.pinnedTableCount
+    ).toBe(1);
+    expect(
+      pinnedContextRun.trace.effectiveContextSummary?.userEnvelope.pinnedColumnCount
+    ).toBe(1);
+    expect(
+      pinnedContextRun.trace.effectiveContextSummary?.retrievalContext?.pinning?.status
+    ).toBeTruthy();
+
     await moduleRef.close();
   });
 });

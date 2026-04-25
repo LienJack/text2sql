@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
 import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
+import { BuildIntentPlanNode } from "../../src/modules/conversation/agent/nodes/build-intent-plan.node";
+import { RetrieveKnowledgeNode } from "../../src/modules/conversation/agent/nodes/retrieve-knowledge.node";
 import { RagEventConsumerService } from "../../src/modules/rag/events/rag-event-consumer.service";
 import { RagIndexBuilderService } from "../../src/modules/rag/index/rag-index-builder.service";
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
@@ -25,6 +27,8 @@ describe("agent rag main flow integration", () => {
     }).compile();
 
     const graph = moduleRef.get(GraphBuilderService);
+    const buildIntentPlanNode = moduleRef.get(BuildIntentPlanNode);
+    const retrieveKnowledgeNode = moduleRef.get(RetrieveKnowledgeNode);
     const repository = moduleRef.get(RagIndexRepository);
     const builder = moduleRef.get(RagIndexBuilderService);
     const eventConsumer = moduleRef.get(RagEventConsumerService);
@@ -85,6 +89,38 @@ describe("agent rag main flow integration", () => {
 
     const safetyStep = run.trace.steps.find((step) => step.node === "safety-check");
     expect(safetyStep?.outputSummary).toContain("riskTags");
+
+    const unpinnedKnowledge = await retrieveKnowledgeNode.run({
+      question: "统计订单 GMV",
+      datasourceId: "sqlite_main",
+      runId: "run-agent-rag-main-retrieve-unpinned"
+    });
+    const pinnedKnowledge = await retrieveKnowledgeNode.run({
+      question: "统计订单 GMV",
+      datasourceId: "sqlite_main",
+      runId: "run-agent-rag-main-retrieve-pinned",
+      pinnedTables: ["refunds"],
+      pinnedColumns: ["refund_amount"]
+    });
+    expect(unpinnedKnowledge.pinning?.status).toBe("inactive");
+    expect(pinnedKnowledge.pinning?.enabled).toBe(true);
+    expect(pinnedKnowledge.pinning?.status).toBe("applied");
+    expect(pinnedKnowledge.summary).toContain("pinning[candidates=");
+    expect(
+      (pinnedKnowledge.retrievalBundle?.selected_context?.length ?? 0) <=
+        (unpinnedKnowledge.retrievalBundle?.selected_context?.length ?? 0)
+    ).toBe(true);
+    expect(
+      pinnedKnowledge.retrievalBundle?.candidates.every((candidate) =>
+        candidate.chunk.metadata.tableNames
+          .map((tableName) => tableName.toLowerCase())
+          .includes("refunds")
+      ) ?? true
+    ).toBe(true);
+    const pinnedIntentPlan = buildIntentPlanNode.run("统计订单 GMV", pinnedKnowledge);
+    expect(pinnedIntentPlan.constraints).toEqual(
+      expect.arrayContaining(["require_pinned_table_alignment"])
+    );
 
     await eventConsumer.consumeEvent({
       eventId: "evt-agent-rag-main-linkage-degraded-1",

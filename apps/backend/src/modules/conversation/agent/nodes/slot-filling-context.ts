@@ -1,6 +1,15 @@
 import type { ContextEnvelope } from "@text2sql/shared-types";
 
-type SlotKey = "subject" | "metric" | "time" | "dimension" | "filter";
+export type SlotKey = "subject" | "metric" | "time" | "dimension" | "filter";
+type SlotFillingDecisionState = "continue" | "clarify";
+type SlotFillingAction = "proceed" | "ask_clarification";
+type SlotFillingSource =
+  | "rule"
+  | "metadata-intent"
+  | "sql-write-intent"
+  | "short-input-fallback"
+  | "exception-fallback";
+type SlotFillingConfidence = "high" | "medium" | "low";
 
 interface SlotStatus {
   key: SlotKey;
@@ -9,10 +18,61 @@ interface SlotStatus {
 }
 
 export interface SlotFillingDecision {
+  decision: SlotFillingDecisionState;
+  action: SlotFillingAction;
+  source: SlotFillingSource;
+  confidence: SlotFillingConfidence;
+  missingSlots: SlotKey[];
   shouldClarify: boolean;
   missingCriticalSlots: SlotKey[];
   reason: string;
   question: string;
+}
+
+interface SlotFillingDecisionInput {
+  decision: SlotFillingDecisionState;
+  source: SlotFillingSource;
+  confidence: SlotFillingConfidence;
+  missingSlots: SlotKey[];
+  reason: string;
+  question?: string;
+}
+
+function buildDecision(input: SlotFillingDecisionInput): SlotFillingDecision {
+  const shouldClarify = input.decision === "clarify";
+  return {
+    decision: input.decision,
+    action: shouldClarify ? "ask_clarification" : "proceed",
+    source: input.source,
+    confidence: input.confidence,
+    missingSlots: input.missingSlots,
+    shouldClarify,
+    missingCriticalSlots: input.missingSlots,
+    reason: input.reason,
+    question: input.question ?? ""
+  };
+}
+
+export function buildFallbackSlotFillingDecision(): SlotFillingDecision {
+  const missingSlots: SlotKey[] = ["subject", "metric", "time"];
+  return buildDecision({
+    decision: "clarify",
+    source: "exception-fallback",
+    confidence: "low",
+    missingSlots,
+    reason: "槽位解析异常",
+    question: "请补充分析对象、指标口径和时间范围后重试。"
+  });
+}
+
+function resolveConfidence(missingSlots: SlotKey[]): SlotFillingConfidence {
+  if (missingSlots.length === 0) {
+    return "high";
+  }
+  if (missingSlots.length === 1) {
+    return "medium";
+  }
+  return "low";
 }
 
 const METRIC_HINT_REGEX =
@@ -145,29 +205,35 @@ export function decideSlotFilling(
 ): SlotFillingDecision {
   const trimmedQuestion = question.trim();
   if (SQL_WRITE_INTENT_REGEX.test(trimmedQuestion)) {
-    return {
-      shouldClarify: false,
-      missingCriticalSlots: [],
+    return buildDecision({
+      decision: "continue",
+      source: "sql-write-intent",
+      confidence: "high",
+      missingSlots: [],
       reason: "检测到写操作 SQL 意图，跳过槽位澄清",
       question: ""
-    };
+    });
   }
   if (METADATA_INTENT_REGEX.test(trimmedQuestion)) {
-    return {
-      shouldClarify: false,
-      missingCriticalSlots: [],
+    return buildDecision({
+      decision: "continue",
+      source: "metadata-intent",
+      confidence: "high",
+      missingSlots: [],
       reason: "元数据查询意图，无需业务槽位补全",
       question: ""
-    };
+    });
   }
   if (trimmedQuestion.length < 6) {
-    const missingCriticalSlots: SlotKey[] = ["subject", "metric", "time"];
-    return {
-      shouldClarify: true,
-      missingCriticalSlots,
-      reason: resolveReason(missingCriticalSlots),
-      question: resolveClarificationQuestion(missingCriticalSlots)
-    };
+    const missingSlots: SlotKey[] = ["subject", "metric", "time"];
+    return buildDecision({
+      decision: "clarify",
+      source: "short-input-fallback",
+      confidence: "low",
+      missingSlots,
+      reason: resolveReason(missingSlots),
+      question: resolveClarificationQuestion(missingSlots)
+    });
   }
 
   const slots = resolveSlots(trimmedQuestion, contextEnvelope);
@@ -186,11 +252,13 @@ export function decideSlotFilling(
     missingSet.add("time");
   }
 
-  const missingCriticalSlots = Array.from(missingSet);
-  return {
-    shouldClarify: missingCriticalSlots.length > 0,
-    missingCriticalSlots,
-    reason: resolveReason(missingCriticalSlots),
-    question: resolveClarificationQuestion(missingCriticalSlots)
-  };
+  const missingSlots = Array.from(missingSet);
+  return buildDecision({
+    decision: missingSlots.length > 0 ? "clarify" : "continue",
+    source: "rule",
+    confidence: resolveConfidence(missingSlots),
+    missingSlots,
+    reason: resolveReason(missingSlots),
+    question: resolveClarificationQuestion(missingSlots)
+  });
 }
