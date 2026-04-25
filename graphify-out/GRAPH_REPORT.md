@@ -1,7 +1,7 @@
 # Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-25)
 
 ## Corpus Check
-- 673 files · ~1,000,403 words
+- 673 files · ~1,006,016 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -3136,10 +3136,10 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `setError()` connect `Community 9` to `Community 25`, `Community 27`, `Community 5`?**
-  _High betweenness centrality (0.024) - this node is a cross-community bridge._
 - **Why does `ok()` connect `Community 6` to `Community 0`, `Community 11`, `Community 4`?**
-  _High betweenness centrality (0.018) - this node is a cross-community bridge._
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+- **Why does `DatasourceService` connect `Community 3` to `Community 0`, `Community 18`?**
+  _High betweenness centrality (0.020) - this node is a cross-community bridge._
 - **Are the 85 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.createSession()`) actually correct?**
   _`ok()` has 85 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ELK`, `ElkLayoutTimeoutError`, `AppModule` to the rest of the system?**
