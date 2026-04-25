@@ -596,6 +596,13 @@ function DataSourcesPageContent() {
       return;
     }
     const selectedTableNames = normalizeSelectedTableNames(setupWizard.selectedTableNames);
+    const previousSuggestionIds = normalizeSelectedIds(setupWizard.selectedSuggestionIds);
+    const previousSuggestionIdSet = new Set(previousSuggestionIds);
+    const previousAllSuggestionIdSet = new Set(
+      setupWizard.suggestions.map((item) => item.id)
+    );
+    const hasExistingSuggestionSelectionState =
+      setupWizard.step === 2 || previousAllSuggestionIdSet.size > 0;
     if (selectedTableNames.length === 0) {
       setSetupWizard((previous) => ({
         ...previous,
@@ -637,13 +644,21 @@ function DataSourcesPageContent() {
           selectedTables: persistedTableNames
         }
       );
+      const nextSelectedSuggestionIds = hasExistingSuggestionSelectionState
+        ? suggestions
+            .filter(
+              (item) =>
+                previousSuggestionIdSet.has(item.id) || !previousAllSuggestionIdSet.has(item.id)
+            )
+            .map((item) => item.id)
+        : suggestions.map((item) => item.id);
       setSetupWizard((previous) => ({
         ...previous,
         step: 2,
         submitting: false,
         selectedTableNames: persistedTableNames,
         suggestions,
-        selectedSuggestionIds: suggestions.map((item) => item.id),
+        selectedSuggestionIds: nextSelectedSuggestionIds,
         failure: null
       }));
     } catch (error) {

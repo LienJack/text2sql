@@ -17,6 +17,40 @@ function dedupe(value: string[]): string[] {
   return Array.from(new Set(value.map((item) => item.trim()).filter(Boolean)));
 }
 
+function resolveCardinalityBadge(
+  cardinality: ModelingSetupRelationshipSuggestion["cardinality"]
+): "1:N" | "1:1" {
+  if (cardinality === "one-to-one") {
+    return "1:1";
+  }
+  return "1:N";
+}
+
+function resolveDirectionText(
+  cardinality: ModelingSetupRelationshipSuggestion["cardinality"]
+): "N -> 1" | "1 -> N" | "1 -> 1" {
+  if (cardinality === "one-to-many") {
+    return "1 -> N";
+  }
+  if (cardinality === "one-to-one") {
+    return "1 -> 1";
+  }
+  return "N -> 1";
+}
+
+function resolveSourceLabel(reason?: string): string {
+  if (reason === "foreign_key_constraint") {
+    return "FK";
+  }
+  if (reason === "fk_naming_suffix") {
+    return "命名推断";
+  }
+  if (reason?.trim()) {
+    return reason.trim();
+  }
+  return "推断";
+}
+
 export function SetupRelationshipsStep({
   suggestions,
   selectedSuggestionIds,
@@ -89,14 +123,22 @@ export function SetupRelationshipsStep({
                 aria-label={`选择关系建议 ${item.name}`}
               />
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-sm font-medium text-[var(--text-primary)]">{item.name}</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-sm font-medium text-[var(--text-primary)]">{item.name}</p>
+                  <span className="rounded-full border border-[var(--border-default)] bg-[var(--surface-subtle)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">
+                    {resolveCardinalityBadge(item.cardinality)}
+                  </span>
+                  <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+                    {resolveSourceLabel(item.reason)}
+                  </span>
+                </div>
                 <p className="text-xs text-[var(--text-secondary)]">
-                  {item.left.dataset}.{item.left.table}.{item.left.column} ={" "}
+                  Bridge: {item.left.dataset}.{item.left.table}.{item.left.column} ={" "}
                   {item.right.dataset}.{item.right.table}.{item.right.column}
                 </p>
-                {item.reason ? (
-                  <p className="text-xs text-[var(--text-tertiary)]">依据：{item.reason}</p>
-                ) : null}
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  方向 {resolveDirectionText(item.cardinality)}
+                </p>
               </div>
               <span className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-xs text-[var(--text-secondary)]">
                 置信度 {(item.confidence * 100).toFixed(0)}%
@@ -108,4 +150,3 @@ export function SetupRelationshipsStep({
     </div>
   );
 }
-

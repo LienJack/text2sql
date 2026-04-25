@@ -14,8 +14,10 @@ import {
   listWorkspaceDatasourceTablePermissions,
   listWorkspaces,
   precheckWorkspaceModelingDeploy,
+  recommendModelingSetupRelationships,
   resolveWorkspaceModelingSchemaChange,
   upsertWorkspaceModelingGraph,
+  type ModelingSetupRelationshipSuggestion,
   type PrecheckWorkspaceModelingDeployResult,
   type WorkspaceModelingGraphSnapshot
 } from "@/lib/admin-api-client";
@@ -222,6 +224,12 @@ type SaveModelingGraphOptions = {
   suppressSuccessMessage?: boolean;
 };
 
+type SyncRecommendedRelationshipsResult = {
+  nextPayload: ModelingGraphPayload;
+  addedCount: number;
+  skippedCount: number;
+};
+
 type ModelingPositionPatch = {
   models: Record<string, { x: number; y: number }>;
   views: Record<string, { x: number; y: number }>;
@@ -290,8 +298,221 @@ function mergePositionPatchIntoGraphPayload(
   };
 }
 
+function normalizeSignaturePart(value: string | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function normalizeRelationshipOperator(value: string | undefined): "eq" {
+  return normalizeSignaturePart(value) === "eq" ? "eq" : "eq";
+}
+
+function buildEndpointSignature(endpoint: {
+  dataset?: string;
+  table?: string;
+  column?: string;
+}): string | null {
+  const dataset = normalizeSignaturePart(endpoint.dataset);
+  const table = normalizeSignaturePart(endpoint.table);
+  const column = normalizeSignaturePart(endpoint.column);
+  if (!table || !column) {
+    return null;
+  }
+  return `${dataset}|${table}|${column}`;
+}
+
+function buildDirectedRelationshipSignature(input: {
+  left: { dataset?: string; table?: string; column?: string };
+  right: { dataset?: string; table?: string; column?: string };
+  operator?: string;
+}): string | null {
+  const leftSignature = buildEndpointSignature(input.left);
+  const rightSignature = buildEndpointSignature(input.right);
+  if (!leftSignature || !rightSignature) {
+    return null;
+  }
+  const operator = normalizeSignaturePart(input.operator) || "eq";
+  return `${leftSignature}->${rightSignature}|${operator}`;
+}
+
+function buildUndirectedRelationshipSignature(input: {
+  left: { dataset?: string; table?: string; column?: string };
+  right: { dataset?: string; table?: string; column?: string };
+  operator?: string;
+}): string | null {
+  const leftSignature = buildEndpointSignature(input.left);
+  const rightSignature = buildEndpointSignature(input.right);
+  if (!leftSignature || !rightSignature) {
+    return null;
+  }
+  const operator = normalizeSignaturePart(input.operator) || "eq";
+  const [endpointA, endpointB] = [leftSignature, rightSignature].sort();
+  return `${endpointA}<->${endpointB}|${operator}`;
+}
+
+function resolveRecommendationRelationshipType(
+  recommendation: ModelingSetupRelationshipSuggestion
+): ModelingGraphPayload["relationships"][number]["type"] {
+  const relationshipType = recommendation.type ?? recommendation.cardinality;
+  if (
+    relationshipType === "many-to-one" ||
+    relationshipType === "one-to-many" ||
+    relationshipType === "one-to-one"
+  ) {
+    return relationshipType;
+  }
+  return "many-to-one";
+}
+
+function resolveRecommendationOperator(
+  recommendation: ModelingSetupRelationshipSuggestion
+): "eq" {
+  const recommendationRecord = recommendation as ModelingSetupRelationshipSuggestion & {
+    operator?: string;
+    bridge?: {
+      operator?: string;
+    };
+  };
+  return normalizeRelationshipOperator(
+    recommendationRecord.bridge?.operator ?? recommendationRecord.operator
+  );
+}
+
+function mergeRecommendedRelationshipsIntoGraphPayload(
+  payload: ModelingGraphPayload,
+  recommendations: ModelingSetupRelationshipSuggestion[]
+): SyncRecommendedRelationshipsResult {
+  const directedSignatureSet = new Set<string>();
+  const undirectedSignatureSet = new Set<string>();
+
+  for (const relationship of payload.relationships) {
+    const directedSignature = buildDirectedRelationshipSignature({
+      left: relationship.bridge.left,
+      right: relationship.bridge.right,
+      operator: relationship.bridge.operator
+    });
+    if (directedSignature) {
+      directedSignatureSet.add(directedSignature);
+    }
+    const undirectedSignature = buildUndirectedRelationshipSignature({
+      left: relationship.bridge.left,
+      right: relationship.bridge.right,
+      operator: relationship.bridge.operator
+    });
+    if (undirectedSignature) {
+      undirectedSignatureSet.add(undirectedSignature);
+    }
+  }
+
+  const additions: ModelingGraphPayload["relationships"] = [];
+  let skippedCount = 0;
+
+  for (const recommendation of recommendations) {
+    const relationshipType = resolveRecommendationRelationshipType(recommendation);
+    const recommendationOperator = resolveRecommendationOperator(recommendation);
+    const nextRelationship: ModelingGraphPayload["relationships"][number] = {
+      id: recommendation.id,
+      name: recommendation.name,
+      source: recommendation.reason === "foreign_key_constraint" ? "fk" : "inferred",
+      confidence: Number(Math.max(0, Math.min(1, recommendation.confidence)).toFixed(4)),
+      type: relationshipType,
+      cardinality: relationshipType,
+      bridge: {
+        left: {
+          dataset: recommendation.left.dataset,
+          table: recommendation.left.table,
+          column: recommendation.left.column
+        },
+        right: {
+          dataset: recommendation.right.dataset,
+          table: recommendation.right.table,
+          column: recommendation.right.column
+        },
+        operator: recommendationOperator,
+        confidence: Number(Math.max(0, Math.min(1, recommendation.confidence)).toFixed(4))
+      }
+    };
+    const directedSignature = buildDirectedRelationshipSignature({
+      left: nextRelationship.bridge.left,
+      right: nextRelationship.bridge.right,
+      operator: nextRelationship.bridge.operator
+    });
+    const undirectedSignature = buildUndirectedRelationshipSignature({
+      left: nextRelationship.bridge.left,
+      right: nextRelationship.bridge.right,
+      operator: nextRelationship.bridge.operator
+    });
+    if (!directedSignature || !undirectedSignature) {
+      skippedCount += 1;
+      continue;
+    }
+    if (
+      directedSignatureSet.has(directedSignature) ||
+      undirectedSignatureSet.has(undirectedSignature)
+    ) {
+      skippedCount += 1;
+      continue;
+    }
+    directedSignatureSet.add(directedSignature);
+    undirectedSignatureSet.add(undirectedSignature);
+    additions.push(nextRelationship);
+  }
+
+  if (additions.length === 0) {
+    return {
+      nextPayload: payload,
+      addedCount: 0,
+      skippedCount
+    };
+  }
+
+  return {
+    nextPayload: {
+      ...payload,
+      relationships: [...payload.relationships, ...additions]
+    },
+    addedCount: additions.length,
+    skippedCount
+  };
+}
+
+function normalizeModelTableNamesForRecommendation(payload: ModelingGraphPayload): string[] {
+  const normalized = new Set<string>();
+  for (const model of payload.models) {
+    const tableName = model.tableName?.trim().toLowerCase();
+    if (!tableName) {
+      continue;
+    }
+    normalized.add(tableName);
+  }
+  return Array.from(normalized).sort((left, right) => left.localeCompare(right));
+}
+
+function buildBootstrapAttemptDraftKey(input: {
+  workspaceId: string;
+  datasourceId: string;
+  snapshot: WorkspaceModelingGraphSnapshot | null;
+  payload: ModelingGraphPayload;
+}): string | null {
+  const modelTableNames = normalizeModelTableNamesForRecommendation(input.payload);
+  if (modelTableNames.length === 0 || input.payload.relationships.length > 0) {
+    return null;
+  }
+  const draftRevision = input.snapshot?.draft?.revision ?? "none";
+  const draftGraphHash = input.snapshot?.draft?.graphHash ?? "none";
+  return [
+    input.workspaceId,
+    input.datasourceId,
+    draftRevision,
+    draftGraphHash,
+    modelTableNames.join(",")
+  ].join("|");
+}
+
 export default function ModelingWorkspacePage() {
   const showDetailsPanel = process.env.NEXT_PUBLIC_MODELING_SHOW_DETAILS_PANEL === "true";
+  const showSchemaAndDeployPanels =
+    process.env.NEXT_PUBLIC_MODELING_SHOW_SCHEMA_DEPLOY_PANELS === "true";
+  const showContextDrawer = showDetailsPanel || showSchemaAndDeployPanels;
   const [workspaceId, setWorkspaceId] = useState("");
   const [datasourceId, setDatasourceId] = useState("");
   const [policyVersion, setPolicyVersion] = useState(0);
@@ -311,6 +532,7 @@ export default function ModelingWorkspacePage() {
   const [hasPendingDraftChanges, setHasPendingDraftChanges] = useState(false);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [syncingRecommendations, setSyncingRecommendations] = useState(false);
   const [deploying, setDeploying] = useState(false);
   const [schemaChangeItems, setSchemaChangeItems] = useState<
     Array<{
@@ -328,6 +550,8 @@ export default function ModelingWorkspacePage() {
   const latestSnapshotLoadTokenRef = useRef(0);
   const positionPatchChangedRef = useRef(false);
   const nextEditorIntentRequestIdRef = useRef(1);
+  const graphPayloadRef = useRef<ModelingGraphPayload>(createEmptyGraphPayload());
+  const bootstrapAttemptedDraftKeysRef = useRef(new Set<string>());
 
   const scrollToLayoutPane = useCallback((paneId: string): void => {
     if (typeof window === "undefined") {
@@ -506,6 +730,10 @@ export default function ModelingWorkspacePage() {
   }, [graphPayload]);
 
   useEffect(() => {
+    graphPayloadRef.current = graphPayload;
+  }, [graphPayload]);
+
+  useEffect(() => {
     if (!message) {
       return;
     }
@@ -573,87 +801,179 @@ export default function ModelingWorkspacePage() {
     return undefined;
   }, [graphPayload.models, graphPayload.relationships, selectedNode]);
 
-  const saveModelingGraph = async (
-    options: SaveModelingGraphOptions = {}
-  ): Promise<WorkspaceModelingGraphSnapshot | null> => {
-    if (!workspaceId || !datasourceId) {
-      setError("请先选择工作空间与数据源。");
-      return null;
-    }
-    const graphPayloadToSave = {
-      models: graphPayload.models,
-      relationships: graphPayload.relationships,
-      calculatedFields: graphPayload.calculatedFields,
-      views: graphPayload.views,
-      schemaChanges: graphPayload.schemaChanges
-    };
-    const applySavedSnapshot = (
-      nextSnapshot: WorkspaceModelingGraphSnapshot,
-      fallbackPolicyVersion: number
-    ): void => {
-      const nextGraphPayload = normalizeGraphPayload(nextSnapshot.draft?.graphPayload);
-      positionPatchChangedRef.current = false;
-      setSnapshot(nextSnapshot);
-      setGraphPayload(nextGraphPayload);
-      setPolicyVersion(nextSnapshot.draft?.policyVersion ?? fallbackPolicyVersion);
-      setSelectedNode((previous) => resolveNextSelectedNode(nextGraphPayload, previous));
-      setDetailsDirty(false);
-      setHasPendingDraftChanges(false);
-      setDeployPrecheck(null);
-    };
-    setSaving(true);
-    setError("");
-    setMessage("");
-    try {
-      const nextSnapshot = await upsertWorkspaceModelingGraph(workspaceId, datasourceId, {
-        policyVersion,
-        ...graphPayloadToSave
-      });
-      applySavedSnapshot(nextSnapshot, policyVersion);
-      if (!options.suppressSuccessMessage) {
-        setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
+  const persistModelingGraphPayload = useCallback(
+    async (
+      graphPayloadToSave: ModelingGraphPayload,
+      options: SaveModelingGraphOptions = {}
+    ): Promise<WorkspaceModelingGraphSnapshot | null> => {
+      if (!workspaceId || !datasourceId) {
+        setError("请先选择工作空间与数据源。");
+        return null;
       }
-      return nextSnapshot;
-    } catch (submitError) {
-      if (isPolicyVersionConflictError(submitError)) {
-        try {
-          const latestPermissions = await listWorkspaceDatasourceTablePermissions(
-            workspaceId,
-            datasourceId
-          );
-          const latestPolicyVersion = latestPermissions.policyVersion;
-          if (latestPolicyVersion !== policyVersion) {
-            const retriedSnapshot = await upsertWorkspaceModelingGraph(
-              workspaceId,
-              datasourceId,
-              {
-                policyVersion: latestPolicyVersion,
-                ...graphPayloadToSave
-              }
-            );
-            applySavedSnapshot(retriedSnapshot, latestPolicyVersion);
-            if (!options.suppressSuccessMessage) {
-              setMessage(
-                `policyVersion 已从 ${policyVersion} 更新为 ${latestPolicyVersion}，已自动重试并保存成功（revision=${retriedSnapshot.draft?.revision ?? "-"}）。`
-              );
-            }
-            return retriedSnapshot;
-          }
-        } catch (retryError) {
-          setError(
-            retryError instanceof Error
-              ? `policyVersion 自动刷新重试失败：${retryError.message}`
-              : "policyVersion 自动刷新重试失败，请刷新后重试。"
-          );
-          return null;
+      const applySavedSnapshot = (
+        nextSnapshot: WorkspaceModelingGraphSnapshot,
+        fallbackPolicyVersion: number
+      ): void => {
+        const nextGraphPayload = normalizeGraphPayload(nextSnapshot.draft?.graphPayload);
+        positionPatchChangedRef.current = false;
+        setSnapshot(nextSnapshot);
+        setGraphPayload(nextGraphPayload);
+        setPolicyVersion(nextSnapshot.draft?.policyVersion ?? fallbackPolicyVersion);
+        setSelectedNode((previous) => resolveNextSelectedNode(nextGraphPayload, previous));
+        setDetailsDirty(false);
+        setHasPendingDraftChanges(false);
+        setDeployPrecheck(null);
+      };
+      setSaving(true);
+      setError("");
+      setMessage("");
+      try {
+        const nextSnapshot = await upsertWorkspaceModelingGraph(workspaceId, datasourceId, {
+          policyVersion,
+          ...graphPayloadToSave
+        });
+        applySavedSnapshot(nextSnapshot, policyVersion);
+        if (!options.suppressSuccessMessage) {
+          setMessage(`Modeling Draft 已保存（revision=${nextSnapshot.draft?.revision ?? "-"}）。`);
         }
+        return nextSnapshot;
+      } catch (submitError) {
+        if (isPolicyVersionConflictError(submitError)) {
+          try {
+            const latestPermissions = await listWorkspaceDatasourceTablePermissions(
+              workspaceId,
+              datasourceId
+            );
+            const latestPolicyVersion = latestPermissions.policyVersion;
+            if (latestPolicyVersion !== policyVersion) {
+              const retriedSnapshot = await upsertWorkspaceModelingGraph(
+                workspaceId,
+                datasourceId,
+                {
+                  policyVersion: latestPolicyVersion,
+                  ...graphPayloadToSave
+                }
+              );
+              applySavedSnapshot(retriedSnapshot, latestPolicyVersion);
+              if (!options.suppressSuccessMessage) {
+                setMessage(
+                  `policyVersion 已从 ${policyVersion} 更新为 ${latestPolicyVersion}，已自动重试并保存成功（revision=${retriedSnapshot.draft?.revision ?? "-"}）。`
+                );
+              }
+              return retriedSnapshot;
+            }
+          } catch (retryError) {
+            setError(
+              retryError instanceof Error
+                ? `policyVersion 自动刷新重试失败：${retryError.message}`
+                : "policyVersion 自动刷新重试失败，请刷新后重试。"
+            );
+            return null;
+          }
+        }
+        setError(submitError instanceof Error ? submitError.message : "保存建模图失败");
+        return null;
+      } finally {
+        setSaving(false);
       }
-      setError(submitError instanceof Error ? submitError.message : "保存建模图失败");
-      return null;
-    } finally {
-      setSaving(false);
+    },
+    [datasourceId, policyVersion, workspaceId]
+  );
+
+  const saveModelingGraph = useCallback(
+    async (options: SaveModelingGraphOptions = {}): Promise<WorkspaceModelingGraphSnapshot | null> =>
+      persistModelingGraphPayload(
+        {
+          models: graphPayload.models,
+          relationships: graphPayload.relationships,
+          calculatedFields: graphPayload.calculatedFields,
+          views: graphPayload.views,
+          schemaChanges: graphPayload.schemaChanges
+        },
+        options
+      ),
+    [graphPayload, persistModelingGraphPayload]
+  );
+
+  const syncRecommendedRelationships = useCallback(
+    async (mode: "bootstrap" | "manual"): Promise<void> => {
+      if (!workspaceId || !datasourceId) {
+        if (mode === "manual") {
+          setError("请先选择工作空间与数据源。");
+        }
+        return;
+      }
+      const currentPayload = graphPayloadRef.current;
+      const selectedTableNames = normalizeModelTableNamesForRecommendation(currentPayload);
+      if (selectedTableNames.length === 0) {
+        if (mode === "manual") {
+          setMessage("当前草稿缺少可同步的模型表，请先创建或导入模型。");
+        }
+        return;
+      }
+      setSyncingRecommendations(true);
+      setError("");
+      if (mode === "manual") {
+        setMessage("");
+      }
+      try {
+        const recommendations = await recommendModelingSetupRelationships(
+          workspaceId,
+          datasourceId,
+          {
+            selectedTables: selectedTableNames
+          }
+        );
+        const mergeResult = mergeRecommendedRelationshipsIntoGraphPayload(
+          currentPayload,
+          recommendations
+        );
+        if (mergeResult.addedCount === 0) {
+          if (mode === "manual") {
+            setMessage(`同步数据库完成：无新增关系（跳过 ${mergeResult.skippedCount} 条）。`);
+          }
+          return;
+        }
+        const savedSnapshot = await persistModelingGraphPayload(mergeResult.nextPayload, {
+          suppressSuccessMessage: true
+        });
+        if (!savedSnapshot) {
+          return;
+        }
+        setMessage(
+          mode === "bootstrap"
+            ? `已自动补全 ${mergeResult.addedCount} 条关系（跳过 ${mergeResult.skippedCount} 条）。`
+            : `同步数据库完成：新增 ${mergeResult.addedCount} 条，跳过 ${mergeResult.skippedCount} 条。`
+        );
+      } catch (syncError) {
+        const fallbackMessage = mode === "bootstrap" ? "自动补全关系失败" : "同步数据库失败";
+        setError(syncError instanceof Error ? syncError.message : fallbackMessage);
+      } finally {
+        setSyncingRecommendations(false);
+      }
+    },
+    [datasourceId, persistModelingGraphPayload, workspaceId]
+  );
+
+  useEffect(() => {
+    if (!workspaceId || !datasourceId) {
+      return;
     }
-  };
+    const nextAttemptDraftKey = buildBootstrapAttemptDraftKey({
+      workspaceId,
+      datasourceId,
+      snapshot,
+      payload: graphPayload
+    });
+    if (!nextAttemptDraftKey) {
+      return;
+    }
+    if (bootstrapAttemptedDraftKeysRef.current.has(nextAttemptDraftKey)) {
+      return;
+    }
+    bootstrapAttemptedDraftKeysRef.current.add(nextAttemptDraftKey);
+    void syncRecommendedRelationships("bootstrap");
+  }, [datasourceId, graphPayload, snapshot, syncRecommendedRelationships, workspaceId]);
 
   const publishModelingDraft = async (): Promise<void> => {
     if (!workspaceId || !datasourceId) {
@@ -823,7 +1143,8 @@ export default function ModelingWorkspacePage() {
       return true;
     }
     const shouldOpenContextDrawer =
-      showDetailsPanel && (nextNode.kind === "view" || nextNode.kind === "relationship");
+      nextNode.kind === "relationship" ||
+      (showDetailsPanel && nextNode.kind === "view");
     const isSame =
       selectedNode?.kind === nextNode.kind && selectedNode?.id === nextNode.id;
     if (isSame) {
@@ -1110,9 +1431,32 @@ export default function ModelingWorkspacePage() {
             <Button
               variant="outline"
               onClick={() => {
+                void syncRecommendedRelationships("manual");
+              }}
+              disabled={
+                busy ||
+                saving ||
+                deploying ||
+                syncingRecommendations ||
+                !workspaceId ||
+                !datasourceId
+              }
+            >
+              {syncingRecommendations ? "同步中..." : "同步数据库"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
                 void saveModelingGraph();
               }}
-              disabled={busy || saving || deploying || !workspaceId || !datasourceId}
+              disabled={
+                busy ||
+                saving ||
+                deploying ||
+                syncingRecommendations ||
+                !workspaceId ||
+                !datasourceId
+              }
             >
               保存 Modeling Draft
             </Button>
@@ -1218,7 +1562,7 @@ export default function ModelingWorkspacePage() {
           <ModelingFlowCanvas
             graphPayload={graphPayload}
             selectedNode={selectedNode}
-            busy={busy || saving}
+            busy={busy || saving || syncingRecommendations}
             autoLayoutKey={flowAutoLayoutKey}
             onSelectNode={selectNodeWithDirtyGuard}
             onNodeAction={handleFlowNodeAction}
@@ -1244,38 +1588,52 @@ export default function ModelingWorkspacePage() {
               Context
             </p>
           </header>
-          <ModelingContextDrawer
-            open={contextDrawerOpen}
-            onOpenChange={(open) => {
-              if (open) {
-                setContextDrawerOpen(true);
-                return;
-              }
-              if (detailsDirty && typeof window !== "undefined") {
-                const confirmed = window.confirm("当前详情面板有未保存改动，确认关闭 Context Drawer 吗？");
-                if (!confirmed) {
+          {showContextDrawer ? (
+            <ModelingContextDrawer
+              open={contextDrawerOpen}
+              onOpenChange={(open) => {
+                if (open) {
+                  setContextDrawerOpen(true);
                   return;
                 }
-              }
-              setContextDrawerOpen(false);
-            }}
-          >
-            {showDetailsPanel ? (
-              <ModelingDetailsPanel
-                selectedNode={selectedNode}
-                models={graphPayload.models}
-                views={graphPayload.views}
-                calculatedFields={graphPayload.calculatedFields}
-                relationships={graphPayload.relationships}
-                busy={busy || saving}
-                onDirtyChange={setDetailsDirty}
-                requestedEditorIntent={requestedEditorIntent}
-                onMetadataSave={async (input, node) => {
-                  setGraphPayload((previous) => {
-                    if (node.kind === "model") {
+                if (detailsDirty && typeof window !== "undefined") {
+                  const confirmed = window.confirm("当前详情面板有未保存改动，确认关闭 Context Drawer 吗？");
+                  if (!confirmed) {
+                    return;
+                  }
+                }
+                setContextDrawerOpen(false);
+              }}
+            >
+              {showDetailsPanel ? (
+                <ModelingDetailsPanel
+                  selectedNode={selectedNode}
+                  models={graphPayload.models}
+                  views={graphPayload.views}
+                  calculatedFields={graphPayload.calculatedFields}
+                  relationships={graphPayload.relationships}
+                  busy={busy || saving}
+                  onDirtyChange={setDetailsDirty}
+                  requestedEditorIntent={requestedEditorIntent}
+                  onMetadataSave={async (input, node) => {
+                    setGraphPayload((previous) => {
+                      if (node.kind === "model") {
+                        return {
+                          ...previous,
+                          models: previous.models.map((item) =>
+                            item.id === node.id
+                              ? {
+                                  ...item,
+                                  displayName: input.displayName,
+                                  description: input.description
+                                }
+                              : item
+                          )
+                        };
+                      }
                       return {
                         ...previous,
-                        models: previous.models.map((item) =>
+                        views: previous.views.map((item) =>
                           item.id === node.id
                             ? {
                                 ...item,
@@ -1285,66 +1643,58 @@ export default function ModelingWorkspacePage() {
                             : item
                         )
                       };
-                    }
-                    return {
+                    });
+                    setHasPendingDraftChanges(true);
+                    setDeployPrecheck(null);
+                    setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
+                  }}
+                  onCalculatedFieldsSave={async (fields) => {
+                    setGraphPayload((previous) => ({
                       ...previous,
-                      views: previous.views.map((item) =>
-                        item.id === node.id
-                          ? {
-                              ...item,
-                              displayName: input.displayName,
-                              description: input.description
-                            }
-                          : item
-                      )
-                    };
-                  });
-                  setHasPendingDraftChanges(true);
-                  setDeployPrecheck(null);
-                  setMessage("Metadata 已更新，点击“保存 Modeling Draft”后提交。");
-                }}
-                onCalculatedFieldsSave={async (fields) => {
-                  setGraphPayload((previous) => ({
-                    ...previous,
-                    calculatedFields: fields
-                  }));
-                  setHasPendingDraftChanges(true);
-                  setDeployPrecheck(null);
-                  setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
-                }}
-                onRelationshipsSave={handleRelationshipsSave}
-                onLoadPreview={loadPreviewForDetails}
-                onDeleteTarget={async ({ targetKind, targetId }) => {
-                  if (targetKind === "model") {
-                    deleteModelFromSidebar(targetId);
-                    return;
-                  }
-                  deleteViewFromSidebar(targetId);
-                }}
-                onSelectRelationship={handleSelectRelationship}
-              />
-            ) : null}
+                      calculatedFields: fields
+                    }));
+                    setHasPendingDraftChanges(true);
+                    setDeployPrecheck(null);
+                    setMessage("Calculated Fields 已更新，点击“保存 Modeling Draft”后提交。");
+                  }}
+                  onRelationshipsSave={handleRelationshipsSave}
+                  onLoadPreview={loadPreviewForDetails}
+                  onDeleteTarget={async ({ targetKind, targetId }) => {
+                    if (targetKind === "model") {
+                      deleteModelFromSidebar(targetId);
+                      return;
+                    }
+                    deleteViewFromSidebar(targetId);
+                  }}
+                  onSelectRelationship={handleSelectRelationship}
+                />
+              ) : null}
 
-            <ModelingSchemaChangePanel
-              busy={busy || saving || deploying}
-              items={schemaChangeItems}
-              unresolvedCount={schemaChangeItems.filter((item) => item.status === "detected").length}
-              onDetect={detectSchemaChanges}
-              onResolve={resolveSchemaChange}
-            />
+              {showSchemaAndDeployPanels ? (
+                <>
+                  <ModelingSchemaChangePanel
+                    busy={busy || saving || deploying}
+                    items={schemaChangeItems}
+                    unresolvedCount={schemaChangeItems.filter((item) => item.status === "detected").length}
+                    onDetect={detectSchemaChanges}
+                    onResolve={resolveSchemaChange}
+                  />
 
-            <ModelingDeployPanel
-              busy={busy || saving || deploying}
-              deployState={deployState}
-              hasUndeployedChanges={deployState === "undeployed"}
-              hasPendingDraftChanges={hasPendingDraftChanges}
-              canRunPrecheck={canRunDeployPrecheck}
-              canDeploy={canActivateRevision}
-              precheck={deployPrecheck}
-              onPrecheck={runDeployPrecheck}
-              onDeploy={deployRevision}
-            />
-          </ModelingContextDrawer>
+                  <ModelingDeployPanel
+                    busy={busy || saving || deploying}
+                    deployState={deployState}
+                    hasUndeployedChanges={deployState === "undeployed"}
+                    hasPendingDraftChanges={hasPendingDraftChanges}
+                    canRunPrecheck={canRunDeployPrecheck}
+                    canDeploy={canActivateRevision}
+                    precheck={deployPrecheck}
+                    onPrecheck={runDeployPrecheck}
+                    onDeploy={deployRevision}
+                  />
+                </>
+              ) : null}
+            </ModelingContextDrawer>
+          ) : null}
         </div>
       </section>
 

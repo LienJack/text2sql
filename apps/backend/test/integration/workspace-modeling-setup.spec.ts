@@ -130,6 +130,8 @@ describe("workspace modeling setup integration", () => {
     expect(preview.relationshipRecommendations[0]?.sourceTable).toBe("orders");
     expect(preview.relationshipRecommendations[0]?.targetTable).toBe("customers");
     expect(preview.relationshipRecommendations[0]?.reason).toBe("foreign_key_constraint");
+    expect(preview.relationshipRecommendations[0]?.type).toBe("many-to-one");
+    expect(preview.relationshipRecommendations[0]?.cardinality).toBe("many-to-one");
 
     const committed = await service.commitSetup(
       actor,
@@ -166,7 +168,9 @@ describe("workspace modeling setup integration", () => {
           relationships: [
             expect.objectContaining({
               id: preview.relationshipRecommendations[0]!.id,
-              source: "fk"
+              source: "fk",
+              type: "many-to-one",
+              cardinality: "many-to-one"
             })
           ]
         })

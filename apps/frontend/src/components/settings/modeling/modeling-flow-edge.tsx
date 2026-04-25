@@ -5,7 +5,7 @@ import {
   getSmoothStepPath,
   type EdgeProps
 } from "@xyflow/react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { ModelingGraphRelationshipType } from "@text2sql/shared-types";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +29,16 @@ export type ModelingFlowEdgeData = {
   };
   description?: string;
   invalid?: boolean;
+  highlightedBySelectedRelationship?: boolean;
+  highlightedBySelectedModel?: boolean;
 };
+
+type ModelingFlowEdgeVisualState =
+  | "invalid"
+  | "selected-relationship"
+  | "selected-model-incident"
+  | "inferred-or-low-confidence"
+  | "normal";
 
 function resolveEdgeRelationshipType(
   edgeData?: ModelingFlowEdgeData
@@ -82,6 +91,34 @@ function resolveEndpointMarkers(
   };
 }
 
+function resolveCardinalityBadgeText(value: "one" | "many" | "none"): string {
+  if (value === "one") {
+    return "1";
+  }
+  if (value === "many") {
+    return "N";
+  }
+  return "";
+}
+
+function resolveCardinalityBadgeOffset(
+  position: string | null | undefined
+): { x: number; y: number } {
+  if (position === "left") {
+    return { x: -14, y: 0 };
+  }
+  if (position === "right") {
+    return { x: 14, y: 0 };
+  }
+  if (position === "top") {
+    return { x: 0, y: -14 };
+  }
+  if (position === "bottom") {
+    return { x: 0, y: 14 };
+  }
+  return { x: 0, y: 0 };
+}
+
 function resolveRelationshipTypeLabel(
   relationshipType: ModelingGraphRelationshipType | "many-to-many" | null
 ): string {
@@ -109,6 +146,29 @@ function formatEndpointPath(
   return `${endpoint.dataset}.${endpoint.table}.${endpoint.column}`;
 }
 
+function resolveEdgeVisualState(params: {
+  invalid: boolean;
+  selectedRelationship: boolean;
+  selectedModelIncident: boolean;
+  inferred: boolean;
+  lowConfidence: boolean;
+}): ModelingFlowEdgeVisualState {
+  const { invalid, selectedRelationship, selectedModelIncident, inferred, lowConfidence } = params;
+  if (invalid) {
+    return "invalid";
+  }
+  if (selectedRelationship) {
+    return "selected-relationship";
+  }
+  if (selectedModelIncident) {
+    return "selected-model-incident";
+  }
+  if (inferred || lowConfidence) {
+    return "inferred-or-low-confidence";
+  }
+  return "normal";
+}
+
 export function ModelingFlowEdge({
   id,
   sourceX,
@@ -127,38 +187,40 @@ export function ModelingFlowEdge({
   const markerType = resolveEndpointMarkers(relationshipType);
   const relationshipTypeLabel = resolveRelationshipTypeLabel(relationshipType);
   const isInvalid = Boolean(edgeData?.invalid);
+  const isInferred = edgeData?.source === "inferred";
   const isLowConfidence = !isInvalid && confidence < 0.6;
-  const hasDash = !selected && (isInvalid || edgeData?.source === "inferred" || isLowConfidence);
-  const confidenceBand = isInvalid ? "invalid" : isLowConfidence ? "low" : "normal";
+  const selectedRelationship = Boolean(selected || edgeData?.highlightedBySelectedRelationship);
+  const selectedModelIncident = Boolean(edgeData?.highlightedBySelectedModel) && !selectedRelationship;
+  const visualState = resolveEdgeVisualState({
+    invalid: isInvalid,
+    selectedRelationship,
+    selectedModelIncident,
+    inferred: isInferred,
+    lowConfidence: isLowConfidence
+  });
+  const hasDash = visualState === "invalid" || visualState === "inferred-or-low-confidence";
+  const confidenceBand = isInvalid
+    ? "invalid"
+    : isLowConfidence
+      ? "low"
+      : isInferred
+        ? "inferred"
+        : "normal";
   const fromPath = formatEndpointPath(edgeData?.from);
   const toPath = formatEndpointPath(edgeData?.to);
-  const markerColor = isInvalid
-    ? selected
+  const sourceBadgeText = resolveCardinalityBadgeText(markerType.source);
+  const targetBadgeText = resolveCardinalityBadgeText(markerType.target);
+  const sourceBadgeOffset = resolveCardinalityBadgeOffset(sourcePosition);
+  const targetBadgeOffset = resolveCardinalityBadgeOffset(targetPosition);
+  const badgeColor =
+    visualState === "invalid"
       ? "#dc2626"
-      : "#ef4444"
-    : isLowConfidence
-      ? "#d97706"
-      : selected
+      : visualState === "selected-relationship"
         ? "var(--action-primary)"
-        : "var(--border-strong)";
-  const edgeMarkerIdPrefix = useMemo(
-    () => `modeling-flow-edge-${id.replace(/[^a-zA-Z0-9_-]/g, "_")}`,
-    [id]
-  );
-  const oneMarkerId = `${edgeMarkerIdPrefix}-one`;
-  const manyMarkerId = `${edgeMarkerIdPrefix}-many`;
-  const markerStart =
-    markerType.source === "one"
-      ? `url(#${oneMarkerId})`
-      : markerType.source === "many"
-        ? `url(#${manyMarkerId})`
-        : undefined;
-  const markerEnd =
-    markerType.target === "one"
-      ? `url(#${oneMarkerId})`
-      : markerType.target === "many"
-        ? `url(#${manyMarkerId})`
-        : undefined;
+        : isLowConfidence
+          ? "#b45309"
+          : "#64748b";
+  const badgeRadius = 10;
   const shouldShowDetailCard = Boolean(edgeData && (hovered || selected));
 
   const [path, labelX, labelY] = getSmoothStepPath({
@@ -174,54 +236,23 @@ export function ModelingFlowEdge({
 
   return (
     <>
-      <defs>
-        <marker
-          id={oneMarkerId}
-          markerWidth="10"
-          markerHeight="10"
-          refX="5"
-          refY="5"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          <path d="M5 1 L5 9" stroke={markerColor} strokeWidth="1.5" fill="none" />
-        </marker>
-        <marker
-          id={manyMarkerId}
-          markerWidth="10"
-          markerHeight="10"
-          refX="5"
-          refY="5"
-          orient="auto"
-          markerUnits="strokeWidth"
-        >
-          <path
-            d="M1.5 1.5 L8.5 5 L1.5 8.5 M1.5 5 L8.5 5"
-            stroke={markerColor}
-            strokeWidth="1.3"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </marker>
-      </defs>
       <BaseEdge
         id={id}
         path={path}
-        markerStart={markerStart}
-        markerEnd={markerEnd}
         className={cn(
           "transition-all",
-          selected
-            ? isInvalid
-              ? "stroke-red-600 stroke-[2.8]"
-              : "stroke-[var(--action-primary)] stroke-[2.5]"
-            : isInvalid
-              ? "stroke-red-500 stroke-[2.2]"
-              : isLowConfidence
-                ? "stroke-amber-600 stroke-2"
-                : "stroke-[var(--border-strong)] stroke-[1.6]",
-          hasDash ? "[stroke-dasharray:6_4]" : ""
+          visualState === "invalid"
+            ? "stroke-red-600 stroke-[2.8]"
+            : visualState === "selected-relationship"
+              ? "stroke-[var(--action-primary)] stroke-[2.7]"
+              : visualState === "selected-model-incident"
+                ? "stroke-slate-400 stroke-[2.1]"
+                : visualState === "inferred-or-low-confidence"
+                  ? isLowConfidence
+                    ? "stroke-amber-600 stroke-2"
+                    : "stroke-slate-500 stroke-[1.9]"
+                  : "stroke-[var(--border-strong)] stroke-[1.6]",
+          hasDash || visualState === "selected-model-incident" ? "[stroke-dasharray:6_4]" : ""
         )}
         onMouseEnter={() => {
           setHovered(true);
@@ -230,28 +261,73 @@ export function ModelingFlowEdge({
           setHovered(false);
         }}
         data-confidence-band={confidenceBand}
-        data-selected={selected ? "true" : "false"}
+        data-selected={selectedRelationship ? "true" : "false"}
+        data-visual-state={visualState}
         data-testid="modeling-flow-edge-path"
       />
+      {sourceBadgeText ? (
+        <g
+          transform={`translate(${sourceX + sourceBadgeOffset.x}, ${sourceY + sourceBadgeOffset.y})`}
+          pointerEvents="none"
+          data-testid="modeling-flow-edge-source-cardinality"
+        >
+          <circle r={badgeRadius} fill={badgeColor} stroke="white" strokeWidth="1.6" />
+          <text
+            x={0}
+            y={0}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="white"
+            fontSize="11"
+            fontWeight="700"
+          >
+            {sourceBadgeText}
+          </text>
+        </g>
+      ) : null}
+      {targetBadgeText ? (
+        <g
+          transform={`translate(${targetX + targetBadgeOffset.x}, ${targetY + targetBadgeOffset.y})`}
+          pointerEvents="none"
+          data-testid="modeling-flow-edge-target-cardinality"
+        >
+          <circle r={badgeRadius} fill={badgeColor} stroke="white" strokeWidth="1.6" />
+          <text
+            x={0}
+            y={0}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="white"
+            fontSize="11"
+            fontWeight="700"
+          >
+            {targetBadgeText}
+          </text>
+        </g>
+      ) : null}
       {shouldShowDetailCard ? (
         <g
           transform={`translate(${labelX}, ${labelY})`}
           pointerEvents="none"
           data-testid="modeling-flow-edge-hover-card"
         >
-          <foreignObject x={-210} y={-236} width={420} height={216}>
-            <div className="min-w-[420px] overflow-hidden rounded-md border border-[var(--border-default)] bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)]">
+          <foreignObject x={-230} y={-248} width={460} height={242}>
+            <div className="w-[460px] overflow-hidden rounded-md border border-[var(--border-default)] bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)]">
               <div className="border-b border-[var(--border-default)] px-4 py-2 text-sm font-medium text-[var(--text-primary)]">
                 Relationship
               </div>
-              <div className="grid grid-cols-2 gap-6 px-4 py-3 text-sm">
+              <div className="space-y-2 px-4 py-3 text-sm">
                 <div className="space-y-1">
                   <p className="text-xs text-[var(--text-tertiary)]">From</p>
-                  <p className="break-all text-sm text-[var(--text-primary)]">{fromPath}</p>
+                  <p className="overflow-x-auto whitespace-nowrap rounded border border-[var(--border-default)] bg-[var(--surface-muted)]/35 px-2 py-1 text-sm font-mono text-[var(--text-primary)]">
+                    {fromPath}
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-xs text-[var(--text-tertiary)]">To</p>
-                  <p className="break-all text-sm text-[var(--text-primary)]">{toPath}</p>
+                  <p className="overflow-x-auto whitespace-nowrap rounded border border-[var(--border-default)] bg-[var(--surface-muted)]/35 px-2 py-1 text-sm font-mono text-[var(--text-primary)]">
+                    {toPath}
+                  </p>
                 </div>
               </div>
               <div className="space-y-2 px-4 pb-4 text-sm">

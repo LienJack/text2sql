@@ -199,6 +199,8 @@ export interface ModelingSetupRelationshipSuggestion {
   confidence: number;
   left: RelationshipBridgeEndpoint;
   right: RelationshipBridgeEndpoint;
+  type: ModelingGraphRelationship["type"];
+  cardinality: ModelingGraphRelationship["cardinality"];
   reason?: string;
 }
 
@@ -653,6 +655,16 @@ function normalizeModelingSetupRelationshipSuggestion(
     typeof value.name === "string" && value.name.trim()
       ? value.name.trim()
       : `${left.table}.${left.column} = ${right.table}.${right.column}`;
+  const typeRaw =
+    typeof value.type === "string"
+      ? value.type
+      : typeof value.cardinality === "string"
+        ? value.cardinality
+        : undefined;
+  const relationshipType: ModelingGraphRelationship["type"] =
+    typeRaw === "many-to-one" || typeRaw === "one-to-many" || typeRaw === "one-to-one"
+      ? typeRaw
+      : "many-to-one";
   return {
     id,
     name,
@@ -662,6 +674,8 @@ function normalizeModelingSetupRelationshipSuggestion(
     ),
     left,
     right,
+    type: relationshipType,
+    cardinality: relationshipType,
     reason:
       typeof value.reason === "string"
         ? value.reason
