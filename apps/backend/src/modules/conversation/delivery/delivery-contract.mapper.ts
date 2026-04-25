@@ -23,6 +23,8 @@ export interface DeliveryReplayRecordInput {
 export interface DeliveryContractMapperInput {
   run: SqlRun;
   replayRecords?: DeliveryReplayRecordInput[];
+  artifactOverride?: DeliveryContract["artifact"];
+  additionalRiskTags?: string[];
 }
 
 interface RerankFinalSnapshot {
@@ -153,7 +155,7 @@ export class DeliveryContractMapper {
     const sqlCoverage = this.readSqlCoverageEvidence(input.run);
     const savedPriorSql = this.readSavedPriorSqlEvidence(input.run);
     const invalidInput = replayIndex.invalidPayload;
-    const artifact = this.buildArtifact(input.run);
+    const artifact = input.artifactOverride ?? this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
       artifact,
       sandboxPayload: replayIndex.sandboxPostprocess,
@@ -170,6 +172,7 @@ export class DeliveryContractMapper {
       ...(savedPriorSql?.safetyResult === "rejected"
         ? ["saved_prior_sql_safety_rejected"]
         : []),
+      ...(input.additionalRiskTags ?? []),
       ...sandboxOutcome.riskTags
     ]);
 

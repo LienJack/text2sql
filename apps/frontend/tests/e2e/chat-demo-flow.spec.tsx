@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -194,6 +194,35 @@ describe("chat demo flow", () => {
             "context:user-explicit",
             "context:system-inferred"
           ]
+        },
+        artifact: {
+          sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
+          rowCount: 1,
+          hasError: false,
+          summary: {
+            headline: "支付方式分布",
+            text: "近 30 天订单主要由 card 支付。"
+          },
+          table: {
+            columns: ["payment_method", "cnt"],
+            rowCount: 1,
+            rowsPreview: [{ payment_method: "card", cnt: 12 }],
+            previewRowCount: 1
+          },
+          chart: {
+            type: "bar",
+            mappings: {
+              x: "payment_method",
+              y: "cnt"
+            },
+            meta: {
+              title: "支付方式分布"
+            }
+          },
+          display: "bar",
+          validation: {
+            status: "valid"
+          }
         }
       }
     });
@@ -319,6 +348,31 @@ describe("chat demo flow", () => {
                 "context:user-explicit",
                 "context:system-inferred"
               ]
+            },
+            artifact: {
+              sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
+              rowCount: 1,
+              hasError: false,
+              summary: {
+                text: "近 30 天订单主要由 card 支付。"
+              },
+              table: {
+                columns: ["payment_method", "cnt"],
+                rowCount: 1,
+                rowsPreview: [{ payment_method: "card", cnt: 12 }],
+                previewRowCount: 1
+              },
+              chart: {
+                type: "bar",
+                mappings: {
+                  x: "payment_method",
+                  y: "cnt"
+                }
+              },
+              display: "bar",
+              validation: {
+                status: "valid"
+              }
             }
           }
         }
@@ -359,7 +413,20 @@ describe("chat demo flow", () => {
     expect(screen.getByText("意图规划")).toBeInTheDocument();
     expect(screen.getByText("语义检索构建")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    const resultPanel = await screen.findByTestId("chatbi-result-panel");
+    const resultQueries = within(resultPanel);
+    const summaryTab = resultQueries.getByRole("tab", { name: /summary/i });
+    expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    expect(resultQueries.getByText("近 30 天订单主要由 card 支付。")).toBeInTheDocument();
+
+    await user.click(resultQueries.getByRole("tab", { name: /chart/i }));
+    expect(resultQueries.getByTestId("chatbi-bar-chart")).toBeInTheDocument();
+
+    await user.click(resultQueries.getByRole("tab", { name: /table/i }));
+    expect(resultQueries.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
+
+    await user.click(resultQueries.getByRole("tab", { name: /SQL 分区/i }));
+    await user.click(resultQueries.getByRole("button", { name: "打开运行详情" }));
     expect(screen.getByText("运行详情")).toBeInTheDocument();
     expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
     expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
@@ -369,7 +436,8 @@ describe("chat demo flow", () => {
     expect(
       screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
     ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
-    expect(screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
+    expect(
+      screen.getAllByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method").length
+    ).toBeGreaterThan(0);
   });
 });

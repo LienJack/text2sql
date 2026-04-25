@@ -115,6 +115,14 @@ describe("chat stream api (e2e)", () => {
       expect(event).toHaveProperty("data");
     }
 
+    const nonFinishEvents = parsedEvents.filter(
+      ({ eventType }) => eventType !== "finish"
+    );
+    for (const { event } of nonFinishEvents) {
+      const dataWithCompat = event.data as Record<string, unknown>;
+      expect(dataWithCompat.delivery).toBeUndefined();
+    }
+
     const startEvent = parsedEvents[startIndex]?.event;
     expect(startEvent).toBeDefined();
     expect(startEvent?.type).toBe("start");
@@ -165,7 +173,25 @@ describe("chat stream api (e2e)", () => {
       status: unknown;
       rowCount: unknown;
       delivery?: {
+        answer?: {
+          text?: string;
+          status?: string;
+        };
+        artifact?: {
+          summary?: {
+            text?: string;
+          };
+          table?: {
+            rowCount?: number;
+          };
+          rowCount?: number;
+          validation?: {
+            status?: string;
+          };
+          display?: string;
+        };
         evidence?: {
+          runId?: string;
           contextPackStatus?: string;
         };
       };
@@ -173,6 +199,14 @@ describe("chat stream api (e2e)", () => {
     expect(typeof finishData.status).toBe("string");
     expect(typeof finishData.rowCount).toBe("number");
     expect(finishData.rowCount as number).toBeGreaterThanOrEqual(0);
+    expect(finishData.delivery?.answer?.status).toBe(finishData.status);
+    expect(finishData.delivery?.artifact?.summary?.text).toBeTruthy();
+    expect(finishData.delivery?.artifact?.table?.rowCount).toBe(
+      finishData.delivery?.artifact?.rowCount
+    );
+    expect(finishData.delivery?.artifact?.validation?.status).toBeTruthy();
+    expect(finishData.delivery?.artifact?.display).toBeTruthy();
+    expect(finishData.delivery?.evidence?.runId).toBe(streamRunId);
     const contextPackStatus = finishData.delivery?.evidence?.contextPackStatus;
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
@@ -193,12 +227,55 @@ describe("chat stream api (e2e)", () => {
     };
     expect(latestRun.runId).toBe(streamRunId);
     expect(latestRun.sessionId).toBe(sessionId);
+    expect(messagesRes.body.data.latestRun.answer).toBe(
+      messagesRes.body.data.latestRun.delivery.answer.text
+    );
+    expect(messagesRes.body.data.latestRun.delivery.evidence.runId).toBe(streamRunId);
     expect(["completed", "failed"]).toContain(latestRun.trace.streamStatus);
     if (latestRun.trace.streamStatus === "failed") {
       expect(typeof latestRun.error).toBe("string");
       expect(latestRun.error?.trim().length).toBeGreaterThan(0);
       expect(eventTypes).toContain("error");
     }
+  });
+
+  it("keeps rejected stream runs in safe delivery semantics without chart artifact", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    const sessionId = sessionRes.body.data.id as string;
+
+    const streamRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages/stream`)
+      .send({ message: "DELETE orders where id = 1" });
+
+    expect(streamRes.status).toBe(200);
+    const parsedEvents = parseSseEvents(streamRes.text);
+    const finishEvent = [...parsedEvents]
+      .reverse()
+      .find(({ eventType }) => eventType === "finish")?.event;
+    expect(finishEvent).toBeDefined();
+
+    const finishData = (finishEvent?.data ?? {}) as {
+      status?: string;
+      delivery?: {
+        answer?: {
+          status?: string;
+        };
+        artifact?: {
+          chart?: unknown;
+          display?: string;
+        };
+      };
+    };
+
+    expect(finishData.status).toBe("rejected");
+    expect(finishData.delivery?.answer?.status).toBe("rejected");
+    expect(finishData.delivery?.artifact?.chart).toBeUndefined();
+    expect(finishData.delivery?.artifact?.display).not.toBe("metric");
+    expect(finishData.delivery?.artifact?.display).not.toBe("bar");
+    expect(finishData.delivery?.artifact?.display).not.toBe("line");
+    expect(finishData.delivery?.artifact?.display).not.toBe("pie");
   });
 
   it("should accept optional contextEnvelope on stream message endpoint", async () => {

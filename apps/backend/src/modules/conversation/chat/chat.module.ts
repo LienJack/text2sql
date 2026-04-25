@@ -19,6 +19,12 @@ import { ChatDeliveryEnrichmentService } from "./application/shared/chat-deliver
 import { ChatPolicyGuardService } from "./application/shared/chat-policy-guard.service";
 import { ChatPostRunHooksService } from "./application/shared/chat-post-run-hooks.service";
 import { ChatRunPersistenceService } from "./application/shared/chat-run-persistence.service";
+import { ChartBiArtifactService } from "../delivery/chartbi/chartbi-artifact.service";
+import { ChartBiResultProfiler } from "../delivery/chartbi/chartbi-result-profiler";
+import { ChartBiIntentParser } from "../delivery/chartbi/chartbi-intent-parser";
+import { ChartBiSpecCompiler } from "../delivery/chartbi/chartbi-spec-compiler";
+import { ChartBiValidator } from "../delivery/chartbi/chartbi-validator";
+import { ChartBiGroundingGuard } from "../delivery/chartbi/chartbi-grounding.guard";
 
 @Module({
   imports: [
@@ -43,7 +49,13 @@ import { ChatRunPersistenceService } from "./application/shared/chat-run-persist
     ChatPostRunHooksService,
     ChatPolicyGuardService,
     ChatRunPersistenceService,
-    ChatDeliveryEnrichmentService
+    ChatDeliveryEnrichmentService,
+    ChartBiArtifactService,
+    ChartBiResultProfiler,
+    ChartBiIntentParser,
+    ChartBiSpecCompiler,
+    ChartBiValidator,
+    ChartBiGroundingGuard
   ],
   exports: [ChatService]
 })

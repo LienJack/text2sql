@@ -18,6 +18,10 @@ import {
 } from "@/lib/settings-api-client";
 import { cn } from "@/lib/utils";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 interface SqlInlinePanelProps {
   run: SqlRun | null;
   streamDelivery?: DeliveryContract;
@@ -87,6 +91,18 @@ export function SqlInlinePanel({
   }
 
   const delivery = run?.delivery ?? streamDelivery;
+  const artifact = isRecord(delivery?.artifact)
+    ? (delivery.artifact as Record<string, unknown>)
+    : undefined;
+  const hasChatBIResultSurface = Boolean(
+    artifact &&
+      (artifact.summary !== undefined ||
+        artifact.table !== undefined ||
+        artifact.chart !== undefined ||
+        artifact.display !== undefined ||
+        artifact.fallback !== undefined ||
+        artifact.validation !== undefined)
+  );
 
   return (
     <section
@@ -194,14 +210,27 @@ export function SqlInlinePanel({
             )}
           </section>
 
-          <section className="space-y-2 rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-panel)] p-3">
-            <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">结果预览</h4>
-            {run ? (
-              <SqlResultTable run={run} />
-            ) : (
-              <StateBlock variant="idle">结果预览将在运行详情回填后展示。</StateBlock>
-            )}
-          </section>
+          {hasChatBIResultSurface ? (
+            <section className="space-y-2 rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-panel)] p-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                结果预览
+              </h4>
+              <StateBlock variant="idle">
+                主回答面板已展示 Summary/Chart/Table 结果，这里保留 SQL 与执行证据链详情。
+              </StateBlock>
+            </section>
+          ) : (
+            <section className="space-y-2 rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-panel)] p-3">
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                结果预览
+              </h4>
+              {run ? (
+                <SqlResultTable run={run} />
+              ) : (
+                <StateBlock variant="idle">结果预览将在运行详情回填后展示。</StateBlock>
+              )}
+            </section>
+          )}
         </div>
       ) : null}
     </section>

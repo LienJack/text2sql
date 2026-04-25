@@ -310,7 +310,112 @@ export interface DeliveryEvidenceLayer {
   evidenceStale?: boolean;
 }
 
+export type DeliveryArtifactChartType =
+  | "table"
+  | "metric"
+  | "bar"
+  | "line"
+  | "pie";
+export type DeliveryArtifactDisplayType =
+  | "summary"
+  | "chart"
+  | "table"
+  | "sql"
+  | DeliveryArtifactChartType;
+export type DeliveryArtifactValidationStatus =
+  | "valid"
+  | "repaired"
+  | "fallback"
+  | "invalid";
+export type DeliveryArtifactVisualIntentSource = "deterministic" | "model" | "hybrid";
+
+export interface DeliveryArtifactSummaryMetric {
+  key: string;
+  label: string;
+  value: string | number;
+  unit?: string;
+  trend?: "up" | "down" | "flat";
+}
+
+export interface DeliveryArtifactSummary {
+  text: string;
+  headline?: string;
+  metrics?: DeliveryArtifactSummaryMetric[];
+  dimensions?: string[];
+}
+
+export interface DeliveryArtifactTable {
+  columns?: string[];
+  rowCount: number;
+  rowsPreview?: Array<Record<string, unknown>>;
+  previewRowCount?: number;
+}
+
+export interface DeliveryArtifactChartMappings {
+  dimension?: string;
+  time?: string;
+  x?: string;
+  y?: string;
+  measure?: string;
+  value?: string;
+  label?: string;
+  series?: string;
+}
+
+export interface DeliveryArtifactChartSeries {
+  key: string;
+  label?: string;
+  aggregation?: "sum" | "avg" | "min" | "max" | "count" | (string & {});
+}
+
+export interface DeliveryArtifactChartMeta {
+  title?: string;
+  subtitle?: string;
+  unit?: string;
+  xLabel?: string;
+  yLabel?: string;
+}
+
+export interface DeliveryArtifactChart {
+  type: DeliveryArtifactChartType;
+  mappings?: DeliveryArtifactChartMappings;
+  series?: DeliveryArtifactChartSeries[];
+  meta?: DeliveryArtifactChartMeta;
+}
+
+export interface DeliveryArtifactValidation {
+  status: DeliveryArtifactValidationStatus;
+  reasonCodes?: string[];
+  message?: string;
+}
+
+export interface DeliveryArtifactFallback {
+  display: "table";
+  reason: string;
+  reasonCode?: string;
+  fromType?: string;
+}
+
+export interface DeliveryArtifactVisualIntent {
+  source: DeliveryArtifactVisualIntentSource;
+  type?: DeliveryArtifactChartType;
+  title?: string;
+  summaryHint?: string;
+  insight?: string;
+  mappings?: Partial<DeliveryArtifactChartMappings>;
+  rawSyntax?: string;
+  normalizedIntent?: Record<string, unknown>;
+}
+
 export interface DeliveryArtifactLayer {
+  summary?: DeliveryArtifactSummary;
+  table?: DeliveryArtifactTable;
+  chart?: DeliveryArtifactChart;
+  display?: DeliveryArtifactDisplayType;
+  validation?: DeliveryArtifactValidation;
+  fallback?: DeliveryArtifactFallback;
+  visualIntent?: DeliveryArtifactVisualIntent;
+  // Legacy mirror fields retained for old run replay compatibility.
   sql?: string;
   columns?: string[];
   rowCount: number;

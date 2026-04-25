@@ -137,6 +137,75 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.artifact?.hasError).toBe(false);
   });
 
+  it("accepts chartbi artifact override and preserves unified answer semantics", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      answer: "订单状态以 paid 为主。"
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: [],
+      artifactOverride: {
+        sql: run.sql,
+        columns: run.columns,
+        rowCount: 1,
+        rowsPreview: run.rows?.slice(0, 1),
+        hasError: false,
+        summary: {
+          text: "订单状态以 paid 为主。"
+        },
+        table: {
+          columns: run.columns,
+          rowCount: 1,
+          rowsPreview: run.rows?.slice(0, 1),
+          previewRowCount: 1
+        },
+        chart: {
+          type: "pie",
+          mappings: {
+            label: "status",
+            value: "count"
+          }
+        },
+        display: "pie",
+        validation: {
+          status: "valid",
+          reasonCodes: ["chartbi_baseline_selected"]
+        }
+      },
+      additionalRiskTags: ["chartbi_artifact_failed"]
+    });
+
+    expect(delivery.answer.text).toBe(run.answer);
+    expect(delivery.artifact?.summary?.text).toBe("订单状态以 paid 为主。");
+    expect(delivery.artifact?.chart?.type).toBe("pie");
+    expect(delivery.artifact?.display).toBe("pie");
+    expect(delivery.evidence?.riskTags).toEqual(
+      expect.arrayContaining(["chartbi_artifact_failed"])
+    );
+  });
+
+  it("keeps safe artifact semantics for clarification runs", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      status: "clarification",
+      answer: "请补充时间范围。",
+      rows: undefined,
+      columns: undefined,
+      sql: undefined
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: [],
+      artifactOverride: undefined
+    });
+
+    expect(delivery.answer.status).toBe("clarification");
+    expect(delivery.artifact).toBeUndefined();
+  });
+
   it("echoes sanitized effective context summary and conflict hint from trace", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

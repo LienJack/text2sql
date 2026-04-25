@@ -6,6 +6,7 @@ import type {
   ContextEnvelope,
   CreatePromptTemplateRequest,
   DeletePromptTemplateResponse,
+  DeliveryArtifactLayer,
   DeliveryContract,
   GlossaryAnchor,
   GlossaryTerm,
@@ -20,6 +21,7 @@ import type {
 } from "./api";
 
 type Expect<T extends true> = T;
+type ExpectFalse<T extends false> = T;
 type IsAssignable<From, To> = [From] extends [To] ? true : false;
 
 const promptTemplateSample: PromptTemplate = {
@@ -113,6 +115,124 @@ const deletePromptTemplateResponseSample: DeletePromptTemplateResponse = {
   deletedAt: "2026-04-18T00:00:00.000Z"
 };
 
+const chatbiFullArtifactSample: DeliveryArtifactLayer = {
+  summary: {
+    text: "华东区净销售额 126.5 万元，较上月增长 8.2%。",
+    headline: "本季度净销售额稳步增长",
+    metrics: [
+      {
+        key: "net_revenue",
+        label: "净销售额",
+        value: 1_265_000,
+        unit: "CNY",
+        trend: "up"
+      }
+    ],
+    dimensions: ["region=east_china", "quarter=2026Q1"]
+  },
+  table: {
+    columns: ["month", "net_revenue"],
+    rowCount: 3,
+    rowsPreview: [
+      { month: "2026-01", net_revenue: 390000 },
+      { month: "2026-02", net_revenue: 410000 },
+      { month: "2026-03", net_revenue: 465000 }
+    ],
+    previewRowCount: 3
+  },
+  chart: {
+    type: "bar",
+    mappings: {
+      x: "month",
+      y: "net_revenue",
+      dimension: "month",
+      measure: "net_revenue"
+    },
+    series: [
+      {
+        key: "net_revenue",
+        label: "净销售额",
+        aggregation: "sum"
+      }
+    ],
+    meta: {
+      title: "净销售额（月度）",
+      subtitle: "2026Q1",
+      unit: "CNY",
+      xLabel: "月份",
+      yLabel: "净销售额"
+    }
+  },
+  display: "bar",
+  validation: {
+    status: "valid"
+  },
+  visualIntent: {
+    source: "model",
+    type: "bar",
+    title: "按月查看净销售额",
+    summaryHint: "关注月度趋势",
+    insight: "3 月达到季度最高值",
+    mappings: {
+      x: "month",
+      y: "net_revenue"
+    },
+    rawSyntax: "vis: bar(month, net_revenue)"
+  },
+  sql: "select month, net_revenue from sales_q1",
+  columns: ["month", "net_revenue"],
+  rowCount: 3,
+  rowsPreview: [
+    { month: "2026-01", net_revenue: 390000 },
+    { month: "2026-02", net_revenue: 410000 },
+    { month: "2026-03", net_revenue: 465000 }
+  ],
+  hasError: false
+};
+
+const chatbiTableFallbackArtifactSample: DeliveryArtifactLayer = {
+  summary: {
+    text: "结果已回退到表格视图，请根据明细继续核验。"
+  },
+  table: {
+    columns: ["category", "value"],
+    rowCount: 2,
+    rowsPreview: [
+      { category: "A", value: 10 },
+      { category: "B", value: 12 }
+    ],
+    previewRowCount: 2
+  },
+  display: "table",
+  validation: {
+    status: "fallback",
+    reasonCodes: ["chart_type_rejected"],
+    message: "chart type is not in allowlist"
+  },
+  fallback: {
+    display: "table",
+    reason: "chart type rejected by contract allowlist",
+    reasonCode: "chart_type_rejected",
+    fromType: "scatter"
+  },
+  sql: "select category, value from demo",
+  columns: ["category", "value"],
+  rowCount: 2,
+  rowsPreview: [
+    { category: "A", value: 10 },
+    { category: "B", value: 12 }
+  ],
+  hasError: false
+};
+
+const legacyOnlyArtifactSample: DeliveryArtifactLayer = {
+  sql: "select 1",
+  columns: ["value"],
+  rowCount: 1,
+  rowsPreview: [{ value: 1 }],
+  hasError: false
+};
+
 const deliverySample: DeliveryContract = {
   answer: {
     text: "ok",
@@ -187,13 +307,25 @@ const deliverySample: DeliveryContract = {
       safetyResult: "passed"
     }
   },
-  artifact: {
-    sql: "select 1",
-    columns: ["value"],
-    rowCount: 1,
-    rowsPreview: [{ value: 1 }],
-    hasError: false
-  }
+  artifact: chatbiFullArtifactSample
+};
+
+const deliveryTableFallbackSample: DeliveryContract = {
+  answer: {
+    text: "ok",
+    status: "executionResult",
+    provider: "openai"
+  },
+  artifact: chatbiTableFallbackArtifactSample
+};
+
+const deliveryLegacyOnlySample: DeliveryContract = {
+  answer: {
+    text: "ok",
+    status: "executionResult",
+    provider: "openai"
+  },
+  artifact: legacyOnlyArtifactSample
 };
 
 const sqlRunSample: SqlRun = {
@@ -240,6 +372,30 @@ const finishEventWithDelivery: ChatStreamEvent = {
     status: "executionResult",
     rowCount: 1,
     delivery: deliverySample
+  }
+};
+
+const finishEventWithTableFallbackArtifact: ChatStreamEvent = {
+  type: "finish",
+  runId: "run_123",
+  sessionId: "session_123",
+  at: "2026-04-18T00:00:00.000Z",
+  data: {
+    status: "executionResult",
+    rowCount: 2,
+    delivery: deliveryTableFallbackSample
+  }
+};
+
+const finishEventWithLegacyArtifact: ChatStreamEvent = {
+  type: "finish",
+  runId: "run_123",
+  sessionId: "session_123",
+  at: "2026-04-18T00:00:00.000Z",
+  data: {
+    status: "executionResult",
+    rowCount: 1,
+    delivery: deliveryLegacyOnlySample
   }
 };
 
@@ -318,6 +474,24 @@ const rollbackGlossaryAnchorResponseSample: RollbackGlossaryAnchorResponse = {
 type DeliveryOnRunIsCompatible = Expect<IsAssignable<DeliveryContract | undefined, SqlRun["delivery"]>>;
 type DeliveryOnAgentResponseIsCompatible = Expect<
   IsAssignable<DeliveryContract | undefined, AgentRunResponse["delivery"]>
+>;
+type DeliveryArtifactChartTypeAllowlist = Expect<
+  IsAssignable<
+    "table" | "metric" | "bar" | "line" | "pie",
+    NonNullable<NonNullable<DeliveryContract["artifact"]>["chart"]>["type"]
+  >
+>;
+type DeliveryArtifactChartTypeRejectsScatter = ExpectFalse<
+  IsAssignable<
+    "scatter",
+    NonNullable<NonNullable<DeliveryContract["artifact"]>["chart"]>["type"]
+  >
+>;
+type DeliveryVisualIntentChartTypeRejectsScatter = ExpectFalse<
+  IsAssignable<
+    "scatter",
+    NonNullable<NonNullable<DeliveryContract["artifact"]>["visualIntent"]>["type"]
+  >
 >;
 type PromptTemplateScopeSupportsWorkspace = Expect<IsAssignable<"workspace", PromptTemplate["scope"]>>;
 type PromptTemplateSceneSupportsSql = Expect<IsAssignable<"sql", PromptTemplate["scene"]>>;
@@ -450,6 +624,8 @@ type GlossaryUpsertAnchorSemantics = Expect<
 
 void agentRunResponseSample;
 void finishEventWithDelivery;
+void finishEventWithTableFallbackArtifact;
+void finishEventWithLegacyArtifact;
 void finishEventWithoutDelivery;
 void listPromptTemplatesResponseSample;
 void createPromptTemplateRequestSample;

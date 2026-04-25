@@ -34,6 +34,13 @@ describe("agent main flow", () => {
     expect(run.trace.steps[0]?.lifecycle).toBeTruthy();
     expect(run.trace.clarificationDecision).toBeDefined();
     expect(["continue", "clarify"]).toContain(run.trace.clarificationDecision?.decision);
+    if (run.status === "executionResult") {
+      expect(typeof run.answer).toBe("string");
+      expect(run.answer?.trim().length).toBeGreaterThan(0);
+      expect(run.answer).toContain("已完成分析");
+      expect(run.answer).not.toContain("样例结果");
+      expect(run.answer).not.toContain("{\"");
+    }
   });
 
   it("should reject non-readonly sql intent", async () => {
