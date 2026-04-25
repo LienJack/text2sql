@@ -95,6 +95,8 @@ const clarificationPromptSample: ClarificationPrompt = {
   reason: "关键槽位缺失：时间范围",
   decision: "clarify",
   triggerPath: "rule",
+  decisionSource: "rule",
+  bypassed: false,
   confidenceLevel: "low",
   missingCriticalSlots: ["time"],
   conflictDetected: false,
@@ -165,6 +167,8 @@ const deliverySample: DeliveryContract = {
     clarificationDecision: {
       decision: "clarify",
       triggerPath: "rule",
+      decisionSource: "rule",
+      bypassed: false,
       confidenceLevel: "low",
       missingCriticalSlots: ["time"],
       conflictDetected: false,
@@ -342,6 +346,15 @@ type ClarificationPromptDecisionShape = Expect<
 type ClarificationPromptSlotShape = Expect<
   IsAssignable<string[] | undefined, ClarificationPrompt["missingCriticalSlots"]>
 >;
+type ClarificationPromptBypassShape = Expect<
+  IsAssignable<boolean | undefined, ClarificationPrompt["bypassed"]>
+>;
+type ClarificationPromptDecisionSourceShape = Expect<
+  IsAssignable<string | undefined, ClarificationPrompt["decisionSource"]>
+>;
+type ClarificationPromptBypassReasonCodeShape = Expect<
+  IsAssignable<string | undefined, ClarificationPrompt["bypassReasonCode"]>
+>;
 type TraceClarificationDecisionPathShape = Expect<
   IsAssignable<
     "rule" | "semantic" | "hybrid" | undefined,
@@ -354,6 +367,22 @@ type DeliveryClarificationDecisionConfidenceShape = Expect<
     NonNullable<
       NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
     >["confidenceLevel"]
+  >
+>;
+type DeliveryClarificationDecisionSourceShape = Expect<
+  IsAssignable<
+    string | undefined,
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+    >["decisionSource"]
+  >
+>;
+type DeliveryClarificationDecisionBypassShape = Expect<
+  IsAssignable<
+    boolean | undefined,
+    NonNullable<
+      NonNullable<DeliveryContract["evidence"]>["clarificationDecision"]
+    >["bypassed"]
   >
 >;
 type PromptTemplateCreateRequestShape = Expect<

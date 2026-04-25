@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { ClarificationDecisionEvidence } from "@text2sql/shared-types";
 import type { IntentPlan } from "./build-intent-plan.node";
 import type { RetrievedKnowledge } from "./retrieve-knowledge.node";
 import { PlannerVersionLockService } from "../planner/planner-version-lock.service";
@@ -22,6 +23,15 @@ export interface SemanticQueryPlan {
   fallbackApplied: boolean;
   degradeReason?: string;
   riskTags: string[];
+  intentRiskTags?: string[];
+  semanticRiskTags?: string[];
+  planningWarnings?: {
+    intent: string[];
+    semantic: string[];
+  };
+  strictMode?: boolean;
+  strictModeReasons?: string[];
+  clarificationDecision?: ClarificationDecisionEvidence;
   summary: string;
 }
 
@@ -34,15 +44,40 @@ export class BuildSemanticQueryNode {
     question: string;
     retrievalBundle?: RagRetrievalBundle;
     requestedSemanticVersion?: number;
+    clarificationDecision?: ClarificationDecisionEvidence;
   }): Promise<SemanticQueryPlan> {
     const { intentPlan } = input;
+    const clarificationDecision =
+      input.clarificationDecision ?? intentPlan.clarificationDecision;
+    const intentRiskTags = this.unique(intentPlan.riskTags ?? []);
+    const planningWarnings = {
+      intent: this.unique(intentPlan.planningWarnings ?? []),
+      semantic: [] as string[]
+    };
+
+    const bypassedBusinessSemantics = intentPlan.constraints.includes(
+      "skip_business_semantic_assertions"
+    );
+    const strictMode =
+      !bypassedBusinessSemantics &&
+      Boolean(intentPlan.uncertaintySignal?.needsStrictSemanticPath);
+    const strictModeReasons = strictMode
+      ? this.unique(intentPlan.uncertaintySignal?.reasonCodes ?? [])
+      : [];
+
     if (intentPlan.status === "degraded") {
       return {
         status: "degraded",
         semanticHints: [],
         lockStatus: "degraded",
         fallbackApplied: false,
-        riskTags: [],
+        riskTags: intentRiskTags,
+        intentRiskTags,
+        semanticRiskTags: [],
+        planningWarnings,
+        strictMode,
+        strictModeReasons,
+        clarificationDecision,
         summary: "意图规划不可用，语义检索降级。"
       };
     }
@@ -66,7 +101,14 @@ export class BuildSemanticQueryNode {
       modelingRevision,
       contextPackStatus
     });
-    const riskTags = this.unique([...versionLock.riskTags, ...contextualRiskTags]);
+
+    const semanticRiskTags = this.unique([
+      ...versionLock.riskTags,
+      ...contextualRiskTags,
+      ...(strictMode ? ["semantic:strict_mode_enabled"] : []),
+      ...(bypassedBusinessSemantics ? ["semantic:bypass_business_semantics"] : [])
+    ]);
+    const riskTags = this.unique([...intentRiskTags, ...semanticRiskTags]);
 
     const semanticHints =
       intentPlan.intent === "aggregate"
@@ -95,6 +137,20 @@ export class BuildSemanticQueryNode {
     );
     if (contextPackStatus === "degraded") {
       semanticHints.push("semantic_context_pack_degraded");
+      planningWarnings.semantic.push("context pack degraded, semantic constraints may be partial");
+    }
+    if (strictMode) {
+      semanticHints.push("enforce_strict_clarification_guards");
+      semanticHints.push("require_explicit_slot_grounding");
+      planningWarnings.semantic.push(
+        `strict semantic path enabled (${strictModeReasons.join(", ") || "unknown reason"})`
+      );
+    }
+    if (bypassedBusinessSemantics) {
+      semanticHints.push("preserve_clarification_bypass_reason");
+      planningWarnings.semantic.push(
+        "bypass intent detected; business semantic assertions are skipped"
+      );
     }
 
     const semanticBindingSummary = contextPack
@@ -116,6 +172,7 @@ export class BuildSemanticQueryNode {
         relationshipBindingCount,
         contextPackStatus
       )}`;
+      planningWarnings.semantic.push(summary);
       return {
         status: "degraded",
         semanticHints,
@@ -126,6 +183,15 @@ export class BuildSemanticQueryNode {
         fallbackApplied: false,
         degradeReason: versionLock.degradeReason,
         riskTags,
+        intentRiskTags,
+        semanticRiskTags,
+        planningWarnings: {
+          intent: this.unique(planningWarnings.intent),
+          semantic: this.unique(planningWarnings.semantic)
+        },
+        strictMode,
+        strictModeReasons,
+        clarificationDecision,
         summary
       };
     }
@@ -136,6 +202,7 @@ export class BuildSemanticQueryNode {
         relationshipBindingCount,
         contextPackStatus
       )}`;
+      planningWarnings.semantic.push(summary);
       return {
         status: "degraded",
         semanticHints,
@@ -146,6 +213,15 @@ export class BuildSemanticQueryNode {
         fallbackApplied: true,
         degradeReason: versionLock.degradeReason,
         riskTags,
+        intentRiskTags,
+        semanticRiskTags,
+        planningWarnings: {
+          intent: this.unique(planningWarnings.intent),
+          semantic: this.unique(planningWarnings.semantic)
+        },
+        strictMode,
+        strictModeReasons,
+        clarificationDecision,
         summary
       };
     }
@@ -164,6 +240,15 @@ export class BuildSemanticQueryNode {
       lockStatus: "locked",
       fallbackApplied: false,
       riskTags,
+      intentRiskTags,
+      semanticRiskTags,
+      planningWarnings: {
+        intent: this.unique(planningWarnings.intent),
+        semantic: this.unique(planningWarnings.semantic)
+      },
+      strictMode,
+      strictModeReasons,
+      clarificationDecision,
       summary
     };
   }

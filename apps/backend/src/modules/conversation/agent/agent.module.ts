@@ -15,6 +15,8 @@ import { SemanticRegistryService } from "../../semantic-registry/semantic-regist
 import { SettingsModule } from "../../governance/settings/settings.module";
 import { BuildIntentPlanNode } from "./nodes/build-intent-plan.node";
 import { ClarifyNode } from "./nodes/clarify.node";
+import { ClarificationFusionPolicy } from "./nodes/clarification-fusion.policy";
+import { ClarificationSemanticEvaluatorService } from "./nodes/clarification-semantic-evaluator.service";
 import { FormatAnswerNode } from "./nodes/format-answer.node";
 import { RetrieveKnowledgeNode } from "./nodes/retrieve-knowledge.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
@@ -60,6 +62,8 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
     GraphBuilderService,
     LangGraphRuntimeService,
     ClarifyNode,
+    ClarificationSemanticEvaluatorService,
+    ClarificationFusionPolicy,
     RetrieveKnowledgeNode,
     BuildIntentPlanNode,
     PlannerVersionLockService,

@@ -14,6 +14,15 @@ describe("ClarifyNode", () => {
     expect(clarification).toBeDefined();
     expect(clarification?.reason).toContain("指标口径");
     expect(clarification?.question).toContain("指标口径");
+    expect(clarification).toMatchObject({
+      decision: "clarify",
+      triggerPath: "rule",
+      decisionSource: "rule",
+      bypassed: false,
+      confidenceLevel: "medium",
+      missingCriticalSlots: ["metric"],
+      reasonCodes: ["missing_metric_slot"]
+    });
   });
 
   it("exposes structured continue decision for sufficient input", () => {
@@ -22,9 +31,13 @@ describe("ClarifyNode", () => {
       decision: "continue",
       action: "proceed",
       source: "rule",
+      decisionSource: "rule",
+      bypassed: false,
       confidence: "high",
+      confidenceLevel: "high",
       missingSlots: [],
-      shouldClarify: false
+      shouldClarify: false,
+      reasonCodes: ["rule_slots_sufficient"]
     });
   });
 
@@ -33,9 +46,12 @@ describe("ClarifyNode", () => {
     expect(decision).toMatchObject({
       decision: "clarify",
       action: "ask_clarification",
-      source: "rule"
+      source: "rule",
+      decisionSource: "rule",
+      bypassed: false
     });
     expect(decision.missingSlots).toContain("metric");
+    expect(decision.reasonCodes).toContain("missing_metric_slot");
   });
 
   it("uses context envelope to avoid repeated clarification", () => {
@@ -71,6 +87,30 @@ describe("ClarifyNode", () => {
     expect(clarification).toBeUndefined();
   });
 
+  it("records metadata intent bypass source and reason code in decision", () => {
+    const decision = node.evaluate("show tables");
+    expect(decision).toMatchObject({
+      decision: "continue",
+      source: "metadata-intent",
+      decisionSource: "metadata-intent",
+      bypassed: true,
+      bypassReasonCode: "bypass_metadata_intent",
+      reasonCodes: ["bypass_metadata_intent"]
+    });
+  });
+
+  it("records sql write bypass source and reason code in decision", () => {
+    const decision = node.evaluate("DELETE FROM orders where id = 1");
+    expect(decision).toMatchObject({
+      decision: "continue",
+      source: "sql-write-intent",
+      decisionSource: "sql-write-intent",
+      bypassed: true,
+      bypassReasonCode: "bypass_sql_write_intent",
+      reasonCodes: ["bypass_sql_write_intent"]
+    });
+  });
+
   it("keeps clarification behavior for non-sql delete wording", () => {
     const clarification = node.run("删除订单 where id = 1");
     expect(clarification).toBeDefined();
@@ -92,9 +132,21 @@ describe("ClarifyNode", () => {
         throw new Error("boom");
       });
     try {
-      expect(node.run("统计近30天订单总数")).toEqual({
+      expect(node.run("统计近30天订单总数")).toMatchObject({
         reason: "槽位解析异常",
-        question: "请补充分析对象、指标口径和时间范围后重试。"
+        question: "请补充分析对象、指标口径和时间范围后重试。",
+        decision: "clarify",
+        triggerPath: "rule",
+        decisionSource: "exception-fallback",
+        bypassed: false,
+        confidenceLevel: "low",
+        missingCriticalSlots: ["subject", "metric", "time"],
+        reasonCodes: [
+          "fallback_exception",
+          "missing_subject_slot",
+          "missing_metric_slot",
+          "missing_time_slot"
+        ]
       });
     } finally {
       spy.mockRestore();

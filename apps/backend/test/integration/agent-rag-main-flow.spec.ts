@@ -89,6 +89,7 @@ describe("agent rag main flow integration", () => {
 
     const safetyStep = run.trace.steps.find((step) => step.node === "safety-check");
     expect(safetyStep?.outputSummary).toContain("riskTags");
+    expect(run.trace.clarificationDecision).toBeDefined();
 
     const unpinnedKnowledge = await retrieveKnowledgeNode.run({
       question: "统计订单 GMV",
@@ -117,7 +118,10 @@ describe("agent rag main flow integration", () => {
           .includes("refunds")
       ) ?? true
     ).toBe(true);
-    const pinnedIntentPlan = buildIntentPlanNode.run("统计订单 GMV", pinnedKnowledge);
+    const pinnedIntentPlan = await buildIntentPlanNode.run(
+      "统计订单 GMV",
+      pinnedKnowledge
+    );
     expect(pinnedIntentPlan.constraints).toEqual(
       expect.arrayContaining(["require_pinned_table_alignment"])
     );

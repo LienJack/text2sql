@@ -32,6 +32,8 @@ describe("agent main flow", () => {
     expect(run.trace.steps[0]?.sequence).toBe(1);
     expect(run.trace.steps[0]?.stepId).toContain("run-1:");
     expect(run.trace.steps[0]?.lifecycle).toBeTruthy();
+    expect(run.trace.clarificationDecision).toBeDefined();
+    expect(["continue", "clarify"]).toContain(run.trace.clarificationDecision?.decision);
   });
 
   it("should reject non-readonly sql intent", async () => {
@@ -47,5 +49,7 @@ describe("agent main flow", () => {
       datasourceType: "sqlite"
     });
     expect(run.status).toBe("rejected");
+    expect(run.trace.clarificationDecision?.decisionSource).toBe("sql-write-intent");
+    expect(run.trace.clarificationDecision?.bypassed).toBe(true);
   });
 });

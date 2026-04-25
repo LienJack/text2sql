@@ -1,4 +1,8 @@
-import type { ContextEnvelope } from "@text2sql/shared-types";
+import type {
+  ClarificationConfidenceLevel,
+  ClarificationTriggerPath,
+  ContextEnvelope
+} from "@text2sql/shared-types";
 
 export type SlotKey = "subject" | "metric" | "time" | "dimension" | "filter";
 type SlotFillingDecisionState = "continue" | "clarify";
@@ -9,7 +13,7 @@ type SlotFillingSource =
   | "sql-write-intent"
   | "short-input-fallback"
   | "exception-fallback";
-type SlotFillingConfidence = "high" | "medium" | "low";
+type SlotFillingConfidence = ClarificationConfidenceLevel;
 
 interface SlotStatus {
   key: SlotKey;
@@ -21,10 +25,16 @@ export interface SlotFillingDecision {
   decision: SlotFillingDecisionState;
   action: SlotFillingAction;
   source: SlotFillingSource;
+  decisionSource: SlotFillingSource;
+  triggerPath: ClarificationTriggerPath;
+  bypassed: boolean;
+  bypassReasonCode?: string;
   confidence: SlotFillingConfidence;
+  confidenceLevel: SlotFillingConfidence;
   missingSlots: SlotKey[];
   shouldClarify: boolean;
   missingCriticalSlots: SlotKey[];
+  reasonCodes: string[];
   reason: string;
   question: string;
 }
@@ -34,23 +44,69 @@ interface SlotFillingDecisionInput {
   source: SlotFillingSource;
   confidence: SlotFillingConfidence;
   missingSlots: SlotKey[];
+  reasonCodes?: string[];
   reason: string;
   question?: string;
 }
 
 function buildDecision(input: SlotFillingDecisionInput): SlotFillingDecision {
   const shouldClarify = input.decision === "clarify";
+  const reasonCodes = uniqueReasonCodes(
+    input.reasonCodes ?? resolveReasonCodes(input.source, input.missingSlots)
+  );
+  const bypassed =
+    input.source === "metadata-intent" || input.source === "sql-write-intent";
   return {
     decision: input.decision,
     action: shouldClarify ? "ask_clarification" : "proceed",
     source: input.source,
+    decisionSource: input.source,
+    triggerPath: "rule",
+    bypassed,
+    bypassReasonCode: bypassed ? reasonCodes[0] : undefined,
     confidence: input.confidence,
+    confidenceLevel: input.confidence,
     missingSlots: input.missingSlots,
     shouldClarify,
     missingCriticalSlots: input.missingSlots,
+    reasonCodes,
     reason: input.reason,
     question: input.question ?? ""
   };
+}
+
+const MISSING_SLOT_REASON_CODE: Record<SlotKey, string> = {
+  subject: "missing_subject_slot",
+  metric: "missing_metric_slot",
+  time: "missing_time_slot",
+  dimension: "missing_dimension_slot",
+  filter: "missing_filter_slot"
+};
+
+function resolveReasonCodes(source: SlotFillingSource, missingSlots: SlotKey[]): string[] {
+  const missingReasonCodes = missingSlots.map((slot) => MISSING_SLOT_REASON_CODE[slot]);
+  if (source === "metadata-intent") {
+    return ["bypass_metadata_intent"];
+  }
+  if (source === "sql-write-intent") {
+    return ["bypass_sql_write_intent"];
+  }
+  if (source === "short-input-fallback") {
+    return ["fallback_short_input", ...missingReasonCodes];
+  }
+  if (source === "exception-fallback") {
+    return ["fallback_exception", ...missingReasonCodes];
+  }
+  if (missingReasonCodes.length === 0) {
+    return ["rule_slots_sufficient"];
+  }
+  return missingReasonCodes;
+}
+
+function uniqueReasonCodes(reasonCodes: string[]): string[] {
+  return Array.from(
+    new Set(reasonCodes.filter((reasonCode) => reasonCode.trim().length > 0))
+  );
 }
 
 export function buildFallbackSlotFillingDecision(): SlotFillingDecision {

@@ -766,6 +766,13 @@ export class DeliveryContractMapper {
       triggerPathRaw === "hybrid"
         ? (triggerPathRaw as ClarificationDecisionEvidence["triggerPath"])
         : undefined;
+    const decisionSource = this.readString(
+      value.decisionSource ?? value.decision_source ?? value.source
+    );
+    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed ?? value.is_bypassed);
+    const bypassReasonCode = this.readString(
+      value.bypassReasonCode ?? value.bypass_reason_code
+    );
     const confidenceLevelRaw = this.readString(
       value.confidenceLevel ?? value.confidence_level ?? value.confidence
     )?.toLowerCase();
@@ -798,6 +805,9 @@ export class DeliveryContractMapper {
     const hasStructuredPayload = Boolean(
       decision ||
         triggerPath ||
+        decisionSource ||
+        bypassed !== undefined ||
+        bypassReasonCode ||
         confidenceLevel ||
         missingCriticalSlots.length > 0 ||
         conflictDetected !== undefined ||
@@ -811,6 +821,9 @@ export class DeliveryContractMapper {
     return {
       ...(decision ? { decision } : {}),
       ...(triggerPath ? { triggerPath } : {}),
+      ...(decisionSource ? { decisionSource } : {}),
+      ...(bypassed !== undefined ? { bypassed } : {}),
+      ...(bypassReasonCode ? { bypassReasonCode } : {}),
       ...(confidenceLevel ? { confidenceLevel } : {}),
       ...(missingCriticalSlots.length > 0 ? { missingCriticalSlots } : {}),
       ...(conflictDetected !== undefined ? { conflictDetected } : {}),

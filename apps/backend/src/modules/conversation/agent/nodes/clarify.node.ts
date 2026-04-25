@@ -26,7 +26,15 @@ export class ClarifyNode {
     }
     return {
       reason: decision.reason,
-      question: decision.question
+      question: decision.question,
+      decision: decision.decision,
+      triggerPath: decision.triggerPath,
+      decisionSource: decision.decisionSource,
+      bypassed: decision.bypassed,
+      ...(decision.bypassReasonCode ? { bypassReasonCode: decision.bypassReasonCode } : {}),
+      confidenceLevel: decision.confidenceLevel,
+      missingCriticalSlots: decision.missingCriticalSlots,
+      ...(decision.reasonCodes.length > 0 ? { reasonCodes: decision.reasonCodes } : {})
     };
   }
 }

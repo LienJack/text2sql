@@ -78,6 +78,13 @@ export interface ChatMessage {
 export type ClarificationDecision = "continue" | "clarify";
 export type ClarificationTriggerPath = "rule" | "semantic" | "hybrid";
 export type ClarificationConfidenceLevel = "high" | "medium" | "low";
+export type ClarificationDecisionSource =
+  | "rule"
+  | "metadata-intent"
+  | "sql-write-intent"
+  | "short-input-fallback"
+  | "exception-fallback"
+  | (string & {});
 export type ClarificationSlotKey =
   | "subject"
   | "metric"
@@ -89,6 +96,9 @@ export type ClarificationSlotKey =
 export interface ClarificationDecisionEvidence {
   decision?: ClarificationDecision;
   triggerPath?: ClarificationTriggerPath;
+  decisionSource?: ClarificationDecisionSource;
+  bypassed?: boolean;
+  bypassReasonCode?: string;
   confidenceLevel?: ClarificationConfidenceLevel;
   missingCriticalSlots?: ClarificationSlotKey[];
   conflictDetected?: boolean;

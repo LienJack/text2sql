@@ -130,7 +130,8 @@ export const createInitialLangGraphState = (
       runId: input.runId,
       provider: fallbackProvider,
       retryCount: 0,
-      steps: []
+      steps: [],
+      clarificationDecision: undefined
     },
     spanEvents: [],
     relationCorrectionRetryCount: 0

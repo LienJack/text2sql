@@ -118,6 +118,18 @@ const appendPlanningWarning = (
   return [...(state.planningWarnings ?? []), warning];
 };
 
+const appendPlanningWarnings = (
+  state: LangGraphState,
+  stage: "intent" | "semantic",
+  warnings: string[]
+): string[] => {
+  const normalized = warnings
+    .map((warning) => warning.trim())
+    .filter((warning) => warning.length > 0)
+    .map((warning) => `${stage}:${warning}`);
+  return [...(state.planningWarnings ?? []), ...normalized];
+};
+
 const normalizeIdentifier = (value: string | undefined): string | undefined => {
   if (!value) {
     return undefined;
@@ -181,7 +193,7 @@ const buildExplicitPinningEvidence = (
 };
 
 export interface LangGraphNodeDependencies {
-  clarifyNode: Pick<ClarifyNode, "run">;
+  clarifyNode: Pick<ClarifyNode, "evaluate">;
   retrieveKnowledgeNode: Pick<RetrieveKnowledgeNode, "run">;
   buildIntentPlanNode: Pick<BuildIntentPlanNode, "run">;
   buildSemanticQueryNode: Pick<BuildSemanticQueryNode, "run">;
@@ -202,14 +214,33 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     await runtime.emitStep(
       buildRunningStep(state, "clarify", startedAt, "正在理解问题")
     );
-    const clarification = deps.clarifyNode.run(
+    const decision = deps.clarifyNode.evaluate(
       state.question,
       state.contextEnvelope
     );
+    const clarificationDecision = {
+      decision: decision.decision,
+      triggerPath: decision.triggerPath,
+      decisionSource: decision.decisionSource,
+      bypassed: decision.bypassed,
+      ...(decision.bypassReasonCode ? { bypassReasonCode: decision.bypassReasonCode } : {}),
+      confidenceLevel: decision.confidenceLevel,
+      missingCriticalSlots: decision.missingCriticalSlots,
+      conflictDetected: false,
+      ...(decision.reasonCodes.length > 0 ? { reasonCodes: decision.reasonCodes } : {}),
+      question: decision.question,
+      reason: decision.reason
+    };
+    const clarification = decision.shouldClarify
+      ? {
+          ...clarificationDecision
+        }
+      : undefined;
     const endedAt = new Date().toISOString();
     if (clarification) {
       const outputs = {
-        clarificationQuestion: clarification.question
+        clarificationQuestion: clarification.question,
+        clarificationDecision
       };
       const trace = appendStep(state, {
         step: {
@@ -225,6 +256,10 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision
+        },
         clarification,
         answer: clarification.question,
         terminalStatus: "clarification"
@@ -234,12 +269,20 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       step: {
         node: "clarify",
         status: "skipped",
-        detail: "问题信息充足，跳过澄清。",
-        ...withTiming(startedAt, endedAt)
-      }
+        detail: decision.reason || "问题信息充足，跳过澄清。",
+        ...withTiming(startedAt, endedAt),
+        outputSummary: summarize({ clarificationDecision })
+      },
+      outputs: { clarificationDecision }
     });
     await runtime.emitStep(latestStep(trace));
-    return trace;
+    return {
+      ...trace,
+      trace: {
+        ...trace.trace,
+        clarificationDecision
+      }
+    };
   };
 
   const retrieveKnowledge = async (
@@ -379,15 +422,19 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
     }
 
     try {
-      const intentPlan = deps.buildIntentPlanNode.run(
+      const intentPlan = await deps.buildIntentPlanNode.run(
         state.question,
-        state.retrievedKnowledge
+        state.retrievedKnowledge,
+        state.trace.clarificationDecision
       );
       const endedAt = new Date().toISOString();
       const outputs = {
         status: intentPlan.status,
         intent: intentPlan.intent,
-        constraints: intentPlan.constraints
+        constraints: intentPlan.constraints,
+        uncertaintySignal: intentPlan.uncertaintySignal,
+        clarificationDecision: intentPlan.clarificationDecision,
+        riskTags: intentPlan.riskTags
       };
       const trace = appendStep(state, {
         step: {
@@ -402,12 +449,24 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision:
+            intentPlan.clarificationDecision ?? state.trace.clarificationDecision
+        },
         intentPlan,
         planningStatus: intentPlan.status === "ready" ? state.planningStatus : "degraded",
         planningWarnings:
-          intentPlan.status === "ready"
+          intentPlan.status === "ready" &&
+          (intentPlan.planningWarnings?.length ?? 0) === 0
             ? state.planningWarnings
-            : appendPlanningWarning(state, intentPlan.summary)
+            : appendPlanningWarnings(
+                state,
+                "intent",
+                (intentPlan.planningWarnings?.length ?? 0) > 0
+                  ? (intentPlan.planningWarnings ?? [])
+                  : [intentPlan.summary]
+              )
       };
     } catch (error) {
       const message = toErrorMessage(error);
@@ -484,7 +543,8 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       const semanticQueryPlan = await deps.buildSemanticQueryNode.run({
         intentPlan: state.intentPlan,
         question: state.question,
-        retrievalBundle: state.retrievalBundle
+        retrievalBundle: state.retrievalBundle,
+        clarificationDecision: state.trace.clarificationDecision
       });
       const endedAt = new Date().toISOString();
       const outputs = {
@@ -497,7 +557,11 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         lockStatus: semanticQueryPlan.lockStatus,
         fallbackApplied: semanticQueryPlan.fallbackApplied,
         degradeReason: semanticQueryPlan.degradeReason,
-        riskTags: semanticQueryPlan.riskTags
+        riskTags: semanticQueryPlan.riskTags,
+        strictMode: semanticQueryPlan.strictMode,
+        strictModeReasons: semanticQueryPlan.strictModeReasons,
+        planningWarnings: semanticQueryPlan.planningWarnings,
+        clarificationDecision: semanticQueryPlan.clarificationDecision
       };
       const trace = appendStep(state, {
         step: {
@@ -512,13 +576,25 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
       await runtime.emitStep(latestStep(trace));
       return {
         ...trace,
+        trace: {
+          ...trace.trace,
+          clarificationDecision:
+            semanticQueryPlan.clarificationDecision ?? state.trace.clarificationDecision
+        },
         semanticQueryPlan,
         planningStatus:
           semanticQueryPlan.status === "ready" ? state.planningStatus : "degraded",
         planningWarnings:
-          semanticQueryPlan.status === "ready"
+          semanticQueryPlan.status === "ready" &&
+          (semanticQueryPlan.planningWarnings?.semantic.length ?? 0) === 0
             ? state.planningWarnings
-            : appendPlanningWarning(state, semanticQueryPlan.summary)
+            : appendPlanningWarnings(
+                state,
+                "semantic",
+                (semanticQueryPlan.planningWarnings?.semantic.length ?? 0) > 0
+                  ? (semanticQueryPlan.planningWarnings?.semantic ?? [])
+                  : [semanticQueryPlan.summary]
+              )
       };
     } catch (error) {
       const message = toErrorMessage(error);
@@ -702,6 +778,9 @@ export const createLangGraphNodeHandlers = (deps: LangGraphNodeDependencies) => 
         retrieveSummary: state.retrievedKnowledge?.summary,
         intent: state.intentPlan?.intent,
         semanticHints: state.semanticQueryPlan?.semanticHints,
+        semanticStrictMode: state.semanticQueryPlan?.strictMode,
+        semanticStrictModeReasons: state.semanticQueryPlan?.strictModeReasons,
+        clarificationDecision: state.trace.clarificationDecision,
         physicalStrategy: state.physicalPlan?.strategy,
         semanticConstraintMode: state.physicalPlan?.semanticConstraintMode,
         contextPackStatus: state.contextPack?.status ?? state.retrievalBundle?.context_pack?.status

@@ -11,10 +11,15 @@ describe("slot-filling-context", () => {
       decision: "continue",
       action: "proceed",
       source: "rule",
+      decisionSource: "rule",
+      triggerPath: "rule",
+      bypassed: false,
       confidence: "high",
+      confidenceLevel: "high",
       missingSlots: [],
       shouldClarify: false,
-      missingCriticalSlots: []
+      missingCriticalSlots: [],
+      reasonCodes: ["rule_slots_sufficient"]
     });
   });
 
@@ -25,9 +30,27 @@ describe("slot-filling-context", () => {
       decision: "continue",
       action: "proceed",
       source: "metadata-intent",
+      decisionSource: "metadata-intent",
+      bypassed: true,
+      bypassReasonCode: "bypass_metadata_intent",
       confidence: "high",
       shouldClarify: false,
-      missingSlots: []
+      missingSlots: [],
+      reasonCodes: ["bypass_metadata_intent"]
+    });
+  });
+
+  it("bypasses clarification for sql write intent with reason code", () => {
+    const decision = decideSlotFilling("DELETE FROM orders where id = 1");
+
+    expect(decision).toMatchObject({
+      decision: "continue",
+      action: "proceed",
+      source: "sql-write-intent",
+      decisionSource: "sql-write-intent",
+      bypassed: true,
+      bypassReasonCode: "bypass_sql_write_intent",
+      reasonCodes: ["bypass_sql_write_intent"]
     });
   });
 
@@ -38,9 +61,18 @@ describe("slot-filling-context", () => {
       decision: "clarify",
       action: "ask_clarification",
       source: "short-input-fallback",
+      decisionSource: "short-input-fallback",
+      bypassed: false,
       confidence: "low",
+      confidenceLevel: "low",
       shouldClarify: true,
-      missingSlots: ["subject", "metric", "time"]
+      missingSlots: ["subject", "metric", "time"],
+      reasonCodes: [
+        "fallback_short_input",
+        "missing_subject_slot",
+        "missing_metric_slot",
+        "missing_time_slot"
+      ]
     });
     expect(decision.reason).toContain("分析对象");
     expect(decision.reason).toContain("指标口径");
@@ -53,6 +85,7 @@ describe("slot-filling-context", () => {
     expect(decision.shouldClarify).toBe(true);
     expect(decision.missingSlots).toContain("time");
     expect(decision.source).toBe("rule");
+    expect(decision.reasonCodes).toContain("missing_time_slot");
   });
 
   it("uses context envelope to fill critical slots", () => {
@@ -75,7 +108,8 @@ describe("slot-filling-context", () => {
       action: "proceed",
       source: "rule",
       shouldClarify: false,
-      missingSlots: []
+      missingSlots: [],
+      reasonCodes: ["rule_slots_sufficient"]
     });
   });
 
@@ -88,7 +122,13 @@ describe("slot-filling-context", () => {
       source: "exception-fallback",
       confidence: "low",
       shouldClarify: true,
-      missingSlots: ["subject", "metric", "time"]
+      missingSlots: ["subject", "metric", "time"],
+      reasonCodes: [
+        "fallback_exception",
+        "missing_subject_slot",
+        "missing_metric_slot",
+        "missing_time_slot"
+      ]
     });
   });
 });
