@@ -41,8 +41,13 @@ describe("rag quality gate integration", () => {
     expect(snapshot.priorSqlLane).toEqual({
       sampleSize: 0,
       priorSqlHitRate: 0,
+      priorSqlMissCount: 0,
       priorSqlFilteredCount: 0,
-      priorSqlStaleRate: 0
+      priorSqlStaleRate: 0,
+      priorSqlAmbiguousCount: 0,
+      priorSqlDuplicateCount: 0,
+      priorSqlSafetyRejectedCount: 0,
+      priorSqlFallbackToGenerationCount: 0
     });
 
     await moduleRef.close();
@@ -91,8 +96,13 @@ describe("rag quality gate integration", () => {
       priorSqlLane: {
         totalCount: 20,
         hitCount: 15,
+        missCount: 2,
         filteredCount: 2,
-        staleCount: 1
+        staleCount: 1,
+        ambiguousCount: 1,
+        duplicateCount: 1,
+        safetyRejectedCount: 1,
+        fallbackToGenerationCount: 1
       }
     });
     quality.recordEvaluation({
@@ -106,8 +116,13 @@ describe("rag quality gate integration", () => {
       priorSqlLane: {
         totalCount: 10,
         hitCount: 5,
+        missCount: 1,
         filteredCount: 1,
-        staleCount: 2
+        staleCount: 2,
+        ambiguousCount: 1,
+        duplicateCount: 0,
+        safetyRejectedCount: 1,
+        fallbackToGenerationCount: 1
       }
     });
 
@@ -115,8 +130,13 @@ describe("rag quality gate integration", () => {
     expect(snapshot.priorSqlLane).toEqual({
       sampleSize: 30,
       priorSqlHitRate: 0.666667,
+      priorSqlMissCount: 3,
       priorSqlFilteredCount: 3,
-      priorSqlStaleRate: 0.1
+      priorSqlStaleRate: 0.1,
+      priorSqlAmbiguousCount: 2,
+      priorSqlDuplicateCount: 1,
+      priorSqlSafetyRejectedCount: 2,
+      priorSqlFallbackToGenerationCount: 2
     });
     expect(snapshot.gatePass).toBe(true);
 

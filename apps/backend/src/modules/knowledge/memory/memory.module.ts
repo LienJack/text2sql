@@ -6,6 +6,7 @@ import { MemoryController } from "../../memory/memory.controller";
 import { MemoryPromotionPolicy } from "../../memory/memory-promotion-policy";
 import { MemoryPromotionService as LegacyMemoryPromotionService } from "../../memory/memory-promotion.service";
 import { MemoryPromotionService as KnowledgeMemoryPromotionService } from "./memory-promotion.service";
+import { SavedPriorSqlService } from "./saved-prior-sql.service";
 
 export const KNOWLEDGE_MEMORY_COMPAT_BRIDGE = Object.freeze({
   capability: "memory",
@@ -24,12 +25,14 @@ export const KNOWLEDGE_MEMORY_COMPAT_BRIDGE = Object.freeze({
       provide: KnowledgeMemoryPromotionService,
       useExisting: LegacyMemoryPromotionService
     },
+    SavedPriorSqlService,
     AdminOnlyGuard
   ],
   exports: [
     MemoryPromotionPolicy,
     LegacyMemoryPromotionService,
-    KnowledgeMemoryPromotionService
+    KnowledgeMemoryPromotionService,
+    SavedPriorSqlService
   ]
 })
 export class MemoryModule {}

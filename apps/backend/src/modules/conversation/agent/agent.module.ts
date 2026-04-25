@@ -24,6 +24,7 @@ import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
 import { GraphBuilderService } from "./graph/graph.builder";
 import { LangGraphRuntimeService } from "./graph/langgraph.runtime";
 import { GenerateSqlNode } from "./nodes/generate-sql.node";
+import { ResolveSavedPriorSqlNode } from "./nodes/resolve-saved-prior-sql.node";
 import { SafetyCheckNode } from "./nodes/safety-check.node";
 import { ExecuteSqlNode } from "./nodes/execute-sql.node";
 import { SqlGenerationService } from "./sql/sql-generation.service";
@@ -70,6 +71,7 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
     PlannerCacheService,
     BuildSemanticQueryNode,
     BuildPhysicalPlanNode,
+    ResolveSavedPriorSqlNode,
     GenerateSqlNode,
     SafetyCheckNode,
     ExecuteSqlNode,

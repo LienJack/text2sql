@@ -16,6 +16,7 @@ import { fuseWithRrf } from "./fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
   type RagPriorSqlLaneEvidence,
+  type RagPriorSqlShortcutDecision,
   type RagRetrievalCandidate,
   type RagRetrievalChunkMetadata,
   type RagRetrievalChunkPayload,
@@ -248,11 +249,16 @@ export class RagRetrievalService {
       graph: laneResults.graph.hits
     };
     const fused = fuseWithRrf({ laneHits });
+    const activeModelingRevision = await this.resolveActiveModelingRevision(
+      workspaceId,
+      datasourceId
+    );
     const priorSqlSelection = this.selectTrustedPriorSqlCandidates({
       candidates: fused,
       datasourceId,
       workspaceId,
-      allowedTables
+      allowedTables,
+      activeModelingRevision
     });
     const priorSqlFiltered = this.filterBlockedPriorSqlCandidates(
       fused,
@@ -713,15 +719,18 @@ export class RagRetrievalService {
     datasourceId: string;
     workspaceId?: string;
     allowedTables: string[];
+    activeModelingRevision?: number;
   }): PriorSqlSelectionResult {
     const trustedSqlExampleCandidates = input.candidates.filter(
       (candidate) =>
         candidate.chunk.metadata.domain === "sql_example" &&
         this.isTrustedPriorSqlCandidate(candidate)
     );
-    const selectedCandidates: RagRetrievalCandidate[] = [];
+    const eligibleCandidates: RagRetrievalCandidate[] = [];
     const blockedChunkIds = new Set<string>();
-    const degradeReasons: string[] = [];
+    const filteredReasons: string[] = [];
+    const staleReasons: string[] = [];
+    let staleCandidateCount = 0;
     const allowedTables = new Set(input.allowedTables);
     const workspaceId = input.workspaceId?.trim();
 
@@ -734,47 +743,102 @@ export class RagRetrievalService {
       });
       if (filterReasons.length > 0) {
         blockedChunkIds.add(candidate.chunk_id);
-        degradeReasons.push(...filterReasons);
+        filteredReasons.push(...filterReasons);
         continue;
       }
-      selectedCandidates.push({
+
+      const candidateStaleReasons = this.collectPriorSqlStaleReasons({
+        candidate,
+        activeModelingRevision: input.activeModelingRevision
+      });
+      if (candidateStaleReasons.length > 0) {
+        staleCandidateCount += 1;
+        staleReasons.push(...candidateStaleReasons);
+        continue;
+      }
+      eligibleCandidates.push({
         ...candidate,
         evidence: this.unique([...candidate.evidence, "prior_sql:trusted"])
       });
     }
 
-    if (selectedCandidates.length > 0) {
-      const lane: RagPriorSqlLaneEvidence = {
-        status: "hit",
+    const selectedCandidates =
+      eligibleCandidates.length === 1 ? [eligibleCandidates[0]] : [];
+    const shortcutStatus: RagPriorSqlShortcutDecision["status"] =
+      selectedCandidates.length === 1
+        ? "hit"
+        : eligibleCandidates.length > 1
+          ? "ambiguous"
+          : blockedChunkIds.size > 0
+            ? "filtered"
+            : staleCandidateCount > 0
+              ? "stale"
+              : "miss";
+    const selectedCandidate = selectedCandidates[0];
+    const shortcutReasons = this.unique([
+      ...(shortcutStatus === "hit"
+        ? ["prior_sql_shortcut_hit"]
+        : []),
+      ...(shortcutStatus === "miss"
+        ? ["prior_sql_no_trusted_match"]
+        : []),
+      ...(shortcutStatus === "filtered"
+        ? ["prior_sql_shortcut_filtered", ...filteredReasons]
+        : []),
+      ...(shortcutStatus === "stale"
+        ? ["prior_sql_shortcut_stale", ...staleReasons]
+        : []),
+      ...(shortcutStatus === "ambiguous"
+        ? ["prior_sql_shortcut_ambiguous"]
+        : [])
+    ]);
+    const laneDegradeReasons = this.unique([
+      ...filteredReasons,
+      ...staleReasons,
+      ...(shortcutStatus === "miss" ? ["prior_sql_no_trusted_match"] : []),
+      ...(shortcutStatus === "ambiguous" ? ["prior_sql_shortcut_ambiguous"] : []),
+      ...(shortcutStatus === "filtered" ? ["prior_sql_shortcut_filtered"] : []),
+      ...(shortcutStatus === "stale" ? ["prior_sql_shortcut_stale"] : [])
+    ]);
+    const shortcutDecision: RagPriorSqlShortcutDecision =
+      this.withPriorSqlShortcutCompatFields({
+        status: shortcutStatus,
+        reason_codes: shortcutReasons,
         matched_count: trustedSqlExampleCandidates.length,
-        selected_count: selectedCandidates.length,
+        eligible_count: eligibleCandidates.length,
         filtered_count: blockedChunkIds.size,
-        ...(degradeReasons.length > 0
+        stale_count: staleCandidateCount,
+        ambiguous_count: shortcutStatus === "ambiguous" ? eligibleCandidates.length : 0,
+        ...(selectedCandidate
           ? {
-              degrade_reasons: this.unique(degradeReasons)
+              selected_chunk_id: selectedCandidate.chunk_id,
+              selected_view_id: this.readPriorSqlViewId(
+                selectedCandidate.chunk.metadata.sourceMetadata
+              ),
+              selected_source_run_id: this.readPriorSqlSourceRunId(
+                selectedCandidate.chunk.metadata.sourceMetadata
+              )
             }
           : {})
-      };
-      return {
-        lane: this.withPriorSqlLaneCompatFields(lane),
-        selectedCandidates,
-        blockedChunkIds
-      };
-    }
-
+      });
     const lane: RagPriorSqlLaneEvidence = {
-      status: trustedSqlExampleCandidates.length > 0 ? "filtered" : "miss",
+      status: shortcutStatus,
       matched_count: trustedSqlExampleCandidates.length,
-      selected_count: 0,
+      selected_count: selectedCandidates.length,
       filtered_count: blockedChunkIds.size,
-      degrade_reasons:
-        trustedSqlExampleCandidates.length > 0
-          ? this.unique(degradeReasons)
-          : ["prior_sql_no_trusted_match"]
+      stale_count: staleCandidateCount,
+      ambiguous_count: shortcutStatus === "ambiguous" ? eligibleCandidates.length : 0,
+      eligible_count: eligibleCandidates.length,
+      ...(laneDegradeReasons.length > 0
+        ? {
+            degrade_reasons: laneDegradeReasons
+          }
+        : {}),
+      shortcut: shortcutDecision
     };
     return {
       lane: this.withPriorSqlLaneCompatFields(lane),
-      selectedCandidates: [],
+      selectedCandidates,
       blockedChunkIds
     };
   }
@@ -836,11 +900,105 @@ export class RagRetrievalService {
     return reasons;
   }
 
+  private collectPriorSqlStaleReasons(input: {
+    candidate: RagRetrievalCandidate;
+    activeModelingRevision?: number;
+  }): string[] {
+    const sourceMetadata = input.candidate.chunk.metadata.sourceMetadata;
+    if (!this.isRecord(sourceMetadata)) {
+      return [];
+    }
+    const reasons: string[] = [];
+    if (
+      this.readBooleanFlag(sourceMetadata.stale) ||
+      this.readBooleanFlag(sourceMetadata.isStale) ||
+      this.readBooleanFlag(sourceMetadata.priorSqlStale) ||
+      this.readBooleanFlag(sourceMetadata.prior_sql_stale)
+    ) {
+      reasons.push("prior_sql_stale_marked");
+    }
+    const viewDeleted =
+      this.readBooleanFlag(sourceMetadata.viewDeleted) ||
+      this.readBooleanFlag(sourceMetadata.view_deleted);
+    const viewExists = this.readOptionalBoolean(
+      sourceMetadata.viewExists ?? sourceMetadata.view_exists
+    );
+    if (viewDeleted || viewExists === false) {
+      reasons.push("prior_sql_stale_view_missing");
+    }
+    const viewStatus = this.readString(sourceMetadata.viewStatus) ??
+      this.readString(sourceMetadata.view_status);
+    if (viewStatus) {
+      const normalized = viewStatus.trim().toLowerCase();
+      if (
+        normalized === "missing" ||
+        normalized === "deleted" ||
+        normalized === "not_found" ||
+        normalized === "archived" ||
+        normalized === "inactive" ||
+        normalized === "stale"
+      ) {
+        reasons.push("prior_sql_stale_view_status");
+      }
+    }
+
+    const sourceModelingRevision = this.readPositiveInteger(
+      sourceMetadata.modelingRevision ?? sourceMetadata.modeling_revision
+    );
+    const currentModelingRevision = this.readPositiveInteger(
+      sourceMetadata.currentModelingRevision ?? sourceMetadata.current_modeling_revision
+    );
+    if (
+      sourceModelingRevision !== undefined &&
+      currentModelingRevision !== undefined &&
+      sourceModelingRevision !== currentModelingRevision
+    ) {
+      reasons.push("prior_sql_stale_modeling_revision_mismatch");
+    }
+    if (
+      sourceModelingRevision !== undefined &&
+      input.activeModelingRevision !== undefined &&
+      sourceModelingRevision !== input.activeModelingRevision
+    ) {
+      reasons.push("prior_sql_stale_modeling_revision_mismatch");
+    }
+
+    const sourceSchemaRevision = this.readPositiveInteger(
+      sourceMetadata.schemaRevision ?? sourceMetadata.schema_revision
+    );
+    const currentSchemaRevision = this.readPositiveInteger(
+      sourceMetadata.currentSchemaRevision ?? sourceMetadata.current_schema_revision
+    );
+    if (
+      sourceSchemaRevision !== undefined &&
+      currentSchemaRevision !== undefined &&
+      sourceSchemaRevision !== currentSchemaRevision
+    ) {
+      reasons.push("prior_sql_stale_schema_revision_mismatch");
+    }
+    return this.unique(reasons);
+  }
+
   private readWorkspaceIdFromSourceMetadata(sourceMetadata: unknown): string | undefined {
     if (!this.isRecord(sourceMetadata)) {
       return undefined;
     }
     return this.readString(sourceMetadata.workspaceId) ?? this.readString(sourceMetadata.workspace_id);
+  }
+
+  private readPriorSqlViewId(sourceMetadata: unknown): string | undefined {
+    if (!this.isRecord(sourceMetadata)) {
+      return undefined;
+    }
+    return this.readString(sourceMetadata.viewId) ?? this.readString(sourceMetadata.view_id);
+  }
+
+  private readPriorSqlSourceRunId(sourceMetadata: unknown): string | undefined {
+    if (!this.isRecord(sourceMetadata)) {
+      return undefined;
+    }
+    return this.readString(sourceMetadata.sourceRunId) ??
+      this.readString(sourceMetadata.source_run_id);
   }
 
   private filterBlockedPriorSqlCandidates(
@@ -1476,16 +1634,80 @@ export class RagRetrievalService {
     lane: RagPriorSqlLaneEvidence
   ): RagPriorSqlLaneEvidence {
     const degradeReasons = lane.degrade_reasons ?? lane.degradeReasons;
+    const shortcut = lane.shortcut ?? lane.shortcutDecision;
     return {
       ...lane,
       matched_count: lane.matched_count,
       selected_count: lane.selected_count,
       filtered_count: lane.filtered_count,
+      ...(lane.stale_count !== undefined ? { stale_count: lane.stale_count } : {}),
+      ...(lane.ambiguous_count !== undefined ? { ambiguous_count: lane.ambiguous_count } : {}),
+      ...(lane.eligible_count !== undefined ? { eligible_count: lane.eligible_count } : {}),
       ...(degradeReasons ? { degrade_reasons: degradeReasons } : {}),
       matchedCount: lane.matched_count,
       selectedCount: lane.selected_count,
       filteredCount: lane.filtered_count,
-      ...(degradeReasons ? { degradeReasons } : {})
+      ...(lane.stale_count !== undefined ? { staleCount: lane.stale_count } : {}),
+      ...(lane.ambiguous_count !== undefined ? { ambiguousCount: lane.ambiguous_count } : {}),
+      ...(lane.eligible_count !== undefined ? { eligibleCount: lane.eligible_count } : {}),
+      ...(degradeReasons ? { degradeReasons } : {}),
+      ...(shortcut
+        ? {
+            shortcut: this.withPriorSqlShortcutCompatFields(shortcut),
+            shortcutDecision: this.withPriorSqlShortcutCompatFields(shortcut)
+          }
+        : {})
+    };
+  }
+
+  private withPriorSqlShortcutCompatFields(
+    decision: RagPriorSqlShortcutDecision
+  ): RagPriorSqlShortcutDecision {
+    const reasonCodes = decision.reason_codes ?? decision.reasonCodes ?? [];
+    return {
+      ...decision,
+      reason_codes: reasonCodes,
+      matched_count: decision.matched_count,
+      eligible_count: decision.eligible_count,
+      filtered_count: decision.filtered_count,
+      stale_count: decision.stale_count,
+      ambiguous_count: decision.ambiguous_count,
+      ...(decision.selected_chunk_id
+        ? {
+            selected_chunk_id: decision.selected_chunk_id
+          }
+        : {}),
+      ...(decision.selected_view_id
+        ? {
+            selected_view_id: decision.selected_view_id
+          }
+        : {}),
+      ...(decision.selected_source_run_id
+        ? {
+            selected_source_run_id: decision.selected_source_run_id
+          }
+        : {}),
+      reasonCodes,
+      matchedCount: decision.matched_count,
+      eligibleCount: decision.eligible_count,
+      filteredCount: decision.filtered_count,
+      staleCount: decision.stale_count,
+      ambiguousCount: decision.ambiguous_count,
+      ...(decision.selected_chunk_id
+        ? {
+            selectedChunkId: decision.selected_chunk_id
+          }
+        : {}),
+      ...(decision.selected_view_id
+        ? {
+            selectedViewId: decision.selected_view_id
+          }
+        : {}),
+      ...(decision.selected_source_run_id
+        ? {
+            selectedSourceRunId: decision.selected_source_run_id
+          }
+        : {})
     };
   }
 
@@ -1593,6 +1815,34 @@ export class RagRetrievalService {
       if (Number.isFinite(parsed)) {
         return parsed;
       }
+    }
+    return undefined;
+  }
+
+  private readPositiveInteger(value: unknown): number | undefined {
+    const parsed = this.readNumber(value);
+    if (parsed === undefined || !Number.isInteger(parsed) || parsed <= 0) {
+      return undefined;
+    }
+    return parsed;
+  }
+
+  private readOptionalBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value > 0;
+    }
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
     }
     return undefined;
   }

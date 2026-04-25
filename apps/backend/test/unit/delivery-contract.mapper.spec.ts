@@ -357,6 +357,51 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.modelingRevision).toBe(12);
   });
 
+  it("maps saved prior SQL shortcut evidence from resolve+safety trace steps", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [
+          {
+            node: "resolve-saved-prior-sql",
+            status: "success",
+            at: "2026-04-25T00:00:00.100Z",
+            outputSummary: JSON.stringify({
+              status: "hit",
+              reasonCodes: ["prior_sql_shortcut_hit"],
+              selectedChunkId: "chunk-saved-prior-1",
+              selectedViewId: "view.chat_run.run-1",
+              selectedSourceRunId: "run-1"
+            })
+          },
+          {
+            node: "safety-check",
+            status: "success",
+            at: "2026-04-25T00:00:00.200Z"
+          }
+        ]
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.savedPriorSql).toEqual({
+      status: "hit",
+      shortcutUsed: true,
+      reasonCodes: ["prior_sql_shortcut_hit"],
+      selectedChunkId: "chunk-saved-prior-1",
+      selectedViewId: "view.chat_run.run-1",
+      selectedSourceRunId: "run-1",
+      safetyResult: "passed"
+    });
+  });
+
   it("falls back to semantic step summary for revision and binding evidence", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

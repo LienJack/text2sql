@@ -16,6 +16,7 @@ export type RunVisibilityThinkingStep = ExecutionTraceStep & {
 };
 
 type JsonRecord = Record<string, unknown>;
+type SavedPriorSqlLayer = NonNullable<DeliveryEvidenceLayer["savedPriorSql"]>;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -186,6 +187,88 @@ function normalizeEvidence(value: unknown): DeliveryEvidenceLayer | undefined {
     value.skillContextSummary ?? value.skill_context_summary ?? value.skill_context
   );
   const evidenceStale = readBoolean(value.evidenceStale) ?? readBoolean(value.evidence_stale);
+  const savedPriorSqlRaw = isRecord(value.savedPriorSql)
+    ? value.savedPriorSql
+    : isRecord(value.saved_prior_sql)
+      ? value.saved_prior_sql
+      : undefined;
+  const savedPriorStatusRaw = readString(savedPriorSqlRaw?.status);
+  const savedPriorStatus: SavedPriorSqlLayer["status"] | undefined =
+    savedPriorStatusRaw === "hit" ||
+    savedPriorStatusRaw === "miss" ||
+    savedPriorStatusRaw === "filtered" ||
+    savedPriorStatusRaw === "stale" ||
+    savedPriorStatusRaw === "ambiguous"
+      ? savedPriorStatusRaw
+      : undefined;
+  const savedPriorSafetyRaw = readString(
+    savedPriorSqlRaw?.safetyResult ?? savedPriorSqlRaw?.safety_result
+  );
+  const savedPriorSafetyResult: SavedPriorSqlLayer["safetyResult"] | undefined =
+    savedPriorSafetyRaw === "passed" ||
+    savedPriorSafetyRaw === "rejected" ||
+    savedPriorSafetyRaw === "fallback_generated"
+      ? savedPriorSafetyRaw
+      : undefined;
+  const savedPriorShortcutUsed = readBoolean(
+    savedPriorSqlRaw?.shortcutUsed ?? savedPriorSqlRaw?.shortcut_used
+  );
+  const savedPriorReasonCodes = unique([
+    ...readStringArray(savedPriorSqlRaw?.reasonCodes),
+    ...readStringArray(savedPriorSqlRaw?.reason_codes)
+  ]);
+  const savedPriorSql: SavedPriorSqlLayer | undefined =
+    savedPriorStatus && savedPriorShortcutUsed !== undefined
+      ? {
+          status: savedPriorStatus,
+          shortcutUsed: savedPriorShortcutUsed,
+          ...(savedPriorReasonCodes.length > 0
+            ? { reasonCodes: savedPriorReasonCodes }
+            : {}),
+          ...(readString(
+            savedPriorSqlRaw?.selectedChunkId ?? savedPriorSqlRaw?.selected_chunk_id
+          )
+            ? {
+                selectedChunkId: readString(
+                  savedPriorSqlRaw?.selectedChunkId ??
+                    savedPriorSqlRaw?.selected_chunk_id
+                )
+              }
+            : {}),
+          ...(readString(
+            savedPriorSqlRaw?.selectedViewId ?? savedPriorSqlRaw?.selected_view_id
+          )
+            ? {
+                selectedViewId: readString(
+                  savedPriorSqlRaw?.selectedViewId ??
+                    savedPriorSqlRaw?.selected_view_id
+                )
+              }
+            : {}),
+          ...(readString(
+            savedPriorSqlRaw?.selectedViewName ?? savedPriorSqlRaw?.selected_view_name
+          )
+            ? {
+                selectedViewName: readString(
+                  savedPriorSqlRaw?.selectedViewName ??
+                    savedPriorSqlRaw?.selected_view_name
+                )
+              }
+            : {}),
+          ...(readString(
+            savedPriorSqlRaw?.selectedSourceRunId ??
+              savedPriorSqlRaw?.selected_source_run_id
+          )
+            ? {
+                selectedSourceRunId: readString(
+                  savedPriorSqlRaw?.selectedSourceRunId ??
+                    savedPriorSqlRaw?.selected_source_run_id
+                )
+              }
+            : {}),
+          ...(savedPriorSafetyResult ? { safetyResult: savedPriorSafetyResult } : {})
+        }
+      : undefined;
 
   const normalized: DeliveryEvidenceLayer = {
     runId,
@@ -198,6 +281,7 @@ function normalizeEvidence(value: unknown): DeliveryEvidenceLayer | undefined {
     ...(semanticLockStatus ? { semanticLockStatus } : {}),
     ...(semanticDegradeReason ? { semanticDegradeReason } : {}),
     ...(skillContextSummary ? { skillContextSummary } : {}),
+    ...(savedPriorSql ? { savedPriorSql } : {}),
     ...(evidenceStale !== undefined ? { evidenceStale } : {})
   };
 

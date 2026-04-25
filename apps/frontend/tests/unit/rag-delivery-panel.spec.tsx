@@ -216,4 +216,35 @@ describe("RagDeliveryPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("模板降级原因：not_triggered")).toBeInTheDocument();
   });
+
+  it("renders saved prior SQL shortcut evidence and safety status", async () => {
+    const user = userEvent.setup();
+    render(
+      <RagDeliveryPanel
+        delivery={createDelivery({
+          savedPriorSql: {
+            status: "hit",
+            shortcutUsed: true,
+            reasonCodes: ["prior_sql_shortcut_hit"],
+            selectedViewId: "view.chat_run.run-1",
+            selectedSourceRunId: "run-1",
+            safetyResult: "passed"
+          }
+        })}
+        runId="run-saved-prior-evidence"
+      />
+    );
+
+    const evidenceTrigger = screen.getByRole("button", {
+      name: "切换 Evidence 区块"
+    });
+    if (evidenceTrigger.getAttribute("aria-expanded") !== "true") {
+      await user.click(evidenceTrigger);
+    }
+
+    expect(screen.getByText("Saved Prior SQL：shortcut hit")).toBeInTheDocument();
+    expect(
+      screen.getByText("已复用保存的 SQL，并已通过安全校验。")
+    ).toBeInTheDocument();
+  });
 });

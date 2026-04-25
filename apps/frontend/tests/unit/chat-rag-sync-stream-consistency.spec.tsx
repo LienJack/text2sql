@@ -82,6 +82,36 @@ describe("chat rag sync/stream consistency", () => {
     expect(resolved?.answer.provider).toBe("mock-provider");
   });
 
+  it("normalizes saved prior SQL evidence from snake_case stream payload", () => {
+    const normalized = normalizeDeliveryContract({
+      answer: {
+        text: "stream-answer",
+        status: "executionResult",
+        provider: "mock-stream"
+      },
+      evidence: {
+        run_id: "run-sync",
+        saved_prior_sql: {
+          status: "hit",
+          shortcut_used: true,
+          reason_codes: ["prior_sql_shortcut_hit"],
+          selected_view_id: "view.chat_run.run-sync",
+          selected_source_run_id: "run-sync",
+          safety_result: "passed"
+        }
+      }
+    });
+
+    expect(normalized?.evidence?.savedPriorSql).toEqual({
+      status: "hit",
+      shortcutUsed: true,
+      reasonCodes: ["prior_sql_shortcut_hit"],
+      selectedViewId: "view.chat_run.run-sync",
+      selectedSourceRunId: "run-sync",
+      safetyResult: "passed"
+    });
+  });
+
   it("prevents terminal state regression to loading on duplicate and out-of-order events", () => {
     let status = transitionRunVisibilityStatus(undefined, "loading");
     status = transitionRunVisibilityStatus(status, "success");

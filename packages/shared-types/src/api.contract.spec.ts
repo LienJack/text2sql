@@ -175,6 +175,16 @@ const deliverySample: DeliveryContract = {
       reasonCodes: ["missing_time_slot"],
       question: clarificationPromptSample.question,
       reason: clarificationPromptSample.reason
+    },
+    savedPriorSql: {
+      status: "hit",
+      shortcutUsed: true,
+      reasonCodes: ["prior_sql_shortcut_hit"],
+      selectedChunkId: "chunk_saved_prior_1",
+      selectedViewId: "view.chat_run.run_123",
+      selectedViewName: "orders_paid_gmv",
+      selectedSourceRunId: "run_123",
+      safetyResult: "passed"
     }
   },
   artifact: {

@@ -11,6 +11,7 @@ import type { IntentPlan } from "../nodes/build-intent-plan.node";
 import type { SemanticQueryPlan } from "../nodes/build-semantic-query.node";
 import type { PhysicalPlan } from "../nodes/build-physical-plan.node";
 import type { SqlSafetyDecision } from "../sql/tools/sql-safety.guard";
+import type { SavedPriorSqlResolution } from "../nodes/resolve-saved-prior-sql.node";
 import type {
   RagContextPack,
   RagRetrievalBundle
@@ -37,6 +38,12 @@ export interface LangGraphState extends GraphInput {
   physicalPlan?: PhysicalPlan;
   planningStatus?: "legacy" | "ready" | "degraded";
   planningWarnings?: string[];
+  savedPriorSqlResolution?: SavedPriorSqlResolution & {
+    reused: boolean;
+    safetyRejected: boolean;
+    fallbackToGeneration: boolean;
+  };
+  savedPriorSqlFallbackRequested?: boolean;
   safetyDecision?: SqlSafetyDecision;
   sql?: string;
   explanation?: string;

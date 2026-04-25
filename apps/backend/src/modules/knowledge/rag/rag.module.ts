@@ -11,6 +11,10 @@ import { RagAuditReplayService } from "../../rag/audit/rag-audit-replay.service"
 import { RagEventConsumerService } from "../../rag/events/rag-event-consumer.service";
 import { RagIndexBuilderService } from "../../rag/index/rag-index-builder.service";
 import { RagIndexRepository } from "../../rag/index/rag-index.repository";
+import { RagDocumentFactory } from "../../rag/ingestion/rag-document.factory";
+import { RagDocumentRepository } from "../../rag/ingestion/rag-document.repository";
+import { IngestionSourceAdapter } from "../../rag/ingestion/ingestion-source.adapter";
+import { RagChunkingService } from "../../rag/ingestion/rag-chunking.service";
 import { BuildRagIndexJob } from "../../rag/jobs/build-rag-index.job";
 import { RagReplayRepository as LegacyRagReplayRepository } from "../../rag/observability/rag-replay.repository";
 import { RagReplayRepository } from "./observability/rag-replay.repository";
@@ -74,6 +78,10 @@ export function assertKnowledgeCompatBridgeRetirementReady(
   controllers: [RagQualityController],
   providers: [
     RagIndexRepository,
+    IngestionSourceAdapter,
+    RagChunkingService,
+    RagDocumentFactory,
+    RagDocumentRepository,
     RagIndexBuilderService,
     BuildRagIndexJob,
     RagDatasourceQuotaPolicy,
@@ -106,6 +114,10 @@ export function assertKnowledgeCompatBridgeRetirementReady(
   ],
   exports: [
     RagIndexRepository,
+    IngestionSourceAdapter,
+    RagChunkingService,
+    RagDocumentFactory,
+    RagDocumentRepository,
     RagIndexBuilderService,
     BuildRagIndexJob,
     RagDatasourceQuotaPolicy,

@@ -243,6 +243,17 @@ export interface DeliveryEvidenceReplayLog {
   createdAt: string;
 }
 
+export interface DeliverySavedPriorSqlEvidence {
+  status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";
+  shortcutUsed: boolean;
+  reasonCodes?: string[];
+  selectedChunkId?: string;
+  selectedViewId?: string;
+  selectedViewName?: string;
+  selectedSourceRunId?: string;
+  safetyResult?: "passed" | "rejected" | "fallback_generated";
+}
+
 export interface DeliveryEvidenceLayer {
   runId: string;
   retrievalStatus?: "ready" | "degraded";
@@ -295,6 +306,7 @@ export interface DeliveryEvidenceLayer {
     reasonCodes?: string[];
   };
   clarificationDecision?: ClarificationDecisionEvidence;
+  savedPriorSql?: DeliverySavedPriorSqlEvidence;
   evidenceStale?: boolean;
 }
 

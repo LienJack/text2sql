@@ -14,6 +14,7 @@ import { ClarifyNode } from "../nodes/clarify.node";
 import { ExecuteSqlNode } from "../nodes/execute-sql.node";
 import { FormatAnswerNode } from "../nodes/format-answer.node";
 import { GenerateSqlNode } from "../nodes/generate-sql.node";
+import { ResolveSavedPriorSqlNode } from "../nodes/resolve-saved-prior-sql.node";
 import { RetrieveKnowledgeNode } from "../nodes/retrieve-knowledge.node";
 import { SafetyCheckNode } from "../nodes/safety-check.node";
 import {
@@ -46,6 +47,8 @@ const LangGraphStateAnnotation = Annotation.Root({
   physicalPlan: Annotation<LangGraphState["physicalPlan"]>(),
   planningStatus: Annotation<LangGraphState["planningStatus"]>(),
   planningWarnings: Annotation<string[] | undefined>(),
+  savedPriorSqlResolution: Annotation<LangGraphState["savedPriorSqlResolution"]>(),
+  savedPriorSqlFallbackRequested: Annotation<boolean | undefined>(),
   safetyDecision: Annotation<LangGraphState["safetyDecision"]>(),
   sql: Annotation<string | undefined>(),
   explanation: Annotation<string | undefined>(),
@@ -69,6 +72,7 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     .addNode("build-intent-plan", handlers.buildIntentPlan)
     .addNode("build-semantic-query", handlers.buildSemanticQuery)
     .addNode("build-physical-plan", handlers.buildPhysicalPlan)
+    .addNode("resolve-saved-prior-sql", handlers.resolveSavedPriorSql)
     .addNode("generate-sql", handlers.generateSql)
     .addNode("safety-check", handlers.safetyCheck)
     .addNode("execute-sql", handlers.executeSql)
@@ -86,7 +90,16 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     .addEdge("retrieve-knowledge", "build-intent-plan")
     .addEdge("build-intent-plan", "build-semantic-query")
     .addEdge("build-semantic-query", "build-physical-plan")
-    .addEdge("build-physical-plan", "generate-sql")
+    .addEdge("build-physical-plan", "resolve-saved-prior-sql")
+    .addConditionalEdges(
+      "resolve-saved-prior-sql",
+      (state) =>
+        state.savedPriorSqlResolution?.status === "hit" ? "shortcut" : "continue",
+      {
+        shortcut: "safety-check",
+        continue: "generate-sql"
+      }
+    )
     .addConditionalEdges(
       "generate-sql",
       (state) => (state.fatalError ? "fatal" : "continue"),
@@ -97,8 +110,14 @@ export const createLangGraphRuntime = (deps: LangGraphNodeDependencies) => {
     )
     .addConditionalEdges(
       "safety-check",
-      (state) => (state.terminalStatus === "rejected" ? "rejected" : "continue"),
+      (state) => {
+        if (state.savedPriorSqlFallbackRequested) {
+          return "fallback-generate";
+        }
+        return state.terminalStatus === "rejected" ? "rejected" : "continue";
+      },
       {
+        "fallback-generate": "generate-sql",
         rejected: END,
         continue: "execute-sql"
       }
@@ -142,6 +161,7 @@ export class LangGraphRuntimeService {
     private readonly buildIntentPlanNode: BuildIntentPlanNode,
     private readonly buildSemanticQueryNode: BuildSemanticQueryNode,
     private readonly buildPhysicalPlanNode: BuildPhysicalPlanNode,
+    private readonly resolveSavedPriorSqlNode: ResolveSavedPriorSqlNode,
     private readonly generateSqlNode: GenerateSqlNode,
     private readonly safetyNode: SafetyCheckNode,
     private readonly executeNode: ExecuteSqlNode,
@@ -153,6 +173,7 @@ export class LangGraphRuntimeService {
       buildIntentPlanNode: this.buildIntentPlanNode,
       buildSemanticQueryNode: this.buildSemanticQueryNode,
       buildPhysicalPlanNode: this.buildPhysicalPlanNode,
+      resolveSavedPriorSqlNode: this.resolveSavedPriorSqlNode,
       generateSqlNode: this.generateSqlNode,
       safetyNode: this.safetyNode,
       executeNode: this.executeNode,

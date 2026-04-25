@@ -26,8 +26,13 @@ export interface RagQualityEvaluationInput {
 export interface RagPriorSqlLaneMetricsInput {
   totalCount: number;
   hitCount: number;
+  missCount?: number;
   filteredCount?: number;
   staleCount?: number;
+  ambiguousCount?: number;
+  duplicateCount?: number;
+  safetyRejectedCount?: number;
+  fallbackToGenerationCount?: number;
 }
 
 interface RagQualityEvaluationRecord extends RagQualityEvaluationInput {
@@ -38,8 +43,13 @@ interface RagQualityEvaluationRecord extends RagQualityEvaluationInput {
 interface RagPriorSqlLaneMetricsRecord {
   totalCount: number;
   hitCount: number;
+  missCount: number;
   filteredCount: number;
   staleCount: number;
+  ambiguousCount: number;
+  duplicateCount: number;
+  safetyRejectedCount: number;
+  fallbackToGenerationCount: number;
 }
 
 export interface RagDatasourceOrchestrationSample {
@@ -145,8 +155,13 @@ export interface RagQualityGateReport {
 export interface RagPriorSqlLaneGateReport {
   sampleSize: number;
   priorSqlHitRate: number;
+  priorSqlMissCount: number;
   priorSqlFilteredCount: number;
   priorSqlStaleRate: number;
+  priorSqlAmbiguousCount: number;
+  priorSqlDuplicateCount: number;
+  priorSqlSafetyRejectedCount: number;
+  priorSqlFallbackToGenerationCount: number;
 }
 
 interface GlossarySelectedContextSampleRow {
@@ -639,11 +654,27 @@ export class RagQualityService {
     const hitCount = Math.min(totalCount, this.normalizeCount(input.hitCount));
     const filteredCount = this.normalizeCount(input.filteredCount);
     const staleCount = Math.min(totalCount, this.normalizeCount(input.staleCount));
+    const ambiguousCount = this.normalizeCount(input.ambiguousCount);
+    const duplicateCount = this.normalizeCount(input.duplicateCount);
+    const safetyRejectedCount = this.normalizeCount(input.safetyRejectedCount);
+    const fallbackToGenerationCount = this.normalizeCount(
+      input.fallbackToGenerationCount
+    );
+    const missCount = Math.max(
+      0,
+      this.normalizeCount(input.missCount) ||
+        totalCount - hitCount - filteredCount - staleCount - ambiguousCount
+    );
     return {
       totalCount,
       hitCount,
+      missCount,
       filteredCount,
-      staleCount
+      staleCount,
+      ambiguousCount,
+      duplicateCount,
+      safetyRejectedCount,
+      fallbackToGenerationCount
     };
   }
 
@@ -690,15 +721,31 @@ export class RagQualityService {
         return {
           totalCount: accumulator.totalCount + record.priorSqlLane.totalCount,
           hitCount: accumulator.hitCount + record.priorSqlLane.hitCount,
+          missCount: accumulator.missCount + record.priorSqlLane.missCount,
           filteredCount: accumulator.filteredCount + record.priorSqlLane.filteredCount,
-          staleCount: accumulator.staleCount + record.priorSqlLane.staleCount
+          staleCount: accumulator.staleCount + record.priorSqlLane.staleCount,
+          ambiguousCount:
+            accumulator.ambiguousCount + record.priorSqlLane.ambiguousCount,
+          duplicateCount:
+            accumulator.duplicateCount + record.priorSqlLane.duplicateCount,
+          safetyRejectedCount:
+            accumulator.safetyRejectedCount +
+            record.priorSqlLane.safetyRejectedCount,
+          fallbackToGenerationCount:
+            accumulator.fallbackToGenerationCount +
+            record.priorSqlLane.fallbackToGenerationCount
         };
       },
       {
         totalCount: 0,
         hitCount: 0,
+        missCount: 0,
         filteredCount: 0,
-        staleCount: 0
+        staleCount: 0,
+        ambiguousCount: 0,
+        duplicateCount: 0,
+        safetyRejectedCount: 0,
+        fallbackToGenerationCount: 0
       }
     );
     return {
@@ -707,11 +754,16 @@ export class RagQualityService {
         summary.totalCount === 0
           ? 0
           : Number((summary.hitCount / summary.totalCount).toFixed(6)),
+      priorSqlMissCount: summary.missCount,
       priorSqlFilteredCount: summary.filteredCount,
       priorSqlStaleRate:
         summary.totalCount === 0
           ? 0
-          : Number((summary.staleCount / summary.totalCount).toFixed(6))
+          : Number((summary.staleCount / summary.totalCount).toFixed(6)),
+      priorSqlAmbiguousCount: summary.ambiguousCount,
+      priorSqlDuplicateCount: summary.duplicateCount,
+      priorSqlSafetyRejectedCount: summary.safetyRejectedCount,
+      priorSqlFallbackToGenerationCount: summary.fallbackToGenerationCount
     };
   }
 
