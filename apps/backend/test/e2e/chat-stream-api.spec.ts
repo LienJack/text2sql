@@ -137,6 +137,17 @@ describe("chat stream api (e2e)", () => {
         sequence?: unknown;
         stepId?: unknown;
         lifecycle?: unknown;
+        v2?: {
+          stageArtifact?: {
+            stage?: string;
+            status?: string;
+            metadata?: {
+              taskProfile?: string;
+              reasoningTier?: string;
+              policySource?: string;
+            };
+          };
+        };
       };
       expect(typeof stateData.node).toBe("string");
       expect(["success", "failed", "skipped"]).toContain(stateData.status);
@@ -153,7 +164,44 @@ describe("chat stream api (e2e)", () => {
           stateData.lifecycle
         );
       }
+      if (stateData.v2?.stageArtifact) {
+        expect([
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ]).toContain(stateData.v2.stageArtifact.stage);
+        expect([
+          "success",
+          "failed",
+          "skipped",
+          "degraded",
+          "clarification"
+        ]).toContain(stateData.v2.stageArtifact.status);
+        const stageMetadata = stateData.v2.stageArtifact.metadata;
+        expect(typeof stageMetadata?.taskProfile).toBe("string");
+        expect(typeof stageMetadata?.reasoningTier).toBe("string");
+        expect(typeof stageMetadata?.policySource).toBe("string");
+      }
     }
+
+    expect(
+      stateEvents.some(({ event }) => {
+        const stateData = event.data as {
+          v2?: {
+            stageArtifact?: {
+              stage?: string;
+            };
+          };
+        };
+        return typeof stateData.v2?.stageArtifact?.stage === "string";
+      })
+    ).toBe(true);
 
     const textDeltaEvents = parsedEvents.filter(
       ({ eventType }) => eventType === "text-delta"

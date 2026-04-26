@@ -9,6 +9,7 @@ import type {
 } from "@text2sql/shared-types";
 import type { LlmGatewayStreamEvent } from "../../../llm/llm-gateway.interface";
 import {
+  resolveText2SqlV2StageCatalogEntry,
   resolveText2SqlReasoningStage,
   resolveText2SqlTitle
 } from "../stages/text2sql-stage-catalog";
@@ -116,6 +117,9 @@ export class Text2SqlStreamEventMapper {
     const stepAt =
       input.step.at ?? input.step.endedAt ?? input.step.startedAt ?? new Date().toISOString();
     const v2StageArtifact = this.extractV2StageArtifact(input.step);
+    const v2CatalogEntry = v2StageArtifact
+      ? resolveText2SqlV2StageCatalogEntry(v2StageArtifact.stage)
+      : undefined;
 
     return {
       data: {
@@ -125,8 +129,8 @@ export class Text2SqlStreamEventMapper {
         sequence,
         lifecycle: input.step.lifecycle ?? this.resolveLifecycle(input.step.status),
         detail: input.step.detail ?? "",
-        stage: resolveText2SqlReasoningStage(input.step.node),
-        title: resolveText2SqlTitle(input.step.node),
+        stage: v2CatalogEntry?.reasoningStage ?? resolveText2SqlReasoningStage(input.step.node),
+        title: v2CatalogEntry?.title ?? resolveText2SqlTitle(input.step.node),
         at: stepAt,
         startedAt: input.step.startedAt,
         endedAt: input.step.endedAt,

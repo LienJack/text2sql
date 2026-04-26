@@ -1,4 +1,5 @@
 import type { ReasoningStage } from "@text2sql/shared-types";
+import type { Text2SqlV2StageName } from "@text2sql/shared-types";
 import type { Text2SqlStageName } from "../contracts/text2sql-stage-name";
 
 export interface Text2SqlStageCatalogItem {
@@ -52,23 +53,6 @@ export const TEXT2SQL_STAGE_CATALOG: Record<
   }
 };
 
-export const TEXT2SQL_LANGGRAPH_NODE_STAGE_MAP = {
-  clarify: "plan-intent",
-  "retrieve-knowledge": "retrieve-context",
-  "build-intent-plan": "plan-intent",
-  "build-semantic-query": "plan-intent",
-  "build-physical-plan": "plan-intent",
-  "resolve-saved-prior-sql": "generate-sql",
-  "generate-sql": "generate-sql",
-  "safety-check": "validate-sql",
-  "execute-sql": "execute-sql",
-  "relationship-correction": "generate-sql",
-  "format-answer": "format-answer"
-} as const satisfies Record<string, Text2SqlStageName>;
-
-export type Text2SqlLangGraphNodeName =
-  keyof typeof TEXT2SQL_LANGGRAPH_NODE_STAGE_MAP;
-
 const TEXT2SQL_LANGGRAPH_NODE_REASONING_STAGE_MAP: Record<string, ReasoningStage> = {
   clarify: "analysis",
   "retrieve-knowledge": "analysis",
@@ -95,22 +79,77 @@ const TEXT2SQL_LANGGRAPH_NODE_TITLE_MAP: Record<string, string> = {
   "format-answer": "整理回答"
 };
 
-const hasOwn = (value: object, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key);
-
-export interface Text2SqlNodeStageCatalogEntry {
-  node: string;
-  stageName: Text2SqlStageName;
-  stageTitle: string;
-  reasoningStage: ReasoningStage;
+export interface Text2SqlV2StageCatalogItem {
   title: string;
+  reasoningStage: ReasoningStage;
+  taskProfile: string;
+  defaultReasoningTier: "low" | "medium" | "high";
 }
 
-export const resolveText2SqlStageName = (node: string): Text2SqlStageName => {
-  if (hasOwn(TEXT2SQL_LANGGRAPH_NODE_STAGE_MAP, node)) {
-    return TEXT2SQL_LANGGRAPH_NODE_STAGE_MAP[node as Text2SqlLangGraphNodeName];
+export const TEXT2SQL_V2_STAGE_CATALOG: Record<
+  Text2SqlV2StageName,
+  Text2SqlV2StageCatalogItem
+> = {
+  intake: {
+    title: "理解问题",
+    reasoningStage: "analysis",
+    taskProfile: "intake-fast",
+    defaultReasoningTier: "low"
+  },
+  retrieve: {
+    title: "检索上下文",
+    reasoningStage: "analysis",
+    taskProfile: "retrieval-support",
+    defaultReasoningTier: "low"
+  },
+  "assemble-context": {
+    title: "装配语义上下文",
+    reasoningStage: "analysis",
+    taskProfile: "context-assembly",
+    defaultReasoningTier: "low"
+  },
+  "semantic-plan": {
+    title: "语义规划",
+    reasoningStage: "analysis",
+    taskProfile: "semantic-planning",
+    defaultReasoningTier: "high"
+  },
+  "generate-sql": {
+    title: "生成 SQL",
+    reasoningStage: "generation",
+    taskProfile: "sql-generation",
+    defaultReasoningTier: "high"
+  },
+  validate: {
+    title: "校验 SQL 与策略",
+    reasoningStage: "validation",
+    taskProfile: "sql-validation",
+    defaultReasoningTier: "medium"
+  },
+  correct: {
+    title: "纠正 SQL",
+    reasoningStage: "validation",
+    taskProfile: "sql-correction",
+    defaultReasoningTier: "medium"
+  },
+  execute: {
+    title: "执行查询",
+    reasoningStage: "execution",
+    taskProfile: "sql-execution",
+    defaultReasoningTier: "low"
+  },
+  answer: {
+    title: "整理回答",
+    reasoningStage: "response",
+    taskProfile: "answer-rendering",
+    defaultReasoningTier: "low"
   }
-  return "generic";
+};
+
+export const resolveText2SqlV2StageCatalogEntry = (
+  stage: Text2SqlV2StageName
+): Text2SqlV2StageCatalogItem => {
+  return TEXT2SQL_V2_STAGE_CATALOG[stage];
 };
 
 export const resolveText2SqlReasoningStage = (node: string): ReasoningStage => {
@@ -119,18 +158,4 @@ export const resolveText2SqlReasoningStage = (node: string): ReasoningStage => {
 
 export const resolveText2SqlTitle = (node: string): string => {
   return TEXT2SQL_LANGGRAPH_NODE_TITLE_MAP[node] ?? node;
-};
-
-export const resolveText2SqlNodeStageCatalogEntry = (
-  node: string
-): Text2SqlNodeStageCatalogEntry => {
-  const stageName = resolveText2SqlStageName(node);
-  const stage = TEXT2SQL_STAGE_CATALOG[stageName];
-  return {
-    node,
-    stageName,
-    stageTitle: stage.title,
-    reasoningStage: resolveText2SqlReasoningStage(node),
-    title: resolveText2SqlTitle(node)
-  };
 };

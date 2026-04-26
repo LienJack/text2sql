@@ -5,10 +5,16 @@ import type {
   ContextEnvelope,
   ExecutionTrace,
   ExecutionTraceStep,
-  SqlRun
+  SqlRun,
+  Text2SqlV2StageArtifact,
+  Text2SqlV2StageName
 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import type { LlmGatewayStreamEvent } from "../../../llm/llm-gateway.interface";
+import {
+  ProviderRouterService,
+  type Text2SqlStageTaskProfilePolicy
+} from "../../../llm/provider-router.service";
 import type { SqlTableAccessContext } from "../../../platform/data/query/index";
 import { BuildIntentPlanNode, type IntentPlan } from "../nodes/build-intent-plan.node";
 import {
@@ -36,6 +42,10 @@ import { SqlToolRegistryService } from "../sql/tools/sql-tool-registry.service";
 import type { Text2SqlPreparedRunContext } from "../../text2sql/stages/prepare-run.stage";
 import { LangsmithTraceService } from "../../../observability/langsmith-trace.service";
 import { SqlCorrectionService } from "./sql-correction.service";
+import {
+  createText2SqlV2StageLifecycle,
+  toText2SqlV2FailureSemantic
+} from "./text2sql-v2-artifacts";
 import { Text2SqlV2StateMachine } from "./text2sql-v2-state-machine";
 
 export interface Text2SqlV2StreamOptions {
@@ -71,6 +81,7 @@ export class Text2SqlV2RunnerService {
     private readonly formatAnswerNode: FormatAnswerNode,
     private readonly sqlCorrectionService: SqlCorrectionService,
     private readonly sqlToolRegistry: SqlToolRegistryService,
+    private readonly providerRouter: ProviderRouterService,
     private readonly langsmithTrace: LangsmithTraceService,
     private readonly stateMachine: Text2SqlV2StateMachine
   ) {}
@@ -128,6 +139,116 @@ export class Text2SqlV2RunnerService {
       route,
       requestId: input.requestId
     });
+    const stageLifecycle = createText2SqlV2StageLifecycle();
+
+    const stagePolicyMetadata = (
+      policy: Text2SqlStageTaskProfilePolicy,
+      metadata?: Record<string, unknown>
+    ): Record<string, unknown> => ({
+      taskProfile: policy.taskProfile,
+      reasoningTier: policy.reasoningTier,
+      policySource: policy.policySource,
+      ...(policy.escalationReason
+        ? {
+            escalationReason: policy.escalationReason
+          }
+        : {}),
+      ...(metadata ?? {})
+    });
+
+    const resolveStagePolicy = (
+      stage: Text2SqlV2StageName,
+      inputOptions?: {
+        escalationReason?: string;
+      }
+    ): Text2SqlStageTaskProfilePolicy =>
+      this.providerRouter.resolveText2SqlStageTaskProfilePolicy({
+        stage,
+        modelCatalogId: input.session.modelCatalogId ?? undefined,
+        provider,
+        model,
+        escalationReason: inputOptions?.escalationReason
+      });
+
+    const startStage = (
+      stage: Text2SqlV2StageName,
+      inputOptions?: {
+        escalationReason?: string;
+        metadata?: Record<string, unknown>;
+      }
+    ): Text2SqlV2StageArtifact => {
+      const policy = resolveStagePolicy(stage, inputOptions);
+      return stageLifecycle.startStage({
+        stage,
+        provider: {
+          provider: policy.provider,
+          model: policy.model
+        },
+        metadata: stagePolicyMetadata(policy, inputOptions?.metadata)
+      });
+    };
+
+    const completeStage = (
+      stage: Text2SqlV2StageName,
+      inputOptions?: {
+        status?: Text2SqlV2StageArtifact["status"];
+        escalationReason?: string;
+        metadata?: Record<string, unknown>;
+        warnings?: string[];
+      }
+    ): Text2SqlV2StageArtifact => {
+      const policy = resolveStagePolicy(stage, inputOptions);
+      return stageLifecycle.completeStage({
+        stage,
+        status: inputOptions?.status,
+        provider: {
+          provider: policy.provider,
+          model: policy.model
+        },
+        warnings: inputOptions?.warnings,
+        metadata: stagePolicyMetadata(policy, inputOptions?.metadata)
+      });
+    };
+
+    const failStage = (
+      stage: Text2SqlV2StageName,
+      stepError: unknown,
+      inputOptions?: {
+        escalationReason?: string;
+        metadata?: Record<string, unknown>;
+        failure?: Partial<NonNullable<Text2SqlV2StageArtifact["failure"]>>;
+      }
+    ): Text2SqlV2StageArtifact => {
+      const policy = resolveStagePolicy(stage, inputOptions);
+      return stageLifecycle.completeStage({
+        stage,
+        status: "failed",
+        provider: {
+          provider: policy.provider,
+          model: policy.model
+        },
+        failure: toText2SqlV2FailureSemantic(stepError, inputOptions?.failure),
+        metadata: stagePolicyMetadata(policy, inputOptions?.metadata)
+      });
+    };
+
+    const skipStage = (
+      stage: Text2SqlV2StageName,
+      inputOptions?: {
+        metadata?: Record<string, unknown>;
+        warnings?: string[];
+      }
+    ): Text2SqlV2StageArtifact => {
+      return completeStage(stage, {
+        status: "skipped",
+        warnings: inputOptions?.warnings,
+        metadata: inputOptions?.metadata
+      });
+    };
+
+    const getStageArtifact = (
+      stage: Text2SqlV2StageName
+    ): Text2SqlV2StageArtifact | undefined => stageLifecycle.getStage(stage);
 
     const recordStep = async (step: Omit<ExecutionTraceStep, "sequence" | "stepId" | "lifecycle">) => {
       const sequence = trace.steps.length + 1;
@@ -157,15 +278,29 @@ export class Text2SqlV2RunnerService {
 
     const runStep = async <T>(inputStep: {
       node: string;
+      stage?: Text2SqlV2StageName;
       detail?: string;
       inputSummary?: Record<string, unknown>;
       outputSummary?: Record<string, unknown>;
+      escalationReason?: string;
+      onSuccess?: (result: T) => void;
       onRun: () => Promise<T>;
     }): Promise<T> => {
       const stepStartedAt = new Date().toISOString();
+      if (inputStep.stage) {
+        startStage(inputStep.stage, {
+          escalationReason: inputStep.escalationReason
+        });
+      }
       try {
         const result = await inputStep.onRun();
+        inputStep.onSuccess?.(result);
         const stepEndedAt = new Date().toISOString();
+        if (inputStep.stage) {
+          completeStage(inputStep.stage, {
+            escalationReason: inputStep.escalationReason
+          });
+        }
         await recordStep({
           node: inputStep.node,
           status: "success",
@@ -177,18 +312,25 @@ export class Text2SqlV2RunnerService {
           inputSummary: this.stringifyStepSummary(
             inputStep.node,
             "success",
-            inputStep.inputSummary
+            inputStep.inputSummary,
+            inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
           ),
           outputSummary: this.stringifyStepSummary(
             inputStep.node,
             "success",
-            inputStep.outputSummary
+            inputStep.outputSummary,
+            inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
           )
         });
         return result;
       } catch (stepError) {
         const message = this.toErrorMessage(stepError);
         const stepEndedAt = new Date().toISOString();
+        if (inputStep.stage) {
+          failStage(inputStep.stage, stepError, {
+            escalationReason: inputStep.escalationReason
+          });
+        }
         await recordStep({
           node: inputStep.node,
           status: "failed",
@@ -200,14 +342,16 @@ export class Text2SqlV2RunnerService {
           inputSummary: this.stringifyStepSummary(
             inputStep.node,
             "failed",
-            inputStep.inputSummary
+            inputStep.inputSummary,
+            inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
           ),
           outputSummary: this.stringifyStepSummary(
             inputStep.node,
             "failed",
             {
               error: message
-            }
+            },
+            inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
           ),
           errorSummary: message
         });
@@ -217,6 +361,7 @@ export class Text2SqlV2RunnerService {
 
     const appendSkippedStep = async (inputStep: {
       node: string;
+      stage?: Text2SqlV2StageName;
       detail?: string;
       inputSummary?: Record<string, unknown>;
       outputSummary?: Record<string, unknown>;
@@ -233,12 +378,14 @@ export class Text2SqlV2RunnerService {
         inputSummary: this.stringifyStepSummary(
           inputStep.node,
           "skipped",
-          inputStep.inputSummary
+          inputStep.inputSummary,
+          inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
         ),
         outputSummary: this.stringifyStepSummary(
           inputStep.node,
           "skipped",
-          inputStep.outputSummary
+          inputStep.outputSummary,
+          inputStep.stage ? getStageArtifact(inputStep.stage) : undefined
         )
       });
     };
@@ -272,7 +419,7 @@ export class Text2SqlV2RunnerService {
         llmRaw,
         createdAt: startedAt
       };
-      return this.attachV2Artifact(run);
+      return this.attachV2Artifact(run, stageLifecycle.listStages());
     };
 
     const finalizeAndTrace = (status: SqlRun["status"]): SqlRun => {
@@ -301,43 +448,94 @@ export class Text2SqlV2RunnerService {
         input.question,
         input.contextEnvelope
       );
+      const clarifyStepStatus: ExecutionTraceStep["status"] =
+        clarificationDecisionRaw.shouldClarify
+          ? "success"
+          : clarificationDecisionRaw.bypassed
+            ? "skipped"
+            : "success";
       trace.clarificationDecision = this.toClarificationDecisionEvidence(
         clarificationDecisionRaw
       );
       clarification = clarificationDecisionRaw.shouldClarify
         ? this.toClarificationPrompt(clarificationDecisionRaw)
         : undefined;
+      startStage("intake", {
+        metadata: {
+          decisionSource: clarificationDecisionRaw.decisionSource,
+          triggerPath: clarificationDecisionRaw.triggerPath
+        }
+      });
+      const intakeStage = completeStage("intake", {
+        status: clarificationDecisionRaw.shouldClarify ? "clarification" : "success",
+        warnings: clarificationDecisionRaw.bypassed ? ["clarify_stage_bypassed"] : undefined,
+        metadata: {
+          decision: clarificationDecisionRaw.shouldClarify ? "clarify" : "continue",
+          bypassed: clarificationDecisionRaw.bypassed
+        }
+      });
 
       await recordStep({
         node: "clarify",
-        status: clarificationDecisionRaw.shouldClarify
-          ? "success"
-          : clarificationDecisionRaw.bypassed
-            ? "skipped"
-            : "success",
+        status: clarifyStepStatus,
         detail: clarificationDecisionRaw.shouldClarify
           ? "需要补充澄清信息"
           : clarificationDecisionRaw.bypassed
             ? "澄清阶段按意图旁路"
             : "问题无需澄清",
         at: new Date().toISOString(),
-        inputSummary: this.stringifyStepSummary("clarify", "success", {
-          questionLength: input.question.length,
-          hasContextEnvelope: Boolean(input.contextEnvelope)
-        }),
-        outputSummary: this.stringifyStepSummary("clarify", "success", {
-          clarificationDecision: trace.clarificationDecision,
-          clarification: clarification ?? null
-        })
+        inputSummary: this.stringifyStepSummary(
+          "clarify",
+          clarifyStepStatus,
+          {
+            questionLength: input.question.length,
+            hasContextEnvelope: Boolean(input.contextEnvelope)
+          },
+          intakeStage
+        ),
+        outputSummary: this.stringifyStepSummary(
+          "clarify",
+          clarifyStepStatus,
+          {
+            clarificationDecision: trace.clarificationDecision,
+            clarification: clarification ?? null
+          },
+          intakeStage
+        )
       });
 
       if (clarification) {
         answer = clarification.question;
+        skipStage("retrieve", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("assemble-context", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("semantic-plan", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("generate-sql", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("validate", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("correct", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("execute", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
+        skipStage("answer", {
+          warnings: ["clarification_terminated_before_stage_execution"]
+        });
         return finalizeAndTrace("clarification");
       }
 
       retrieval = await runStep({
         node: "retrieve-knowledge",
+        stage: "retrieve",
         detail: "执行 RAG 检索与重排",
         inputSummary: {
           datasourceId: input.session.datasource,
@@ -370,11 +568,13 @@ export class Text2SqlV2RunnerService {
           candidateCount: retrieval.retrievalBundle?.candidates.length ?? 0,
           retrievalDegradeReasons: retrieval.retrievalBundle?.degrade_reasons ?? [],
           riskTags: retrieval.retrievalBundle?.risk_tags ?? []
-        }
+        },
+        getStageArtifact("retrieve")
       );
 
       intentPlan = await runStep({
         node: "build-intent-plan",
+        stage: "assemble-context",
         detail: "生成意图规划",
         inputSummary: {
           retrievalStatus: retrieval.status,
@@ -402,11 +602,13 @@ export class Text2SqlV2RunnerService {
           riskTags: intentPlan.riskTags ?? [],
           planningWarnings: intentPlan.planningWarnings ?? [],
           clarificationDecision: trace.clarificationDecision
-        }
+        },
+        getStageArtifact("assemble-context")
       );
 
       semanticPlan = await runStep({
         node: "build-semantic-query",
+        stage: "semantic-plan",
         detail: "生成语义计划",
         inputSummary: {
           intent: intentPlan.intent,
@@ -433,11 +635,13 @@ export class Text2SqlV2RunnerService {
           riskTags: semanticPlan.riskTags,
           strictMode: semanticPlan.strictMode,
           strictModeReasons: semanticPlan.strictModeReasons ?? []
-        }
+        },
+        getStageArtifact("semantic-plan")
       );
 
       physicalPlan = await runStep({
         node: "build-physical-plan",
+        stage: "semantic-plan",
         detail: "生成物理执行计划",
         inputSummary: {
           semanticStatus: semanticPlan.status,
@@ -461,11 +665,13 @@ export class Text2SqlV2RunnerService {
           lockStatus: physicalPlan.lockStatus,
           cacheStatus: physicalPlan.cacheStatus,
           cacheReason: physicalPlan.cacheReason
-        }
+        },
+        getStageArtifact("semantic-plan")
       );
 
       savedPriorSql = await runStep({
         node: "resolve-saved-prior-sql",
+        stage: "generate-sql",
         detail: "判定是否复用已保存 SQL",
         inputSummary: {
           candidateCount: retrieval?.retrievalBundle?.candidates.length ?? 0
@@ -486,7 +692,8 @@ export class Text2SqlV2RunnerService {
           reasonCodes: savedPriorSql.reasonCodes,
           selectedChunkId: savedPriorSql.selectedChunkId,
           selectedViewId: savedPriorSql.selectedViewId
-        }
+        },
+        getStageArtifact("generate-sql")
       );
 
       const runGenerateSql = async (cause: "initial" | "shortcut-fallback" | "correction") => {
@@ -502,7 +709,12 @@ export class Text2SqlV2RunnerService {
           : undefined;
         const draft = await runStep({
           node: "generate-sql",
+          stage: "generate-sql",
           detail: stepDetailMap[cause],
+          escalationReason:
+            cause === "correction"
+              ? "correction_retry_after_execution_error"
+              : undefined,
           inputSummary: {
             cause,
             retrievalStatus: retrieval?.status,
@@ -514,6 +726,17 @@ export class Text2SqlV2RunnerService {
             strategy: physicalPlan?.strategy
           },
           outputSummary: {},
+          onSuccess: (generated) => {
+            provider = generated.provider;
+            model = generated.model;
+            llmRaw = {
+              provider: generated.provider,
+              model: generated.model,
+              rawText: generated.rawText,
+              createdAt: new Date().toISOString()
+            };
+            trace.promptTemplate = generated.promptTemplate;
+          },
           onRun: () =>
             this.generateSqlNode.run(input.question, input.datasource.type, input.session.modelCatalogId ?? undefined, {
               stream: streamMode,
@@ -532,16 +755,15 @@ export class Text2SqlV2RunnerService {
               allowedTables: input.sqlAccessContext?.allowedTables
             })
         });
-
-        provider = draft.provider;
-        model = draft.model;
-        llmRaw = {
-          provider: draft.provider,
-          model: draft.model,
-          rawText: draft.rawText,
-          createdAt: new Date().toISOString()
-        };
-        trace.promptTemplate = draft.promptTemplate;
+        completeStage("generate-sql", {
+          escalationReason:
+            cause === "correction"
+              ? "correction_retry_after_execution_error"
+              : undefined,
+          metadata: {
+            cause
+          }
+        });
 
         trace.steps[trace.steps.length - 1]!.outputSummary = this.stringifyStepSummary(
           "generate-sql",
@@ -556,7 +778,8 @@ export class Text2SqlV2RunnerService {
             coverage: draft.coverage,
             semanticContextPack: draft.semanticContextPack,
             semanticPlan: draft.semanticPlan
-          }
+          },
+          getStageArtifact("generate-sql")
         );
 
         return draft;
@@ -571,6 +794,7 @@ export class Text2SqlV2RunnerService {
         explanation = savedPriorSql.explanation;
         await appendSkippedStep({
           node: "generate-sql",
+          stage: "generate-sql",
           detail: "命中 saved prior SQL shortcut，跳过模型生成",
           outputSummary: {
             status: "shortcut_hit",
@@ -591,6 +815,7 @@ export class Text2SqlV2RunnerService {
       const runSafetyCheck = async (reason: string) => {
         const decision = await runStep({
           node: "safety-check",
+          stage: "validate",
           detail: reason,
           inputSummary: {
             sqlPreview: sql?.slice(0, 180),
@@ -611,6 +836,27 @@ export class Text2SqlV2RunnerService {
 
         const step = trace.steps[trace.steps.length - 1];
         if (step) {
+          if (!decision.allowed) {
+            failStage("validate", decision.reason ?? "validation failed", {
+              failure: {
+                code: "VALIDATION_REJECTED",
+                category: "governance",
+                terminal: true,
+                correctable: false
+              },
+              metadata: {
+                mode: decision.mode,
+                riskLevel: decision.riskLevel
+              }
+            });
+          } else {
+            completeStage("validate", {
+              metadata: {
+                mode: decision.mode,
+                riskLevel: decision.riskLevel
+              }
+            });
+          }
           step.outputSummary = this.stringifyStepSummary(
             "safety-check",
             decision.allowed ? "success" : "failed",
@@ -620,7 +866,8 @@ export class Text2SqlV2RunnerService {
               riskLevel: decision.riskLevel,
               riskTags: decision.riskTags,
               reason: decision.reason
-            }
+            },
+            getStageArtifact("validate")
           );
           if (!decision.allowed) {
             step.status = "failed";
@@ -650,6 +897,7 @@ export class Text2SqlV2RunnerService {
         try {
           const executionResult = await runStep({
             node: "execute-sql",
+            stage: "execute",
             detail: "执行 SQL",
             inputSummary: {
               sqlPreview: sql?.slice(0, 180),
@@ -674,7 +922,8 @@ export class Text2SqlV2RunnerService {
             {
               rowCount: rows.length,
               columnCount: columns.length
-            }
+            },
+            getStageArtifact("execute")
           );
           break;
         } catch (executeError) {
@@ -690,7 +939,9 @@ export class Text2SqlV2RunnerService {
 
           await runStep({
             node: "relationship-correction",
+            stage: "correct",
             detail: "执行错误可修正，触发 correction 迭代",
+            escalationReason: "execution_error_correction_retry",
             inputSummary: {
               retryCount: correctionAttempt,
               reason: correctionDecision.reason
@@ -718,6 +969,7 @@ export class Text2SqlV2RunnerService {
 
       answer = await runStep({
         node: "format-answer",
+        stage: "answer",
         detail: "整理自然语言回答",
         inputSummary: {
           rowCount: rows?.length ?? 0,
@@ -733,7 +985,8 @@ export class Text2SqlV2RunnerService {
         "success",
         {
           answerPreview: answer.slice(0, 200)
-        }
+        },
+        getStageArtifact("answer")
       );
 
       return finalizeAndTrace("executionResult");
@@ -743,8 +996,13 @@ export class Text2SqlV2RunnerService {
     }
   }
 
-  private attachV2Artifact(run: SqlRun): SqlRun {
-    const v2Artifact = this.stateMachine.buildRunArtifact(run);
+  private attachV2Artifact(
+    run: SqlRun,
+    stageArtifacts: Text2SqlV2StageArtifact[]
+  ): SqlRun {
+    const v2Artifact = this.stateMachine.buildRunArtifact(run, {
+      stageArtifacts
+    });
     return {
       ...run,
       trace: {
@@ -797,68 +1055,27 @@ export class Text2SqlV2RunnerService {
   private stringifyStepSummary(
     node: string,
     status: "success" | "failed" | "skipped",
-    payload?: Record<string, unknown>
+    payload?: Record<string, unknown>,
+    stageArtifact?: Text2SqlV2StageArtifact
   ): string | undefined {
     if (!payload) {
       return undefined;
     }
-    const stage = this.resolveV2Stage(node);
     const summary: Record<string, unknown> = {
       ...payload,
-      v2: {
-        stageArtifact: {
-          stage,
-          status:
-            status === "success"
-              ? "success"
-              : status === "failed"
-                ? "failed"
-                : "skipped"
-        }
-      }
+      ...(stageArtifact
+        ? {
+            v2: {
+              stageArtifact
+            }
+          }
+        : {})
     };
     try {
       return JSON.stringify(summary);
     } catch {
       return undefined;
     }
-  }
-
-  private resolveV2Stage(node: string):
-    | "intake"
-    | "retrieve"
-    | "assemble-context"
-    | "semantic-plan"
-    | "generate-sql"
-    | "validate"
-    | "correct"
-    | "execute"
-    | "answer" {
-    if (node === "clarify") {
-      return "intake";
-    }
-    if (node === "retrieve-knowledge") {
-      return "retrieve";
-    }
-    if (node === "build-intent-plan") {
-      return "assemble-context";
-    }
-    if (node === "build-semantic-query" || node === "build-physical-plan") {
-      return "semantic-plan";
-    }
-    if (node === "generate-sql" || node === "resolve-saved-prior-sql") {
-      return "generate-sql";
-    }
-    if (node === "safety-check") {
-      return "validate";
-    }
-    if (node === "relationship-correction") {
-      return "correct";
-    }
-    if (node === "execute-sql") {
-      return "execute";
-    }
-    return "answer";
   }
 
   private withContextEvidence(

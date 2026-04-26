@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { Text2SqlV2StageName } from "@text2sql/shared-types";
 import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { LlmGatewayService } from "./llm-gateway.service";
@@ -46,6 +47,68 @@ export interface RerankCandidatesResponse {
   results: RerankCandidateResult[];
   metadata: RerankExecutionMetadata;
 }
+
+export type Text2SqlReasoningTier = "low" | "medium" | "high";
+
+export interface Text2SqlStageTaskProfilePolicy {
+  stage: Text2SqlV2StageName;
+  taskProfile: string;
+  reasoningTier: Text2SqlReasoningTier;
+  provider: string;
+  model: string;
+  policySource:
+    | "session_model_catalog_binding"
+    | "session_model_binding"
+    | "router_default_binding";
+  escalationReason?: string;
+}
+
+interface StageTaskProfileRule {
+  taskProfile: string;
+  reasoningTier: Text2SqlReasoningTier;
+}
+
+const DEFAULT_TEXT2SQL_STAGE_POLICY_MATRIX: Record<
+  Text2SqlV2StageName,
+  StageTaskProfileRule
+> = {
+  intake: {
+    taskProfile: "intake-fast",
+    reasoningTier: "low"
+  },
+  retrieve: {
+    taskProfile: "retrieval-support",
+    reasoningTier: "low"
+  },
+  "assemble-context": {
+    taskProfile: "context-assembly",
+    reasoningTier: "low"
+  },
+  "semantic-plan": {
+    taskProfile: "semantic-planning",
+    reasoningTier: "high"
+  },
+  "generate-sql": {
+    taskProfile: "sql-generation",
+    reasoningTier: "high"
+  },
+  validate: {
+    taskProfile: "sql-validation",
+    reasoningTier: "medium"
+  },
+  correct: {
+    taskProfile: "sql-correction",
+    reasoningTier: "medium"
+  },
+  execute: {
+    taskProfile: "sql-execution",
+    reasoningTier: "low"
+  },
+  answer: {
+    taskProfile: "answer-rendering",
+    reasoningTier: "low"
+  }
+};
 
 @Injectable()
 export class ProviderRouterService {
@@ -193,6 +256,37 @@ export class ProviderRouterService {
     };
   }
 
+  resolveText2SqlStageTaskProfilePolicy(input: {
+    stage: Text2SqlV2StageName;
+    modelCatalogId?: string;
+    provider?: string;
+    model?: string;
+    escalationReason?: string;
+  }): Text2SqlStageTaskProfilePolicy {
+    const stageRule = DEFAULT_TEXT2SQL_STAGE_POLICY_MATRIX[input.stage];
+    const provider = this.normalizeProviderModel(input.provider, this.config.llmProvider);
+    const model = this.normalizeProviderModel(input.model, this.config.llmModel);
+    const policySource = input.modelCatalogId
+      ? "session_model_catalog_binding"
+      : input.provider || input.model
+        ? "session_model_binding"
+        : "router_default_binding";
+
+    return {
+      stage: input.stage,
+      taskProfile: stageRule.taskProfile,
+      reasoningTier: this.resolveReasoningTier(stageRule.reasoningTier, input.escalationReason),
+      provider,
+      model,
+      policySource,
+      ...(input.escalationReason
+        ? {
+            escalationReason: input.escalationReason
+          }
+        : {})
+    };
+  }
+
   private async resolveRuntime(
     modelCatalogId?: string
   ): Promise<{
@@ -292,6 +386,30 @@ export class ProviderRouterService {
     } catch {
       return [];
     }
+  }
+
+  private normalizeProviderModel(
+    value: string | undefined,
+    fallback: string | undefined
+  ): string {
+    const normalized = value?.trim() || fallback?.trim();
+    return normalized && normalized.length > 0 ? normalized : "unknown";
+  }
+
+  private resolveReasoningTier(
+    baseline: Text2SqlReasoningTier,
+    escalationReason?: string
+  ): Text2SqlReasoningTier {
+    if (!escalationReason) {
+      return baseline;
+    }
+    if (baseline === "high") {
+      return "high";
+    }
+    if (baseline === "medium") {
+      return "high";
+    }
+    return "medium";
   }
 
   private toRerankResult(row: unknown): RerankCandidateResult | undefined {

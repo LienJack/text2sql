@@ -16,6 +16,35 @@ const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
     runId: "run-v2-runtime",
     provider: "volcengine",
     retryCount: 0,
+    v2: {
+      version: "v2",
+      stageOrder: [
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ],
+      stages: [
+        { stage: "intake", status: "success" },
+        { stage: "retrieve", status: "success" },
+        { stage: "assemble-context", status: "success" },
+        { stage: "semantic-plan", status: "success" },
+        {
+          stage: "generate-sql",
+          status: "success",
+          provider: { provider: "volcengine", model: "mock-model" }
+        },
+        { stage: "validate", status: "success" },
+        { stage: "correct", status: "skipped" },
+        { stage: "execute", status: "success" },
+        { stage: "answer", status: "success" }
+      ]
+    },
     steps: [
       {
         node: "clarify",
@@ -99,6 +128,17 @@ describe("text2sql v2 runtime artifacts", () => {
       trace: {
         ...createBaseRun().trace,
         retryCount: 1,
+        v2: {
+          ...(createBaseRun().trace.v2 ?? {
+            version: "v2",
+            stageOrder: [],
+            stages: []
+          }),
+          stages:
+            createBaseRun().trace.v2?.stages.map((stage) =>
+              stage.stage === "correct" ? { ...stage, status: "success" } : stage
+            ) ?? []
+        },
         steps: [
           ...createBaseRun().trace.steps,
           {
@@ -122,6 +162,29 @@ describe("text2sql v2 runtime artifacts", () => {
       trace: {
         ...createBaseRun().trace,
         retryCount: 2,
+        v2: {
+          ...(createBaseRun().trace.v2 ?? {
+            version: "v2",
+            stageOrder: [],
+            stages: []
+          }),
+          stages:
+            createBaseRun().trace.v2?.stages.map((stage) =>
+              stage.stage === "correct"
+                ? {
+                    ...stage,
+                    status: "failed",
+                    failure: {
+                      code: "CORRECT_FAILED",
+                      message: "unknown column foo",
+                      category: "validation",
+                      terminal: true,
+                      correctable: true
+                    }
+                  }
+                : stage
+            ) ?? []
+        },
         steps: [
           ...createBaseRun().trace.steps,
           {
@@ -148,6 +211,21 @@ describe("text2sql v2 runtime artifacts", () => {
       status: "clarification",
       trace: {
         ...createBaseRun().trace,
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [{ stage: "intake", status: "clarification" }]
+        },
         steps: [
           {
             node: "clarify",
@@ -160,6 +238,6 @@ describe("text2sql v2 runtime artifacts", () => {
 
     const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
     expect(artifact.stages.find((stage) => stage.stage === "intake")?.status).toBe("clarification");
-    expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("clarification");
+    expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("skipped");
   });
 });

@@ -132,6 +132,24 @@ describe("Text2SqlV2RunnerService", () => {
         getToolsForDatasource: jest.fn(() => ({}))
       } as never,
       {
+        resolveText2SqlStageTaskProfilePolicy: jest.fn((input: { stage: string }) => ({
+          stage: input.stage,
+          taskProfile:
+            input.stage === "semantic-plan"
+              ? "semantic-planning"
+              : input.stage === "generate-sql"
+                ? "sql-generation"
+                : "intake-fast",
+          reasoningTier:
+            input.stage === "semantic-plan" || input.stage === "generate-sql"
+              ? "high"
+              : "low",
+          provider: "volcengine",
+          model: "mock-model",
+          policySource: "session_model_binding"
+        }))
+      } as never,
+      {
         startRoot: jest.fn(() => ({})),
         recordSpan: jest.fn(),
         endRoot: jest.fn()
@@ -180,5 +198,17 @@ describe("Text2SqlV2RunnerService", () => {
     expect(run.trace.v2?.stages.map((item) => item.stage)).toEqual(
       run.trace.v2?.stageOrder
     );
+    const generateSqlStage = run.trace.v2?.stages.find(
+      (item) => item.stage === "generate-sql"
+    );
+    expect(generateSqlStage?.provider).toEqual({
+      provider: "volcengine",
+      model: "mock-model"
+    });
+    expect(generateSqlStage?.metadata).toMatchObject({
+      taskProfile: "sql-generation",
+      reasoningTier: "high",
+      policySource: "session_model_binding"
+    });
   });
 });

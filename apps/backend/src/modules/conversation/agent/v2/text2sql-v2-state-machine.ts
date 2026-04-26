@@ -13,159 +13,145 @@ import type {
 } from "@text2sql/shared-types";
 import { TEXT2SQL_V2_STAGE_ORDER } from "./text2sql-v2.types";
 
-const STAGE_NODE_MAP: Record<Text2SqlV2StageName, string[]> = {
-  intake: ["clarify"],
-  retrieve: ["retrieve-knowledge"],
-  "assemble-context": ["build-intent-plan"],
-  "semantic-plan": ["build-semantic-query", "build-physical-plan"],
-  "generate-sql": ["resolve-saved-prior-sql", "generate-sql"],
-  validate: ["safety-check"],
-  correct: ["relationship-correction"],
-  execute: ["execute-sql"],
-  answer: ["format-answer"]
-};
+interface BuildRunArtifactOptions {
+  stageArtifacts?: Text2SqlV2StageArtifact[];
+  contextPack?: SemanticContextPackV1;
+  semanticPlan?: SemanticPlanV1;
+  sqlGeneration?: SqlGenerationArtifactV1;
+  sqlValidation?: SqlValidationArtifactV1;
+}
 
 @Injectable()
 export class Text2SqlV2StateMachine {
-  buildRunArtifact(run: SqlRun): Text2SqlV2RunArtifact {
-    const stageArtifacts = TEXT2SQL_V2_STAGE_ORDER.map((stage) =>
-      this.buildStageArtifact(stage, run)
-    );
+  buildRunArtifact(
+    run: SqlRun,
+    options?: BuildRunArtifactOptions
+  ): Text2SqlV2RunArtifact {
+    const stageArtifacts = this.resolveStageArtifacts(run, options?.stageArtifacts);
 
     return {
       version: "v2",
       stageOrder: [...TEXT2SQL_V2_STAGE_ORDER],
       stages: stageArtifacts,
-      contextPack: this.buildContextPack(run),
-      semanticPlan: this.buildSemanticPlan(run),
-      sqlGeneration: this.buildSqlGenerationArtifact(run),
-      sqlValidation: this.buildSqlValidationArtifact(run)
+      contextPack: options?.contextPack ?? this.buildContextPack(run),
+      semanticPlan: options?.semanticPlan ?? this.buildSemanticPlan(run),
+      sqlGeneration: options?.sqlGeneration ?? this.buildSqlGenerationArtifact(run),
+      sqlValidation: options?.sqlValidation ?? this.buildSqlValidationArtifact(run)
     };
   }
 
-  private buildStageArtifact(
-    stage: Text2SqlV2StageName,
-    run: SqlRun
-  ): Text2SqlV2StageArtifact {
-    const steps = this.selectStageSteps(stage, run.trace.steps ?? []);
-    if (steps.length === 0) {
-      if (stage === "answer" && run.status === "clarification") {
-        return {
-          stage,
-          status: "clarification",
-          warnings: ["clarification_terminated_before_answer_stage"]
-        };
+  private resolveStageArtifacts(
+    run: SqlRun,
+    stageArtifacts: Text2SqlV2StageArtifact[] | undefined
+  ): Text2SqlV2StageArtifact[] {
+    const explicitStages = stageArtifacts?.length
+      ? stageArtifacts
+      : run.trace.v2?.stages?.length
+        ? run.trace.v2.stages
+        : this.readStageArtifactsFromTraceSteps(run.trace.steps ?? []);
+    const byStage = new Map<Text2SqlV2StageName, Text2SqlV2StageArtifact>();
+
+    for (const stage of explicitStages) {
+      if (!this.isStageName(stage.stage)) {
+        continue;
+      }
+      byStage.set(stage.stage, this.normalizeStageArtifact(stage));
+    }
+
+    if (run.status === "clarification" && !byStage.has("intake")) {
+      byStage.set("intake", {
+        stage: "intake",
+        status: "clarification",
+        warnings: ["clarification_terminated_before_runtime_completion"]
+      });
+    }
+
+    return TEXT2SQL_V2_STAGE_ORDER.map((stage) => {
+      const existing = byStage.get(stage);
+      if (existing) {
+        if (run.status === "clarification" && stage !== "intake" && existing.status === "clarification") {
+          return {
+            ...existing,
+            status: "skipped"
+          };
+        }
+        return existing;
       }
       return {
         stage,
-        status: "skipped"
+        status: stage === "intake" && run.status === "clarification" ? "clarification" : "skipped"
       };
-    }
+    });
+  }
 
-    const startedAt = steps.find((step) => step.startedAt)?.startedAt ?? steps[0]?.at;
-    const endedAt = [...steps].reverse().find((step) => step.endedAt)?.endedAt ?? steps.at(-1)?.at;
-    const failureStep = steps.find((step) => step.status === "failed");
-
-    const status: Text2SqlV2StageArtifact["status"] =
-      stage === "intake" && run.status === "clarification"
-        ? "clarification"
-        : failureStep
-          ? "failed"
-          : steps.every((step) => step.status === "skipped")
-            ? "skipped"
-            : "success";
-
+  private normalizeStageArtifact(stage: Text2SqlV2StageArtifact): Text2SqlV2StageArtifact {
+    const startedAt = this.readTimestamp(stage.startedAt);
+    const endedAt = this.readTimestamp(stage.endedAt);
     return {
-      stage,
-      status,
+      ...stage,
       startedAt,
       endedAt,
-      durationMs: this.resolveDurationMs(startedAt, endedAt),
-      warnings: this.resolveWarnings(steps),
-      failure: failureStep
-        ? this.toFailureSemantic(stage, run, failureStep)
-        : undefined,
-      provider:
-        stage === "generate-sql"
-          ? {
-              provider: run.provider,
-              model: run.model
-            }
-          : undefined
+      durationMs:
+        stage.durationMs ??
+        this.resolveDurationMs(startedAt, endedAt),
+      warnings: this.uniqueStrings(stage.warnings),
+      evidenceIds: this.uniqueStrings(stage.evidenceIds),
+      metadata: stage.metadata ? { ...stage.metadata } : undefined,
+      provider: stage.provider ? { ...stage.provider } : undefined,
+      failure: stage.failure ? { ...stage.failure } : undefined
     };
   }
 
-  private selectStageSteps(
-    stage: Text2SqlV2StageName,
+  private readStageArtifactsFromTraceSteps(
     steps: ExecutionTraceStep[]
-  ): ExecutionTraceStep[] {
-    const nodes = STAGE_NODE_MAP[stage];
-    return steps.filter((step) => nodes.includes(step.node));
+  ): Text2SqlV2StageArtifact[] {
+    const byStage = new Map<Text2SqlV2StageName, Text2SqlV2StageArtifact>();
+    for (const step of steps) {
+      const candidates = [step.outputSummary, step.inputSummary]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+      for (const payload of candidates) {
+        const parsed = this.safeParseJson(payload);
+        if (!this.isRecord(parsed)) {
+          continue;
+        }
+        const v2 = parsed.v2;
+        if (!this.isRecord(v2) || !this.isRecord(v2.stageArtifact)) {
+          continue;
+        }
+        const stageArtifact = this.toStageArtifact(v2.stageArtifact);
+        if (!stageArtifact) {
+          continue;
+        }
+        byStage.set(stageArtifact.stage, stageArtifact);
+        break;
+      }
+    }
+    return TEXT2SQL_V2_STAGE_ORDER.flatMap((stage) => {
+      const artifact = byStage.get(stage);
+      return artifact ? [artifact] : [];
+    });
   }
 
-  private resolveDurationMs(startedAt?: string, endedAt?: string): number | undefined {
-    if (!startedAt || !endedAt) {
+  private toStageArtifact(
+    payload: Record<string, unknown>
+  ): Text2SqlV2StageArtifact | undefined {
+    const stage = payload.stage;
+    const status = payload.status;
+    if (!this.isStageName(stage) || !this.isStageStatus(status)) {
       return undefined;
     }
-    const start = Date.parse(startedAt);
-    const end = Date.parse(endedAt);
-    if (Number.isNaN(start) || Number.isNaN(end)) {
-      return undefined;
-    }
-    return Math.max(0, end - start);
-  }
-
-  private resolveWarnings(steps: ExecutionTraceStep[]): string[] | undefined {
-    const warnings = steps
-      .map((step) => step.detail)
-      .filter((detail): detail is string => Boolean(detail))
-      .filter((detail) => /degrad|fallback|timeout|warn|降级|超时/i.test(detail));
-    return warnings.length > 0 ? Array.from(new Set(warnings)) : undefined;
-  }
-
-  private toFailureSemantic(
-    stage: Text2SqlV2StageName,
-    run: SqlRun,
-    step: ExecutionTraceStep
-  ): Text2SqlV2FailureSemantic {
-    return {
-      code: `${stage.toUpperCase().replace(/-/g, "_")}_FAILED`,
-      message: step.errorSummary ?? step.detail ?? run.error ?? `${stage} failed`,
-      category: this.resolveFailureCategory(stage),
-      terminal: this.isTerminalFailure(stage, run),
-      correctable: stage === "validate" || stage === "correct"
-    };
-  }
-
-  private resolveFailureCategory(
-    stage: Text2SqlV2StageName
-  ): Text2SqlV2FailureSemantic["category"] {
-    if (stage === "intake") {
-      return "intake";
-    }
-    if (stage === "retrieve") {
-      return "retrieval";
-    }
-    if (stage === "assemble-context" || stage === "semantic-plan") {
-      return "planning";
-    }
-    if (stage === "generate-sql") {
-      return "generation";
-    }
-    if (stage === "validate" || stage === "correct") {
-      return "validation";
-    }
-    if (stage === "execute" || stage === "answer") {
-      return "execution";
-    }
-    return "unknown";
-  }
-
-  private isTerminalFailure(stage: Text2SqlV2StageName, run: SqlRun): boolean {
-    if (run.status === "failed" || run.status === "rejected") {
-      return true;
-    }
-    return stage === "execute";
+    return this.normalizeStageArtifact({
+      stage,
+      status,
+      startedAt: this.readTimestamp(payload.startedAt),
+      endedAt: this.readTimestamp(payload.endedAt),
+      durationMs: this.readNumber(payload.durationMs),
+      warnings: this.readStringArray(payload.warnings),
+      evidenceIds: this.readStringArray(payload.evidenceIds),
+      provider: this.readProviderMetadata(payload.provider),
+      failure: this.readFailureSemantic(payload.failure),
+      metadata: this.readRecord(payload.metadata)
+    });
   }
 
   private buildContextPack(run: SqlRun): SemanticContextPackV1 {
@@ -337,12 +323,29 @@ export class Text2SqlV2StateMachine {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 
+  private readRecord(value: unknown): Record<string, unknown> | undefined {
+    return this.isRecord(value) ? value : undefined;
+  }
+
   private readString(value: unknown): string | undefined {
     if (typeof value !== "string") {
       return undefined;
     }
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private readTimestamp(value: unknown): string | undefined {
+    const text = this.readString(value);
+    if (!text) {
+      return undefined;
+    }
+    return Number.isNaN(Date.parse(text)) ? undefined : text;
+  }
+
+  private readNumber(value: unknown): number | undefined {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
   }
 
   private readStringArray(value: unknown): string[] {
@@ -354,6 +357,16 @@ export class Text2SqlV2StateMachine {
       .filter((item): item is string => Boolean(item));
   }
 
+  private uniqueStrings(values: string[] | undefined): string[] | undefined {
+    if (!values) {
+      return undefined;
+    }
+    const filtered = values
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    return filtered.length > 0 ? Array.from(new Set(filtered)) : undefined;
+  }
+
   private readGenerateStepSummary(
     steps: ExecutionTraceStep[]
   ): Record<string, unknown> | undefined {
@@ -361,11 +374,113 @@ export class Text2SqlV2StateMachine {
     if (typeof outputSummary !== "string") {
       return undefined;
     }
+    const parsed = this.safeParseJson(outputSummary);
+    return this.isRecord(parsed) ? parsed : undefined;
+  }
+
+  private readProviderMetadata(value: unknown): Text2SqlV2StageArtifact["provider"] {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const provider = this.readString(value.provider);
+    const model = this.readString(value.model);
+    const dimensions = this.readNumber(value.dimensions);
+    const vectorVersion = this.readString(value.vectorVersion);
+    const indexVersion = this.readString(value.indexVersion);
+    const scope = this.readString(value.scope);
+    const assetType = this.readString(value.assetType);
+    const timeoutMs = this.readNumber(value.timeoutMs);
+    const inputCount = this.readNumber(value.inputCount);
+    const outputCount = this.readNumber(value.outputCount);
+    const fallbackReason = this.readString(value.fallbackReason);
+    const unavailableReason = this.readString(value.unavailableReason);
+    if (
+      !provider &&
+      !model &&
+      dimensions === undefined &&
+      !vectorVersion &&
+      !indexVersion &&
+      !scope &&
+      !assetType &&
+      timeoutMs === undefined &&
+      inputCount === undefined &&
+      outputCount === undefined &&
+      !fallbackReason &&
+      !unavailableReason
+    ) {
+      return undefined;
+    }
+    return {
+      provider,
+      model,
+      dimensions,
+      vectorVersion,
+      indexVersion,
+      scope,
+      assetType,
+      timeoutMs,
+      inputCount,
+      outputCount,
+      fallbackReason,
+      unavailableReason
+    };
+  }
+
+  private readFailureSemantic(value: unknown): Text2SqlV2FailureSemantic | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const code = this.readString(value.code);
+    const message = this.readString(value.message);
+    if (!code || !message) {
+      return undefined;
+    }
+    const category = this.readString(value.category) as Text2SqlV2FailureSemantic["category"];
+    const terminal = typeof value.terminal === "boolean" ? value.terminal : undefined;
+    const correctable = typeof value.correctable === "boolean" ? value.correctable : undefined;
+    return {
+      code,
+      message,
+      category,
+      terminal,
+      correctable
+    };
+  }
+
+  private safeParseJson(value: string): unknown {
     try {
-      const parsed = JSON.parse(outputSummary) as unknown;
-      return this.isRecord(parsed) ? parsed : undefined;
+      return JSON.parse(value);
     } catch {
       return undefined;
     }
   }
+
+  private isStageName(value: unknown): value is Text2SqlV2StageName {
+    return typeof value === "string" && TEXT2SQL_V2_STAGE_ORDER.includes(value as Text2SqlV2StageName);
+  }
+
+  private isStageStatus(
+    value: unknown
+  ): value is Text2SqlV2StageArtifact["status"] {
+    return (
+      value === "success" ||
+      value === "skipped" ||
+      value === "degraded" ||
+      value === "failed" ||
+      value === "clarification"
+    );
+  }
+
+  private resolveDurationMs(startedAt?: string, endedAt?: string): number | undefined {
+    if (!startedAt || !endedAt) {
+      return undefined;
+    }
+    const started = Date.parse(startedAt);
+    const ended = Date.parse(endedAt);
+    if (Number.isNaN(started) || Number.isNaN(ended)) {
+      return undefined;
+    }
+    return Math.max(0, ended - started);
+  }
 }
+
