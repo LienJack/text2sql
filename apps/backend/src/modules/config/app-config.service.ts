@@ -187,6 +187,14 @@ export class AppConfigService {
     return this.config.get<string>("EMBEDDING_VECTOR_VERSION", "v1");
   }
 
+  get embeddingMockMode(): boolean {
+    return this.config.get<string>("EMBEDDING_MOCK_MODE", "false") === "true";
+  }
+
+  get rerankMockMode(): boolean {
+    return this.config.get<string>("RERANK_MOCK_MODE", "false") === "true";
+  }
+
   get agentPlanningScaffoldEnabled(): boolean {
     return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
   }

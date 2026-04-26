@@ -27,7 +27,8 @@ export class EmbeddingRouterService implements EmbeddingGateway {
       return [];
     }
 
-    if (this.config.llmMockMode) {
+    const testScopedMockMode = this.config.llmMockMode && this.config.nodeEnv === "test";
+    if (this.config.embeddingMockMode || testScopedMockMode) {
       return this.embedInMockMode(texts, input);
     }
 
@@ -171,4 +172,3 @@ export class EmbeddingRouterService implements EmbeddingGateway {
       .filter((item) => Number.isFinite(item));
   }
 }
-

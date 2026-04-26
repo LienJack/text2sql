@@ -105,14 +105,18 @@ export class RetrieveKnowledgeNode {
     const snippets = (bundle.selected_context ?? bundle.candidates.map((item) => item.chunk))
       .slice(0, 3)
       .map((item) => item.content.slice(0, 200));
+    const denseState = this.resolveLaneState(bundle, "dense");
+    const rerankState = this.resolveRerankState(bundle);
+    const pruningSummary = this.summarizePruning(bundle);
+    const laneSummary = `dense=${denseState},rerank=${rerankState}`;
 
     return {
       status: bundle.status,
       snippets,
       summary:
         bundle.status === "ready"
-          ? `检索与重排完成，候选=${bundle.candidates.length}，上下文=${bundle.selected_context?.length ?? 0}，priorSQL=${priorSqlHitCount}${pinningSummary}。`
-          : `检索链路降级执行，原因=${bundle.degrade_reasons.join(", ") || "unknown"}，priorSQL=${priorSqlHitCount}${pinningSummary}。`,
+          ? `检索与重排完成，候选=${bundle.candidates.length}，上下文=${bundle.selected_context?.length ?? 0}，priorSQL=${priorSqlHitCount}，${laneSummary}${pruningSummary}${pinningSummary}。`
+          : `检索链路降级执行，原因=${bundle.degrade_reasons.join(", ") || "unknown"}，priorSQL=${priorSqlHitCount}，${laneSummary}${pruningSummary}${pinningSummary}。`,
       retrievalBundle: bundle,
       contextPack: bundle.context_pack,
       pinning: pinningResult.pinning
@@ -203,6 +207,29 @@ export class RetrieveKnowledgeNode {
       reranked: [],
       selected_context: [],
       risk_tags: ["rag_zero_recall", input.degradeReason],
+      lane_metadata: [
+        {
+          lane: "dense",
+          state: "unavailable",
+          unavailable_reason: input.degradeReason,
+          reason_codes: [input.degradeReason]
+        },
+        {
+          lane: "rerank",
+          state: "skipped",
+          fallback_reason: input.degradeReason,
+          reason_codes: [input.degradeReason]
+        }
+      ],
+      pruning_decisions: [
+        {
+          budget_source: "context_pack",
+          removed_evidence_ids: [],
+          kept_evidence_ids: [],
+          reason_codes: [input.degradeReason],
+          summary: `context_pack:disabled:${input.degradeReason}`
+        }
+      ],
       context_pack: {
         status: "degraded",
         semantic_lock_status: "degraded",
@@ -222,6 +249,30 @@ export class RetrieveKnowledgeNode {
           count: 0,
           snippets: []
         },
+        lane_metadata: [
+          {
+            lane: "dense",
+            state: "unavailable",
+            unavailable_reason: input.degradeReason,
+            reason_codes: [input.degradeReason]
+          },
+          {
+            lane: "rerank",
+            state: "skipped",
+            fallback_reason: input.degradeReason,
+            reason_codes: [input.degradeReason]
+          }
+        ],
+        pruning_decisions: [
+          {
+            budget_source: "context_pack",
+            removed_evidence_ids: [],
+            kept_evidence_ids: [],
+            reason_codes: [input.degradeReason],
+            summary: `context_pack:disabled:${input.degradeReason}`
+          }
+        ],
+        selected_context_lanes: [],
         degrade_reasons: [input.degradeReason],
         risk_tags: ["semantic_spine_degraded", input.degradeReason]
       }
@@ -261,6 +312,9 @@ export class RetrieveKnowledgeNode {
       0,
       (bundle.selected_context?.length ?? 0) - filteredSelectedContext.length
     );
+    const removedEvidenceIds = (bundle.selected_context ?? [])
+      .map((chunk) => chunk.chunk_id)
+      .filter((chunkId) => !filteredSelectedContext.some((chunk) => chunk.chunk_id === chunkId));
 
     const nextBundle: RagRetrievalBundle = {
       ...bundle,
@@ -271,7 +325,11 @@ export class RetrieveKnowledgeNode {
             reranked: filteredReranked
           }
         : {}),
-      context_pack: this.withPinnedContextPack(bundle.context_pack, filteredSelectedContext)
+      context_pack: this.withPinnedContextPack(
+        bundle.context_pack,
+        filteredSelectedContext,
+        removedEvidenceIds
+      )
     };
 
     return {
@@ -287,18 +345,35 @@ export class RetrieveKnowledgeNode {
 
   private withPinnedContextPack(
     contextPack: RagContextPack | undefined,
-    selectedContext: RagRetrievalChunkPayload[]
+    selectedContext: RagRetrievalChunkPayload[],
+    removedEvidenceIds: string[]
   ): RagContextPack | undefined {
     if (!contextPack) {
       return contextPack;
     }
+    const existingPruningDecisions =
+      contextPack.pruning_decisions ?? contextPack.pruningDecisions ?? [];
+    const pinningDecision =
+      removedEvidenceIds.length > 0
+        ? [
+            {
+              budget_source: "context_pack" as const,
+              removed_evidence_ids: removedEvidenceIds,
+              kept_evidence_ids: selectedContext.map((chunk) => chunk.chunk_id),
+              reason_codes: ["pinning_filter_applied"],
+              summary: `context_pack:pinning_removed=${removedEvidenceIds.length}`
+            }
+          ]
+        : [];
     return {
       ...contextPack,
       selected_context_summary: {
         ...contextPack.selected_context_summary,
         count: selectedContext.length,
         snippets: selectedContext.map((chunk) => chunk.content.slice(0, 200))
-      }
+      },
+      pruning_decisions: [...existingPruningDecisions, ...pinningDecision],
+      pruningDecisions: [...existingPruningDecisions, ...pinningDecision]
     };
   }
 
@@ -321,6 +396,58 @@ export class RetrieveKnowledgeNode {
       }
     }
     return true;
+  }
+
+  private resolveLaneState(bundle: RagRetrievalBundle, lane: "dense" | "lexical" | "graph"): string {
+    const laneMetadata = bundle.context_pack?.lane_metadata ?? bundle.context_pack?.laneMetadata ?? [];
+    const metadataState = laneMetadata.find((item) => item.lane === lane)?.state;
+    if (metadataState && metadataState.trim().length > 0) {
+      return metadataState;
+    }
+    const laneResult = bundle.lane_results[lane];
+    if (laneResult.status === "ok") {
+      return "ready";
+    }
+    if ((laneResult.degrade_reason ?? "").includes("unavailable")) {
+      return "unavailable";
+    }
+    return "degraded";
+  }
+
+  private resolveRerankState(bundle: RagRetrievalBundle): string {
+    const laneMetadata = bundle.context_pack?.lane_metadata ?? bundle.context_pack?.laneMetadata ?? [];
+    const rerankLane = laneMetadata.find((item) => item.lane === "rerank");
+    if (rerankLane?.state) {
+      return rerankLane.state;
+    }
+    const secondary = bundle.rerank_metadata?.secondary ?? bundle.rerankMetadata?.secondary;
+    if (!secondary) {
+      return "skipped";
+    }
+    if (secondary.status === "ok") {
+      return "ready";
+    }
+    if (secondary.unavailable_reason || secondary.unavailableReason) {
+      return "unavailable";
+    }
+    return secondary.status;
+  }
+
+  private summarizePruning(bundle: RagRetrievalBundle): string {
+    const pruningDecisions =
+      bundle.context_pack?.pruning_decisions ??
+      bundle.context_pack?.pruningDecisions ??
+      bundle.pruning_decisions ??
+      bundle.pruningDecisions ??
+      [];
+    if (pruningDecisions.length === 0) {
+      return "";
+    }
+    const reasonCount = pruningDecisions.reduce(
+      (total, decision) => total + (decision.reason_codes?.length ?? decision.reasonCodes?.length ?? 0),
+      0
+    );
+    return `,pruning[decisions=${pruningDecisions.length},reasons=${reasonCount}]`;
   }
 
   private toNormalizedSet(values?: string[]): Set<string> {

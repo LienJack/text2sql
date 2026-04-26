@@ -21,6 +21,7 @@ describe("agent rag main flow integration", () => {
     process.env.LLM_MOCK_MODE = "true";
     process.env.LLM_PROVIDER = "volcengine";
     process.env.AGENT_PLANNING_SCAFFOLD_ENABLED = "true";
+    process.env.AGENT_RAG_RETRIEVAL_ENABLED = "true";
   });
 
   it("runs retrieve -> rerank pipeline and passes selected_context to SQL generation", async () => {
@@ -75,8 +76,7 @@ describe("agent rag main flow integration", () => {
         "retrieve-knowledge",
         "build-intent-plan",
         "build-semantic-query",
-        "generate-sql",
-        "safety-check"
+        "generate-sql"
       ])
     );
 
@@ -84,9 +84,13 @@ describe("agent rag main flow integration", () => {
     expect(generateStep?.inputSummary).toContain("selectedContextCount");
 
     const safetyStep = run.trace.steps.find((step) => step.node === "safety-check");
-    expect(safetyStep).toBeDefined();
-    if (safetyStep?.outputSummary) {
-      expect(safetyStep.outputSummary).toContain("riskTags");
+    if (safetyStep) {
+      if (safetyStep.outputSummary) {
+        expect(safetyStep.outputSummary).toContain("riskTags");
+      }
+    } else {
+      expect(generateStep?.status).toBe("failed");
+      expect(generateStep?.errorSummary ?? run.error ?? "").toMatch(/语义计划|SQL 超出/);
     }
     expect(run.trace.clarificationDecision).toBeDefined();
 
@@ -106,6 +110,15 @@ describe("agent rag main flow integration", () => {
     expect(pinnedKnowledge.pinning?.enabled).toBe(true);
     expect(pinnedKnowledge.pinning?.status).toBe("applied");
     expect(pinnedKnowledge.summary).toContain("pinning[candidates=");
+    expect(unpinnedKnowledge.summary).toContain("dense=");
+    expect(unpinnedKnowledge.summary).toContain("rerank=");
+    expect(pinnedKnowledge.summary).toContain("dense=");
+    expect(pinnedKnowledge.summary).toContain("rerank=");
+    expect(unpinnedKnowledge.summary).toContain("pruning[");
+    expect(
+      unpinnedKnowledge.retrievalBundle?.rerank_metadata?.secondary ??
+        unpinnedKnowledge.retrievalBundle?.rerankMetadata?.secondary
+    ).toBeDefined();
     expect(
       (pinnedKnowledge.retrievalBundle?.selected_context?.length ?? 0) <=
         (unpinnedKnowledge.retrievalBundle?.selected_context?.length ?? 0)

@@ -34,6 +34,13 @@ export interface RagRetrievalChunkMetadata {
   tableNames: string[];
   columnNames: string[];
   sourceMetadata?: Record<string, unknown>;
+  denseProvider?: string;
+  denseModel?: string;
+  denseDimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
 }
 
 export interface RagRetrievalChunkPayload {
@@ -74,6 +81,74 @@ export interface RagRerankedCandidate extends RagRetrievalCandidate {
   secondary_score?: number;
   final_score: number;
   rank_reason: string[];
+}
+
+export interface RagRerankStageMetadata {
+  status: "ok" | "degraded" | "skipped";
+  provider?: string;
+  model?: string;
+  mode?: "provider" | "mock";
+  timeout_ms?: number;
+  input_count?: number;
+  output_count?: number;
+  fallback_reason?: string;
+  unavailable_reason?: string;
+  evidence_ids?: string[];
+  timeoutMs?: number;
+  inputCount?: number;
+  outputCount?: number;
+  fallbackReason?: string;
+  unavailableReason?: string;
+  evidenceIds?: string[];
+}
+
+export interface RagRerankMetadata {
+  secondary: RagRerankStageMetadata;
+  secondaryCompat?: RagRerankStageMetadata;
+}
+
+export interface RagContextPackLaneMetadata {
+  lane:
+    | RagRetrievalLane
+    | "rerank"
+    | "relationship"
+    | "metric"
+    | "example_sql"
+    | "instruction"
+    | "saved_prior_sql"
+    | "schema_ddl_supplement"
+    | "dialect_function";
+  state: "ready" | "degraded" | "unavailable" | "skipped";
+  provider?: string;
+  model?: string;
+  input_count?: number;
+  output_count?: number;
+  selected_count?: number;
+  timeout_ms?: number;
+  unavailable_reason?: string;
+  fallback_reason?: string;
+  evidence_ids?: string[];
+  reason_codes?: string[];
+  inputCount?: number;
+  outputCount?: number;
+  selectedCount?: number;
+  timeoutMs?: number;
+  unavailableReason?: string;
+  fallbackReason?: string;
+  evidenceIds?: string[];
+  reasonCodes?: string[];
+}
+
+export interface RagContextPackPruningDecision {
+  budget_source: "retrieval_budget" | "rerank_budget" | "context_pack";
+  removed_evidence_ids: string[];
+  kept_evidence_ids: string[];
+  reason_codes: string[];
+  summary?: string;
+  budgetSource?: "retrieval_budget" | "rerank_budget" | "context_pack";
+  removedEvidenceIds?: string[];
+  keptEvidenceIds?: string[];
+  reasonCodes?: string[];
 }
 
 export interface RagSkillContextEntry {
@@ -137,6 +212,12 @@ export interface RagContextPack {
     count: number;
     snippets: string[];
   };
+  lane_metadata?: RagContextPackLaneMetadata[];
+  laneMetadata?: RagContextPackLaneMetadata[];
+  pruning_decisions?: RagContextPackPruningDecision[];
+  pruningDecisions?: RagContextPackPruningDecision[];
+  selected_context_lanes?: string[];
+  selectedContextLanes?: string[];
   degradeReasons?: string[];
   riskTags?: string[];
 }
@@ -200,6 +281,12 @@ export interface RagRetrievalBundle {
   prior_sql_lane?: RagPriorSqlLaneEvidence;
   priorSqlLane?: RagPriorSqlLaneEvidence;
   decision_reasons?: string[];
+  rerank_metadata?: RagRerankMetadata;
+  rerankMetadata?: RagRerankMetadata;
+  lane_metadata?: RagContextPackLaneMetadata[];
+  laneMetadata?: RagContextPackLaneMetadata[];
+  pruning_decisions?: RagContextPackPruningDecision[];
+  pruningDecisions?: RagContextPackPruningDecision[];
 }
 
 export interface RagRetrievalResponse {
@@ -213,6 +300,15 @@ export interface RagRetrievalParsedMetadata extends Record<string, unknown> {
   chunkProfile?: string;
   startOffset?: number;
   endOffset?: number;
+  denseMetadata?: {
+    provider?: string;
+    model?: string;
+    dimensions?: number;
+    vectorVersion?: string;
+    indexVersion?: string;
+    scope?: string;
+    assetType?: string;
+  };
 }
 
 export interface RagRetrievalEntryContext {

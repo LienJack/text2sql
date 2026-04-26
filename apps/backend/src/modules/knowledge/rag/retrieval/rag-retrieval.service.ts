@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { DomainError } from "../../../../common/domain-error";
+import { EmbeddingRouterService } from "../../../llm/embedding-router.service";
 import { GraphService } from "../../graph/graph.service";
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
@@ -15,7 +17,10 @@ import { ModelingGraphRepository } from "../../../platform/data/persistence/mode
 import { fuseWithRrf } from "../../../rag/retrieval/fusion/rrf-fusion";
 import {
   RAG_RETRIEVAL_LANES,
+  type RagContextPackLaneMetadata,
+  type RagContextPackPruningDecision,
   type RagPriorSqlLaneEvidence,
+  type RagPriorSqlShortcutDecision,
   type RagRetrievalCandidate,
   type RagRetrievalChunkMetadata,
   type RagRetrievalChunkPayload,
@@ -27,7 +32,7 @@ import {
   type RagRetrievalResponse,
   type RagContextPack,
   type RagSkillContext
-} from "../../../rag/retrieval/rag-retrieval.types";
+} from "./rag-retrieval.types";
 
 const DEFAULT_PER_LANE_LIMIT = 20;
 const DEFAULT_FINAL_CANDIDATE_LIMIT = 20;
@@ -40,7 +45,6 @@ const DEFAULT_LANE_TIMEOUT_MS: Record<RagRetrievalLane, number> = {
 };
 const REQUIRED_DOMAIN_COVERAGE = ["schema", "sql_example", "semantic_term"];
 const SEMANTIC_PROMOTED_DEGRADED_REASON = "semantic_promoted_linkage_degraded";
-const MODELING_REVISION_MISSING_RISK_TAG = "modeling_revision_missing";
 
 class LaneTimeoutError extends Error {
   constructor(public readonly lane: RagRetrievalLane) {
@@ -91,6 +95,16 @@ interface WideTableProfile {
   columns: string[];
 }
 
+interface DenseVectorMetadata {
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
+}
+
 interface TablePruningPlan {
   tableName: string;
   normalizedTableName: string;
@@ -109,6 +123,7 @@ export class RagRetrievalService {
   constructor(
     private readonly indexRepository: RagIndexRepository,
     private readonly replayRepository: RagReplayRepository,
+    private readonly embeddingRouter: EmbeddingRouterService,
     private readonly skillRegistry: SkillRegistryService,
     private readonly graphService: GraphService,
     private readonly cacheKeyFactory: RagCacheKeyFactory,
@@ -249,11 +264,16 @@ export class RagRetrievalService {
       graph: laneResults.graph.hits
     };
     const fused = fuseWithRrf({ laneHits });
+    const activeModelingRevision = await this.resolveActiveModelingRevision(
+      workspaceId,
+      datasourceId
+    );
     const priorSqlSelection = this.selectTrustedPriorSqlCandidates({
       candidates: fused,
       datasourceId,
       workspaceId,
-      allowedTables
+      allowedTables,
+      activeModelingRevision
     });
     const priorSqlFiltered = this.filterBlockedPriorSqlCandidates(
       fused,
@@ -313,6 +333,20 @@ export class RagRetrievalService {
       status: response.retrieval_bundle.status,
       degradeReasons: uniqueDegradeReasons
     });
+    const laneMetadata =
+      response.retrieval_bundle.context_pack?.lane_metadata ??
+      response.retrieval_bundle.context_pack?.laneMetadata;
+    const pruningDecisions =
+      response.retrieval_bundle.context_pack?.pruning_decisions ??
+      response.retrieval_bundle.context_pack?.pruningDecisions;
+    if (laneMetadata && laneMetadata.length > 0) {
+      response.retrieval_bundle.lane_metadata = laneMetadata;
+      response.retrieval_bundle.laneMetadata = laneMetadata;
+    }
+    if (pruningDecisions && pruningDecisions.length > 0) {
+      response.retrieval_bundle.pruning_decisions = pruningDecisions;
+      response.retrieval_bundle.pruningDecisions = pruningDecisions;
+    }
 
     this.queryCache.set({
       key: cacheKey,
@@ -367,6 +401,19 @@ export class RagRetrievalService {
       status: hydratedBundle.status,
       degradeReasons: hydratedBundle.degrade_reasons
     });
+    const laneMetadata =
+      hydratedBundle.context_pack?.lane_metadata ?? hydratedBundle.context_pack?.laneMetadata;
+    const pruningDecisions =
+      hydratedBundle.context_pack?.pruning_decisions ??
+      hydratedBundle.context_pack?.pruningDecisions;
+    if (laneMetadata && laneMetadata.length > 0) {
+      hydratedBundle.lane_metadata = laneMetadata;
+      hydratedBundle.laneMetadata = laneMetadata;
+    }
+    if (pruningDecisions && pruningDecisions.length > 0) {
+      hydratedBundle.pruning_decisions = pruningDecisions;
+      hydratedBundle.pruningDecisions = pruningDecisions;
+    }
     return hydratedBundle;
   }
 
@@ -518,16 +565,61 @@ export class RagRetrievalService {
     return this.sortHits(hits).slice(0, limit);
   }
 
-  private runDenseLane(
+  private async runDenseLane(
     query: string,
     contexts: RagRetrievalEntryContext[],
     limit: number
-  ): RagRetrievalLaneHit[] {
-    const queryVector = this.buildDenseVector(query);
+  ): Promise<LaneExecutionOutput> {
+    if (contexts.length === 0) {
+      return {
+        hits: []
+      };
+    }
+
+    let queryVector: number[];
+    let queryMetadata: DenseVectorMetadata | undefined;
+    try {
+      const embeddings = await this.embeddingRouter.embed({
+        texts: [query],
+        indexVersion: contexts[0]?.indexVersionId,
+        scope: "retrieval_query",
+        assetType: "query"
+      });
+      queryVector = embeddings[0]?.vector ?? [];
+      queryMetadata = embeddings[0]
+        ? this.toDenseVectorMetadata(embeddings[0].metadata)
+        : undefined;
+    } catch (error) {
+      return {
+        hits: [],
+        degradeReason: this.resolveDenseUnavailableReason(error)
+      };
+    }
+
+    if (!queryVector || queryVector.length === 0) {
+      return {
+        hits: [],
+        degradeReason: "dense_unavailable_empty_query_vector"
+      };
+    }
+
     const hits: RagRetrievalLaneHit[] = [];
+    let incompatibleVectorSpaceDetected = false;
     for (const context of contexts) {
       const vector = this.parseDenseVector(context.entry.denseVector);
-      if (!vector || vector.length === 0 || vector.length !== queryVector.length) {
+      if (!vector || vector.length === 0) {
+        continue;
+      }
+      const candidateDenseMetadata = this.readDenseVectorMetadata(context);
+      if (
+        vector.length !== queryVector.length ||
+        !this.isDenseVectorSpaceCompatible({
+          queryMetadata,
+          candidateMetadata: candidateDenseMetadata,
+          indexVersionId: context.indexVersionId
+        })
+      ) {
+        incompatibleVectorSpaceDetected = true;
         continue;
       }
       const cosine = this.cosineSimilarity(queryVector, vector);
@@ -538,11 +630,27 @@ export class RagRetrievalService {
         lane: "dense",
         chunk_id: context.entry.chunkId,
         score: Number(cosine.toFixed(12)),
-        evidence: [`cosine:${cosine.toFixed(6)}`],
+        evidence: this.unique([
+          `cosine:${cosine.toFixed(6)}`,
+          ...(candidateDenseMetadata?.provider
+            ? [`dense_provider:${candidateDenseMetadata.provider}`]
+            : []),
+          ...(candidateDenseMetadata?.model
+            ? [`dense_model:${candidateDenseMetadata.model}`]
+            : [])
+        ]),
         chunk: this.toChunkPayload(context)
       });
     }
-    return this.sortHits(hits).slice(0, limit);
+    if (incompatibleVectorSpaceDetected) {
+      return {
+        hits: [],
+        degradeReason: "dense_unavailable_incompatible_vector_space"
+      };
+    }
+    return {
+      hits: this.sortHits(hits).slice(0, limit)
+    };
   }
 
   private async runGraphLane(
@@ -656,7 +764,8 @@ export class RagRetrievalService {
           this.readString(parsed.chunkProfile) ??
           this.readString(sourceMetadata.chunkProfile),
         startOffset: this.readNumber(parsed.startOffset) ?? this.readNumber(sourceMetadata.startOffset),
-        endOffset: this.readNumber(parsed.endOffset) ?? this.readNumber(sourceMetadata.endOffset)
+        endOffset: this.readNumber(parsed.endOffset) ?? this.readNumber(sourceMetadata.endOffset),
+        denseMetadata: this.readDenseVectorMetadataFromParsed(parsed, sourceMetadata)
       }
     };
   }
@@ -674,7 +783,14 @@ export class RagRetrievalService {
       columnNames: this.readStringArray(context.parsedMetadata.columnNames),
       sourceMetadata: this.isRecord(context.parsedMetadata.sourceMetadata)
         ? context.parsedMetadata.sourceMetadata
-        : {}
+        : {},
+      denseProvider: context.parsedMetadata.denseMetadata?.provider,
+      denseModel: context.parsedMetadata.denseMetadata?.model,
+      denseDimensions: context.parsedMetadata.denseMetadata?.dimensions,
+      vectorVersion: context.parsedMetadata.denseMetadata?.vectorVersion,
+      indexVersion: context.parsedMetadata.denseMetadata?.indexVersion,
+      scope: context.parsedMetadata.denseMetadata?.scope,
+      assetType: context.parsedMetadata.denseMetadata?.assetType
     };
 
     return {
@@ -714,15 +830,18 @@ export class RagRetrievalService {
     datasourceId: string;
     workspaceId?: string;
     allowedTables: string[];
+    activeModelingRevision?: number;
   }): PriorSqlSelectionResult {
     const trustedSqlExampleCandidates = input.candidates.filter(
       (candidate) =>
         candidate.chunk.metadata.domain === "sql_example" &&
         this.isTrustedPriorSqlCandidate(candidate)
     );
-    const selectedCandidates: RagRetrievalCandidate[] = [];
+    const eligibleCandidates: RagRetrievalCandidate[] = [];
     const blockedChunkIds = new Set<string>();
-    const degradeReasons: string[] = [];
+    const filteredReasons: string[] = [];
+    const staleReasons: string[] = [];
+    let staleCandidateCount = 0;
     const allowedTables = new Set(input.allowedTables);
     const workspaceId = input.workspaceId?.trim();
 
@@ -735,47 +854,102 @@ export class RagRetrievalService {
       });
       if (filterReasons.length > 0) {
         blockedChunkIds.add(candidate.chunk_id);
-        degradeReasons.push(...filterReasons);
+        filteredReasons.push(...filterReasons);
         continue;
       }
-      selectedCandidates.push({
+
+      const candidateStaleReasons = this.collectPriorSqlStaleReasons({
+        candidate,
+        activeModelingRevision: input.activeModelingRevision
+      });
+      if (candidateStaleReasons.length > 0) {
+        staleCandidateCount += 1;
+        staleReasons.push(...candidateStaleReasons);
+        continue;
+      }
+      eligibleCandidates.push({
         ...candidate,
         evidence: this.unique([...candidate.evidence, "prior_sql:trusted"])
       });
     }
 
-    if (selectedCandidates.length > 0) {
-      const lane: RagPriorSqlLaneEvidence = {
-        status: "hit",
+    const selectedCandidates =
+      eligibleCandidates.length === 1 ? [eligibleCandidates[0]] : [];
+    const shortcutStatus: RagPriorSqlShortcutDecision["status"] =
+      selectedCandidates.length === 1
+        ? "hit"
+        : eligibleCandidates.length > 1
+          ? "ambiguous"
+          : blockedChunkIds.size > 0
+            ? "filtered"
+            : staleCandidateCount > 0
+              ? "stale"
+              : "miss";
+    const selectedCandidate = selectedCandidates[0];
+    const shortcutReasons = this.unique([
+      ...(shortcutStatus === "hit"
+        ? ["prior_sql_shortcut_hit"]
+        : []),
+      ...(shortcutStatus === "miss"
+        ? ["prior_sql_no_trusted_match"]
+        : []),
+      ...(shortcutStatus === "filtered"
+        ? ["prior_sql_shortcut_filtered", ...filteredReasons]
+        : []),
+      ...(shortcutStatus === "stale"
+        ? ["prior_sql_shortcut_stale", ...staleReasons]
+        : []),
+      ...(shortcutStatus === "ambiguous"
+        ? ["prior_sql_shortcut_ambiguous"]
+        : [])
+    ]);
+    const laneDegradeReasons = this.unique([
+      ...filteredReasons,
+      ...staleReasons,
+      ...(shortcutStatus === "miss" ? ["prior_sql_no_trusted_match"] : []),
+      ...(shortcutStatus === "ambiguous" ? ["prior_sql_shortcut_ambiguous"] : []),
+      ...(shortcutStatus === "filtered" ? ["prior_sql_shortcut_filtered"] : []),
+      ...(shortcutStatus === "stale" ? ["prior_sql_shortcut_stale"] : [])
+    ]);
+    const shortcutDecision: RagPriorSqlShortcutDecision =
+      this.withPriorSqlShortcutCompatFields({
+        status: shortcutStatus,
+        reason_codes: shortcutReasons,
         matched_count: trustedSqlExampleCandidates.length,
-        selected_count: selectedCandidates.length,
+        eligible_count: eligibleCandidates.length,
         filtered_count: blockedChunkIds.size,
-        ...(degradeReasons.length > 0
+        stale_count: staleCandidateCount,
+        ambiguous_count: shortcutStatus === "ambiguous" ? eligibleCandidates.length : 0,
+        ...(selectedCandidate
           ? {
-              degrade_reasons: this.unique(degradeReasons)
+              selected_chunk_id: selectedCandidate.chunk_id,
+              selected_view_id: this.readPriorSqlViewId(
+                selectedCandidate.chunk.metadata.sourceMetadata
+              ),
+              selected_source_run_id: this.readPriorSqlSourceRunId(
+                selectedCandidate.chunk.metadata.sourceMetadata
+              )
             }
           : {})
-      };
-      return {
-        lane: this.withPriorSqlLaneCompatFields(lane),
-        selectedCandidates,
-        blockedChunkIds
-      };
-    }
-
+      });
     const lane: RagPriorSqlLaneEvidence = {
-      status: trustedSqlExampleCandidates.length > 0 ? "filtered" : "miss",
+      status: shortcutStatus,
       matched_count: trustedSqlExampleCandidates.length,
-      selected_count: 0,
+      selected_count: selectedCandidates.length,
       filtered_count: blockedChunkIds.size,
-      degrade_reasons:
-        trustedSqlExampleCandidates.length > 0
-          ? this.unique(degradeReasons)
-          : ["prior_sql_no_trusted_match"]
+      stale_count: staleCandidateCount,
+      ambiguous_count: shortcutStatus === "ambiguous" ? eligibleCandidates.length : 0,
+      eligible_count: eligibleCandidates.length,
+      ...(laneDegradeReasons.length > 0
+        ? {
+            degrade_reasons: laneDegradeReasons
+          }
+        : {}),
+      shortcut: shortcutDecision
     };
     return {
       lane: this.withPriorSqlLaneCompatFields(lane),
-      selectedCandidates: [],
+      selectedCandidates,
       blockedChunkIds
     };
   }
@@ -837,11 +1011,105 @@ export class RagRetrievalService {
     return reasons;
   }
 
+  private collectPriorSqlStaleReasons(input: {
+    candidate: RagRetrievalCandidate;
+    activeModelingRevision?: number;
+  }): string[] {
+    const sourceMetadata = input.candidate.chunk.metadata.sourceMetadata;
+    if (!this.isRecord(sourceMetadata)) {
+      return [];
+    }
+    const reasons: string[] = [];
+    if (
+      this.readBooleanFlag(sourceMetadata.stale) ||
+      this.readBooleanFlag(sourceMetadata.isStale) ||
+      this.readBooleanFlag(sourceMetadata.priorSqlStale) ||
+      this.readBooleanFlag(sourceMetadata.prior_sql_stale)
+    ) {
+      reasons.push("prior_sql_stale_marked");
+    }
+    const viewDeleted =
+      this.readBooleanFlag(sourceMetadata.viewDeleted) ||
+      this.readBooleanFlag(sourceMetadata.view_deleted);
+    const viewExists = this.readOptionalBoolean(
+      sourceMetadata.viewExists ?? sourceMetadata.view_exists
+    );
+    if (viewDeleted || viewExists === false) {
+      reasons.push("prior_sql_stale_view_missing");
+    }
+    const viewStatus = this.readString(sourceMetadata.viewStatus) ??
+      this.readString(sourceMetadata.view_status);
+    if (viewStatus) {
+      const normalized = viewStatus.trim().toLowerCase();
+      if (
+        normalized === "missing" ||
+        normalized === "deleted" ||
+        normalized === "not_found" ||
+        normalized === "archived" ||
+        normalized === "inactive" ||
+        normalized === "stale"
+      ) {
+        reasons.push("prior_sql_stale_view_status");
+      }
+    }
+
+    const sourceModelingRevision = this.readPositiveInteger(
+      sourceMetadata.modelingRevision ?? sourceMetadata.modeling_revision
+    );
+    const currentModelingRevision = this.readPositiveInteger(
+      sourceMetadata.currentModelingRevision ?? sourceMetadata.current_modeling_revision
+    );
+    if (
+      sourceModelingRevision !== undefined &&
+      currentModelingRevision !== undefined &&
+      sourceModelingRevision !== currentModelingRevision
+    ) {
+      reasons.push("prior_sql_stale_modeling_revision_mismatch");
+    }
+    if (
+      sourceModelingRevision !== undefined &&
+      input.activeModelingRevision !== undefined &&
+      sourceModelingRevision !== input.activeModelingRevision
+    ) {
+      reasons.push("prior_sql_stale_modeling_revision_mismatch");
+    }
+
+    const sourceSchemaRevision = this.readPositiveInteger(
+      sourceMetadata.schemaRevision ?? sourceMetadata.schema_revision
+    );
+    const currentSchemaRevision = this.readPositiveInteger(
+      sourceMetadata.currentSchemaRevision ?? sourceMetadata.current_schema_revision
+    );
+    if (
+      sourceSchemaRevision !== undefined &&
+      currentSchemaRevision !== undefined &&
+      sourceSchemaRevision !== currentSchemaRevision
+    ) {
+      reasons.push("prior_sql_stale_schema_revision_mismatch");
+    }
+    return this.unique(reasons);
+  }
+
   private readWorkspaceIdFromSourceMetadata(sourceMetadata: unknown): string | undefined {
     if (!this.isRecord(sourceMetadata)) {
       return undefined;
     }
     return this.readString(sourceMetadata.workspaceId) ?? this.readString(sourceMetadata.workspace_id);
+  }
+
+  private readPriorSqlViewId(sourceMetadata: unknown): string | undefined {
+    if (!this.isRecord(sourceMetadata)) {
+      return undefined;
+    }
+    return this.readString(sourceMetadata.viewId) ?? this.readString(sourceMetadata.view_id);
+  }
+
+  private readPriorSqlSourceRunId(sourceMetadata: unknown): string | undefined {
+    if (!this.isRecord(sourceMetadata)) {
+      return undefined;
+    }
+    return this.readString(sourceMetadata.sourceRunId) ??
+      this.readString(sourceMetadata.source_run_id);
   }
 
   private filterBlockedPriorSqlCandidates(
@@ -1386,16 +1654,6 @@ export class RagRetrievalService {
     }
   }
 
-  private buildDenseVector(input: string): number[] {
-    const digest = createHash("sha256").update(input).digest();
-    const dimensions = 8;
-    return Array.from({ length: dimensions }, (_, index) => {
-      const byte = digest[index] ?? 0;
-      const normalized = byte / 255;
-      return Number((normalized * 2 - 1).toFixed(6));
-    });
-  }
-
   private cosineSimilarity(left: number[], right: number[]): number {
     let dot = 0;
     let leftNorm = 0;
@@ -1463,6 +1721,117 @@ export class RagRetrievalService {
     return source.column_pruning ?? source.columnPruning;
   }
 
+  private readDenseVectorMetadata(
+    context: RagRetrievalEntryContext
+  ): DenseVectorMetadata | undefined {
+    return context.parsedMetadata.denseMetadata as DenseVectorMetadata | undefined;
+  }
+
+  private readDenseVectorMetadataFromParsed(
+    parsed: Record<string, unknown>,
+    sourceMetadata: Record<string, unknown>
+  ): DenseVectorMetadata | undefined {
+    const denseRaw = this.isRecord(parsed.dense)
+      ? parsed.dense
+      : this.isRecord(sourceMetadata.dense)
+        ? sourceMetadata.dense
+        : undefined;
+    if (!denseRaw) {
+      return undefined;
+    }
+    return {
+      provider: this.readString(denseRaw.provider),
+      model: this.readString(denseRaw.model),
+      dimensions: this.readNumber(denseRaw.dimensions),
+      vectorVersion: this.readString(denseRaw.vectorVersion),
+      indexVersion: this.readString(denseRaw.indexVersion),
+      scope: this.readString(denseRaw.scope),
+      assetType: this.readString(denseRaw.assetType)
+    };
+  }
+
+  private toDenseVectorMetadata(metadata: {
+    provider: string;
+    model: string;
+    dimensions: number;
+    vectorVersion: string;
+    indexVersion?: string;
+    scope?: string;
+    assetType?: string;
+  }): DenseVectorMetadata {
+    return {
+      provider: metadata.provider,
+      model: metadata.model,
+      dimensions: metadata.dimensions,
+      vectorVersion: metadata.vectorVersion,
+      indexVersion: metadata.indexVersion,
+      scope: metadata.scope,
+      assetType: metadata.assetType
+    };
+  }
+
+  private isDenseVectorSpaceCompatible(input: {
+    queryMetadata?: DenseVectorMetadata;
+    candidateMetadata?: DenseVectorMetadata;
+    indexVersionId: string;
+  }): boolean {
+    const { queryMetadata, candidateMetadata, indexVersionId } = input;
+    if (!queryMetadata || !candidateMetadata) {
+      return false;
+    }
+    if (
+      queryMetadata.dimensions !== undefined &&
+      candidateMetadata.dimensions !== undefined &&
+      queryMetadata.dimensions !== candidateMetadata.dimensions
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.provider &&
+      candidateMetadata.provider &&
+      queryMetadata.provider !== candidateMetadata.provider
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.model &&
+      candidateMetadata.model &&
+      queryMetadata.model !== candidateMetadata.model
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.vectorVersion &&
+      candidateMetadata.vectorVersion &&
+      queryMetadata.vectorVersion !== candidateMetadata.vectorVersion
+    ) {
+      return false;
+    }
+    if (
+      candidateMetadata.indexVersion &&
+      candidateMetadata.indexVersion !== indexVersionId
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.indexVersion &&
+      queryMetadata.indexVersion !== indexVersionId
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private resolveDenseUnavailableReason(error: unknown): string {
+    if (error instanceof DomainError) {
+      return `dense_unavailable:${error.code.toLowerCase()}`;
+    }
+    if (error instanceof Error) {
+      return `dense_unavailable:${error.message.toLowerCase().replace(/\s+/g, "_")}`;
+    }
+    return "dense_unavailable:unknown_error";
+  }
+
   private readPriorSqlLaneEvidence(
     bundle: RagRetrievalResponse["retrieval_bundle"]
   ): RagPriorSqlLaneEvidence | undefined {
@@ -1477,17 +1846,310 @@ export class RagRetrievalService {
     lane: RagPriorSqlLaneEvidence
   ): RagPriorSqlLaneEvidence {
     const degradeReasons = lane.degrade_reasons ?? lane.degradeReasons;
+    const shortcut = lane.shortcut ?? lane.shortcutDecision;
     return {
       ...lane,
       matched_count: lane.matched_count,
       selected_count: lane.selected_count,
       filtered_count: lane.filtered_count,
+      ...(lane.stale_count !== undefined ? { stale_count: lane.stale_count } : {}),
+      ...(lane.ambiguous_count !== undefined ? { ambiguous_count: lane.ambiguous_count } : {}),
+      ...(lane.eligible_count !== undefined ? { eligible_count: lane.eligible_count } : {}),
       ...(degradeReasons ? { degrade_reasons: degradeReasons } : {}),
       matchedCount: lane.matched_count,
       selectedCount: lane.selected_count,
       filteredCount: lane.filtered_count,
-      ...(degradeReasons ? { degradeReasons } : {})
+      ...(lane.stale_count !== undefined ? { staleCount: lane.stale_count } : {}),
+      ...(lane.ambiguous_count !== undefined ? { ambiguousCount: lane.ambiguous_count } : {}),
+      ...(lane.eligible_count !== undefined ? { eligibleCount: lane.eligible_count } : {}),
+      ...(degradeReasons ? { degradeReasons } : {}),
+      ...(shortcut
+        ? {
+            shortcut: this.withPriorSqlShortcutCompatFields(shortcut),
+            shortcutDecision: this.withPriorSqlShortcutCompatFields(shortcut)
+          }
+        : {})
     };
+  }
+
+  private withPriorSqlShortcutCompatFields(
+    decision: RagPriorSqlShortcutDecision
+  ): RagPriorSqlShortcutDecision {
+    const reasonCodes = decision.reason_codes ?? decision.reasonCodes ?? [];
+    return {
+      ...decision,
+      reason_codes: reasonCodes,
+      matched_count: decision.matched_count,
+      eligible_count: decision.eligible_count,
+      filtered_count: decision.filtered_count,
+      stale_count: decision.stale_count,
+      ambiguous_count: decision.ambiguous_count,
+      ...(decision.selected_chunk_id
+        ? {
+            selected_chunk_id: decision.selected_chunk_id
+          }
+        : {}),
+      ...(decision.selected_view_id
+        ? {
+            selected_view_id: decision.selected_view_id
+          }
+        : {}),
+      ...(decision.selected_source_run_id
+        ? {
+            selected_source_run_id: decision.selected_source_run_id
+          }
+        : {}),
+      reasonCodes,
+      matchedCount: decision.matched_count,
+      eligibleCount: decision.eligible_count,
+      filteredCount: decision.filtered_count,
+      staleCount: decision.stale_count,
+      ambiguousCount: decision.ambiguous_count,
+      ...(decision.selected_chunk_id
+        ? {
+            selectedChunkId: decision.selected_chunk_id
+          }
+        : {}),
+      ...(decision.selected_view_id
+        ? {
+            selectedViewId: decision.selected_view_id
+          }
+        : {}),
+      ...(decision.selected_source_run_id
+        ? {
+            selectedSourceRunId: decision.selected_source_run_id
+          }
+        : {})
+    };
+  }
+
+  private buildContextPackLaneMetadata(
+    bundle: RagRetrievalResponse["retrieval_bundle"] | undefined
+  ): RagContextPackLaneMetadata[] {
+    if (!bundle) {
+      return [];
+    }
+    const candidateByChunkId = new Map(
+      bundle.candidates.map((candidate) => [candidate.chunk_id, candidate])
+    );
+    const selectedContext = bundle.selected_context ?? [];
+    const selectedByLane = new Map<RagRetrievalLane, string[]>();
+    for (const chunk of selectedContext) {
+      const lane = candidateByChunkId.get(chunk.chunk_id)?.source_lane;
+      if (!lane) {
+        continue;
+      }
+      const selected = selectedByLane.get(lane) ?? [];
+      selected.push(chunk.chunk_id);
+      selectedByLane.set(lane, selected);
+    }
+
+    const laneMetadata: RagContextPackLaneMetadata[] = RAG_RETRIEVAL_LANES.map((lane) => {
+      const laneResult = bundle.lane_results[lane];
+      const unavailableReason = this.resolveLaneUnavailableReason(laneResult.degrade_reason);
+      const state: RagContextPackLaneMetadata["state"] =
+        laneResult.status === "ok"
+          ? "ready"
+          : unavailableReason
+            ? "unavailable"
+            : "degraded";
+      const evidenceIds = laneResult.hits.map((item) => item.chunk_id);
+      const selectedEvidenceIds = selectedByLane.get(lane) ?? [];
+      const reasonCodes = this.unique([
+        laneResult.degrade_reason ?? "",
+        ...(bundle.decision_reasons ?? [])
+      ]);
+      return {
+        lane,
+        state,
+        input_count: laneResult.hits.length,
+        inputCount: laneResult.hits.length,
+        output_count: laneResult.hits.length,
+        outputCount: laneResult.hits.length,
+        selected_count: selectedEvidenceIds.length,
+        selectedCount: selectedEvidenceIds.length,
+        timeout_ms: laneResult.timeout_ms,
+        timeoutMs: laneResult.timeout_ms,
+        unavailable_reason: unavailableReason,
+        unavailableReason: unavailableReason,
+        evidence_ids: evidenceIds,
+        evidenceIds: evidenceIds,
+        reason_codes: reasonCodes,
+        reasonCodes: reasonCodes
+      };
+    });
+
+    const schemaCandidates = bundle.candidates.filter(
+      (candidate) => candidate.chunk.metadata.domain === "schema"
+    );
+    const exampleCandidates = bundle.candidates.filter(
+      (candidate) => candidate.chunk.metadata.domain === "sql_example"
+    );
+    const relationshipHints = bundle.candidates.filter((candidate) =>
+      candidate.evidence.some((evidence) => evidence.includes("relationship"))
+    );
+    const metricTerms = this.unique(bundle.skill_context?.context.map((entry) => entry.term) ?? []);
+    const instructionBindings =
+      bundle.context_pack?.instruction_sets.model_bindings.length ??
+      bundle.context_pack?.instructionSets?.modelBindings?.length ??
+      0;
+    const priorSqlLane = bundle.prior_sql_lane ?? bundle.priorSqlLane;
+
+    laneMetadata.push(
+      {
+        lane: "schema_ddl_supplement",
+        state: schemaCandidates.length > 0 ? "ready" : "degraded",
+        input_count: schemaCandidates.length,
+        inputCount: schemaCandidates.length,
+        output_count: schemaCandidates.length,
+        outputCount: schemaCandidates.length,
+        selected_count: selectedContext.filter((chunk) => chunk.metadata.domain === "schema").length,
+        selectedCount: selectedContext.filter((chunk) => chunk.metadata.domain === "schema").length,
+        evidence_ids: schemaCandidates.map((candidate) => candidate.chunk_id),
+        evidenceIds: schemaCandidates.map((candidate) => candidate.chunk_id)
+      },
+      {
+        lane: "example_sql",
+        state: exampleCandidates.length > 0 ? "ready" : "degraded",
+        input_count: exampleCandidates.length,
+        inputCount: exampleCandidates.length,
+        output_count: exampleCandidates.length,
+        outputCount: exampleCandidates.length,
+        selected_count: selectedContext.filter((chunk) => chunk.metadata.domain === "sql_example")
+          .length,
+        selectedCount: selectedContext.filter(
+          (chunk) => chunk.metadata.domain === "sql_example"
+        ).length,
+        evidence_ids: exampleCandidates.map((candidate) => candidate.chunk_id),
+        evidenceIds: exampleCandidates.map((candidate) => candidate.chunk_id)
+      },
+      {
+        lane: "relationship",
+        state: relationshipHints.length > 0 ? "ready" : "degraded",
+        input_count: relationshipHints.length,
+        inputCount: relationshipHints.length,
+        output_count: relationshipHints.length,
+        outputCount: relationshipHints.length,
+        selected_count: selectedContext.length,
+        selectedCount: selectedContext.length
+      },
+      {
+        lane: "metric",
+        state: metricTerms.length > 0 ? "ready" : "degraded",
+        input_count: metricTerms.length,
+        inputCount: metricTerms.length,
+        output_count: metricTerms.length,
+        outputCount: metricTerms.length,
+        selected_count: metricTerms.length,
+        selectedCount: metricTerms.length,
+        evidence_ids: metricTerms,
+        evidenceIds: metricTerms
+      },
+      {
+        lane: "instruction",
+        state: instructionBindings > 0 ? "ready" : "degraded",
+        input_count: instructionBindings,
+        inputCount: instructionBindings,
+        output_count: instructionBindings,
+        outputCount: instructionBindings,
+        selected_count: instructionBindings,
+        selectedCount: instructionBindings
+      },
+      {
+        lane: "saved_prior_sql",
+        state:
+          priorSqlLane?.status === "hit"
+            ? "ready"
+            : priorSqlLane?.status
+              ? "degraded"
+              : "skipped",
+        input_count: priorSqlLane?.matched_count ?? 0,
+        inputCount: priorSqlLane?.matched_count ?? 0,
+        output_count: priorSqlLane?.selected_count ?? 0,
+        outputCount: priorSqlLane?.selected_count ?? 0,
+        selected_count: priorSqlLane?.selected_count ?? 0,
+        selectedCount: priorSqlLane?.selected_count ?? 0,
+        reason_codes: this.unique(priorSqlLane?.degrade_reasons ?? []),
+        reasonCodes: this.unique(priorSqlLane?.degrade_reasons ?? [])
+      },
+      {
+        lane: "dialect_function",
+        state:
+          bundle.skill_context && bundle.skill_context.skills.length > 0 ? "ready" : "degraded",
+        input_count: bundle.skill_context?.skills.length ?? 0,
+        inputCount: bundle.skill_context?.skills.length ?? 0,
+        output_count: bundle.skill_context?.skills.length ?? 0,
+        outputCount: bundle.skill_context?.skills.length ?? 0,
+        selected_count: bundle.skill_context?.context.length ?? 0,
+        selectedCount: bundle.skill_context?.context.length ?? 0
+      }
+    );
+
+    return laneMetadata;
+  }
+
+  private buildContextPackPruningDecisions(
+    bundle: RagRetrievalResponse["retrieval_bundle"] | undefined
+  ): RagContextPackPruningDecision[] {
+    if (!bundle) {
+      return [];
+    }
+    const selectedEvidenceIds = (bundle.selected_context ?? []).map((chunk) => chunk.chunk_id);
+    const removedEvidenceIds = bundle.candidates
+      .map((candidate) => candidate.chunk_id)
+      .filter((chunkId) => !selectedEvidenceIds.includes(chunkId));
+    const decisions: RagContextPackPruningDecision[] = [];
+
+    const retrievalBudgetDecision = this.budgetPolicy.describePruningDecision({
+      budgetSource: "retrieval_budget",
+      decisionReasons: bundle.decision_reasons ?? [],
+      removedEvidenceIds,
+      keptEvidenceIds:
+        selectedEvidenceIds.length > 0
+          ? selectedEvidenceIds
+          : bundle.candidates.map((candidate) => candidate.chunk_id)
+    });
+    if (retrievalBudgetDecision) {
+      decisions.push({
+        budget_source: retrievalBudgetDecision.budget_source,
+        removed_evidence_ids: retrievalBudgetDecision.removed_evidence_ids,
+        kept_evidence_ids: retrievalBudgetDecision.kept_evidence_ids,
+        reason_codes: retrievalBudgetDecision.reason_codes,
+        summary: retrievalBudgetDecision.summary,
+        budgetSource: retrievalBudgetDecision.budgetSource,
+        removedEvidenceIds: retrievalBudgetDecision.removedEvidenceIds,
+        keptEvidenceIds: retrievalBudgetDecision.keptEvidenceIds,
+        reasonCodes: retrievalBudgetDecision.reasonCodes
+      });
+    }
+
+    const columnPruning = this.readColumnPruningEvidence(bundle);
+    if (columnPruning && columnPruning.reason_codes.length > 0) {
+      const reasonCodes = this.unique(columnPruning.reason_codes);
+      decisions.push({
+        budget_source: "context_pack",
+        removed_evidence_ids: [],
+        kept_evidence_ids: selectedEvidenceIds,
+        reason_codes: reasonCodes,
+        summary: `context_pack:column_pruning:${reasonCodes.join("|")}`,
+        budgetSource: "context_pack",
+        removedEvidenceIds: [],
+        keptEvidenceIds: selectedEvidenceIds,
+        reasonCodes
+      });
+    }
+
+    return decisions;
+  }
+
+  private resolveLaneUnavailableReason(degradeReason: string | undefined): string | undefined {
+    if (!degradeReason) {
+      return undefined;
+    }
+    if (degradeReason.includes("unavailable")) {
+      return degradeReason;
+    }
+    return undefined;
   }
 
   private async buildContextPack(input: {
@@ -1498,148 +2160,75 @@ export class RagRetrievalService {
     degradeReasons: string[];
   }): Promise<RagContextPack> {
     const bundle = input.bundle;
-    const activeModeling = await this.resolveActiveModelingSnapshot(
-      input.workspaceId,
-      input.datasourceId
-    );
     const semanticCandidates =
       bundle?.candidates.filter((candidate) => candidate.chunk.metadata.domain === "semantic_term") ??
       [];
-    const retrievalModelKeys = this.unique(
+    const modelKeys = this.unique(
       semanticCandidates.flatMap((candidate) => candidate.chunk.metadata.tableNames)
     );
-    const modelKeys = this.unique([
-      ...activeModeling.modelKeys,
-      ...retrievalModelKeys
-    ]);
-    const relationshipKeys = this.unique(activeModeling.relationshipKeys);
-    const calculatedFieldKeys = this.unique(activeModeling.calculatedFieldKeys);
     const metricKeys = this.unique(
       bundle?.skill_context?.context.map((entry) => entry.term) ?? []
     );
     const selectedContext = bundle?.selected_context ?? [];
-    const modelingRevision = activeModeling.modelingRevision;
-    const semanticBindings = {
-      model_keys: modelKeys,
-      relationship_keys: relationshipKeys,
-      metric_keys: metricKeys,
-      calculated_field_keys: calculatedFieldKeys,
-      modelKeys,
-      relationshipKeys,
-      metricKeys,
-      calculatedFieldKeys
-    };
-    const instructionSets = {
-      model_bindings: modelKeys,
-      relationship_bindings: relationshipKeys,
-      metric_bindings: metricKeys,
-      calculated_field_bindings: calculatedFieldKeys,
-      modelBindings: modelKeys,
-      relationshipBindings: relationshipKeys,
-      metricBindings: metricKeys,
-      calculatedFieldBindings: calculatedFieldKeys
-    };
-    const selectedContextSummary = {
-      count: selectedContext.length,
-      snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5),
-      selectedContextCount: selectedContext.length
-    };
-    const degradeReasons = this.unique(input.degradeReasons);
-    const riskTags = this.unique([
-      ...(input.status === "degraded"
-        ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
-        : bundle?.risk_tags ?? []),
-      ...(input.workspaceId && modelingRevision === undefined
-        ? [MODELING_REVISION_MISSING_RISK_TAG]
-        : [])
-    ]);
+    const modelingRevision = await this.resolveActiveModelingRevision(
+      input.workspaceId,
+      input.datasourceId
+    );
+    const laneMetadata = this.buildContextPackLaneMetadata(bundle);
+    const pruningDecisions = this.buildContextPackPruningDecisions(bundle);
+    const selectedContextLanes = this.unique(
+      selectedContext.map((entry) => entry.metadata.domain)
+    );
 
     return {
       status: input.status,
       modeling_revision: modelingRevision,
-      modelingRevision,
       semantic_lock_status: input.status === "ready" ? "locked" : "degraded",
-      semanticLockStatus: input.status === "ready" ? "locked" : "degraded",
-      semantic_bindings: semanticBindings,
-      semanticBindings,
-      instruction_sets: instructionSets,
-      instructionSets,
-      selected_context_summary: selectedContextSummary,
-      selectedContextSummary,
-      degrade_reasons: degradeReasons,
-      degradeReasons,
-      risk_tags: riskTags,
-      riskTags
+      semantic_bindings: {
+        model_keys: modelKeys,
+        relationship_keys: [],
+        metric_keys: metricKeys,
+        calculated_field_keys: []
+      },
+      instruction_sets: {
+        model_bindings: modelKeys,
+        relationship_bindings: [],
+        metric_bindings: metricKeys,
+        calculated_field_bindings: []
+      },
+      selected_context_summary: {
+        count: selectedContext.length,
+        snippets: selectedContext.map((entry) => entry.content.slice(0, 160)).slice(0, 5)
+      },
+      lane_metadata: laneMetadata,
+      laneMetadata: laneMetadata,
+      pruning_decisions: pruningDecisions,
+      pruningDecisions: pruningDecisions,
+      selected_context_lanes: selectedContextLanes,
+      selectedContextLanes: selectedContextLanes,
+      degrade_reasons: this.unique(input.degradeReasons),
+      risk_tags: this.unique(
+        input.status === "degraded"
+          ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+          : bundle?.risk_tags ?? []
+      )
     };
   }
 
-  private async resolveActiveModelingSnapshot(
+  private async resolveActiveModelingRevision(
     workspaceIdRaw: string | undefined,
     datasourceIdRaw: string
-  ): Promise<{
-    modelingRevision?: number;
-    modelKeys: string[];
-    relationshipKeys: string[];
-    calculatedFieldKeys: string[];
-  }> {
+  ): Promise<number | undefined> {
     const workspaceId = workspaceIdRaw?.trim();
     const datasourceId = datasourceIdRaw.trim();
     if (!workspaceId || !datasourceId) {
-      return {
-        modelKeys: [],
-        relationshipKeys: [],
-        calculatedFieldKeys: []
-      };
+      return undefined;
     }
     const scope = await this.modelingGraphRepository.getLatestScopeState({
       workspaceId,
       datasourceId
     });
-    if (!scope.activeRevision) {
-      return {
-        modelKeys: [],
-        relationshipKeys: [],
-        calculatedFieldKeys: []
-      };
-    }
-    const activeRevision = await this.modelingGraphRepository.findRevision({
-      workspaceId,
-      datasourceId,
-      revision: scope.activeRevision
-    });
-    if (!activeRevision) {
-      return {
-        modelingRevision: scope.activeRevision,
-        modelKeys: [],
-        relationshipKeys: [],
-        calculatedFieldKeys: []
-      };
-    }
-
-    const modelKeys = this.unique(
-      (activeRevision.graphPayload.models ?? [])
-        .map((model) => this.readString(model.modelName ?? model.id ?? model.tableName))
-        .filter((model): model is string => Boolean(model))
-    );
-    const relationshipKeys = this.unique(
-      (activeRevision.graphPayload.relationships ?? [])
-        .map((relationship) =>
-          this.readString(relationship.id ?? relationship.name)
-        )
-        .filter((relationship): relationship is string => Boolean(relationship))
-    );
-    const calculatedFieldKeys = this.unique(
-      (activeRevision.graphPayload.calculatedFields ?? [])
-        .map((field) => this.readString(field.id ?? field.name))
-        .filter((field): field is string => Boolean(field))
-    );
-
-    return {
-      modelingRevision: scope.activeRevision,
-      modelKeys,
-      relationshipKeys,
-      calculatedFieldKeys
-    };
+    return scope.activeRevision;
   }
 
   private safeParseJson(value?: string): Record<string, unknown> {
@@ -1678,6 +2267,34 @@ export class RagRetrievalService {
       if (Number.isFinite(parsed)) {
         return parsed;
       }
+    }
+    return undefined;
+  }
+
+  private readPositiveInteger(value: unknown): number | undefined {
+    const parsed = this.readNumber(value);
+    if (parsed === undefined || !Number.isInteger(parsed) || parsed <= 0) {
+      return undefined;
+    }
+    return parsed;
+  }
+
+  private readOptionalBoolean(value: unknown): boolean | undefined {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value > 0;
+    }
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes") {
+      return true;
+    }
+    if (normalized === "false" || normalized === "0" || normalized === "no") {
+      return false;
     }
     return undefined;
   }
@@ -1742,6 +2359,18 @@ export class RagRetrievalService {
         candidateCount: bundle.candidates.length,
         priorSqlLane: this.readPriorSqlLaneEvidence(bundle),
         columnPruning: this.readColumnPruningEvidence(bundle),
+        laneMetadata:
+          bundle.lane_metadata ??
+          bundle.laneMetadata ??
+          bundle.context_pack?.lane_metadata ??
+          bundle.context_pack?.laneMetadata ??
+          [],
+        pruningDecisions:
+          bundle.pruning_decisions ??
+          bundle.pruningDecisions ??
+          bundle.context_pack?.pruning_decisions ??
+          bundle.context_pack?.pruningDecisions ??
+          [],
         skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
           chunkId: candidate.chunk_id,

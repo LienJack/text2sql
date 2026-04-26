@@ -26,6 +26,7 @@ import { RagQueryCacheService } from "../../rag/perf/rag-query-cache.service";
 import { RagQualityController } from "../../rag/quality/rag-quality.controller";
 import { RagQualityService } from "../../rag/quality/rag-quality.service";
 import { RagRetrievalService as LegacyRagRetrievalService } from "../../rag/retrieval/rag-retrieval.service";
+import { SemanticAssetReindexService } from "./retrieval/semantic-asset-reindex.service";
 import { RagRetrievalService } from "./retrieval/rag-retrieval.service";
 import { ModelRerankerAdapter } from "../../rag/rerank/model-reranker.adapter";
 import { RagRerankService as LegacyRagRerankService } from "../../rag/rerank/rag-rerank.service";
@@ -96,20 +97,21 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     RagAuditReplayService,
     LegacyRagReplayRepository,
     RagQualityService,
-    LegacyRagRetrievalService,
+    RagRetrievalService,
+    SemanticAssetReindexService,
     ModelRerankerAdapter,
-    LegacyRagRerankService,
+    RagRerankService,
     {
       provide: RagReplayRepository,
       useExisting: LegacyRagReplayRepository
     },
     {
-      provide: RagRetrievalService,
-      useExisting: LegacyRagRetrievalService
+      provide: LegacyRagRetrievalService,
+      useExisting: RagRetrievalService
     },
     {
-      provide: RagRerankService,
-      useExisting: LegacyRagRerankService
+      provide: LegacyRagRerankService,
+      useExisting: RagRerankService
     }
   ],
   exports: [
@@ -134,6 +136,7 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     RagReplayRepository,
     RagQualityService,
     LegacyRagRetrievalService,
+    SemanticAssetReindexService,
     RagRetrievalService,
     ModelRerankerAdapter,
     LegacyRagRerankService,
