@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AppConfigModule } from "../config/config.module";
 import { PlatformDataPersistenceModule } from "../platform/data/persistence.module";
+import { EmbeddingRouterService } from "./embedding-router.service";
 import { LlmGatewayService } from "./llm-gateway.service";
 import { LlmModelFactory } from "./llm-model-factory";
 import { ProviderCatalogService } from "./provider-catalog.service";
@@ -13,6 +14,7 @@ import { ToolEventsMapper } from "./tools/tool-events.mapper";
     LlmModelFactory,
     LlmGatewayService,
     ToolEventsMapper,
+    EmbeddingRouterService,
     ProviderCatalogService,
     ProviderRouterService
   ],
@@ -20,6 +22,7 @@ import { ToolEventsMapper } from "./tools/tool-events.mapper";
     LlmModelFactory,
     LlmGatewayService,
     ToolEventsMapper,
+    EmbeddingRouterService,
     ProviderCatalogService,
     ProviderRouterService
   ]

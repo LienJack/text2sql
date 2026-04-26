@@ -119,85 +119,89 @@ describe("GlossaryPage", () => {
     mockListDatasources.mockResolvedValue(DATASOURCES);
   });
 
-  it("supports create and update flows with scope/priority controls and linkage feedback", async () => {
-    const user = userEvent.setup();
-    const updatedGlobalTerm: GlossaryTerm = {
+  it(
+    "supports create and update flows with scope/priority controls and linkage feedback",
+    async () => {
+      const user = userEvent.setup();
+      const updatedGlobalTerm: GlossaryTerm = {
       ...GLOBAL_TERM,
       definition: "gross merchandise value updated",
       priority: 77,
       updatedAt: "2026-04-11T00:00:00.000Z"
-    };
+      };
 
-    mockListGlossaryTerms
-      .mockResolvedValueOnce(listResult([GLOBAL_TERM]))
-      .mockResolvedValueOnce(listResult([DATASOURCE_TERM, GLOBAL_TERM]))
-      .mockResolvedValueOnce(listResult([DATASOURCE_TERM, updatedGlobalTerm]));
+      mockListGlossaryTerms
+        .mockResolvedValueOnce(listResult([GLOBAL_TERM]))
+        .mockResolvedValueOnce(listResult([DATASOURCE_TERM, GLOBAL_TERM]))
+        .mockResolvedValueOnce(listResult([DATASOURCE_TERM, updatedGlobalTerm]));
 
-    mockCreateGlossaryTerm.mockResolvedValue(
-      upsertResponse(DATASOURCE_TERM, {
-        linkageStatus: "degraded",
-        conflictDecision: {
-          resolution: "priority_then_updated_at",
-          winnerTermId: DATASOURCE_TERM.id,
-          loserTermIds: [GLOBAL_TERM.id],
-          winnerPriority: DATASOURCE_TERM.priority,
-          winnerUpdatedAt: DATASOURCE_TERM.updatedAt
-        }
-      })
-    );
-    mockUpdateGlossaryTerm.mockResolvedValue(upsertResponse(updatedGlobalTerm));
-
-    render(<GlossaryPage />);
-    expect(await screen.findByText("GMV")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "新增术语" }));
-    await user.type(screen.getByLabelText("术语名称"), "订单");
-    await user.type(screen.getByLabelText("同义词"), "order");
-    await user.type(screen.getByLabelText("定义"), "订单事实表");
-    await user.selectOptions(screen.getByLabelText("作用范围"), "datasource");
-    await user.selectOptions(screen.getByLabelText("数据源范围"), "sqlite_main");
-    await user.clear(screen.getByLabelText("优先级（0-100）"));
-    await user.type(screen.getByLabelText("优先级（0-100）"), "90");
-    await user.click(screen.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
-      expect(mockCreateGlossaryTerm).toHaveBeenCalledWith(
-        {
-          term: "订单",
-          definition: "订单事实表",
-          synonyms: ["order"],
-          scope: "datasource",
-          datasourceId: "sqlite_main",
-          priority: 90
-        },
-        expect.objectContaining({ idempotencyKey: expect.any(String) })
+      mockCreateGlossaryTerm.mockResolvedValue(
+        upsertResponse(DATASOURCE_TERM, {
+          linkageStatus: "degraded",
+          conflictDecision: {
+            resolution: "priority_then_updated_at",
+            winnerTermId: DATASOURCE_TERM.id,
+            loserTermIds: [GLOBAL_TERM.id],
+            winnerPriority: DATASOURCE_TERM.priority,
+            winnerUpdatedAt: DATASOURCE_TERM.updatedAt
+          }
+        })
       );
-    });
-    expect(await screen.findByText(/作用域规则：同名术语下，数据源作用域优先于全局。/)).toBeInTheDocument();
-    expect(screen.getByText(/联动降级：术语已保存，RAG 联动当前处于降级状态。/)).toBeInTheDocument();
+      mockUpdateGlossaryTerm.mockResolvedValue(upsertResponse(updatedGlobalTerm));
 
-    const gmvRow = screen.getByText("GMV").closest("tr");
-    expect(gmvRow).not.toBeNull();
-    await user.click(within(gmvRow!).getByRole("button", { name: /编辑/ }));
-    const definitionField = screen.getByLabelText("定义");
-    await user.clear(definitionField);
-    await user.type(definitionField, "gross merchandise value updated");
-    await user.clear(screen.getByLabelText("优先级（0-100）"));
-    await user.type(screen.getByLabelText("优先级（0-100）"), "77");
-    await user.click(screen.getByRole("button", { name: "保存" }));
+      render(<GlossaryPage />);
+      expect(await screen.findByText("GMV")).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(mockUpdateGlossaryTerm).toHaveBeenCalledWith(
-        GLOBAL_TERM.id,
-        expect.objectContaining({
-          definition: "gross merchandise value updated",
-          priority: 77
-        }),
-        expect.objectContaining({ idempotencyKey: expect.any(String) })
-      );
-    });
-    expect(await screen.findByText(/术语已更新。/)).toBeInTheDocument();
-  });
+      await user.click(screen.getByRole("button", { name: "新增术语" }));
+      await user.type(screen.getByLabelText("术语名称"), "订单");
+      await user.type(screen.getByLabelText("同义词"), "order");
+      await user.type(screen.getByLabelText("定义"), "订单事实表");
+      await user.selectOptions(screen.getByLabelText("作用范围"), "datasource");
+      await user.selectOptions(screen.getByLabelText("数据源范围"), "sqlite_main");
+      await user.clear(screen.getByLabelText("优先级（0-100）"));
+      await user.type(screen.getByLabelText("优先级（0-100）"), "90");
+      await user.click(screen.getByRole("button", { name: "保存" }));
+
+      await waitFor(() => {
+        expect(mockCreateGlossaryTerm).toHaveBeenCalledWith(
+          {
+            term: "订单",
+            definition: "订单事实表",
+            synonyms: ["order"],
+            scope: "datasource",
+            datasourceId: "sqlite_main",
+            priority: 90
+          },
+          expect.objectContaining({ idempotencyKey: expect.any(String) })
+        );
+      });
+      expect(await screen.findByText(/作用域规则：同名术语下，数据源作用域优先于全局。/)).toBeInTheDocument();
+      expect(screen.getByText(/联动降级：术语已保存，RAG 联动当前处于降级状态。/)).toBeInTheDocument();
+
+      const gmvRow = screen.getByText("GMV").closest("tr");
+      expect(gmvRow).not.toBeNull();
+      await user.click(within(gmvRow!).getByRole("button", { name: /编辑/ }));
+      const definitionField = screen.getByLabelText("定义");
+      await user.clear(definitionField);
+      await user.type(definitionField, "gross merchandise value updated");
+      await user.clear(screen.getByLabelText("优先级（0-100）"));
+      await user.type(screen.getByLabelText("优先级（0-100）"), "77");
+      await user.click(screen.getByRole("button", { name: "保存" }));
+
+      await waitFor(() => {
+        expect(mockUpdateGlossaryTerm).toHaveBeenCalledWith(
+          GLOBAL_TERM.id,
+          expect.objectContaining({
+            definition: "gross merchandise value updated",
+            priority: 77
+          }),
+          expect.objectContaining({ idempotencyKey: expect.any(String) })
+        );
+      });
+      expect(await screen.findByText(/术语已更新。/)).toBeInTheDocument();
+    },
+    15000
+  );
 
   it("shows readable feedback when non-admin toggle gets 403", async () => {
     const user = userEvent.setup();

@@ -4,7 +4,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ## 技术栈
 - 后端：NestJS + TypeScript + Prisma
-- Agent：LangGraph `StateGraph` 运行时编排（澄清 -> 生成SQL -> 安全检查 -> 执行 -> 格式化）
+- Agent：Text2SQL v2 Ask 状态机（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`），由 `conversation/text2sql` 统一入口驱动
 - 前端：Next.js + React + Tailwind CSS v4 + shadcn-ui
 - 查询数据：SQLite / MySQL / PostgreSQL / CSV / Excel（会话绑定数据源路由）
 - 功能数据：Redis 缓冲 + PostgreSQL 持久化
@@ -82,6 +82,13 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `LLM_API_KEY=<api-key>`
 - `LLM_MODEL=<model-name>`
 - `LLM_MOCK_MODE=false`（联调真实模型时保持 false）
+- `EMBEDDING_PROVIDER=<provider>`（Text2SQL v2 dense retrieval 的 embedding provider）
+- `EMBEDDING_BASE_URL=<openai-compatible-base-url>`
+- `EMBEDDING_API_KEY=<api-key>`
+- `EMBEDDING_MODEL=text-embedding-3-small`
+- `EMBEDDING_DIMENSIONS=<optional>`
+- `EMBEDDING_VECTOR_VERSION=v1`
+- Rerank 默认走 LLM provider runtime（模型目录或 `LLM_*`）；`LLM_MOCK_MODE=true` 仅用于测试/本地假数据，不作为生产 fallback。
 - `LANGSMITH_TRACING=true|false`（是否启用 LangSmith 追踪）
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
 - `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
@@ -239,6 +246,13 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
 - 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
+- Text2SQL v2 artifact 通过 `run.trace.v2`、`run.delivery.evidence.v2`、SSE `state` 事件 `data.v2.stageArtifact` 暴露；不会破坏既有 `type/runId/sessionId/at/data` 合同。
+
+## Text2SQL v2 评估门禁（新增）
+- 评估脚本：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- fixture：`apps/backend/test/fixtures/text2sql-v2-eval-cases.json`
+- 输出指标：`retrievalRelevance`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
+- 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。
 
 ## 测试
 ```bash
@@ -261,6 +275,7 @@ pnpm test:frontend
   - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
   - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
+- Text2SQL v2 评估：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
   - 后端健康检查：`GET http://localhost:3002/health`

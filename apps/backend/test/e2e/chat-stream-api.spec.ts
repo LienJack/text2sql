@@ -193,6 +193,9 @@ describe("chat stream api (e2e)", () => {
         evidence?: {
           runId?: string;
           contextPackStatus?: string;
+          v2?: {
+            stageArtifacts?: Array<{ stage?: string }>;
+          };
         };
       };
     };
@@ -210,6 +213,24 @@ describe("chat stream api (e2e)", () => {
     const contextPackStatus = finishData.delivery?.evidence?.contextPackStatus;
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
+    const deliveryV2 = finishData.delivery?.evidence?.v2 as
+      | {
+          stageArtifacts?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (deliveryV2 !== undefined) {
+      expect(deliveryV2.stageArtifacts?.map((item) => item.stage)).toEqual([
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ]);
     }
 
     const messagesRes = await request(app.getHttpServer())
@@ -232,6 +253,14 @@ describe("chat stream api (e2e)", () => {
     );
     expect(messagesRes.body.data.latestRun.delivery.evidence.runId).toBe(streamRunId);
     expect(["completed", "failed"]).toContain(latestRun.trace.streamStatus);
+    const latestTraceV2 = (messagesRes.body.data.latestRun.trace?.v2 ?? null) as
+      | {
+          version?: string;
+        }
+      | null;
+    if (latestTraceV2) {
+      expect(latestTraceV2.version).toBe("v2");
+    }
     if (latestRun.trace.streamStatus === "failed") {
       expect(typeof latestRun.error).toBe("string");
       expect(latestRun.error?.trim().length).toBeGreaterThan(0);

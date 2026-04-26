@@ -125,16 +125,16 @@ const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
     targetDomain: "conversation",
     sourcePathPattern: /^apps\/backend\/src\/modules\/eval\/eval\.module\.ts$/,
     targetPathPattern:
-      /^apps\/backend\/src\/modules\/conversation\/agent\/agent\.module\.ts$/,
-    reason: "Transitional wiring: eval still composes conversation agent module."
+      /^apps\/backend\/src\/modules\/conversation\/text2sql\/text2sql\.module\.ts$/,
+    reason: "Transitional wiring: eval still composes conversation text2sql module."
   },
   {
     sourceDomain: "platform",
     targetDomain: "conversation",
     sourcePathPattern: /^apps\/backend\/src\/modules\/eval\/eval\.service\.ts$/,
     targetPathPattern:
-      /^apps\/backend\/src\/modules\/conversation\/agent\/graph\/graph\.builder\.ts$/,
-    reason: "Transitional wiring: eval service still uses conversation graph builder."
+      /^apps\/backend\/src\/modules\/conversation\/text2sql\/text2sql-workflow-runner\.service\.ts$/,
+    reason: "Transitional wiring: eval service still uses conversation workflow runner."
   },
   {
     sourceDomain: "knowledge",
@@ -205,11 +205,6 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     reason: "Temporary bridge: agent module still imports knowledge module directly."
   },
   {
-    sourceFile: "apps/backend/src/modules/conversation/agent/graph/langgraph.state.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: langgraph state still imports RAG retrieval payload types directly."
-  },
-  {
     sourceFile: "apps/backend/src/modules/conversation/agent/nodes/generate-sql.node.ts",
     targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
     reason: "Temporary bridge: generate-sql node still imports RAG retrieval payload types directly."
@@ -250,6 +245,11 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
       "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
     targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
     reason: "Temporary bridge: post-run hooks still imports knowledge facade contract directly."
+  },
+  {
+    sourceFile: "apps/backend/src/modules/conversation/text2sql/text2sql.module.ts",
+    targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
+    reason: "Temporary bridge: text2sql module still imports knowledge module directly."
   },
   {
     sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",

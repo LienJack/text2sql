@@ -77,7 +77,7 @@ const createService = (override?: {
       status: "active",
       entryCount: 1,
       archivedChannels: ["lexical", "dense"],
-      denseMode: "placeholder_vector_string"
+      denseMode: "mock_provider"
     })
   };
   const service = new SavedPriorSqlService(

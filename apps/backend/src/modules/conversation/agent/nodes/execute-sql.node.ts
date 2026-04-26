@@ -11,6 +11,7 @@ import {
 import { DatasourceService } from "../../../governance/datasource/datasource.service";
 import type { AccessContext } from "../../../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../../../governance/access/policy-evaluator.service";
+import { SqlCorrectionService } from "../v2/sql-correction.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -19,7 +20,8 @@ export class ExecuteSqlNode {
     private readonly queryExecutorRouter: QueryExecutorRouterService,
     private readonly chatRepository: ChatRepository,
     private readonly policyEvaluatorService: PolicyEvaluatorService,
-    private readonly auditLogRepository: AuditLogRepository
+    private readonly auditLogRepository: AuditLogRepository,
+    private readonly sqlCorrectionService: SqlCorrectionService
   ) {}
 
   async run(input: {
@@ -88,6 +90,19 @@ export class ExecuteSqlNode {
           requestId: input.requestId,
           accessContext: effectiveAccessContext
         });
+      }
+      const correctionDecision = this.sqlCorrectionService.decide(error);
+      if (correctionDecision.correctable) {
+        throw new DomainError(
+          "SQL_CORRECTABLE_EXECUTION_FAILED",
+          error instanceof Error ? error.message : String(error),
+          422,
+          {
+            correctable: true,
+            correctionReason: correctionDecision.reason,
+            maxAttempts: correctionDecision.maxAttempts
+          }
+        );
       }
       throw error;
     }

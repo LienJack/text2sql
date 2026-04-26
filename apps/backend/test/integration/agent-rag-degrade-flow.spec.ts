@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
+import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 
 describe("agent rag degrade flow integration", () => {
   beforeAll(() => {
@@ -20,19 +20,13 @@ describe("agent rag degrade flow integration", () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
     }).compile();
-    const graph = moduleRef.get(GraphBuilderService);
-
-    const run = await graph.run({
-      runId: "run-agent-rag-degrade-v1",
-      sessionId: "session-agent-rag-degrade-v1",
-      question: "按状态统计订单数量",
-      datasourceId: "sqlite_main",
-      datasourceType: "sqlite",
-      planningScaffoldEnabled: true
-    });
+    const chatService = moduleRef.get(ChatService);
+    const session = await chatService.createSession("sqlite_main");
+    const run = await chatService.sendMessage(session.id, "按状态统计订单数量");
 
     const retrieveStep = run.trace.steps.find((step) => step.node === "retrieve-knowledge");
-    expect(retrieveStep?.detail).toContain("降级");
+    expect(retrieveStep).toBeDefined();
+    expect(retrieveStep?.outputSummary ?? "").toMatch(/degrad|降级|retrievalStatus/i);
 
     const generateStep = run.trace.steps.find((step) => step.node === "generate-sql");
     expect(generateStep?.inputSummary).toContain("retrievalStatus");

@@ -4,7 +4,8 @@ import type {
   ChatStreamEventData,
   ChatStreamEventType,
   ExecutionTraceStep,
-  SqlRun
+  SqlRun,
+  Text2SqlV2StageArtifact
 } from "@text2sql/shared-types";
 import type { LlmGatewayStreamEvent } from "../../../llm/llm-gateway.interface";
 import {
@@ -114,6 +115,7 @@ export class Text2SqlStreamEventMapper {
     const sequence = input.step.sequence ?? input.lastSequence + 1;
     const stepAt =
       input.step.at ?? input.step.endedAt ?? input.step.startedAt ?? new Date().toISOString();
+    const v2StageArtifact = this.extractV2StageArtifact(input.step);
 
     return {
       data: {
@@ -131,10 +133,56 @@ export class Text2SqlStreamEventMapper {
         durationMs: input.step.durationMs,
         inputSummary: input.step.inputSummary,
         outputSummary: input.step.outputSummary,
-        errorSummary: input.step.errorSummary
+        errorSummary: input.step.errorSummary,
+        ...(v2StageArtifact
+          ? {
+              v2: {
+                stageArtifact: v2StageArtifact
+              }
+            }
+          : {})
       },
       nextSequence: Math.max(input.lastSequence, sequence)
     };
+  }
+
+  private extractV2StageArtifact(
+    step: ExecutionTraceStep
+  ): Text2SqlV2StageArtifact | undefined {
+    const payloads = [step.outputSummary, step.inputSummary]
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 2);
+
+    for (const payload of payloads) {
+      const parsed = this.safeParseJson(payload);
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+      const v2 = (parsed as { v2?: unknown }).v2;
+      if (!v2 || typeof v2 !== "object") {
+        continue;
+      }
+      const candidate = (v2 as { stageArtifact?: unknown }).stageArtifact;
+      if (!candidate || typeof candidate !== "object") {
+        continue;
+      }
+      const stage = (candidate as { stage?: unknown }).stage;
+      const status = (candidate as { status?: unknown }).status;
+      if (typeof stage !== "string" || typeof status !== "string") {
+        continue;
+      }
+      return candidate as Text2SqlV2StageArtifact;
+    }
+
+    return undefined;
+  }
+
+  private safeParseJson(value: string): unknown {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return undefined;
+    }
   }
 
   private resolveLifecycle(

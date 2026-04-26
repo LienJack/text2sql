@@ -1,374 +1,165 @@
-import {
-  createInitialLangGraphState,
-  normalizeTraceContext
-} from "../../src/modules/conversation/agent/graph/langgraph.state";
-import { createLangGraphRuntime } from "../../src/modules/conversation/agent/graph/langgraph.runtime";
+import type { SqlRun } from "@text2sql/shared-types";
+import { Text2SqlV2StateMachine } from "../../src/modules/conversation/agent/v2/text2sql-v2-state-machine";
 
-const createMockIntentPlan = () => ({
-  status: "ready" as const,
-  intent: "aggregate" as const,
-  constraints: [],
-  summary: "stub",
-  uncertaintySignal: {
-    level: "low" as const,
-    needsStrictSemanticPath: false,
-    reasonCodes: ["rule_slots_sufficient"]
+const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
+  runId: "run-v2-runtime",
+  sessionId: "session-v2-runtime",
+  question: "统计订单总数",
+  status: "executionResult",
+  provider: "volcengine",
+  model: "mock-model",
+  sql: "select count(*) as total from orders",
+  answer: "订单总数为 10",
+  rows: [{ total: 10 }],
+  columns: ["total"],
+  trace: {
+    runId: "run-v2-runtime",
+    provider: "volcengine",
+    retryCount: 0,
+    steps: [
+      {
+        node: "clarify",
+        status: "success",
+        at: "2026-04-26T00:00:00.000Z"
+      },
+      {
+        node: "retrieve-knowledge",
+        status: "success",
+        at: "2026-04-26T00:00:00.100Z"
+      },
+      {
+        node: "build-intent-plan",
+        status: "success",
+        at: "2026-04-26T00:00:00.200Z"
+      },
+      {
+        node: "build-semantic-query",
+        status: "success",
+        at: "2026-04-26T00:00:00.300Z"
+      },
+      {
+        node: "build-physical-plan",
+        status: "success",
+        at: "2026-04-26T00:00:00.400Z"
+      },
+      {
+        node: "generate-sql",
+        status: "success",
+        at: "2026-04-26T00:00:00.500Z"
+      },
+      {
+        node: "safety-check",
+        status: "success",
+        at: "2026-04-26T00:00:00.600Z"
+      },
+      {
+        node: "execute-sql",
+        status: "success",
+        at: "2026-04-26T00:00:00.700Z"
+      },
+      {
+        node: "format-answer",
+        status: "success",
+        at: "2026-04-26T00:00:00.800Z"
+      }
+    ]
   },
-  clarificationDecision: {
-    decision: "continue" as const,
-    triggerPath: "rule" as const,
-    confidenceLevel: "high" as const,
-    missingCriticalSlots: [],
-    conflictDetected: false,
-    reasonCodes: ["rule_slots_sufficient"],
-    question: "",
-    reason: "问题信息充足"
-  },
-  riskTags: [],
-  planningWarnings: []
+  llmRaw: null,
+  createdAt: "2026-04-26T00:00:01.000Z",
+  ...override
 });
 
-const createMockSemanticPlan = () => ({
-  status: "ready" as const,
-  semanticHints: [],
-  semanticVersion: 1,
-  lockStatus: "locked" as const,
-  fallbackApplied: false,
-  riskTags: [],
-  intentRiskTags: [],
-  semanticRiskTags: [],
-  planningWarnings: {
-    intent: [],
-    semantic: []
-  },
-  strictMode: false,
-  strictModeReasons: [],
-  summary: "stub"
-});
+describe("text2sql v2 runtime artifacts", () => {
+  it("maps successful trace nodes into v2 stages", () => {
+    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(createBaseRun());
 
-describe("langgraph runtime", () => {
-  it("passes contextEnvelope into clarify node", async () => {
-    const clarifyRun = jest.fn().mockReturnValue({
-      decision: "clarify",
-      action: "ask_clarification",
-      source: "rule",
-      decisionSource: "rule",
-      triggerPath: "rule",
-      bypassed: false,
-      confidence: "low",
-      confidenceLevel: "low",
-      missingSlots: ["metric"],
-      shouldClarify: true,
-      missingCriticalSlots: ["metric"],
-      reasonCodes: ["missing_metric_slot"],
-      reason: "need clarification",
-      question: "请补充指标口径"
-    });
-    const runtime = createLangGraphRuntime({
-      clarifyNode: {
-        evaluate: clarifyRun
-      },
-      retrieveKnowledgeNode: {
-        run: async () => ({
-          status: "ready",
-          snippets: ["stub"],
-          summary: "stub"
-        })
-      },
-      buildIntentPlanNode: {
-        run: async () => createMockIntentPlan()
-      },
-      buildSemanticQueryNode: {
-        run: async () => createMockSemanticPlan()
-      },
-      buildPhysicalPlanNode: {
-        run: async () => ({
-          status: "ready",
-          strategy: "direct_sql",
-          semanticConstraintMode: "structured" as const,
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          cacheStatus: "miss" as const,
-          summary: "stub"
-        })
-      },
-      resolveSavedPriorSqlNode: {
-        run: () => ({
-          status: "miss" as const,
-          reasonCodes: ["prior_sql_no_trusted_match"]
-        })
-      },
-      generateSqlNode: {
-        run: async () => ({
-          provider: "mock-provider",
-          model: "mock-model",
-          sql: "SELECT 1 AS value",
-          explanation: "mock explanation",
-          rawText: "mock raw text",
-          prompt: {
-            systemPrompt: "sys",
-            userPrompt: "usr"
-          }
-        })
-      },
-      safetyNode: {
-        run: async () => ({
-          allowed: true,
-          mode: "pass" as const,
-          riskLevel: "low" as const,
-          riskTags: []
-        })
-      },
-      executeNode: {
-        run: async () => ({
-          rows: [{ value: 1 }],
-          columns: ["value"]
-        })
-      },
-      formatNode: {
-        run: () => "formatted"
-      }
-    });
-
-    const contextEnvelope = {
-      metricDefinition: "订单总数"
-    };
-    const state = createInitialLangGraphState({
-      runId: "run-with-envelope",
-      sessionId: "session-1",
-      question: "这个趋势怎么样",
-      datasourceId: "ds-1",
-      contextEnvelope
-    });
-    const output = await runtime.invoke(state);
-
-    expect(clarifyRun).toHaveBeenCalledWith("这个趋势怎么样", contextEnvelope);
-    expect(output.terminalStatus).toBe("clarification");
-    expect(output.trace.clarificationDecision?.decision).toBe("clarify");
-  });
-
-  it("should run through executionResult path with expected node steps", async () => {
-    const runtime = createLangGraphRuntime({
-      clarifyNode: {
-        evaluate: () => ({
-          decision: "continue",
-          action: "proceed",
-          source: "rule",
-          decisionSource: "rule",
-          triggerPath: "rule",
-          bypassed: false,
-          confidence: "high",
-          confidenceLevel: "high",
-          missingSlots: [],
-          shouldClarify: false,
-          missingCriticalSlots: [],
-          reasonCodes: ["rule_slots_sufficient"],
-          reason: "问题信息充足",
-          question: ""
-        })
-      },
-      retrieveKnowledgeNode: {
-        run: async () => ({
-          status: "ready",
-          snippets: ["stub"],
-          summary: "stub"
-        })
-      },
-      buildIntentPlanNode: {
-        run: async () => createMockIntentPlan()
-      },
-      buildSemanticQueryNode: {
-        run: async () => createMockSemanticPlan()
-      },
-      buildPhysicalPlanNode: {
-        run: async () => ({
-          status: "ready",
-          strategy: "direct_sql",
-          semanticConstraintMode: "structured" as const,
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          cacheStatus: "miss" as const,
-          summary: "stub"
-        })
-      },
-      resolveSavedPriorSqlNode: {
-        run: () => ({
-          status: "miss" as const,
-          reasonCodes: ["prior_sql_no_trusted_match"]
-        })
-      },
-      generateSqlNode: {
-        run: async () => ({
-          provider: "mock-provider",
-          model: "mock-model",
-          sql: "SELECT 1 AS value",
-          explanation: "mock explanation",
-          rawText: "mock raw text",
-          prompt: {
-            systemPrompt: "sys",
-            userPrompt: "usr"
-          }
-        })
-      },
-      safetyNode: {
-        run: async () => ({
-          allowed: true,
-          mode: "pass" as const,
-          riskLevel: "low" as const,
-          riskTags: []
-        })
-      },
-      executeNode: {
-        run: async () => ({
-          rows: [{ value: 1 }],
-          columns: ["value"]
-        })
-      },
-      formatNode: {
-        run: () => "formatted"
-      }
-    });
-
-    const state = createInitialLangGraphState({
-      runId: "run-1",
-      sessionId: "session-1",
-      question: "统计订单总数",
-      datasourceId: "ds-1"
-    });
-    const output = await runtime.invoke(state);
-
-    expect(output.terminalStatus).toBe("executionResult");
-    expect(output.provider).toBe("mock-provider");
-    expect(output.llmRaw?.model).toBe("mock-model");
-    expect(output.answer).toBe("formatted");
-    expect(output.trace.steps.map((step) => step.node)).toEqual([
-      "clarify",
-      "retrieve-knowledge",
-      "build-intent-plan",
-      "build-semantic-query",
-      "build-physical-plan",
-      "resolve-saved-prior-sql",
+    expect(artifact.version).toBe("v2");
+    expect(artifact.stageOrder).toEqual([
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
       "generate-sql",
-      "safety-check",
-      "execute-sql",
-      "format-answer"
+      "validate",
+      "correct",
+      "execute",
+      "answer"
     ]);
-    expect(output.trace.steps[0]?.sequence).toBe(1);
-    expect(output.trace.steps[0]?.stepId).toBe("run-1:clarify:1");
-    expect(output.trace.steps[0]?.lifecycle).toBe("skipped");
-    expect(output.trace.steps[6]?.sequence).toBe(7);
-    expect(output.trace.steps[6]?.lifecycle).toBe("completed");
-    expect(output.trace.clarificationDecision?.decision).toBe("continue");
-  });
-
-  it("should normalize missing trace context", () => {
-    expect(normalizeTraceContext(undefined)).toEqual({
-      source: "chat",
-      route: "unknown"
+    expect(artifact.stages.find((stage) => stage.stage === "generate-sql")?.status).toBe("success");
+    expect(artifact.stages.find((stage) => stage.stage === "generate-sql")?.provider).toEqual({
+      provider: "volcengine",
+      model: "mock-model"
     });
+    expect(artifact.stages.find((stage) => stage.stage === "correct")?.status).toBe("skipped");
+    expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("success");
   });
 
-  it("should capture fatal llm error into state without throwing from runtime", async () => {
-    const runtime = createLangGraphRuntime({
-      clarifyNode: {
-        evaluate: () => ({
-          decision: "continue",
-          action: "proceed",
-          source: "rule",
-          decisionSource: "rule",
-          triggerPath: "rule",
-          bypassed: false,
-          confidence: "high",
-          confidenceLevel: "high",
-          missingSlots: [],
-          shouldClarify: false,
-          missingCriticalSlots: [],
-          reasonCodes: ["rule_slots_sufficient"],
-          reason: "问题信息充足",
-          question: ""
-        })
-      },
-      retrieveKnowledgeNode: {
-        run: async () => ({
-          status: "ready",
-          snippets: ["stub"],
-          summary: "stub"
-        })
-      },
-      buildIntentPlanNode: {
-        run: async () => createMockIntentPlan()
-      },
-      buildSemanticQueryNode: {
-        run: async () => createMockSemanticPlan()
-      },
-      buildPhysicalPlanNode: {
-        run: async () => ({
-          status: "ready",
-          strategy: "direct_sql",
-          semanticConstraintMode: "structured" as const,
-          semanticVersion: 1,
-          lockStatus: "locked" as const,
-          fallbackApplied: false,
-          cacheStatus: "miss" as const,
-          summary: "stub"
-        })
-      },
-      resolveSavedPriorSqlNode: {
-        run: () => ({
-          status: "miss" as const,
-          reasonCodes: ["prior_sql_no_trusted_match"]
-        })
-      },
-      generateSqlNode: {
-        run: async () => {
-          throw new Error("llm failed");
-        }
-      },
-      safetyNode: {
-        run: async () => ({
-          allowed: true,
-          mode: "pass" as const,
-          riskLevel: "low" as const,
-          riskTags: []
-        })
-      },
-      executeNode: {
-        run: async () => ({
-          rows: [],
-          columns: []
-        })
-      },
-      formatNode: {
-        run: () => "formatted"
+  it("marks correction stage success when relationship-correction runs", () => {
+    const run = createBaseRun({
+      trace: {
+        ...createBaseRun().trace,
+        retryCount: 1,
+        steps: [
+          ...createBaseRun().trace.steps,
+          {
+            node: "relationship-correction",
+            status: "success",
+            at: "2026-04-26T00:00:00.650Z",
+            detail: "执行错误可修正，触发 correction 迭代"
+          }
+        ]
       }
     });
 
-    const state = createInitialLangGraphState({
-      runId: "run-2",
-      sessionId: "session-2",
-      question: "统计异常",
-      datasourceId: "ds-2"
-    });
-    const output = await runtime.invoke(state);
+    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    expect(artifact.stages.find((stage) => stage.stage === "correct")?.status).toBe("success");
+  });
 
-    expect(output.terminalStatus).toBe("failed");
-    expect(output.error).toBe("llm failed");
-    expect(output.fatalError).toBeInstanceOf(Error);
-    expect(output.trace.steps.map((step) => step.node)).toEqual([
-      "clarify",
-      "retrieve-knowledge",
-      "build-intent-plan",
-      "build-semantic-query",
-      "build-physical-plan",
-      "resolve-saved-prior-sql",
-      "generate-sql"
-    ]);
-    expect(output.trace.steps[6]?.status).toBe("failed");
-    expect(output.trace.steps[6]?.sequence).toBe(7);
-    expect(output.trace.steps[6]?.stepId).toBe("run-2:generate-sql:7");
-    expect(output.trace.steps[6]?.lifecycle).toBe("failed");
-    expect(output.trace.steps[6]?.errorSummary).toContain("llm failed");
+  it("captures correction failure as correctable validation-category failure", () => {
+    const run = createBaseRun({
+      status: "failed",
+      error: "unknown column foo",
+      trace: {
+        ...createBaseRun().trace,
+        retryCount: 2,
+        steps: [
+          ...createBaseRun().trace.steps,
+          {
+            node: "relationship-correction",
+            status: "failed",
+            at: "2026-04-26T00:00:00.650Z",
+            errorSummary: "unknown column foo"
+          }
+        ]
+      }
+    });
+
+    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    const correctionStage = artifact.stages.find((stage) => stage.stage === "correct");
+
+    expect(correctionStage?.status).toBe("failed");
+    expect(correctionStage?.failure?.category).toBe("validation");
+    expect(correctionStage?.failure?.correctable).toBe(true);
+    expect(correctionStage?.failure?.terminal).toBe(true);
+  });
+
+  it("marks clarification terminal runs without answer stage fallback", () => {
+    const run = createBaseRun({
+      status: "clarification",
+      trace: {
+        ...createBaseRun().trace,
+        steps: [
+          {
+            node: "clarify",
+            status: "success",
+            at: "2026-04-26T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    expect(artifact.stages.find((stage) => stage.stage === "intake")?.status).toBe("clarification");
+    expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("clarification");
   });
 });

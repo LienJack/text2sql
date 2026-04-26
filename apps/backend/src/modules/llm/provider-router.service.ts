@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { LlmGatewayService } from "./llm-gateway.service";
 import type {
@@ -30,6 +31,20 @@ export interface RerankCandidateResult {
   candidateId: string;
   score: number;
   reason: string;
+}
+
+export interface RerankExecutionMetadata {
+  mode: "provider" | "mock";
+  provider?: string;
+  model?: string;
+  inputCount: number;
+  outputCount: number;
+  fallbackReason?: string;
+}
+
+export interface RerankCandidatesResponse {
+  results: RerankCandidateResult[];
+  metadata: RerankExecutionMetadata;
 }
 
 @Injectable()
@@ -83,12 +98,41 @@ export class ProviderRouterService {
     candidates: RerankCandidateInput[];
     modelCatalogId?: string;
   }): Promise<RerankCandidateResult[]> {
+    const response = await this.rerankCandidatesWithMetadata(input);
+    return response.results;
+  }
+
+  async rerankCandidatesWithMetadata(input: {
+    query: string;
+    candidates: RerankCandidateInput[];
+    modelCatalogId?: string;
+  }): Promise<RerankCandidatesResponse> {
     if (input.candidates.length === 0) {
-      return [];
+      return {
+        results: [],
+        metadata: {
+          mode: this.config.llmMockMode ? "mock" : "provider",
+          provider: this.config.llmProvider,
+          model: this.config.llmModel,
+          inputCount: 0,
+          outputCount: 0
+        }
+      };
     }
 
     if (this.config.llmMockMode) {
-      return this.rerankInMockMode(input.query, input.candidates);
+      const results = this.rerankInMockMode(input.query, input.candidates);
+      return {
+        results,
+        metadata: {
+          mode: "mock",
+          provider: `${this.config.llmProvider}:mock`,
+          model: this.config.llmModel,
+          inputCount: input.candidates.length,
+          outputCount: results.length,
+          fallbackReason: "llm_mock_mode"
+        }
+      };
     }
 
     const prompt: LlmGatewayPrompt = {
@@ -126,9 +170,27 @@ export class ProviderRouterService {
     });
     const parsed = this.parseRerankResponse(completion.rawText);
     if (parsed.length === 0) {
-      return this.rerankInMockMode(input.query, input.candidates);
+      throw new DomainError(
+        "RERANK_PROVIDER_INVALID_PAYLOAD",
+        "Rerank provider 未返回有效排序结果。",
+        502,
+        {
+          provider: completion.provider,
+          model: completion.model,
+          inputCount: input.candidates.length
+        }
+      );
     }
-    return parsed;
+    return {
+      results: parsed,
+      metadata: {
+        mode: "provider",
+        provider: completion.provider,
+        model: completion.model,
+        inputCount: input.candidates.length,
+        outputCount: parsed.length
+      }
+    };
   }
 
   private async resolveRuntime(

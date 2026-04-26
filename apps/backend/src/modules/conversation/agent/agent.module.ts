@@ -21,8 +21,6 @@ import { FormatAnswerNode } from "./nodes/format-answer.node";
 import { RetrieveKnowledgeNode } from "./nodes/retrieve-knowledge.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
-import { GraphBuilderService } from "./graph/graph.builder";
-import { LangGraphRuntimeService } from "./graph/langgraph.runtime";
 import { GenerateSqlNode } from "./nodes/generate-sql.node";
 import { ResolveSavedPriorSqlNode } from "./nodes/resolve-saved-prior-sql.node";
 import { SafetyCheckNode } from "./nodes/safety-check.node";
@@ -35,6 +33,13 @@ import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
 import { PlannerVersionLockService } from "./planner/planner-version-lock.service";
 import { PlannerCacheService } from "./planner/planner-cache.service";
+import { SemanticContextPackService } from "./v2/semantic-context-pack.service";
+import { SemanticPlanService } from "./v2/semantic-plan.service";
+import { SemanticPlanValidator } from "./v2/semantic-plan.validator";
+import { SqlValidationService } from "./v2/sql-validation.service";
+import { SqlCorrectionService } from "./v2/sql-correction.service";
+import { Text2SqlV2StateMachine } from "./v2/text2sql-v2-state-machine";
+import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
 
 @Module({
   imports: [
@@ -60,8 +65,6 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
         >,
       inject: [KNOWLEDGE_FACADE_CONTRACT]
     },
-    GraphBuilderService,
-    LangGraphRuntimeService,
     ClarifyNode,
     ClarificationSemanticEvaluatorService,
     ClarificationFusionPolicy,
@@ -81,11 +84,18 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
     SqlGenerationService,
     SqlSafetyGuard,
     SqlReadonlyTool,
-    SqlToolRegistryService
+    SqlToolRegistryService,
+    SemanticContextPackService,
+    SemanticPlanService,
+    SemanticPlanValidator,
+    SqlValidationService,
+    SqlCorrectionService,
+    Text2SqlV2StateMachine,
+    Text2SqlV2RunnerService
   ],
   exports: [
-    GraphBuilderService,
-    SqlToolRegistryService
+    SqlToolRegistryService,
+    Text2SqlV2RunnerService
   ]
 })
 export class AgentModule {}

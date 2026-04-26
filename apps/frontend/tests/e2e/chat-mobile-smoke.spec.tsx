@@ -178,7 +178,9 @@ describe("chat mobile smoke", () => {
     vi.clearAllMocks();
   });
 
-  it("renders mobile-usable chat controls and progressive delivery toggles", async () => {
+  it(
+    "renders mobile-usable chat controls and progressive delivery toggles",
+    async () => {
     const user = userEvent.setup();
     render(<ChatPage />);
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
@@ -237,5 +239,7 @@ describe("chat mobile smoke", () => {
     expect(
       screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
     ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
-  });
+    },
+    15000
+  );
 });

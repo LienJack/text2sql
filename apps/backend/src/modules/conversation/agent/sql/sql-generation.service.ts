@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType, PromptTemplateTraceEvidence } from "@text2sql/shared-types";
+import type {
+  DatasourceType,
+  PromptTemplateTraceEvidence,
+  SemanticPlanV1
+} from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import type {
   LlmGatewayPrompt,
@@ -31,6 +35,7 @@ interface SqlGenerationSelection {
   semanticContextPack?: RagContextPack;
   semanticIntent?: SqlSemanticIntent;
   explicitPinning?: SqlGenerationExplicitPinningEvidence;
+  semanticPlan?: SemanticPlanV1;
 }
 
 export interface SqlGenerationExplicitPinningEvidence {
@@ -81,6 +86,7 @@ export interface SqlDraft {
   retryCount?: number;
   semanticIntent?: SqlSemanticIntent;
   coverage?: SqlEvidenceCoverage;
+  semanticPlan?: SemanticPlanV1;
 }
 
 @Injectable()
@@ -187,7 +193,8 @@ export class SqlGenerationService {
           intent: semanticIntent,
           retryReason
         },
-        semanticContextPack: selection?.semanticContextPack
+        semanticContextPack: selection?.semanticContextPack,
+        semanticPlan: selection?.semanticPlan
       }
     );
   }
@@ -207,6 +214,7 @@ export class SqlGenerationService {
     templateOverlay?: string;
     promptTemplate: PromptTemplateTraceEvidence;
   }): Promise<SqlDraft> {
+    this.assertSemanticPlan(input.selection?.semanticPlan);
     let retryCount = 0;
     let prompt = input.prompt;
     let completion = input.completion;
@@ -235,6 +243,21 @@ export class SqlGenerationService {
               }
             );
           }
+          const semanticPlanCoverage = this.validateSemanticPlanCoverage({
+            sql: extracted.sql,
+            semanticPlan: input.selection?.semanticPlan
+          });
+          if (!semanticPlanCoverage.valid) {
+            throw new DomainError(
+              "LLM_SQL_PLAN_COVERAGE_FAILED",
+              "SQL 超出了语义计划允许范围，已阻止该输出。",
+              422,
+              {
+                reason: semanticPlanCoverage.reason,
+                missingObjects: semanticPlanCoverage.missingObjects
+              }
+            );
+          }
           return {
             provider: completion.provider,
             model: completion.model,
@@ -246,7 +269,8 @@ export class SqlGenerationService {
             promptTemplate: input.promptTemplate,
             retryCount,
             semanticIntent: input.semanticIntent,
-            coverage: coverage.evidence
+            coverage: coverage.evidence,
+            semanticPlan: input.selection?.semanticPlan
           };
         }
 
@@ -306,6 +330,22 @@ export class SqlGenerationService {
       return "count";
     }
     return explicitIntent ?? "general";
+  }
+
+  private assertSemanticPlan(semanticPlan: SemanticPlanV1 | undefined): void {
+    if (!semanticPlan) {
+      return;
+    }
+    if (semanticPlan.route === "reject") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_REJECTED",
+        "语义计划路由为 reject，已终止 SQL 生成。",
+        422,
+        {
+          semanticPlan
+        }
+      );
+    }
   }
 
   private validateSemanticIntent(
@@ -457,6 +497,59 @@ export class SqlGenerationService {
         triggerSource,
         usedObjects
       }
+    };
+  }
+
+  private validateSemanticPlanCoverage(input: {
+    sql: string;
+    semanticPlan: SemanticPlanV1 | undefined;
+  }): {
+    valid: boolean;
+    reason?: string;
+    missingObjects: string[];
+  } {
+    const semanticPlan = input.semanticPlan;
+    if (!semanticPlan) {
+      return {
+        valid: true,
+        missingObjects: []
+      };
+    }
+
+    const references = this.extractSqlReferences(input.sql);
+    const allowedTables = this.unique(
+      (semanticPlan.allowedTables ?? [])
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item))
+    );
+    const forbiddenTables = new Set(
+      (semanticPlan.forbiddenTables ?? [])
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item))
+    );
+
+    const missingObjects = this.unique([
+      ...Array.from(references.tables)
+        .filter((table) => forbiddenTables.has(table))
+        .map((table) => `table:${table}`),
+      ...(allowedTables.length > 0
+        ? Array.from(references.tables)
+            .filter((table) => !allowedTables.includes(table))
+            .map((table) => `table:${table}`)
+        : [])
+    ]);
+
+    if (missingObjects.length > 0) {
+      return {
+        valid: false,
+        reason: `semantic plan coverage missing: ${missingObjects.join(", ")}`,
+        missingObjects
+      };
+    }
+
+    return {
+      valid: true,
+      missingObjects: []
     };
   }
 

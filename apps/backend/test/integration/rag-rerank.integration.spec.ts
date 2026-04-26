@@ -92,6 +92,18 @@ describe("rag rerank integration", () => {
     expect(replayEvents.some((item) => item.replayKey === "rerank:primary")).toBe(true);
     expect(replayEvents.some((item) => item.replayKey === "rerank:secondary")).toBe(true);
     expect(replayEvents.some((item) => item.replayKey === "rerank:final")).toBe(true);
+    const secondaryReplay = replayEvents.find(
+      (item) => item.replayKey === "rerank:secondary"
+    );
+    const secondaryPayload = JSON.parse(secondaryReplay?.payload ?? "{}") as {
+      metadata?: {
+        mode?: string;
+        fallback_reason?: string;
+      };
+    };
+    expect(secondaryPayload.metadata?.mode).toBe("mock");
+    expect(secondaryPayload.metadata?.fallback_reason).toBe("llm_mock_mode");
+    expect(reranked.retrieval_bundle.rerank_metadata?.secondary.mode).toBe("mock");
 
     await moduleRef.close();
   });
@@ -107,17 +119,26 @@ describe("rag rerank integration", () => {
     const rerankService = moduleRef.get(RagRerankService);
     const modelAdapter = moduleRef.get(ModelRerankerAdapter);
 
-    jest.spyOn(modelAdapter, "rerank").mockImplementation(
+    jest.spyOn(modelAdapter, "rerankWithMetadata").mockImplementation(
       async () =>
         new Promise((resolvePromise) => {
           setTimeout(() => {
-            resolvePromise([
-              {
-                candidateId: "chunk-timeout-schema",
-                score: 0.9,
-                reason: "late result"
+            resolvePromise({
+              results: [
+                {
+                  candidateId: "chunk-timeout-schema",
+                  score: 0.9,
+                  reason: "late result"
+                }
+              ],
+              metadata: {
+                mode: "provider",
+                provider: "openai",
+                model: "gpt-4.1-mini",
+                inputCount: 3,
+                outputCount: 1
               }
-            ]);
+            });
           }, 30);
         })
     );
@@ -164,6 +185,9 @@ describe("rag rerank integration", () => {
       expect.arrayContaining(["secondary_rerank_timeout"])
     );
     expect(reranked.retrieval_bundle.context_pack?.status).toBe("degraded");
+    expect(
+      reranked.retrieval_bundle.rerank_metadata?.secondary.unavailable_reason
+    ).toBe("secondary_rerank_timeout");
     expect(reranked.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
       true
     );

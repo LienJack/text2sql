@@ -85,7 +85,7 @@ const createBundle = (): RagRetrievalBundle => ({
 
 describe("rag rerank service", () => {
   function createService(
-    adapter: Pick<ModelRerankerAdapter, "rerank">,
+    adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata">,
     replay: Pick<RagReplayRepository, "writeReplay">
   ): RagRerankService {
     return new RagRerankService(
@@ -101,8 +101,15 @@ describe("rag rerank service", () => {
   }
 
   it("skips secondary rerank when candidate count is below threshold", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([])
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [],
+        metadata: {
+          mode: "mock",
+          inputCount: 0,
+          outputCount: 0
+        }
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -115,7 +122,7 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 10
     });
 
-    expect(adapter.rerank).not.toHaveBeenCalled();
+    expect(adapter.rerankWithMetadata).not.toHaveBeenCalled();
     expect(response.retrieval_bundle.reranked?.length).toBe(2);
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["secondary_rerank_skipped_low_candidates"])
@@ -123,8 +130,8 @@ describe("rag rerank service", () => {
   });
 
   it("falls back to primary ranking when secondary rerank fails", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockRejectedValue(new Error("secondary_model_unavailable"))
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockRejectedValue(new Error("secondary_model_unavailable"))
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -137,29 +144,41 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 2
     });
 
-    expect(adapter.rerank).toHaveBeenCalledTimes(1);
+    expect(adapter.rerankWithMetadata).toHaveBeenCalledTimes(1);
     expect(response.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
       true
     );
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
-      expect.arrayContaining(["secondary_model_unavailable"])
+      expect.arrayContaining(["secondary_rerank_unavailable_secondary_model_unavailable"])
+    );
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.unavailable_reason).toBe(
+      "secondary_rerank_unavailable_secondary_model_unavailable"
     );
   });
 
   it("applies secondary scores when model rerank succeeds", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([
-        {
-          candidateId: "chunk-a",
-          score: 0.2,
-          reason: "less relevant"
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [
+          {
+            candidateId: "chunk-a",
+            score: 0.2,
+            reason: "less relevant"
+          },
+          {
+            candidateId: "chunk-b",
+            score: 0.95,
+            reason: "strong semantic match"
+          }
+        ],
+        metadata: {
+          mode: "provider",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          inputCount: 2,
+          outputCount: 2
         },
-        {
-          candidateId: "chunk-b",
-          score: 0.95,
-          reason: "strong semantic match"
-        }
-      ])
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -172,14 +191,23 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 2
     });
 
-    expect(adapter.rerank).toHaveBeenCalledTimes(1);
+    expect(adapter.rerankWithMetadata).toHaveBeenCalledTimes(1);
     expect(response.retrieval_bundle.reranked?.[0]?.chunk_id).toBe("chunk-b");
     expect(response.retrieval_bundle.reranked?.[0]?.secondary_score).toBeCloseTo(0.95);
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.provider).toBe("openai");
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.model).toBe("gpt-4.1-mini");
   });
 
   it("keeps retrieval column pruning evidence visible in rerank replay payload", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([])
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [],
+        metadata: {
+          mode: "mock",
+          inputCount: 0,
+          outputCount: 0
+        }
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)

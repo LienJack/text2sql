@@ -6,6 +6,7 @@ import { RagQueryCacheService } from "../perf/rag-query-cache.service";
 import { RagQualityService } from "../quality/rag-quality.service";
 import {
   type RagBudgetSignal,
+  type RagRerankStageMetadata,
   type RagRetrievalBundle,
   type RagRetrievalCandidate,
   type RagRerankedCandidate
@@ -33,6 +34,11 @@ const DEFAULT_SECONDARY_MIN_CANDIDATES = 3;
 const DEFAULT_SELECTED_CONTEXT_LIMIT = 6;
 const RERANK_CACHE_L1_TTL_MS = 20_000;
 const RERANK_CACHE_L2_TTL_MS = 3 * 60_000;
+
+interface SecondaryRerankExecution {
+  scores: Record<string, { score: number; reason: string }>;
+  metadata: RagRerankStageMetadata;
+}
 
 @Injectable()
 export class RagRerankService {
@@ -110,50 +116,99 @@ export class RagRerankService {
       input.secondaryTimeoutMs,
       DEFAULT_SECONDARY_TIMEOUT_MS
     );
+    const candidateWindow = primary.slice(0, secondaryTopK);
+    let secondaryMetadata: RagRerankStageMetadata = {
+      status: "skipped",
+      timeout_ms: secondaryTimeoutMs,
+      timeoutMs: secondaryTimeoutMs,
+      input_count: candidateWindow.length,
+      inputCount: candidateWindow.length,
+      output_count: 0,
+      outputCount: 0
+    };
 
     if (!budgetDecision.secondaryEnabled) {
-      rerankDegradeReasons.push("secondary_rerank_disabled_by_budget");
+      const reason = "secondary_rerank_disabled_by_budget";
+      rerankDegradeReasons.push(reason);
+      secondaryMetadata = {
+        ...secondaryMetadata,
+        status: "skipped",
+        fallback_reason: reason,
+        fallbackReason: reason
+      };
       await this.writeSecondaryReplay(bundle, {
         status: "skipped",
-        reason: "secondary_rerank_disabled_by_budget",
-        timeoutMs: secondaryTimeoutMs
+        reason,
+        timeoutMs: secondaryTimeoutMs,
+        metadata: secondaryMetadata
       });
     } else if (!secondaryEnabled) {
-      rerankDegradeReasons.push("secondary_rerank_disabled");
+      const reason = "secondary_rerank_disabled";
+      rerankDegradeReasons.push(reason);
+      secondaryMetadata = {
+        ...secondaryMetadata,
+        status: "skipped",
+        fallback_reason: reason,
+        fallbackReason: reason
+      };
       await this.writeSecondaryReplay(bundle, {
         status: "skipped",
-        reason: "secondary_rerank_disabled",
-        timeoutMs: secondaryTimeoutMs
+        reason,
+        timeoutMs: secondaryTimeoutMs,
+        metadata: secondaryMetadata
       });
     } else if (primary.length < secondaryMinCandidates) {
-      rerankDegradeReasons.push("secondary_rerank_skipped_low_candidates");
+      const reason = "secondary_rerank_skipped_low_candidates";
+      rerankDegradeReasons.push(reason);
+      secondaryMetadata = {
+        ...secondaryMetadata,
+        status: "skipped",
+        fallback_reason: reason,
+        fallbackReason: reason,
+        evidence_ids: candidateWindow.map((item) => item.chunk_id),
+        evidenceIds: candidateWindow.map((item) => item.chunk_id)
+      };
       await this.writeSecondaryReplay(bundle, {
         status: "skipped",
-        reason: "secondary_rerank_skipped_low_candidates",
-        timeoutMs: secondaryTimeoutMs
+        reason,
+        timeoutMs: secondaryTimeoutMs,
+        metadata: secondaryMetadata
       });
     } else {
       try {
-        secondaryScores = await this.withTimeout(
-          this.runSecondaryRerank(bundle, primary.slice(0, secondaryTopK), input.modelCatalogId),
+        const secondary = await this.withTimeout(
+          this.runSecondaryRerank(bundle, candidateWindow, input.modelCatalogId),
           secondaryTimeoutMs,
           "secondary_rerank_timeout"
         );
+        secondaryScores = secondary.scores;
+        secondaryMetadata = {
+          ...secondary.metadata,
+          status: "ok",
+          timeout_ms: secondaryTimeoutMs,
+          timeoutMs: secondaryTimeoutMs
+        };
         await this.writeSecondaryReplay(bundle, {
           status: "ok",
           timeoutMs: secondaryTimeoutMs,
-          scores: secondaryScores
+          scores: secondaryScores,
+          metadata: secondaryMetadata
         });
       } catch (error) {
-        const reason =
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "secondary_rerank_failed";
+        const reason = this.resolveSecondaryDegradeReason(error);
         rerankDegradeReasons.push(reason);
+        secondaryMetadata = this.toSecondaryMetadataFromError({
+          error,
+          reason,
+          timeoutMs: secondaryTimeoutMs,
+          evidenceIds: candidateWindow.map((item) => item.chunk_id),
+          inputCount: candidateWindow.length
+        });
         await this.writeSecondaryReplay(bundle, {
           status: "degraded",
           reason,
-          timeoutMs: secondaryTimeoutMs
+          timeoutMs: secondaryTimeoutMs,
+          metadata: secondaryMetadata
         });
       }
     }
@@ -177,7 +232,15 @@ export class RagRerankService {
       decision_reasons: this.unique([
         ...(bundle.decision_reasons ?? []),
         ...budgetDecision.decisionReasons
-      ])
+      ]),
+      rerank_metadata: {
+        secondary: secondaryMetadata,
+        secondaryCompat: secondaryMetadata
+      },
+      rerankMetadata: {
+        secondary: secondaryMetadata,
+        secondaryCompat: secondaryMetadata
+      }
     };
     const existingContextPack = bundle.context_pack;
     responseBundle.context_pack = {
@@ -268,8 +331,8 @@ export class RagRerankService {
     bundle: RagRetrievalBundle,
     candidates: RagRerankedCandidate[],
     modelCatalogId?: string
-  ): Promise<Record<string, { score: number; reason: string }>> {
-    const response = await this.modelReranker.rerank({
+  ): Promise<SecondaryRerankExecution> {
+    const response = await this.modelReranker.rerankWithMetadata({
       query: bundle.query,
       modelCatalogId,
       candidates: candidates.map((candidate) => ({
@@ -282,7 +345,7 @@ export class RagRerankService {
       }))
     });
     const scoreMap: Record<string, { score: number; reason: string }> = {};
-    for (const item of response) {
+    for (const item of response.results) {
       if (!Number.isFinite(item.score)) {
         continue;
       }
@@ -291,7 +354,25 @@ export class RagRerankService {
         reason: item.reason
       };
     }
-    return scoreMap;
+    const evidenceIds = candidates.map((candidate) => candidate.chunk_id);
+    const metadata: RagRerankStageMetadata = {
+      status: "ok",
+      mode: response.metadata.mode,
+      provider: response.metadata.provider,
+      model: response.metadata.model,
+      input_count: response.metadata.inputCount,
+      inputCount: response.metadata.inputCount,
+      output_count: Object.keys(scoreMap).length,
+      outputCount: Object.keys(scoreMap).length,
+      fallback_reason: response.metadata.fallbackReason,
+      fallbackReason: response.metadata.fallbackReason,
+      evidence_ids: evidenceIds,
+      evidenceIds
+    };
+    return {
+      scores: scoreMap,
+      metadata
+    };
   }
 
   private mergePrimaryWithSecondary(
@@ -398,6 +479,7 @@ export class RagRerankService {
       reason?: string;
       timeoutMs: number;
       scores?: Record<string, { score: number; reason: string }>;
+      metadata?: RagRerankStageMetadata;
     }
   ): Promise<void> {
     await this.replayRepository.writeReplay({
@@ -410,7 +492,8 @@ export class RagRerankService {
         status: input.status,
         reason: input.reason,
         timeoutMs: input.timeoutMs,
-        scores: input.scores
+        scores: input.scores,
+        metadata: input.metadata
       }
     });
   }
@@ -429,6 +512,7 @@ export class RagRerankService {
         rerankedCount: bundle.reranked?.length ?? 0,
         selectedContextCount: bundle.selected_context?.length ?? 0,
         riskTags: bundle.risk_tags ?? [],
+        rerankMetadata: bundle.rerank_metadata ?? bundle.rerankMetadata,
         columnPruning: this.readColumnPruningEvidence(bundle),
         contextPack: bundle.context_pack
           ? {
@@ -483,6 +567,81 @@ export class RagRerankService {
     };
     const candidate = record.column_pruning ?? record.columnPruning;
     return this.isRecord(candidate) ? candidate : undefined;
+  }
+
+  private resolveSecondaryDegradeReason(error: unknown): string {
+    if (error instanceof Error && error.message === "secondary_rerank_timeout") {
+      return "secondary_rerank_timeout";
+    }
+    const code = this.readErrorCode(error);
+    if (code === "LLM_CONFIG_MISSING") {
+      return "secondary_rerank_unavailable_provider_config_missing";
+    }
+    if (code === "RERANK_PROVIDER_INVALID_PAYLOAD") {
+      return "secondary_rerank_unavailable_invalid_payload";
+    }
+    if (typeof code === "string" && code.trim().length > 0) {
+      return `secondary_rerank_unavailable_${code.toLowerCase()}`;
+    }
+    if (error instanceof Error && error.message.trim()) {
+      return `secondary_rerank_unavailable_${error.message
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .slice(0, 64)}`;
+    }
+    return "secondary_rerank_unavailable_unknown";
+  }
+
+  private toSecondaryMetadataFromError(input: {
+    error: unknown;
+    reason: string;
+    timeoutMs: number;
+    evidenceIds: string[];
+    inputCount: number;
+  }): RagRerankStageMetadata {
+    const details = this.readErrorDetails(input.error);
+    const provider = this.readString(details?.provider);
+    const model = this.readString(details?.model);
+    return {
+      status: "degraded",
+      provider,
+      model,
+      timeout_ms: input.timeoutMs,
+      timeoutMs: input.timeoutMs,
+      input_count: input.inputCount,
+      inputCount: input.inputCount,
+      output_count: 0,
+      outputCount: 0,
+      unavailable_reason: input.reason,
+      unavailableReason: input.reason,
+      evidence_ids: input.evidenceIds,
+      evidenceIds: input.evidenceIds
+    };
+  }
+
+  private readErrorCode(error: unknown): string | undefined {
+    if (!this.isRecord(error)) {
+      return undefined;
+    }
+    return this.readString(error.code);
+  }
+
+  private readErrorDetails(error: unknown): Record<string, unknown> | undefined {
+    if (!this.isRecord(error)) {
+      return undefined;
+    }
+    if (!this.isRecord(error.details)) {
+      return undefined;
+    }
+    return error.details;
+  }
+
+  private readString(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized : undefined;
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

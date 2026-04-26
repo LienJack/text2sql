@@ -455,6 +455,7 @@ describe("settings modeling complete parity", () => {
   });
 
   it("routes node action entries with keyboard support and opens relationship dialogs", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const user = userEvent.setup();
     render(<ModelingWorkspacePage />);
     const topStatusBar = screen.getByTestId("modeling-top-status-bar");
@@ -490,5 +491,6 @@ describe("settings modeling complete parity", () => {
     expect(await screen.findByRole("dialog", { name: "Edit relationship" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(topStatusBar).toHaveTextContent("Current Context: relationship · rel-orders-customers");
+    confirmSpy.mockRestore();
   });
 });

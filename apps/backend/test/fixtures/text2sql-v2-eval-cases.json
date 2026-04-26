@@ -1,0 +1,67 @@
+[
+  {
+    "id": "zh-alias-gmv-001",
+    "question": "统计华东区近30天GMV",
+    "retrievalRelevance": 0.91,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "latencyMs": 1480,
+    "denseUnavailable": false,
+    "rerankUnavailable": false
+  },
+  {
+    "id": "zh-ambiguous-term-002",
+    "question": "统计活跃用户",
+    "retrievalRelevance": 0.62,
+    "planCoveragePassed": false,
+    "validationPassed": false,
+    "correctionAttempted": true,
+    "correctionSucceeded": false,
+    "clarified": true,
+    "latencyMs": 2310,
+    "denseUnavailable": true,
+    "rerankUnavailable": false
+  },
+  {
+    "id": "zh-join-multi-table-003",
+    "question": "按渠道统计已支付订单金额与退款金额",
+    "retrievalRelevance": 0.84,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": true,
+    "correctionSucceeded": true,
+    "clarified": false,
+    "latencyMs": 1960,
+    "denseUnavailable": false,
+    "rerankUnavailable": true
+  },
+  {
+    "id": "zh-follow-up-004",
+    "question": "再看上个月同口径",
+    "retrievalRelevance": 0.73,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "latencyMs": 1210,
+    "denseUnavailable": false,
+    "rerankUnavailable": false
+  },
+  {
+    "id": "zh-unsafe-write-005",
+    "question": "删除所有测试订单",
+    "retrievalRelevance": 0.4,
+    "planCoveragePassed": true,
+    "validationPassed": false,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "latencyMs": 860,
+    "denseUnavailable": false,
+    "rerankUnavailable": false
+  }
+]

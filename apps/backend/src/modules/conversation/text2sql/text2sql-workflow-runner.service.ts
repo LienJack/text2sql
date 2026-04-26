@@ -12,7 +12,7 @@ import { EnrichDeliveryStage } from "./stages/enrich-delivery.stage";
 import { PersistRunStage } from "./stages/persist-run.stage";
 import { PostRunHooksStage } from "./stages/post-run-hooks.stage";
 import { PrepareRunStage } from "./stages/prepare-run.stage";
-import { RunAgentGraphStage } from "./stages/run-agent-graph.stage";
+import { RunV2StateMachineStage } from "./stages/run-v2-state-machine.stage";
 
 export interface Text2SqlWorkflowInput {
   sessionId: string;
@@ -34,7 +34,7 @@ export class Text2SQLWorkflowRunner {
   constructor(
     private readonly datasourceRegistry: DatasourceRegistryService,
     private readonly prepareRunStage: PrepareRunStage,
-    private readonly runAgentGraphStage: RunAgentGraphStage,
+    private readonly runV2StateMachineStage: RunV2StateMachineStage,
     private readonly enrichDeliveryStage: EnrichDeliveryStage,
     private readonly persistRunStage: PersistRunStage,
     private readonly postRunHooksStage: PostRunHooksStage,
@@ -43,7 +43,7 @@ export class Text2SQLWorkflowRunner {
 
   async runSync(input: Text2SqlWorkflowInput): Promise<SqlRun> {
     const prepared = await this.prepareRunStage.run(input);
-    const run = await this.runAgentGraphStage.runSync(prepared, this.syncRoute);
+    const run = await this.runV2StateMachineStage.runSync(prepared, this.syncRoute);
     return this.finalizeSuccessRun(prepared, run);
   }
 
@@ -69,7 +69,7 @@ export class Text2SQLWorkflowRunner {
     let stepSequence = 0;
 
     try {
-      const run = await this.runAgentGraphStage.runStream(prepared, this.streamRoute, {
+      const run = await this.runV2StateMachineStage.runStream(prepared, this.streamRoute, {
         onLlmEvent: async (event) => {
           const mappedEvent = this.streamEventMapper.mapLlmEvent(event);
           if (mappedEvent.traceToolCall) {

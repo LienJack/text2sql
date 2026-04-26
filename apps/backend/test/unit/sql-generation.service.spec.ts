@@ -343,11 +343,69 @@ describe("SqlGenerationService semantic guardrails", () => {
         explicitPinning: {
           source: "context_envelope",
           tables: ["orders"],
-        columns: ["orders.amount"]
-      }
-    })
-  ).rejects.toMatchObject<Partial<DomainError>>({
-    code: "LLM_SQL_EVIDENCE_COVERAGE_FAILED"
+          columns: ["orders.amount"]
+        }
+      })
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "LLM_SQL_EVIDENCE_COVERAGE_FAILED"
+    });
   });
-});
+
+  it("fails semantic plan coverage when SQL references tables outside allowed plan tables", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT amount FROM invoices;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await expect(
+      service.generate("查询金额", {
+        semanticPlan: {
+          route: "answer",
+          standaloneQuestion: "查询金额",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.amount"],
+          allowedTables: ["orders"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"]
+        }
+      })
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "LLM_SQL_PLAN_COVERAGE_FAILED"
+    });
+  });
+
+  it("injects typed semantic plan guidance into SQL prompt", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT amount FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("查询订单金额", {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "查询订单金额",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.amount"],
+        allowedTables: ["orders"],
+        forbiddenTables: ["refunds"],
+        confidence: 0.91,
+        evidenceRefs: ["chunk-orders-1"]
+      }
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.systemPrompt).toContain("Typed semantic plan (must follow):");
+    expect(prompt.systemPrompt).toContain("selectedTables=orders");
+    expect(prompt.systemPrompt).toContain("forbiddenTables=refunds");
+  });
 });

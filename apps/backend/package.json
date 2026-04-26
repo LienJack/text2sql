@@ -21,13 +21,13 @@
     "collect:clarification-balance-gate": "TS_NODE_TRANSPILE_ONLY=1 ts-node --project tsconfig.json scripts/collect-clarification-balance-gate.ts",
     "collect:clarification-balance-gate:strict": "TS_NODE_TRANSPILE_ONLY=1 ts-node --project tsconfig.json scripts/collect-clarification-balance-gate.ts --strict",
     "collect:modeling-parity-shadow-gate": "node scripts/collect-modeling-parity-shadow-gate.mjs",
-    "collect:modeling-parity-shadow-gate:strict": "node scripts/collect-modeling-parity-shadow-gate.mjs --fail-on-gate"
+    "collect:modeling-parity-shadow-gate:strict": "node scripts/collect-modeling-parity-shadow-gate.mjs --fail-on-gate",
+    "collect:text2sql-v2-eval-gate": "TS_NODE_TRANSPILE_ONLY=1 ts-node --project tsconfig.json scripts/collect-text2sql-v2-eval-gate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@anthropic-ai/claude-agent-sdk": "^0.2.98",
     "@langchain/core": "^1.1.39",
-    "@langchain/langgraph": "^1.2.8",
     "@nestjs/common": "^10.4.2",
     "@nestjs/config": "^3.2.3",
     "@nestjs/core": "^10.4.2",

@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import type { DatasourceType, SemanticPlanV1 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import {
   SqlTableAccessGuardService,
@@ -8,20 +9,51 @@ import {
   SqlSafetyGuard,
   type SqlSafetyDecision
 } from "../sql/tools/sql-safety.guard";
+import { SqlValidationService } from "../v2/sql-validation.service";
 
 @Injectable()
 export class SafetyCheckNode {
   constructor(
     private readonly tableAccessGuard: SqlTableAccessGuardService = new SqlTableAccessGuardService(),
-    private readonly safetyGuard?: SqlSafetyGuard
+    private readonly safetyGuard?: SqlSafetyGuard,
+    @Optional()
+    private readonly sqlValidationService?: SqlValidationService
   ) {}
 
   async run(input: {
     sql: string;
     datasourceId: string;
+    datasourceType?: DatasourceType;
+    semanticPlan?: SemanticPlanV1;
     accessContext?: SqlTableAccessContext;
     riskTags?: string[];
   }): Promise<SqlSafetyDecision> {
+    if (this.sqlValidationService) {
+      const validation = this.sqlValidationService.validate({
+        sql: input.sql,
+        datasourceType: input.datasourceType,
+        semanticPlan: input.semanticPlan
+      });
+      if (validation.status === "failed" && validation.failure) {
+        if (validation.failure.correctable) {
+          return {
+            allowed: true,
+            mode: "soft-warn",
+            riskLevel: "medium",
+            riskTags: ["correctable_validation_failure", validation.failure.code],
+            reason: validation.failure.message
+          };
+        }
+        return {
+          allowed: false,
+          mode: "hard-block",
+          riskLevel: "high",
+          riskTags: ["terminal_validation_failure", validation.failure.code],
+          reason: validation.failure.message
+        };
+      }
+    }
+
     const readonlyDecision = this.evaluateReadonly(input.sql, input.riskTags);
     if (!readonlyDecision.allowed) {
       return readonlyDecision;

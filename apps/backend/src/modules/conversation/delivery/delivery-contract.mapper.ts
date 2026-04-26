@@ -3,7 +3,8 @@ import type {
   ClarificationDecisionEvidence,
   DeliveryContract,
   DeliveryEvidenceReplayLog,
-  SqlRun
+  SqlRun,
+  Text2SqlV2RunArtifact
 } from "@text2sql/shared-types";
 import {
   DELIVERY_SANDBOX_REPLAY_KEY,
@@ -154,6 +155,7 @@ export class DeliveryContractMapper {
     const clarificationDecision = this.readClarificationDecisionEvidence(input.run);
     const sqlCoverage = this.readSqlCoverageEvidence(input.run);
     const savedPriorSql = this.readSavedPriorSqlEvidence(input.run);
+    const traceV2Artifact = this.readTraceV2Artifact(input.run);
     const invalidInput = replayIndex.invalidPayload;
     const artifact = input.artifactOverride ?? this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
@@ -231,7 +233,19 @@ export class DeliveryContractMapper {
       conflictHint: traceContextEvidence.conflictHint,
       clarificationDecision,
       sqlCoverage,
-      savedPriorSql
+      savedPriorSql,
+      ...(traceV2Artifact
+        ? {
+            v2: {
+              stageArtifacts: traceV2Artifact.stages,
+              contextPack: traceV2Artifact.contextPack,
+              semanticPlan: traceV2Artifact.semanticPlan,
+              sqlGeneration: traceV2Artifact.sqlGeneration,
+              sqlValidation: traceV2Artifact.sqlValidation,
+              failure: this.resolveTraceV2Failure(traceV2Artifact)
+            }
+          }
+        : {})
     };
 
     return {
@@ -756,6 +770,32 @@ export class DeliveryContractMapper {
       ...(selectedSourceRunId ? { selectedSourceRunId } : {}),
       ...(safetyResult ? { safetyResult } : {})
     };
+  }
+
+  private readTraceV2Artifact(run: SqlRun): Text2SqlV2RunArtifact | undefined {
+    const traceWithCompat = run.trace as SqlRun["trace"] & {
+      v2?: unknown;
+    };
+    if (!this.isRecord(traceWithCompat.v2)) {
+      return undefined;
+    }
+    const stages = (traceWithCompat.v2 as { stages?: unknown }).stages;
+    if (!Array.isArray(stages)) {
+      return undefined;
+    }
+    return traceWithCompat.v2 as Text2SqlV2RunArtifact;
+  }
+
+  private resolveTraceV2Failure(
+    traceV2: Text2SqlV2RunArtifact
+  ): NonNullable<NonNullable<DeliveryContract["evidence"]>["v2"]>["failure"] {
+    for (let index = traceV2.stages.length - 1; index >= 0; index -= 1) {
+      const stage = traceV2.stages[index];
+      if (stage.status === "failed" && stage.failure) {
+        return stage.failure;
+      }
+    }
+    return traceV2.sqlValidation?.failure;
   }
 
   private readSqlCoverageFromRecord(

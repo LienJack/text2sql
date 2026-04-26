@@ -146,6 +146,9 @@ export class ChatDeliveryEnrichmentService {
     const resolvedEffectiveContextSummary =
       evidenceEffectiveContextSummary ?? traceEffectiveContextSummary;
     const resolvedConflictHint = evidenceConflictHint ?? traceConflictHint;
+    const resolvedTraceV2 = run.trace.v2;
+    const resolvedEvidenceV2 =
+      run.delivery?.evidence?.v2 ?? this.buildEvidenceV2FromTrace(run.trace.v2);
 
     const normalizedTrace = resolvedPromptTemplate
       ? {
@@ -160,6 +163,11 @@ export class ChatDeliveryEnrichmentService {
             ? {
                 conflictHint: resolvedConflictHint
               }
+            : {}),
+          ...(resolvedTraceV2
+            ? {
+                v2: resolvedTraceV2
+              }
             : {})
         }
       : ({
@@ -173,6 +181,11 @@ export class ChatDeliveryEnrichmentService {
             ? {
                 conflictHint: resolvedConflictHint
               }
+            : {}),
+          ...(resolvedTraceV2
+            ? {
+                v2: resolvedTraceV2
+              }
             : {})
         } as SqlRun["trace"]);
 
@@ -181,7 +194,11 @@ export class ChatDeliveryEnrichmentService {
     }
 
     const nextEvidence =
-      run.delivery.evidence || resolvedPromptTemplate
+      run.delivery.evidence ||
+      resolvedPromptTemplate ||
+      resolvedEffectiveContextSummary ||
+      resolvedConflictHint ||
+      resolvedEvidenceV2
         ? {
             runId: run.delivery.evidence?.runId ?? run.runId,
             ...run.delivery.evidence,
@@ -198,6 +215,11 @@ export class ChatDeliveryEnrichmentService {
             ...(resolvedConflictHint
               ? {
                   conflictHint: resolvedConflictHint
+                }
+              : {}),
+            ...(resolvedEvidenceV2
+              ? {
+                  v2: resolvedEvidenceV2
                 }
               : {})
           }
@@ -447,6 +469,21 @@ export class ChatDeliveryEnrichmentService {
           .filter((item): item is string => Boolean(item))
       )
     );
+  }
+
+  private buildEvidenceV2FromTrace(
+    traceV2: SqlRun["trace"]["v2"] | undefined
+  ): NonNullable<NonNullable<SqlRun["delivery"]>["evidence"]>["v2"] | undefined {
+    if (!traceV2) {
+      return undefined;
+    }
+    return {
+      stageArtifacts: traceV2.stages,
+      contextPack: traceV2.contextPack,
+      semanticPlan: traceV2.semanticPlan,
+      sqlGeneration: traceV2.sqlGeneration,
+      sqlValidation: traceV2.sqlValidation
+    };
   }
 
   private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {

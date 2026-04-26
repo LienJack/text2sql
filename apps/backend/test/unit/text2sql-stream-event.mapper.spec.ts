@@ -22,6 +22,46 @@ describe("Text2SqlStreamEventMapper", () => {
     });
   });
 
+  it("maps optional v2 stage artifact from step summary without breaking shell fields", () => {
+    const mapped = mapper.mapStepEvent({
+      step: {
+        node: "generate-sql",
+        status: "success",
+        at: "2026-04-26T00:00:00.000Z",
+        outputSummary: JSON.stringify({
+          v2: {
+            stageArtifact: {
+              stage: "generate-sql",
+              status: "success",
+              durationMs: 12
+            }
+          }
+        })
+      },
+      runId: "run-2",
+      lastSequence: 0
+    });
+
+    const data = mapped.data as {
+      node: string;
+      status: string;
+      v2?: {
+        stageArtifact?: {
+          stage?: string;
+          status?: string;
+          durationMs?: number;
+        };
+      };
+    };
+    expect(data.node).toBe("generate-sql");
+    expect(data.status).toBe("success");
+    expect(data.v2?.stageArtifact).toEqual({
+      stage: "generate-sql",
+      status: "success",
+      durationMs: 12
+    });
+  });
+
   it("maps tool-call/result/error events with trace payload", () => {
     const called = mapper.mapLlmEvent({
       type: "tool-call",
@@ -71,5 +111,48 @@ describe("Text2SqlStreamEventMapper", () => {
         requestId: "req-1"
       }
     });
+  });
+
+  it("keeps stream shell fields stable when state data carries v2 progress", () => {
+    const mapped = mapper.mapStepEvent({
+      step: {
+        node: "safety-check",
+        status: "success",
+        at: "2026-04-26T00:00:01.000Z",
+        outputSummary: JSON.stringify({
+          v2: {
+            stageArtifact: {
+              stage: "validate",
+              status: "success",
+              warnings: ["validation_passed"]
+            }
+          }
+        })
+      },
+      runId: "run-v2-shell",
+      lastSequence: 2
+    });
+    const envelope = mapper.createEnvelope({
+      type: "state",
+      runId: "run-v2-shell",
+      sessionId: "session-v2-shell",
+      at: "2026-04-26T00:00:01.000Z",
+      data: mapped.data
+    });
+
+    expect(envelope).toMatchObject({
+      type: "state",
+      runId: "run-v2-shell",
+      sessionId: "session-v2-shell",
+      at: "2026-04-26T00:00:01.000Z"
+    });
+    const data = envelope.data as {
+      v2?: {
+        stageArtifact?: {
+          stage?: string;
+        };
+      };
+    };
+    expect(data.v2?.stageArtifact?.stage).toBe("validate");
   });
 });

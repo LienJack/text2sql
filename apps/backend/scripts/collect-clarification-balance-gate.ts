@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { AppModule } from "../src/app.module";
-import { GraphBuilderService } from "../src/modules/conversation/agent/graph/graph.builder";
+import { ChatService } from "../src/modules/conversation/chat/chat.service";
 import { createSeededSqliteFixture } from "../test/support/sqlite-fixture";
 
 type RunStatus =
@@ -433,7 +433,7 @@ export async function collectClarificationBalanceGate(
       imports: [AppModule]
     }).compile();
     moduleRef = builtModule;
-    const graph = builtModule.get(GraphBuilderService);
+    const chatService = builtModule.get(ChatService);
 
     for (const testCase of fixture.cases) {
       const diagnostics: CaseDiagnostics = {
@@ -450,13 +450,12 @@ export async function collectClarificationBalanceGate(
       };
 
       try {
-        const firstRun = await graph.run({
-          runId: randomUUID(),
-          sessionId: `clarification-balance:${testCase.id}`,
-          question: testCase.initialQuestion,
-          datasourceId: "sqlite_main",
-          datasourceType: "sqlite"
-        });
+        const session = await chatService.createSession("sqlite_main");
+        const firstRun = await chatService.sendMessage(
+          session.id,
+          testCase.initialQuestion,
+          randomUUID()
+        );
         const firstRunStatus = readRunStatus(firstRun.status);
         diagnostics.firstRunStatus = firstRunStatus;
 
@@ -488,13 +487,11 @@ export async function collectClarificationBalanceGate(
           trace: firstRun.trace
         });
         if (triggeredClarification && testCase.followUpQuestion) {
-          const followUpRun = await graph.run({
-            runId: randomUUID(),
-            sessionId: `clarification-balance:${testCase.id}`,
-            question: testCase.followUpQuestion,
-            datasourceId: "sqlite_main",
-            datasourceType: "sqlite"
-          });
+          const followUpRun = await chatService.sendMessage(
+            session.id,
+            testCase.followUpQuestion,
+            randomUUID()
+          );
           diagnostics.followUpRunStatus = readRunStatus(followUpRun.status);
           diagnostics.strictSemanticPathDetected =
             diagnostics.strictSemanticPathDetected ||

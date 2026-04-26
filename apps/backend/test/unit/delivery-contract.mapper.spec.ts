@@ -310,6 +310,79 @@ describe("DeliveryContractMapper", () => {
     });
   });
 
+  it("maps optional trace.v2 into delivery evidence.v2 without changing base evidence fields", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            },
+            {
+              stage: "validate",
+              status: "failed",
+              failure: {
+                code: "VALIDATION_FAILED",
+                message: "table not allowed",
+                category: "validation",
+                terminal: true,
+                correctable: false
+              }
+            }
+          ],
+          semanticPlan: {
+            route: "reject",
+            standaloneQuestion: "统计订单",
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id"],
+            confidence: 0.2,
+            evidenceRefs: ["chunk:1"]
+          },
+          sqlValidation: {
+            status: "failed",
+            checks: [
+              {
+                check: "permission",
+                status: "failed",
+                code: "TABLE_FORBIDDEN"
+              }
+            ],
+            correctable: false
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.runId).toBe("run-delivery-unit");
+    expect(delivery.evidence?.v2?.stageArtifacts).toHaveLength(2);
+    expect(delivery.evidence?.v2?.semanticPlan?.route).toBe("reject");
+    expect(delivery.evidence?.v2?.sqlValidation?.status).toBe("failed");
+    expect(delivery.evidence?.v2?.failure?.code).toBe("VALIDATION_FAILED");
+  });
+
   it("reads snake_case clarification decision from clarify step summary", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

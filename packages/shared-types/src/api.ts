@@ -165,6 +165,124 @@ export interface PromptTemplateTraceEvidenceCompat
   fallback_reason?: string;
 }
 
+export type Text2SqlV2StageName =
+  | "intake"
+  | "retrieve"
+  | "assemble-context"
+  | "semantic-plan"
+  | "generate-sql"
+  | "validate"
+  | "correct"
+  | "execute"
+  | "answer";
+
+export interface Text2SqlV2ProviderMetadata {
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
+  timeoutMs?: number;
+  inputCount?: number;
+  outputCount?: number;
+  fallbackReason?: string;
+  unavailableReason?: string;
+}
+
+export interface Text2SqlV2FailureSemantic {
+  code: string;
+  message: string;
+  category?:
+    | "intake"
+    | "retrieval"
+    | "planning"
+    | "generation"
+    | "validation"
+    | "governance"
+    | "execution"
+    | "unknown";
+  terminal?: boolean;
+  correctable?: boolean;
+}
+
+export interface Text2SqlV2StageArtifact {
+  stage: Text2SqlV2StageName;
+  status: "success" | "skipped" | "degraded" | "failed" | "clarification";
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  warnings?: string[];
+  evidenceIds?: string[];
+  provider?: Text2SqlV2ProviderMetadata;
+  failure?: Text2SqlV2FailureSemantic;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SemanticContextPackV1 {
+  status: "ready" | "degraded";
+  selectedEvidenceIds: string[];
+  selectedTables: string[];
+  selectedColumns: string[];
+  warnings?: string[];
+}
+
+export interface SemanticPlanV1 {
+  route: "answer" | "clarify" | "reject";
+  standaloneQuestion: string;
+  selectedTables: string[];
+  selectedColumns: string[];
+  metrics?: string[];
+  grain?: string;
+  filters?: string[];
+  joinPath?: string[];
+  allowedTables?: string[];
+  forbiddenTables?: string[];
+  confidence: number;
+  evidenceRefs: string[];
+}
+
+export interface SqlGenerationArtifactV1 {
+  sql: string;
+  assumptions?: string[];
+  usedTables: string[];
+  usedColumns: string[];
+  evidenceRefs: string[];
+}
+
+export interface SqlValidationCheckV1 {
+  check:
+    | "parse"
+    | "read-only"
+    | "permission"
+    | "plan-coverage"
+    | "relationship-path"
+    | "dialect"
+    | "dry-run"
+    | "dry-plan";
+  status: "passed" | "failed" | "skipped";
+  code?: string;
+  message?: string;
+}
+
+export interface SqlValidationArtifactV1 {
+  status: "passed" | "failed" | "skipped";
+  checks: SqlValidationCheckV1[];
+  correctable: boolean;
+  failure?: Text2SqlV2FailureSemantic;
+}
+
+export interface Text2SqlV2RunArtifact {
+  version: "v2";
+  stageOrder: Text2SqlV2StageName[];
+  stages: Text2SqlV2StageArtifact[];
+  contextPack?: SemanticContextPackV1;
+  semanticPlan?: SemanticPlanV1;
+  sqlGeneration?: SqlGenerationArtifactV1;
+  sqlValidation?: SqlValidationArtifactV1;
+}
+
 export interface ExecutionTraceStep {
   node: string;
   status: "success" | "failed" | "skipped";
@@ -220,6 +338,7 @@ export interface ExecutionTrace {
     reasonCodes?: string[];
   };
   clarificationDecision?: ClarificationDecisionEvidence;
+  v2?: Text2SqlV2RunArtifact;
 }
 
 export interface LlmRawOutput {
@@ -308,6 +427,14 @@ export interface DeliveryEvidenceLayer {
   clarificationDecision?: ClarificationDecisionEvidence;
   savedPriorSql?: DeliverySavedPriorSqlEvidence;
   evidenceStale?: boolean;
+  v2?: {
+    stageArtifacts?: Text2SqlV2StageArtifact[];
+    contextPack?: SemanticContextPackV1;
+    semanticPlan?: SemanticPlanV1;
+    sqlGeneration?: SqlGenerationArtifactV1;
+    sqlValidation?: SqlValidationArtifactV1;
+    failure?: Text2SqlV2FailureSemantic;
+  };
 }
 
 export type DeliveryArtifactChartType =
@@ -570,6 +697,9 @@ export type ChatStreamEventData =
       inputSummary?: string;
       outputSummary?: string;
       errorSummary?: string;
+      v2?: {
+        stageArtifact?: Text2SqlV2StageArtifact;
+      };
     }
   | {
       status: RunStatus;

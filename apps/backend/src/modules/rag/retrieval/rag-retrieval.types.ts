@@ -34,6 +34,13 @@ export interface RagRetrievalChunkMetadata {
   tableNames: string[];
   columnNames: string[];
   sourceMetadata?: Record<string, unknown>;
+  denseProvider?: string;
+  denseModel?: string;
+  denseDimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
 }
 
 export interface RagRetrievalChunkPayload {
@@ -74,6 +81,30 @@ export interface RagRerankedCandidate extends RagRetrievalCandidate {
   secondary_score?: number;
   final_score: number;
   rank_reason: string[];
+}
+
+export interface RagRerankStageMetadata {
+  status: "ok" | "degraded" | "skipped";
+  provider?: string;
+  model?: string;
+  mode?: "provider" | "mock";
+  timeout_ms?: number;
+  input_count?: number;
+  output_count?: number;
+  fallback_reason?: string;
+  unavailable_reason?: string;
+  evidence_ids?: string[];
+  timeoutMs?: number;
+  inputCount?: number;
+  outputCount?: number;
+  fallbackReason?: string;
+  unavailableReason?: string;
+  evidenceIds?: string[];
+}
+
+export interface RagRerankMetadata {
+  secondary: RagRerankStageMetadata;
+  secondaryCompat?: RagRerankStageMetadata;
 }
 
 export interface RagSkillContextEntry {
@@ -200,6 +231,8 @@ export interface RagRetrievalBundle {
   prior_sql_lane?: RagPriorSqlLaneEvidence;
   priorSqlLane?: RagPriorSqlLaneEvidence;
   decision_reasons?: string[];
+  rerank_metadata?: RagRerankMetadata;
+  rerankMetadata?: RagRerankMetadata;
 }
 
 export interface RagRetrievalResponse {
@@ -213,6 +246,15 @@ export interface RagRetrievalParsedMetadata extends Record<string, unknown> {
   chunkProfile?: string;
   startOffset?: number;
   endOffset?: number;
+  denseMetadata?: {
+    provider?: string;
+    model?: string;
+    dimensions?: number;
+    vectorVersion?: string;
+    indexVersion?: string;
+    scope?: string;
+    assetType?: string;
+  };
 }
 
 export interface RagRetrievalEntryContext {

@@ -1,8 +1,13 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
+import type { Session } from "@text2sql/shared-types";
 import { AppModule } from "../../src/app.module";
-import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
+import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 import { SavedPriorSqlService } from "../../src/modules/knowledge/memory/saved-prior-sql.service";
+import {
+  ChatRepository,
+  WorkspaceDatasourcePolicyRepository
+} from "../../src/modules/platform/data/persistence/index";
 
 describe("agent saved prior sql shortcut integration", () => {
   beforeAll(() => {
@@ -21,11 +26,14 @@ describe("agent saved prior sql shortcut integration", () => {
       imports: [AppModule]
     }).compile();
 
-    const graph = moduleRef.get(GraphBuilderService);
+    const chatService = moduleRef.get(ChatService);
+    const chatRepository = moduleRef.get(ChatRepository);
+    const policyRepository = moduleRef.get(WorkspaceDatasourcePolicyRepository);
     const savedPriorSql = moduleRef.get(SavedPriorSqlService);
+    const workspaceId = "ws-agent-shortcut-hit";
 
     await savedPriorSql.captureFromSavedView({
-      workspaceId: "ws-agent-shortcut-hit",
+      workspaceId,
       datasourceId: "sqlite_main",
       sourceRunId: "run-agent-shortcut-source-hit",
       sourceRunStatus: "executionResult",
@@ -38,25 +46,25 @@ describe("agent saved prior sql shortcut integration", () => {
       savedAt: "2026-04-25T10:00:00.000Z"
     });
 
-    const run = await graph.run({
-      runId: "run-agent-shortcut-hit",
-      sessionId: "session-agent-shortcut-hit",
-      question: "统计订单总数",
-      datasourceId: "sqlite_main",
-      datasourceType: "sqlite",
-      contextEnvelope: {
+    const sessionId = "session-agent-shortcut-hit";
+    await setupWorkspaceScopedSession({
+      chatRepository,
+      policyRepository,
+      workspaceId,
+      sessionId
+    });
+    const run = await chatService.sendMessage(
+      sessionId,
+      "统计订单总数",
+      undefined,
+      {
         metricDefinition: "订单总数",
         timeRange: {
           from: "2026-01-01",
           to: "2026-01-31"
         }
-      },
-      accessContext: {
-        actorId: "user-agent-shortcut-hit",
-        workspaceId: "ws-agent-shortcut-hit",
-        allowedTables: ["orders"]
       }
-    });
+    );
 
     expect(run.status).not.toBe("clarification");
     expect(run.trace.steps.some((step) => step.node === "resolve-saved-prior-sql")).toBe(
@@ -76,11 +84,14 @@ describe("agent saved prior sql shortcut integration", () => {
       imports: [AppModule]
     }).compile();
 
-    const graph = moduleRef.get(GraphBuilderService);
+    const chatService = moduleRef.get(ChatService);
+    const chatRepository = moduleRef.get(ChatRepository);
+    const policyRepository = moduleRef.get(WorkspaceDatasourcePolicyRepository);
     const savedPriorSql = moduleRef.get(SavedPriorSqlService);
+    const workspaceId = "ws-agent-shortcut-fallback";
 
     await savedPriorSql.captureFromSavedView({
-      workspaceId: "ws-agent-shortcut-fallback",
+      workspaceId,
       datasourceId: "sqlite_main",
       sourceRunId: "run-agent-shortcut-source-fallback",
       sourceRunStatus: "executionResult",
@@ -93,25 +104,25 @@ describe("agent saved prior sql shortcut integration", () => {
       savedAt: "2026-04-25T10:01:00.000Z"
     });
 
-    const run = await graph.run({
-      runId: "run-agent-shortcut-fallback",
-      sessionId: "session-agent-shortcut-fallback",
-      question: "统计订单总数（安全回退测试）",
-      datasourceId: "sqlite_main",
-      datasourceType: "sqlite",
-      contextEnvelope: {
+    const sessionId = "session-agent-shortcut-fallback";
+    await setupWorkspaceScopedSession({
+      chatRepository,
+      policyRepository,
+      workspaceId,
+      sessionId
+    });
+    const run = await chatService.sendMessage(
+      sessionId,
+      "统计订单总数（安全回退测试）",
+      undefined,
+      {
         metricDefinition: "订单总数",
         timeRange: {
           from: "2026-01-01",
           to: "2026-01-31"
         }
-      },
-      accessContext: {
-        actorId: "user-agent-shortcut-fallback",
-        workspaceId: "ws-agent-shortcut-fallback",
-        allowedTables: ["orders"]
       }
-    });
+    );
 
     expect(run.status).not.toBe("clarification");
     expect(run.trace.steps.some((step) => step.node === "resolve-saved-prior-sql")).toBe(
@@ -128,3 +139,27 @@ describe("agent saved prior sql shortcut integration", () => {
     await moduleRef.close();
   });
 });
+
+async function setupWorkspaceScopedSession(input: {
+  chatRepository: ChatRepository;
+  policyRepository: WorkspaceDatasourcePolicyRepository;
+  workspaceId: string;
+  sessionId: string;
+}): Promise<Session> {
+  await input.policyRepository.upsertWorkspaceDatasourceBindings([
+    {
+      workspaceId: input.workspaceId,
+      datasourceId: "sqlite_main"
+    }
+  ]);
+  const session: Session = {
+    id: input.sessionId,
+    datasource: "sqlite_main",
+    workspaceId: input.workspaceId,
+    createdAt: new Date().toISOString(),
+    datasourceType: "sqlite",
+    datasourceStatus: "available"
+  };
+  await input.chatRepository.createSession(session);
+  return session;
+}

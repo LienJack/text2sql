@@ -100,4 +100,46 @@ describe("rag run replay completeness integration", () => {
 
     await moduleRef.close();
   });
+
+  it("persists rerank metadata payload for replay diagnostics", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const replay = moduleRef.get(RagReplayRepository);
+    const runId = "run-rag-replay-rerank-metadata-v1";
+
+    await replay.writeReplay({
+      runId,
+      replayKey: "rerank:secondary",
+      datasourceId: "ds-rag-replay",
+      stage: "rerank_secondary",
+      payload: {
+        status: "degraded",
+        reason: "secondary_rerank_unavailable_provider_config_missing",
+        metadata: {
+          status: "degraded",
+          unavailable_reason: "secondary_rerank_unavailable_provider_config_missing",
+          input_count: 4,
+          output_count: 0
+        }
+      }
+    });
+
+    const events = await replay.listByRunId(runId);
+    const secondary = events.find((item) => item.replayKey === "rerank:secondary");
+    const payload = JSON.parse(secondary?.payload ?? "{}") as {
+      metadata?: {
+        unavailable_reason?: string;
+        input_count?: number;
+        output_count?: number;
+      };
+    };
+    expect(payload.metadata?.unavailable_reason).toBe(
+      "secondary_rerank_unavailable_provider_config_missing"
+    );
+    expect(payload.metadata?.input_count).toBe(4);
+    expect(payload.metadata?.output_count).toBe(0);
+
+    await moduleRef.close();
+  });
 });

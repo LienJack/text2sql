@@ -76,6 +76,38 @@ describe("chat api (e2e)", () => {
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
     }
+    const traceV2 = runRes.body.data.run.trace?.v2 as
+      | {
+          version?: string;
+          stageOrder?: string[];
+          stages?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (traceV2 !== undefined) {
+      expect(traceV2.version).toBe("v2");
+      expect(traceV2.stageOrder).toEqual([
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ]);
+      expect(traceV2.stages?.map((item) => item.stage)).toEqual(traceV2.stageOrder);
+    }
+    const deliveryV2 = runRes.body.data.delivery?.evidence?.v2 as
+      | {
+          stageArtifacts?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (deliveryV2 !== undefined) {
+      expect(deliveryV2.stageArtifacts?.map((item) => item.stage)).toEqual(
+        traceV2?.stageOrder
+      );
+    }
 
     const messageViewRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)
@@ -92,6 +124,14 @@ describe("chat api (e2e)", () => {
       messageViewRes.body.data.latestRun.runId
     );
     expect(messageViewRes.body.data.latestRun.delivery.artifact.summary.text).toBeTruthy();
+    const latestTraceV2 = messageViewRes.body.data.latestRun.trace?.v2 as
+      | {
+          version?: string;
+        }
+      | undefined;
+    if (latestTraceV2 !== undefined) {
+      expect(latestTraceV2.version).toBe("v2");
+    }
   });
 
   it("should accept optional contextEnvelope on sync message endpoint", async () => {

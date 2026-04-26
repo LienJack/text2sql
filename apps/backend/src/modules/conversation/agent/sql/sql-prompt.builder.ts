@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType } from "@text2sql/shared-types";
+import type { DatasourceType, SemanticPlanV1 } from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
@@ -44,6 +44,7 @@ export class SqlPromptBuilder {
         retryReason?: string;
       };
       semanticContextPack?: RagContextPack;
+      semanticPlan?: SemanticPlanV1;
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -55,6 +56,7 @@ export class SqlPromptBuilder {
     const semanticInstructionBlock = this.buildSemanticInstructionBlock(
       options?.semanticContextPack
     );
+    const semanticPlanBlock = this.buildSemanticPlanBlock(options?.semanticPlan);
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
     const semanticGuardrailBlock = this.buildSemanticGuardrailBlock(
       options?.semanticGuardrail?.intent ?? "general"
@@ -72,6 +74,7 @@ export class SqlPromptBuilder {
         repairHintBlock,
         tableHint,
         overlayBlock,
+        semanticPlanBlock,
         semanticInstructionBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
       ].join(" "),
@@ -514,5 +517,40 @@ export class SqlPromptBuilder {
       "Structured semantic instruction set (higher priority than free-text context):",
       ...lines
     ].join(" ");
+  }
+
+  private buildSemanticPlanBlock(plan?: SemanticPlanV1): string {
+    if (!plan) {
+      return "";
+    }
+    const route = `route=${plan.route}`;
+    const confidence = `confidence=${plan.confidence.toFixed(2)}`;
+    const selectedTables =
+      plan.selectedTables.length > 0
+        ? `selectedTables=${plan.selectedTables.slice(0, 12).join(", ")}`
+        : "selectedTables=none";
+    const selectedColumns =
+      plan.selectedColumns.length > 0
+        ? `selectedColumns=${plan.selectedColumns.slice(0, 16).join(", ")}`
+        : "selectedColumns=none";
+    const allowedTables =
+      plan.allowedTables && plan.allowedTables.length > 0
+        ? `allowedTables=${plan.allowedTables.slice(0, 12).join(", ")}`
+        : "";
+    const forbiddenTables =
+      plan.forbiddenTables && plan.forbiddenTables.length > 0
+        ? `forbiddenTables=${plan.forbiddenTables.slice(0, 12).join(", ")}`
+        : "";
+    return [
+      "Typed semantic plan (must follow):",
+      route,
+      confidence,
+      selectedTables,
+      selectedColumns,
+      allowedTables,
+      forbiddenTables
+    ]
+      .filter((item) => item.trim().length > 0)
+      .join(" ");
   }
 }
