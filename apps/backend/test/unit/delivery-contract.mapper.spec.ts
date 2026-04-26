@@ -377,13 +377,25 @@ describe("DeliveryContractMapper", () => {
     });
 
     expect(delivery.evidence?.runId).toBe("run-delivery-unit");
+    expect(delivery.evidence?.v2?.version).toBe("v2");
+    expect(delivery.evidence?.v2?.stageOrder).toEqual([
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ]);
     expect(delivery.evidence?.v2?.stageArtifacts).toHaveLength(2);
     expect(delivery.evidence?.v2?.semanticPlan?.route).toBe("reject");
     expect(delivery.evidence?.v2?.sqlValidation?.status).toBe("failed");
     expect(delivery.evidence?.v2?.failure?.code).toBe("VALIDATION_FAILED");
   });
 
-  it("reads snake_case clarification decision from clarify step summary", () => {
+  it("ignores legacy clarify step summaries without canonical trace decision payload", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       status: "clarification",
@@ -422,39 +434,45 @@ describe("DeliveryContractMapper", () => {
       replayRecords: []
     });
 
-    expect(delivery.evidence?.clarificationDecision).toEqual({
-      decision: "clarify",
-      triggerPath: "rule",
-      confidenceLevel: "low",
-      missingCriticalSlots: ["time"],
-      conflictDetected: false,
-      reasonCodes: ["missing_time_slot"],
-      question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
-      reason: "关键槽位缺失：时间范围"
-    });
+    expect(delivery.evidence?.clarificationDecision).toBeUndefined();
   });
 
-  it("maps SQL coverage evidence from generate-sql step summary", () => {
+  it("maps SQL coverage evidence from canonical trace.v2 sqlValidation", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "generate-sql",
-            status: "success",
-            at: "2026-04-18T00:00:00.500Z",
-            outputSummary: JSON.stringify({
-              coverage: {
-                gateStatus: "passed",
-                missingObjects: [],
-                triggerSource: "selected_context"
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "validate", status: "success" }
+          ],
+          sqlValidation: {
+            status: "passed",
+            checks: [
+              {
+                check: "plan-coverage",
+                status: "passed"
               }
-            })
+            ],
+            correctable: false
           }
-        ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -475,7 +493,7 @@ describe("DeliveryContractMapper", () => {
     expect(evidenceWithCoverage?.sqlCoverage).toEqual({
       gateStatus: "passed",
       missingObjects: [],
-      triggerSource: "selected_context"
+      triggerSource: "semantic_context"
     });
   });
 
@@ -499,32 +517,33 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.modelingRevision).toBe(12);
   });
 
-  it("maps saved prior SQL shortcut evidence from resolve+safety trace steps", () => {
+  it("maps saved prior SQL shortcut evidence from canonical v2 stage artifacts", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "resolve-saved-prior-sql",
-            status: "success",
-            at: "2026-04-25T00:00:00.100Z",
-            outputSummary: JSON.stringify({
-              status: "hit",
-              reasonCodes: ["prior_sql_shortcut_hit"],
-              selectedChunkId: "chunk-saved-prior-1",
-              selectedViewId: "view.chat_run.run-1",
-              selectedSourceRunId: "run-1"
-            })
-          },
-          {
-            node: "safety-check",
-            status: "success",
-            at: "2026-04-25T00:00:00.200Z"
-          }
-        ]
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "success" }
+          ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -536,40 +555,42 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.savedPriorSql).toEqual({
       status: "hit",
       shortcutUsed: true,
-      reasonCodes: ["prior_sql_shortcut_hit"],
-      selectedChunkId: "chunk-saved-prior-1",
-      selectedViewId: "view.chat_run.run-1",
-      selectedSourceRunId: "run-1",
+      reasonCodes: ["saved_prior_sql_shortcut"],
       safetyResult: "passed"
     });
   });
 
-  it("falls back to semantic step summary for revision and binding evidence", () => {
+  it("reads semantic snapshot from canonical trace.v2 context pack", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "build-semantic-query",
-            status: "success",
-            at: "2026-04-18T00:00:00.500Z",
-            outputSummary: JSON.stringify({
-              semanticVersion: 13,
-              lockStatus: "locked",
-              modelingRevision: 21,
-              contextPackStatus: "ready",
-              semanticBindingSummary: {
-                modelBindingCount: 4,
-                relationshipBindingCount: 2,
-                metricBindingCount: 3,
-                calculatedFieldBindingCount: 1
-              }
-            })
+        modelingRevision: 21,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [{ stage: "intake", status: "success" }],
+          contextPack: {
+            status: "ready",
+            selectedEvidenceIds: [],
+            selectedTables: [],
+            selectedColumns: [],
+            warnings: ["semantic_context_ready"]
           }
-        ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -579,15 +600,8 @@ describe("DeliveryContractMapper", () => {
     });
 
     expect(delivery.evidence?.modelingRevision).toBe(21);
-    expect(delivery.evidence?.semanticVersion).toBe(13);
-    expect(delivery.evidence?.semanticLockStatus).toBe("locked");
     expect(delivery.evidence?.contextPackStatus).toBe("ready");
-    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
-      modelBindingCount: 4,
-      relationshipBindingCount: 2,
-      metricBindingCount: 3,
-      calculatedFieldBindingCount: 1
-    });
+    expect(delivery.evidence?.semanticDegradeReason).toBe("semantic_context_ready");
   });
 
   it("keeps trace modelingRevision when step summary has a different revision", () => {

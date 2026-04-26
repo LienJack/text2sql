@@ -70,6 +70,10 @@ CI 参考：
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
 - 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
+- 若本次改动涉及 Text2SQL v2 read-model/delivery hard-cut：执行
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - `pnpm run text2sql:no-legacy-compat:check`
+  - 并核对 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 - 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
 - 若本次改动需要发布门禁（go/no-go）：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`，并检查 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 
@@ -121,11 +125,14 @@ CI 参考：
 - 同步接口保持 `AgentRunResponse` 合同。
 - 流式事件字段必须完整（`type/runId/sessionId/at/data`）。
 - 工具调用走 allowlist，失败可追踪。
-- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致，且旧 run 缺字段可兼容读取。
+- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致。
+- hard-cut 生效后，run read/save-view/replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）；历史 shape 必须返回 `410 LEGACY_RUN_UNSUPPORTED`（见 runbook）。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 - `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 eval + characterization 双门禁 `rollout.recommendedStage/rollbackSuggested/reasons`。
+- `pnpm run text2sql:no-legacy-compat:check` 必须通过。
 
 ### D. Governance 术语硬切规范
 来源：`docs/standards/governance-terminology-spec.md`

@@ -247,11 +247,16 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
 - 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
 - Text2SQL v2 artifact 通过 `run.trace.v2`、`run.delivery.evidence.v2`、SSE `state` 事件 `data.v2.stageArtifact` 暴露；不会破坏既有 `type/runId/sessionId/at/data` 合同。
+- hard-cut read-model policy：`/api/v1/runs/:runId`、`/api/v1/runs/:runId/save-as-view`、RAG audit replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）。授权后若命中历史 shape，会返回 `410 LEGACY_RUN_UNSUPPORTED`（含迁移 runbook 提示）。
 
 ## Text2SQL v2 评估门禁（新增）
 - 评估脚本：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
 - fixture：`apps/backend/test/fixtures/text2sql-v2-eval-cases.json`
-- 输出指标：`retrievalRelevance`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
+- characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
+- 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
+- rollout 输出：`summary.rollout`（eval 单门禁）+ `rollout`（eval + characterization 双门禁聚合，含 `recommendedStage/rollbackSuggested/reasons`）
+- anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
+- 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
 - 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。
 
 ## 测试
@@ -276,6 +281,7 @@ pnpm test:frontend
   - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - Text2SQL v2 评估：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- Text2SQL hard-cut anti-regression：`pnpm run text2sql:no-legacy-compat:check`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
   - 后端健康检查：`GET http://localhost:3002/health`

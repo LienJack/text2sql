@@ -11,6 +11,7 @@ import { ChatRunPersistenceService } from "../../src/modules/conversation/chat/a
 import { ChatDeliveryEnrichmentService } from "../../src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service";
 import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 import { Text2SQLWorkflowRunner } from "../../src/modules/conversation/text2sql/text2sql-workflow-runner.service";
+import { ChatRepository } from "../../src/modules/data/persistence/chat.repository";
 import { GovernanceChatAccessFacade } from "../../src/modules/governance/governance-chat-access.facade";
 import { KnowledgeChatSupportFacade } from "../../src/modules/knowledge/knowledge-chat-support.facade";
 import { PlatformChatRuntimeFacade } from "../../src/modules/platform/platform-chat-runtime.facade";
@@ -64,5 +65,43 @@ describe("data flow", () => {
         providers: [ChatService]
       }).compile()
     ).rejects.toThrow(/can't resolve dependencies of the ChatService/i);
+  });
+
+  it("should return deterministic hard-cut error for legacy run reads", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const repository = moduleRef.get(ChatRepository, { strict: false });
+    const runViewUsecase = moduleRef.get(RunViewUsecase, { strict: false });
+
+    await repository.createSession({
+      id: "session-legacy-read",
+      datasource: "sqlite_main",
+      createdAt: "2026-04-26T00:00:00.000Z",
+      workspaceId: "ws_001"
+    });
+    await repository.persistRun({
+      runId: "run-legacy-read",
+      sessionId: "session-legacy-read",
+      question: "legacy run",
+      status: "executionResult",
+      provider: "volcengine",
+      model: "mock-model",
+      sql: "SELECT 1",
+      trace: {
+        runId: "run-legacy-read",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-26T00:00:01.000Z"
+    });
+
+    await expect(runViewUsecase.getRunById("run-legacy-read")).rejects.toMatchObject({
+      code: "LEGACY_RUN_UNSUPPORTED",
+      statusCode: 410
+    });
+
+    await moduleRef.close();
   });
 });

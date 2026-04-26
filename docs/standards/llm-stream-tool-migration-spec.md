@@ -36,7 +36,7 @@
   - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
   - `run.delivery.evidence.modelingRevision?`：与 `run.trace.modelingRevision?` 同源镜像字段，语义必须一致
   - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
-  - backward compatibility：历史 run 缺失 `run.trace.modelingRevision?` 或 `run.delivery.evidence.modelingRevision?` 时，读取端必须按“字段可选”处理，不得因缺字段导致反序列化或回放失败
+  - hard-cut read-model：run read/save-view/replay 必须命中显式 v2 marker（`run.trace.v2.version === "v2"`、`run.trace.v2.stageOrder.length > 0`、`run.trace.v2.stages.length > 0`）；命中授权但不支持历史 shape 时返回 `410 LEGACY_RUN_UNSUPPORTED`
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
 ### Stream Contract (`/messages/stream`)
@@ -59,7 +59,7 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
-- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
+- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
 
 ## Tool Calling Baseline
 
@@ -94,8 +94,7 @@
 - 同步/流式的错误分类在相同故障输入下保持一致。
 - Compare stream endpoint success rate against legacy endpoint baseline.
 - Verify trace persistence includes tool events when tools are called.
-- Verify `GET /api/v1/runs/:runId` 对历史 run（无模板字段）与新 run（含模板字段）都可稳定返回，且不会破坏反序列化。
-- Verify `GET /api/v1/runs/:runId` 对历史 run（无 `modelingRevision` 字段）与新 run（含 `run.trace.modelingRevision` + `run.delivery.evidence.modelingRevision`）均可稳定返回，且前端回放不因缺字段降级失败。
+- Verify `GET /api/v1/runs/:runId`、`POST /api/v1/runs/:runId/save-as-view` 与 replay 读路径只接受显式 v2 read-model；历史 shape 返回 `410 LEGACY_RUN_UNSUPPORTED`，错误详情包含迁移 runbook hint。
 - Verify modeling parity shadow gate report includes:
   - `modelingWorkspace.metrics.deployBlockRate / rollbackRate / schemaBacklogAvg`
   - `modelingWorkspace.signalCoverage.*`（样本信号覆盖率）

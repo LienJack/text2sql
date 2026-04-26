@@ -4,6 +4,36 @@ import type { KnowledgeMemoryContract } from "../../src/modules/knowledge/contra
 import { ModelingGraphRepository } from "../../src/modules/platform/data/persistence/modeling-graph.repository";
 import { ModelingGraphValidator } from "../../src/modules/platform/data/persistence/modeling-graph.validator";
 
+const V2_STAGE_ORDER = [
+  "intake",
+  "retrieve",
+  "assemble-context",
+  "semantic-plan",
+  "generate-sql",
+  "validate",
+  "correct",
+  "execute",
+  "answer"
+] as const;
+
+const createV2Trace = (runId: string, provider = "openai") => ({
+  runId,
+  provider,
+  retryCount: 0,
+  steps: [],
+  v2: {
+    version: "v2" as const,
+    stageOrder: [...V2_STAGE_ORDER],
+    stages: V2_STAGE_ORDER.map((stage) => ({
+      stage,
+      status:
+        stage === "correct"
+          ? ("skipped" as const)
+          : ("success" as const)
+    }))
+  }
+});
+
 const buildUsecase = (knowledgeMemoryContract?: KnowledgeMemoryContract) => {
   const chatRepository = new ChatRepository({
     databaseUrl: ""
@@ -43,12 +73,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM orders LIMIT 10",
-      trace: {
-        runId: "run-1",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-1"),
       createdAt: "2026-04-23T01:00:00.000Z"
     });
 
@@ -92,12 +117,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM orders LIMIT 10",
-      trace: {
-        runId: "run-1",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-1"),
       createdAt: "2026-04-23T01:00:00.000Z"
     });
 
@@ -133,12 +153,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM orders LIMIT 10",
-      trace: {
-        runId: "run-1",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-1"),
       createdAt: "2026-04-23T01:00:00.000Z"
     });
     await chatRepository.persistRun({
@@ -148,12 +163,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM customers LIMIT 10",
-      trace: {
-        runId: "run-2",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-2"),
       createdAt: "2026-04-23T01:10:00.000Z"
     });
 
@@ -195,12 +205,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM orders LIMIT 10",
-      trace: {
-        runId: "run-1",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-1"),
       createdAt: "2026-04-23T01:00:00.000Z"
     });
     await chatRepository.persistRun({
@@ -210,12 +215,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM customers LIMIT 10",
-      trace: {
-        runId: "run-2",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-2"),
       createdAt: "2026-04-23T01:10:00.000Z"
     });
 
@@ -282,12 +282,7 @@ describe("save view from run integration", () => {
       status: "executionResult",
       provider: "openai",
       sql: "SELECT * FROM orders LIMIT 10",
-      trace: {
-        runId: "run-1",
-        provider: "openai",
-        retryCount: 0,
-        steps: []
-      },
+      trace: createV2Trace("run-1"),
       createdAt: "2026-04-23T01:00:00.000Z"
     });
 
@@ -317,5 +312,42 @@ describe("save view from run integration", () => {
         name: "orders_recent_10"
       })
     ]);
+  });
+
+  it("rejects unsupported historical run shape with deterministic hard-cut error", async () => {
+    const { usecase, chatRepository } = buildUsecase();
+    await chatRepository.createSession({
+      id: "session-legacy",
+      datasource: "ds-1",
+      workspaceId: "ws-1",
+      title: "legacy",
+      createdAt: "2026-04-23T00:00:00.000Z"
+    });
+    await chatRepository.persistRun({
+      runId: "run-legacy",
+      sessionId: "session-legacy",
+      question: "legacy",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT 1",
+      trace: {
+        runId: "run-legacy",
+        provider: "openai",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-23T01:00:00.000Z"
+    });
+
+    await expect(
+      usecase.execute({
+        runId: "run-legacy",
+        name: "legacy_saved_view",
+        actorId: "user-admin"
+      })
+    ).rejects.toMatchObject({
+      code: "LEGACY_RUN_UNSUPPORTED",
+      statusCode: 410
+    });
   });
 });

@@ -1,16 +1,17 @@
 import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import request from "supertest";
 import type { SqlRun } from "@text2sql/shared-types";
 import { AppModule } from "../../src/app.module";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
 import { ChatRepository } from "../../src/modules/data/persistence/chat.repository";
+import { RunViewUsecase } from "../../src/modules/conversation/chat/application/run-view.usecase";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 describe("chat run prompt-template trace integration", () => {
   let app: INestApplication;
   let repository: ChatRepository;
+  let runViewUsecase: RunViewUsecase;
   let cleanupFixture: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
@@ -32,6 +33,9 @@ describe("chat run prompt-template trace integration", () => {
     await app.init();
 
     repository = app.get(ChatRepository);
+    runViewUsecase = app.get(RunViewUsecase, {
+      strict: false
+    });
   });
 
   afterAll(async () => {
@@ -63,6 +67,31 @@ describe("chat run prompt-template trace integration", () => {
         provider: "mock-provider",
         retryCount: 0,
         steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "retrieve", status: "success" },
+            { stage: "assemble-context", status: "success" },
+            { stage: "semantic-plan", status: "success" },
+            { stage: "generate-sql", status: "success" },
+            { stage: "validate", status: "success" },
+            { stage: "correct", status: "skipped" },
+            { stage: "execute", status: "success" },
+            { stage: "answer", status: "success" }
+          ]
+        },
         promptTemplate: {
           templateId: "pt_ds_001",
           scene: "sql",
@@ -75,21 +104,15 @@ describe("chat run prompt-template trace integration", () => {
 
     await repository.persistRun(run);
 
-    const response = await request(app.getHttpServer()).get(
-      "/api/v1/runs/run-template-trace-1"
-    );
+    const runById = await runViewUsecase.getRunById("run-template-trace-1");
 
-    expect(response.status).toBe(200);
-    expect(response.body.status).toBe("success");
-    expect(response.body.data.trace.promptTemplate.templateId).toBe("pt_ds_001");
-    expect(response.body.data.trace.promptTemplate.scope).toBe("datasource");
-    expect(response.body.data.delivery.evidence.promptTemplate.templateId).toBe(
-      "pt_ds_001"
-    );
-    expect(response.body.data.delivery.evidence.promptTemplate.version).toBe(3);
+    expect(runById.trace.promptTemplate?.templateId).toBe("pt_ds_001");
+    expect(runById.trace.promptTemplate?.scope).toBe("datasource");
+    expect(runById.delivery?.evidence?.promptTemplate?.templateId).toBe("pt_ds_001");
+    expect(runById.delivery?.evidence?.promptTemplate?.version).toBe(3);
   });
 
-  it("normalizes legacy prompt_template fields from trace payload", async () => {
+  it("returns deterministic hard-cut semantics for legacy prompt_template trace payload", async () => {
     await repository.createSession({
       id: "session-template-trace-legacy",
       datasource: "sqlite_main",
@@ -122,17 +145,16 @@ describe("chat run prompt-template trace integration", () => {
 
     await repository.persistRun(legacyRun);
 
-    const response = await request(app.getHttpServer()).get(
-      "/api/v1/runs/run-template-trace-legacy"
-    );
-
-    expect(response.status).toBe(200);
-    expect(response.body.status).toBe("success");
-    expect(response.body.data.trace.promptTemplate.templateId).toBe("pt_legacy");
-    expect(response.body.data.trace.promptTemplate.scope).toBe("workspace");
-    expect(response.body.data.trace.promptTemplate.version).toBe(5);
-    expect(response.body.data.trace.promptTemplate.fallbackReason).toBe(
-      "legacy_source"
-    );
+    await expect(
+      runViewUsecase.getRunById("run-template-trace-legacy")
+    ).rejects.toMatchObject({
+      code: "LEGACY_RUN_UNSUPPORTED",
+      statusCode: 410,
+      details: expect.objectContaining({
+        runId: "run-template-trace-legacy",
+        migrationRunbook:
+          "docs/runbooks/text2sql-v2-hardcut-read-model-migration.md"
+      })
+    });
   });
 });

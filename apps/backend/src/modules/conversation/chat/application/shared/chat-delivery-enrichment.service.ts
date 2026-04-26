@@ -1,7 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   DeliveryContract,
-  PromptTemplateTraceEvidenceCompat,
   SqlRun
 } from "@text2sql/shared-types";
 import {
@@ -102,45 +101,23 @@ export class ChatDeliveryEnrichmentService {
   }
 
   withPromptTemplateEvidence(run: SqlRun): SqlRun {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      prompt_template?: unknown;
-      prompt_template_evidence?: unknown;
-      templateEvidence?: unknown;
-      effectiveContextSummary?: unknown;
-      effective_context_summary?: unknown;
-      conflictHint?: unknown;
-      context_conflict_hint?: unknown;
-    };
-    const evidenceWithCompat = run.delivery?.evidence as
-      | (NonNullable<SqlRun["delivery"]>["evidence"] & {
-          effectiveContextSummary?: unknown;
-          effective_context_summary?: unknown;
-          conflictHint?: unknown;
-          context_conflict_hint?: unknown;
-        })
-      | undefined;
     const tracePromptTemplate = this.normalizePromptTemplateTraceEvidence(
-      traceWithCompat.promptTemplate ??
-        traceWithCompat.prompt_template ??
-        traceWithCompat.prompt_template_evidence ??
-        traceWithCompat.templateEvidence
+      run.trace.promptTemplate
     );
     const evidencePromptTemplate = this.normalizePromptTemplateTraceEvidence(
       run.delivery?.evidence?.promptTemplate
     );
     const traceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
-      traceWithCompat.effectiveContextSummary ??
-        traceWithCompat.effective_context_summary
+      run.trace.effectiveContextSummary
     );
     const evidenceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
-      evidenceWithCompat?.effectiveContextSummary ??
-        evidenceWithCompat?.effective_context_summary
+      run.delivery?.evidence?.effectiveContextSummary
     );
     const traceConflictHint = this.normalizeContextConflictHint(
-      traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
+      run.trace.conflictHint
     );
     const evidenceConflictHint = this.normalizeContextConflictHint(
-      evidenceWithCompat?.conflictHint ?? evidenceWithCompat?.context_conflict_hint
+      run.delivery?.evidence?.conflictHint
     );
     const resolvedPromptTemplate = evidencePromptTemplate ?? tracePromptTemplate;
     const resolvedEffectiveContextSummary =
@@ -241,26 +218,25 @@ export class ChatDeliveryEnrichmentService {
     if (!this.isRecord(value)) {
       return undefined;
     }
-    const candidate = value as PromptTemplateTraceEvidenceCompat;
-    const templateId = this.readNonEmptyString(candidate.templateId ?? candidate.template_id);
+    const candidate = value as {
+      templateId?: unknown;
+      scope?: unknown;
+      version?: unknown;
+      fallbackReason?: unknown;
+      scene?: unknown;
+    };
+    const templateId = this.readNonEmptyString(candidate.templateId);
     const scope = this.normalizePromptTemplateScope(
-      candidate.scope ??
-        candidate.scope_type ??
-        candidate.template_scope ??
-        (this.isRecord(value) ? (value.scopeType as unknown) : undefined)
+      candidate.scope
     );
     const version = this.readPositiveInteger(
-      candidate.version ??
-        candidate.template_version ??
-        (this.isRecord(value) ? (value.templateVersion as unknown) : undefined)
+      candidate.version
     );
     const fallbackReason = this.readNonEmptyString(
-      candidate.fallbackReason ??
-        candidate.fallback_reason ??
-        (this.isRecord(value) ? (value.fallback_reason_code as unknown) : undefined)
+      candidate.fallbackReason
     );
     const scene = this.normalizePromptTemplateScene(
-      candidate.scene ?? candidate.scene_name ?? candidate.template_scene
+      candidate.scene
     );
 
     if (!templateId && !scope && version === undefined && !fallbackReason && !scene) {
@@ -478,6 +454,8 @@ export class ChatDeliveryEnrichmentService {
       return undefined;
     }
     return {
+      version: traceV2.version,
+      stageOrder: traceV2.stageOrder,
       stageArtifacts: traceV2.stages,
       contextPack: traceV2.contextPack,
       semanticPlan: traceV2.semanticPlan,

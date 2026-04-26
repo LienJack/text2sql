@@ -212,7 +212,8 @@ export class DeliveryContractMapper {
           : undefined,
       retrievalLogs: replayLogs.length > 0 ? replayLogs : undefined,
       riskTags: evidenceRiskTags.length > 0 ? evidenceRiskTags : undefined,
-      semanticVersion: semanticSnapshot.semanticVersion,
+      semanticVersion:
+        semanticSnapshot.semanticVersion ?? finalSnapshot.semanticSpineVersion,
       modelingRevision:
         semanticSnapshot.modelingRevision ?? finalSnapshot.modelingRevision,
       semanticSpineVersion:
@@ -237,6 +238,8 @@ export class DeliveryContractMapper {
       ...(traceV2Artifact
         ? {
             v2: {
+              version: traceV2Artifact.version,
+              stageOrder: traceV2Artifact.stageOrder,
               stageArtifacts: traceV2Artifact.stages,
               contextPack: traceV2Artifact.contextPack,
               semanticPlan: traceV2Artifact.semanticPlan,
@@ -554,220 +557,88 @@ export class DeliveryContractMapper {
   }
 
   private readSemanticSnapshot(run: SqlRun): SemanticSnapshot {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      modeling_revision?: unknown;
-    };
-    const traceModelingRevision = this.readPositiveInteger(
-      traceWithCompat.modelingRevision ?? traceWithCompat.modeling_revision
+    const traceModelingRevision = this.readPositiveInteger(run.trace.modelingRevision);
+    const traceV2 = this.readTraceV2Artifact(run);
+    const contextPackStatus =
+      traceV2?.contextPack?.status === "ready" || traceV2?.contextPack?.status === "degraded"
+        ? traceV2.contextPack.status
+        : undefined;
+    const semanticDegradeReason = traceV2?.contextPack?.warnings?.find(
+      (item) => typeof item === "string" && item.trim().length > 0
     );
-    const semanticSteps = [...(run.trace.steps ?? [])]
-      .reverse()
-      .filter(
-        (step) =>
-          step.node === "build-semantic-query" || step.node === "build-physical-plan"
-      );
 
-    for (const step of semanticSteps) {
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const semanticVersionRaw = output.semanticVersion;
-      const semanticVersionCompatRaw =
-        semanticVersionRaw ?? output.semantic_version;
-      const semanticVersion = this.readPositiveInteger(semanticVersionCompatRaw);
-      const lockStatus = this.readString(output.lockStatus ?? output.lock_status);
-      const semanticLockStatus =
-        lockStatus === "locked" || lockStatus === "fallback" || lockStatus === "degraded"
-          ? lockStatus
-          : undefined;
-      const modelingRevision = this.readPositiveInteger(
-        output.modelingRevision ??
-          output.modeling_revision ??
-          output.activeRevision ??
-          output.active_revision
-      );
-      const contextPack = this.readRecord(output.contextPack ?? output.context_pack);
-      const contextPackStatusRaw = this.readString(
-        output.contextPackStatus ??
-          output.context_pack_status ??
-          contextPack?.status ??
-          contextPack?.context_pack_status
-      );
-      const contextPackStatus =
-        contextPackStatusRaw === "ready" || contextPackStatusRaw === "degraded"
-          ? contextPackStatusRaw
-          : undefined;
-      const semanticInstructionSummary = this.readSemanticInstructionSummary(
-        output.semanticBindingSummary ??
-          output.semantic_binding_summary ??
-          output.semanticInstructionSummary ??
-          output.semantic_instruction_summary
-      );
-      const semanticDegradeReason = this.readString(output.degradeReason);
-      const semanticDegradeReasonCompat =
-        semanticDegradeReason ?? this.readString(output.degrade_reason);
-
-      if (
-        semanticVersion ||
-        semanticLockStatus ||
-        semanticDegradeReasonCompat ||
-        modelingRevision !== undefined ||
-        contextPackStatus ||
-        semanticInstructionSummary
-      ) {
-        return {
-          modelingRevision: traceModelingRevision ?? modelingRevision,
-          semanticVersion,
-          semanticLockStatus,
-          contextPackStatus,
-          semanticInstructionSummary,
-          semanticDegradeReason: semanticDegradeReasonCompat
-        };
-      }
-    }
-
-    return { modelingRevision: traceModelingRevision };
+    return {
+      modelingRevision: traceModelingRevision,
+      contextPackStatus,
+      semanticDegradeReason
+    };
   }
 
   private readTraceContextEvidence(run: SqlRun): TraceContextEvidence {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      effectiveContextSummary?: unknown;
-      effective_context_summary?: unknown;
-      conflictHint?: unknown;
-      context_conflict_hint?: unknown;
-    };
-
     return {
       effectiveContextSummary: this.readEffectiveContextSummary(
-        traceWithCompat.effectiveContextSummary ??
-          traceWithCompat.effective_context_summary
+        run.trace.effectiveContextSummary
       ),
-      conflictHint: this.readConflictHint(
-        traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
-      )
+      conflictHint: this.readConflictHint(run.trace.conflictHint)
     };
   }
 
   private readClarificationDecisionEvidence(
     run: SqlRun
   ): ClarificationDecisionLayer | undefined {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      clarificationDecision?: unknown;
-      clarification_decision?: unknown;
-    };
-    const traceDecision = this.readClarificationDecision(
-      traceWithCompat.clarificationDecision ?? traceWithCompat.clarification_decision
-    );
+    const traceDecision = this.readClarificationDecision(run.trace.clarificationDecision);
     if (traceDecision) {
       return traceDecision;
     }
-
-    const stepDecision = this.readClarificationDecisionFromSteps(run.trace.steps);
-    if (stepDecision) {
-      return stepDecision;
-    }
-
     return this.readClarificationDecision(run.clarification);
   }
 
   private readSqlCoverageEvidence(run: SqlRun): SqlCoverageEvidenceSnapshot | undefined {
-    const steps = run.trace.steps ?? [];
-    for (const step of [...steps].reverse()) {
-      if (step.node !== "generate-sql") {
-        continue;
-      }
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const directCoverage = this.readSqlCoverageFromRecord(
-        output.coverage ?? output.sqlCoverage ?? output.sql_coverage
-      );
-      if (directCoverage) {
-        return directCoverage;
-      }
-      const errorCode = this.readString(output.errorCode ?? output.error_code);
-      if (errorCode !== "LLM_SQL_EVIDENCE_COVERAGE_FAILED") {
-        continue;
-      }
-      const errorDetails = this.readRecord(output.errorDetails ?? output.error_details);
-      const detailsCoverage = this.readSqlCoverageFromRecord(
-        errorDetails?.coverage ?? errorDetails?.sqlCoverage ?? errorDetails?.sql_coverage
-      );
-      if (detailsCoverage) {
-        return detailsCoverage;
-      }
+    const checks = run.trace.v2?.sqlValidation?.checks;
+    if (!Array.isArray(checks)) {
+      return undefined;
     }
-    return undefined;
+    const coverageCheck = checks.find((item) => item.check === "plan-coverage");
+    if (!coverageCheck) {
+      return undefined;
+    }
+    const gateStatus =
+      coverageCheck.status === "passed"
+        ? "passed"
+        : coverageCheck.status === "failed"
+          ? "failed"
+          : "skipped_no_evidence";
+    return {
+      gateStatus,
+      missingObjects: [],
+      triggerSource: "semantic_context"
+    };
   }
 
   private readSavedPriorSqlEvidence(
     run: SqlRun
   ): SavedPriorSqlEvidenceSnapshot | undefined {
-    const steps = run.trace.steps ?? [];
-    if (steps.length === 0) {
+    const stages = run.trace.v2?.stages;
+    if (!Array.isArray(stages) || stages.length === 0) {
       return undefined;
     }
-    const resolutionStepIndex = [...steps]
-      .map((step, index) => ({ step, index }))
-      .reverse()
-      .find((entry) => entry.step.node === "resolve-saved-prior-sql");
-    if (!resolutionStepIndex) {
+    const generateStage = stages.find((stage) => stage.stage === "generate-sql");
+    if (!generateStage || generateStage.status !== "skipped") {
       return undefined;
     }
-    const output = this.parseSummaryObject(resolutionStepIndex.step.outputSummary);
-    const statusRaw = this.readString(output?.status);
-    const status =
-      statusRaw === "hit" ||
-      statusRaw === "miss" ||
-      statusRaw === "filtered" ||
-      statusRaw === "stale" ||
-      statusRaw === "ambiguous"
-        ? statusRaw
-        : undefined;
-    if (!status) {
-      return undefined;
-    }
-
-    const reasonCodes = this.readStringArray(
-      output?.reasonCodes ?? output?.reason_codes
-    );
-    const selectedChunkId = this.readString(
-      output?.selectedChunkId ?? output?.selected_chunk_id
-    );
-    const selectedViewId = this.readString(
-      output?.selectedViewId ?? output?.selected_view_id
-    );
-    const selectedSourceRunId = this.readString(
-      output?.selectedSourceRunId ?? output?.selected_source_run_id
-    );
-
-    const subsequentSteps = steps.slice(resolutionStepIndex.index + 1);
-    const safetyStep = subsequentSteps.find((step) => step.node === "safety-check");
-    const hasFallbackGeneration = subsequentSteps.some(
-      (step) => step.node === "generate-sql"
-    );
+    const validateStage = stages.find((stage) => stage.stage === "validate");
     const safetyResult: SavedPriorSqlEvidenceSnapshot["safetyResult"] | undefined =
-      status !== "hit"
-        ? undefined
-        : safetyStep?.status === "success"
-          ? "passed"
-          : safetyStep?.status === "failed"
-            ? hasFallbackGeneration
-              ? "fallback_generated"
-              : "rejected"
-            : undefined;
-
-    const shortcutUsed = status === "hit" && safetyResult === "passed";
+      validateStage?.status === "success"
+        ? "passed"
+        : validateStage?.status === "failed"
+          ? "rejected"
+          : undefined;
+    const shortcutUsed = safetyResult === "passed";
 
     return {
-      status,
+      status: "hit",
       shortcutUsed,
-      ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
-      ...(selectedChunkId ? { selectedChunkId } : {}),
-      ...(selectedViewId ? { selectedViewId } : {}),
-      ...(selectedSourceRunId ? { selectedSourceRunId } : {}),
+      reasonCodes: ["saved_prior_sql_shortcut"],
       ...(safetyResult ? { safetyResult } : {})
     };
   }
@@ -798,76 +669,6 @@ export class DeliveryContractMapper {
     return traceV2.sqlValidation?.failure;
   }
 
-  private readSqlCoverageFromRecord(
-    value: unknown
-  ): SqlCoverageEvidenceSnapshot | undefined {
-    if (!this.isRecord(value)) {
-      return undefined;
-    }
-    const gateStatusRaw = this.readString(value.gateStatus ?? value.gate_status);
-    const gateStatus =
-      gateStatusRaw === "passed" ||
-      gateStatusRaw === "failed" ||
-      gateStatusRaw === "skipped_no_evidence" ||
-      gateStatusRaw === "skipped_metadata_intent" ||
-      gateStatusRaw === "skipped_no_sql_objects"
-        ? gateStatusRaw
-        : undefined;
-    const triggerSourceRaw = this.readString(
-      value.triggerSource ?? value.trigger_source
-    );
-    const triggerSource =
-      triggerSourceRaw === "selected_context" ||
-      triggerSourceRaw === "semantic_context" ||
-      triggerSourceRaw === "explicit_pinning" ||
-      triggerSourceRaw === "none"
-        ? triggerSourceRaw
-        : undefined;
-    if (!gateStatus || !triggerSource) {
-      return undefined;
-    }
-    return {
-      gateStatus,
-      missingObjects: this.readStringArray(
-        value.missingObjects ?? value.missing_objects
-      ),
-      triggerSource
-    };
-  }
-
-  private readClarificationDecisionFromSteps(
-    steps: SqlRun["trace"]["steps"] | undefined
-  ): ClarificationDecisionLayer | undefined {
-    if (!steps || steps.length === 0) {
-      return undefined;
-    }
-
-    for (const step of [...steps].reverse()) {
-      if (step.node !== "clarify") {
-        continue;
-      }
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const question = this.readString(
-        output.clarificationQuestion ?? output.clarification_question
-      );
-      const stepDecision = this.readClarificationDecision(
-        output.clarificationDecision ?? output.clarification_decision ?? output,
-        {
-          question,
-          reason: this.readString(step.detail)
-        }
-      );
-      if (stepDecision) {
-        return stepDecision;
-      }
-    }
-
-    return undefined;
-  }
-
   private readClarificationDecision(
     value: unknown,
     fallback?: {
@@ -885,10 +686,7 @@ export class DeliveryContractMapper {
         ? (decisionRaw as ClarificationDecisionEvidence["decision"])
         : undefined;
     const triggerPathRaw = this.readString(
-      value.triggerPath ??
-        value.trigger_path ??
-        value.triggerSource ??
-        value.trigger_source
+      value.triggerPath ?? value.triggerSource
     )?.toLowerCase();
     const triggerPath =
       triggerPathRaw === "rule" ||
@@ -897,14 +695,12 @@ export class DeliveryContractMapper {
         ? (triggerPathRaw as ClarificationDecisionEvidence["triggerPath"])
         : undefined;
     const decisionSource = this.readString(
-      value.decisionSource ?? value.decision_source ?? value.source
+      value.decisionSource ?? value.source
     );
-    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed ?? value.is_bypassed);
-    const bypassReasonCode = this.readString(
-      value.bypassReasonCode ?? value.bypass_reason_code
-    );
+    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed);
+    const bypassReasonCode = this.readString(value.bypassReasonCode);
     const confidenceLevelRaw = this.readString(
-      value.confidenceLevel ?? value.confidence_level ?? value.confidence
+      value.confidenceLevel ?? value.confidence
     )?.toLowerCase();
     const confidenceLevel =
       confidenceLevelRaw === "high" ||
@@ -913,23 +709,14 @@ export class DeliveryContractMapper {
         ? (confidenceLevelRaw as ClarificationDecisionEvidence["confidenceLevel"])
         : undefined;
     const missingCriticalSlots = this.readStringArray(
-      value.missingCriticalSlots ??
-        value.missing_critical_slots ??
-        value.missingSlots ??
-        value.missing_slots
+      value.missingCriticalSlots ?? value.missingSlots
     );
     const conflictDetected = this.readBoolean(
-      value.conflictDetected ??
-        value.conflict_detected ??
-        value.hasConflict ??
-        value.has_conflict
+      value.conflictDetected ?? value.hasConflict
     );
-    const reasonCodes = this.readStringArray(value.reasonCodes ?? value.reason_codes);
+    const reasonCodes = this.readStringArray(value.reasonCodes);
     const question = this.readString(
-      value.question ??
-        value.clarificationQuestion ??
-        value.clarification_question ??
-        fallback?.question
+      value.question ?? value.clarificationQuestion ?? fallback?.question
     );
     const reason = this.readString(value.reason ?? fallback?.reason);
     const hasStructuredPayload = Boolean(
@@ -1112,17 +899,6 @@ export class DeliveryContractMapper {
     } catch {
       return undefined;
     }
-  }
-
-  private parseSummaryObject(summary: string | undefined): Record<string, unknown> | undefined {
-    if (!summary) {
-      return undefined;
-    }
-    const trimmed = summary.trim();
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-      return undefined;
-    }
-    return this.parsePayload(trimmed);
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,0 +1,293 @@
+[
+  {
+    "id": "char-main-happy-001",
+    "scenario": "text_to_sql success path parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      }
+    }
+  },
+  {
+    "id": "char-clarification-002",
+    "scenario": "clarification terminal parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      }
+    }
+  },
+  {
+    "id": "char-validation-terminal-003",
+    "scenario": "validation terminal failure parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      }
+    }
+  }
+]

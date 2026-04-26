@@ -428,6 +428,8 @@ export interface DeliveryEvidenceLayer {
   savedPriorSql?: DeliverySavedPriorSqlEvidence;
   evidenceStale?: boolean;
   v2?: {
+    version?: "v2";
+    stageOrder?: Text2SqlV2StageName[];
     stageArtifacts?: Text2SqlV2StageArtifact[];
     contextPack?: SemanticContextPackV1;
     semanticPlan?: SemanticPlanV1;

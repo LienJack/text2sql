@@ -8,6 +8,17 @@ import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.reposi
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 function createRun(runId: string): SqlRun {
+  const stageOrder = [
+    "intake",
+    "retrieve",
+    "assemble-context",
+    "semantic-plan",
+    "generate-sql",
+    "validate",
+    "correct",
+    "execute",
+    "answer"
+  ] as const;
   return {
     runId,
     sessionId: "session-rag-audit-1",
@@ -23,14 +34,18 @@ function createRun(runId: string): SqlRun {
       runId,
       provider: "volcengine",
       retryCount: 0,
-      steps: [
-        {
-          node: "retrieve_context",
-          status: "success",
-          detail: "retrieval completed",
-          at: "2026-04-18T03:00:00.000Z"
-        }
-      ]
+      steps: [],
+      v2: {
+        version: "v2",
+        stageOrder: [...stageOrder],
+        stages: stageOrder.map((stage) => ({
+          stage,
+          status:
+            stage === "correct"
+              ? ("skipped" as const)
+              : ("success" as const)
+        }))
+      }
     },
     llmRaw: null,
     createdAt: "2026-04-18T03:00:00.000Z"
@@ -162,5 +177,23 @@ describe("rag audit replay integration", () => {
       fromAt: "2100-01-01T00:00:00.000Z"
     });
     expect(windowed.events).toHaveLength(0);
+  });
+
+  it("fails with deterministic hard-cut semantics for legacy run replay reads", async () => {
+    const runId = "run-rag-audit-legacy";
+    await chatRepository.persistRun({
+      ...createRun(runId),
+      trace: {
+        runId,
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      }
+    });
+
+    await expect(auditReplayService.queryChain({ runId })).rejects.toMatchObject({
+      code: "LEGACY_RUN_UNSUPPORTED",
+      statusCode: 410
+    });
   });
 });
