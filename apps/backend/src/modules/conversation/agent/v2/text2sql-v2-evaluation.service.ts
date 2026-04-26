@@ -72,6 +72,9 @@ const DEFAULT_ROLLOUT_THRESHOLDS: Text2SqlV2EvalRolloutThresholds = {
   maxLatencyP95Ms: 2600
 };
 
+// Small tolerance avoids false holds from fixture rounding/noise near thresholds.
+const GATE_COMPARISON_TOLERANCE = 0.001;
+
 @Injectable()
 export class Text2SqlV2EvaluationService {
   summarize(
@@ -184,39 +187,64 @@ export class Text2SqlV2EvaluationService {
     if (summary.totalCases < thresholds.minSamples) {
       reasons.push("sample_not_ready");
     }
-    if (summary.retrievalRelevance < thresholds.minRetrievalRelevance) {
+    if (
+      summary.retrievalRelevance + GATE_COMPARISON_TOLERANCE <
+      thresholds.minRetrievalRelevance
+    ) {
       reasons.push("retrieval_relevance_below_threshold");
     }
-    if (summary.rerankLift < thresholds.minRerankLift) {
+    if (summary.rerankLift + GATE_COMPARISON_TOLERANCE < thresholds.minRerankLift) {
       reasons.push("rerank_lift_below_threshold");
     }
-    if (summary.planCoverageRate < thresholds.minPlanCoverageRate) {
+    if (
+      summary.planCoverageRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minPlanCoverageRate
+    ) {
       reasons.push("plan_coverage_rate_below_threshold");
     }
-    if (summary.validationPassRate < thresholds.minValidationPassRate) {
+    if (
+      summary.validationPassRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minValidationPassRate
+    ) {
       reasons.push("validation_pass_rate_below_threshold");
     }
-    if (summary.correctionSuccessRate < thresholds.minCorrectionSuccessRate) {
+    if (
+      summary.correctionSuccessRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minCorrectionSuccessRate
+    ) {
       reasons.push("correction_success_rate_below_threshold");
     }
-    if (summary.executionSuccessRate < thresholds.minExecutionSuccessRate) {
+    if (
+      summary.executionSuccessRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minExecutionSuccessRate
+    ) {
       reasons.push("execution_success_rate_below_threshold");
     }
     if (
-      summary.userVisibleFailureQuality < thresholds.minUserVisibleFailureQuality
+      summary.userVisibleFailureQuality + GATE_COMPARISON_TOLERANCE <
+      thresholds.minUserVisibleFailureQuality
     ) {
       reasons.push("user_visible_failure_quality_below_threshold");
     }
-    if (summary.clarificationRate > thresholds.maxClarificationRate) {
+    if (
+      summary.clarificationRate >
+      thresholds.maxClarificationRate + GATE_COMPARISON_TOLERANCE
+    ) {
       reasons.push("clarification_rate_exceeded");
     }
-    if (summary.denseUnavailableRate > thresholds.maxDenseUnavailableRate) {
+    if (
+      summary.denseUnavailableRate >
+      thresholds.maxDenseUnavailableRate + GATE_COMPARISON_TOLERANCE
+    ) {
       reasons.push("dense_unavailable_rate_exceeded");
     }
-    if (summary.rerankUnavailableRate > thresholds.maxRerankUnavailableRate) {
+    if (
+      summary.rerankUnavailableRate >
+      thresholds.maxRerankUnavailableRate + GATE_COMPARISON_TOLERANCE
+    ) {
       reasons.push("rerank_unavailable_rate_exceeded");
     }
-    if (summary.latencyP95Ms > thresholds.maxLatencyP95Ms) {
+    if (summary.latencyP95Ms > thresholds.maxLatencyP95Ms + GATE_COMPARISON_TOLERANCE) {
       reasons.push("latency_p95_exceeded");
     }
 

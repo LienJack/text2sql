@@ -78,7 +78,7 @@ describe("text2sql v2 semantic plan", () => {
     );
   });
 
-  it("marks degraded context with no selected tables as low-confidence clarification route", () => {
+  it("keeps text-to-sql route when degraded context has no rag grounding", () => {
     const result = planService.build({
       question: "统计 GMV",
       contextPack: {
@@ -86,14 +86,17 @@ describe("text2sql v2 semantic plan", () => {
         selectedEvidenceIds: [],
         selectedTables: [],
         selectedColumns: [],
-        warnings: ["dense_unavailable"]
+        warnings: ["rag_retrieval_disabled", "dense_reason:rag_retrieval_disabled"]
       }
     });
 
-    expect(result.plan.route).toBe("clarify");
+    expect(result.plan.route).toBe("answer");
+    expect(result.validation.routeKind).toBe("text_to_sql");
+    expect(result.validation.requiresClarification).toBe(false);
+    expect(result.validation.evidenceComplete).toBe(false);
     expect(result.validation.lowConfidence).toBe(true);
     expect(result.validation.reasons).toEqual(
-      expect.arrayContaining(["plan_low_confidence"])
+      expect.arrayContaining(["plan_missing_selected_tables", "plan_missing_grounding_evidence"])
     );
   });
 

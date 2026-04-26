@@ -42,6 +42,43 @@ describe("agent rag degrade flow integration", () => {
     await moduleRef.close();
   });
 
+  it("keeps SQL path when RAG retrieval is disabled and grounding evidence is absent", async () => {
+    const previousRetrievalEnabled = process.env.AGENT_RAG_RETRIEVAL_ENABLED;
+    process.env.AGENT_RAG_RETRIEVAL_ENABLED = "false";
+
+    try {
+      const moduleRef = await Test.createTestingModule({
+        imports: [AppModule]
+      }).compile();
+      const chatService = moduleRef.get(ChatService);
+      const session = await chatService.createSession("sqlite_main");
+      const run = await chatService.sendMessage(session.id, "按状态统计订单数量");
+
+      const generateStep = run.trace.steps.find((step) => step.node === "generate-sql");
+      expect(generateStep).toBeDefined();
+      expect(generateStep?.status).toBe("success");
+
+      const parsedSummary =
+        typeof generateStep?.outputSummary === "string"
+          ? (JSON.parse(generateStep.outputSummary) as {
+              semanticPlan?: {
+                route?: string;
+              };
+            })
+          : undefined;
+      expect(parsedSummary?.semanticPlan?.route).toBe("answer");
+      expect(run.status).not.toBe("clarification");
+
+      await moduleRef.close();
+    } finally {
+      if (previousRetrievalEnabled === undefined) {
+        delete process.env.AGENT_RAG_RETRIEVAL_ENABLED;
+      } else {
+        process.env.AGENT_RAG_RETRIEVAL_ENABLED = previousRetrievalEnabled;
+      }
+    }
+  });
+
   it("marks dense/rerank unavailable explicitly when external providers are not configured", async () => {
     process.env.NODE_ENV = "development";
     process.env.LLM_MOCK_MODE = "false";

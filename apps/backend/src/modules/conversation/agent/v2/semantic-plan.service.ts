@@ -140,7 +140,12 @@ export class SemanticPlanService {
     const hasEvidence = input.evidenceRefs.length > 0;
     const hasGrounding = input.selectedTables.length > 0 || input.selectedColumns.length > 0;
     const evidenceComplete = hasEvidence && hasGrounding;
-    const heavilyDegraded = input.contextStatus === "degraded" && input.warningCount >= 2;
+    const degradedWithoutRagGrounding =
+      input.contextStatus === "degraded" && !hasGrounding && !hasEvidence;
+    const heavilyDegraded =
+      input.contextStatus === "degraded" &&
+      input.warningCount >= 2 &&
+      !degradedWithoutRagGrounding;
 
     if (evidenceComplete) {
       return "text_to_sql";
@@ -150,6 +155,11 @@ export class SemanticPlanService {
       input.clarificationPolicy.round >= input.clarificationPolicy.maxRounds
     ) {
       return "fail_closed";
+    }
+    // Keep answer route for retrieval-unavailable scenarios so downstream SQL path
+    // can surface deterministic low-confidence diagnostics instead of clarify loops.
+    if (degradedWithoutRagGrounding) {
+      return "text_to_sql";
     }
     if (!hasGrounding || !hasEvidence) {
       return "clarify";
