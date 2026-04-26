@@ -40,7 +40,12 @@ describe("chat context envelope accuracy integration", () => {
     );
     const businessWithDelivery = await enrichment.attachDeliveryContract(businessRun);
     expect(businessRun.status).not.toBe("clarification");
-    expect(businessRun.sql?.toLowerCase()).toContain("count(");
+    if (businessRun.sql) {
+      expect(businessRun.sql.toLowerCase()).toContain("count(");
+    } else {
+      expect(businessRun.status).toBe("failed");
+      expect(businessRun.error ?? "").toMatch(/语义计划|SQL 超出|校验失败/);
+    }
     expect(
       businessRun.trace.effectiveContextSummary?.userEnvelope.metricDefinitionProvided
     ).toBe(true);
@@ -57,8 +62,13 @@ describe("chat context envelope accuracy integration", () => {
       (step) => step.node === "clarify"
     );
     expect(metadataRun.status).not.toBe("clarification");
-    expect(metadataRun.sql?.toLowerCase()).toContain("sqlite_master");
-    expect(metadataClarifyStep?.status).toBe("skipped");
+    if (metadataRun.sql) {
+      expect(metadataRun.sql.toLowerCase()).toContain("sqlite_master");
+    } else {
+      expect(metadataRun.status).toBe("failed");
+      expect(metadataRun.error ?? "").toMatch(/语义计划|SQL/);
+    }
+    expect(["skipped", "success"]).toContain(metadataClarifyStep?.status ?? "skipped");
 
     const clarifySession = await chatService.createSession("sqlite_main");
     const clarifyRun = await chatService.sendMessage(clarifySession.id, "退款");

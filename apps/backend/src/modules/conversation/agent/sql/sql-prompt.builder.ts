@@ -523,8 +523,11 @@ export class SqlPromptBuilder {
     if (!plan) {
       return "";
     }
+    const routeKind = this.readRouteKind(plan);
     const route = `route=${plan.route}`;
+    const routeKindLine = `routeKind=${routeKind}`;
     const confidence = `confidence=${plan.confidence.toFixed(2)}`;
+    const standaloneQuestion = `standaloneQuestion=${plan.standaloneQuestion}`;
     const selectedTables =
       plan.selectedTables.length > 0
         ? `selectedTables=${plan.selectedTables.slice(0, 12).join(", ")}`
@@ -541,16 +544,76 @@ export class SqlPromptBuilder {
       plan.forbiddenTables && plan.forbiddenTables.length > 0
         ? `forbiddenTables=${plan.forbiddenTables.slice(0, 12).join(", ")}`
         : "";
+    const metrics =
+      plan.metrics && plan.metrics.length > 0
+        ? `metrics=${plan.metrics.slice(0, 8).join(", ")}`
+        : "";
+    const grain = plan.grain ? `grain=${plan.grain}` : "";
+    const filters =
+      plan.filters && plan.filters.length > 0
+        ? `filters=${plan.filters.slice(0, 10).join(", ")}`
+        : "";
+    const joinPath =
+      plan.joinPath && plan.joinPath.length > 0
+        ? `joinPath=${plan.joinPath.slice(0, 10).join(" | ")}`
+        : "";
+    const evidenceRefs =
+      plan.evidenceRefs.length > 0
+        ? `evidenceRefs=${plan.evidenceRefs.slice(0, 10).join(", ")}`
+        : "evidenceRefs=none";
+    const routeGuardrail =
+      routeKind === "metadata"
+        ? "routeGuardrail=metadata_only"
+        : routeKind === "general"
+          ? "routeGuardrail=general_non_sql_preferred"
+          : routeKind === "clarify"
+            ? "routeGuardrail=clarification_required"
+            : routeKind === "fail_closed"
+              ? "routeGuardrail=fail_closed_no_sql"
+              : "routeGuardrail=text_to_sql";
     return [
       "Typed semantic plan (must follow):",
       route,
+      routeKindLine,
       confidence,
+      standaloneQuestion,
       selectedTables,
       selectedColumns,
+      metrics,
+      grain,
+      filters,
+      joinPath,
       allowedTables,
-      forbiddenTables
+      forbiddenTables,
+      evidenceRefs,
+      routeGuardrail
     ]
       .filter((item) => item.trim().length > 0)
       .join(" ");
+  }
+
+  private readRouteKind(
+    plan: SemanticPlanV1
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" {
+    const routeFilter = plan.filters?.find((item) => item.startsWith("route_kind:"));
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
+      }
+    }
+    if (plan.route === "clarify") {
+      return "clarify";
+    }
+    if (plan.route === "reject") {
+      return "fail_closed";
+    }
+    return "text_to_sql";
   }
 }

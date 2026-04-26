@@ -13,6 +13,12 @@ export interface RelationshipDryRunResult {
   }>;
 }
 
+export interface RelationshipDryPlanSnapshot {
+  pass: boolean;
+  missingTables: string[];
+  reason?: string;
+}
+
 const MAX_SAMPLE_COUNT = 20;
 const MAX_SQL_LENGTH = 2000;
 
@@ -73,6 +79,46 @@ export class RelationshipDryRunService {
     };
   }
 
+  evaluateJoinPathConsistency(input: {
+    sql: string;
+    selectedTables?: string[];
+    joinPath?: string[];
+  }): RelationshipDryPlanSnapshot {
+    const selectedTables = this.normalizeIdentifiers(input.selectedTables ?? []);
+    const joinPath = this.normalizeJoinPath(input.joinPath ?? []);
+    if (selectedTables.length <= 1 && joinPath.length === 0) {
+      return {
+        pass: true,
+        missingTables: []
+      };
+    }
+
+    const referencedTables = this.extractTables(input.sql);
+    const missingTables = selectedTables.filter(
+      (table) => !referencedTables.includes(table)
+    );
+    if (missingTables.length > 0) {
+      return {
+        pass: false,
+        missingTables,
+        reason: `missing tables from relationship plan: ${missingTables.join(", ")}`
+      };
+    }
+
+    if (joinPath.length > 0 && !/\bjoin\b/i.test(input.sql)) {
+      return {
+        pass: false,
+        missingTables: selectedTables,
+        reason: "join path exists but SQL has no JOIN keyword"
+      };
+    }
+
+    return {
+      pass: true,
+      missingTables: []
+    };
+  }
+
   private normalizeSqlSamples(sqlSamples: string[]): string[] {
     const normalized = sqlSamples
       .map((item) => item.trim().replace(/;\s*$/, ""))
@@ -83,5 +129,43 @@ export class RelationshipDryRunService {
       return ["SELECT 1"];
     }
     return normalized;
+  }
+
+  private extractTables(sql: string): string[] {
+    const matches = [
+      ...sql.matchAll(/\b(?:from|join)\s+([a-zA-Z_][\w$]*(?:\.[a-zA-Z_][\w$]*)?)/gi)
+    ];
+    const tables = matches
+      .map((match) => this.normalizeIdentifier(match[1]))
+      .filter((value): value is string => Boolean(value));
+    return Array.from(new Set(tables));
+  }
+
+  private normalizeJoinPath(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+    );
+  }
+
+  private normalizeIdentifiers(values: string[]): string[] {
+    return Array.from(
+      new Set(
+        values
+          .map((value) => this.normalizeIdentifier(value))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+  }
+
+  private normalizeIdentifier(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = value
+      .trim()
+      .replace(/^[`"'\[\]]+|[`"'\[\]]+$/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    return normalized.length > 0 ? normalized : undefined;
   }
 }

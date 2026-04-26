@@ -34,6 +34,7 @@ describe("text2sql v2 semantic plan", () => {
     });
 
     expect(result.plan.route).toBe("answer");
+    expect(result.validation.routeKind).toBe("text_to_sql");
     expect(result.plan.selectedTables).toEqual(["orders"]);
     expect(result.plan.selectedColumns).toEqual(["id", "amount", "status"]);
     expect(result.plan.evidenceRefs).toEqual(["chunk-orders-1"]);
@@ -59,6 +60,24 @@ describe("text2sql v2 semantic plan", () => {
     );
   });
 
+  it("maps metadata intent to answer route with metadata route-kind marker", () => {
+    const result = planService.build({
+      question: "有哪些表",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: [],
+        selectedTables: [],
+        selectedColumns: []
+      }
+    });
+
+    expect(result.plan.route).toBe("answer");
+    expect(result.validation.routeKind).toBe("metadata");
+    expect(result.plan.filters).toEqual(
+      expect.arrayContaining(["route_kind:metadata"])
+    );
+  });
+
   it("marks degraded context with no selected tables as low-confidence clarification route", () => {
     const result = planService.build({
       question: "统计 GMV",
@@ -76,5 +95,22 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.validation.reasons).toEqual(
       expect.arrayContaining(["plan_low_confidence"])
     );
+  });
+
+  it("hard-stops to fail-closed route when clarification round budget is exhausted", () => {
+    const result = planService.build({
+      question: "统计 GMV",
+      contextPack: {
+        status: "degraded",
+        selectedEvidenceIds: [],
+        selectedTables: [],
+        selectedColumns: [],
+        warnings: ["clarification_round:2", "clarification_max_rounds:2"]
+      }
+    });
+
+    expect(result.plan.route).toBe("reject");
+    expect(result.validation.routeKind).toBe("fail_closed");
+    expect(result.validation.terminal).toBe(true);
   });
 });

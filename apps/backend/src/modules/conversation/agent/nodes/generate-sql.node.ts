@@ -87,6 +87,28 @@ export class GenerateSqlNode {
       semanticIntent: options?.semanticIntent,
       allowedTables: options?.allowedTables
     });
+    if (semanticPlanResult.plan.route === "reject") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_FAIL_CLOSED",
+        "语义计划进入 fail-closed 路径，已阻止 SQL 生成。",
+        422,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan
+        }
+      );
+    }
+    if (semanticPlanResult.plan.route === "clarify") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_REQUIRES_CLARIFICATION",
+        "语义计划要求先澄清问题，已阻止 SQL 生成。",
+        422,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan
+        }
+      );
+    }
     if (
       !semanticPlanResult.validation.valid &&
       semanticPlanResult.validation.reasons.some(

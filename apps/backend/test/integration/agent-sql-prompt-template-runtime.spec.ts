@@ -14,6 +14,20 @@ describe("agent sql prompt template runtime integration", () => {
     generate: jest.Mock;
     stream: jest.Mock;
   };
+  const selectedContext = [
+    {
+      chunk_id: "chunk-orders-schema",
+      content: "table orders(id, status, total_amount, payment_method)",
+      metadata: {
+        datasourceId: "ds_001",
+        indexVersionId: "index-v1",
+        chunkId: "chunk-orders-schema",
+        domain: "schema",
+        tableNames: ["orders"],
+        columnNames: ["id", "status", "total_amount", "payment_method"]
+      }
+    }
+  ];
 
   beforeEach(async () => {
     providerRouter = {
@@ -96,7 +110,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_001",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     expect(providerRouter.generate).toHaveBeenCalledTimes(1);
@@ -138,7 +153,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_not_exists",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     const prompt = providerRouter.generate.mock.calls[0][0] as LlmGatewayPrompt;
@@ -155,7 +171,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_001",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     const prompt = providerRouter.generate.mock.calls[0][0] as LlmGatewayPrompt;
@@ -182,6 +199,7 @@ describe("agent sql prompt template runtime integration", () => {
       stream: true,
       datasourceId: "ds_stream",
       workspaceId: "ws_stream",
+      selectedContext,
       onEvent: async () => {
         return;
       }

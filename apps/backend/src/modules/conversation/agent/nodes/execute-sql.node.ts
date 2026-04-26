@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import type { SemanticPlanV1 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import {
   AuditLogRepository,
@@ -12,6 +13,7 @@ import { DatasourceService } from "../../../governance/datasource/datasource.ser
 import type { AccessContext } from "../../../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../../../governance/access/policy-evaluator.service";
 import { SqlCorrectionService } from "../v2/sql-correction.service";
+import { SqlValidationService } from "../v2/sql-validation.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -21,7 +23,9 @@ export class ExecuteSqlNode {
     private readonly chatRepository: ChatRepository,
     private readonly policyEvaluatorService: PolicyEvaluatorService,
     private readonly auditLogRepository: AuditLogRepository,
-    private readonly sqlCorrectionService: SqlCorrectionService
+    private readonly sqlCorrectionService: SqlCorrectionService,
+    @Optional()
+    private readonly sqlValidationService?: SqlValidationService
   ) {}
 
   async run(input: {
@@ -30,6 +34,7 @@ export class ExecuteSqlNode {
     sessionId: string;
     requestId?: string;
     accessContext?: SqlTableAccessContext;
+    semanticPlan?: SemanticPlanV1;
   }): Promise<{
     rows: Array<Record<string, unknown>>;
     columns: string[];
@@ -69,6 +74,43 @@ export class ExecuteSqlNode {
         }
       : undefined;
 
+    if (this.sqlValidationService) {
+      const validation = await this.sqlValidationService.validate({
+        sql: input.sql,
+        datasourceId: input.datasourceId,
+        datasourceType: datasource.type,
+        semanticPlan: input.semanticPlan,
+        accessContext: effectiveAccessContext,
+        allowedTables: policyResult?.readableTables
+      });
+      if (validation.status === "failed" && validation.failure) {
+        if (validation.failure.correctable) {
+          throw new DomainError(
+            "SQL_CORRECTABLE_EXECUTION_FAILED",
+            validation.failure.message,
+            422,
+            {
+              correctable: true,
+              correctionReason: validation.failure.code,
+              maxAttempts: this.sqlCorrectionService.maxAttempts,
+              validationFailure: validation.failure,
+              validationArtifact: validation
+            }
+          );
+        }
+        throw new DomainError(
+          "SQL_TERMINAL_VALIDATION_FAILED",
+          validation.failure.message,
+          422,
+          {
+            correctable: false,
+            validationFailure: validation.failure,
+            validationArtifact: validation
+          }
+        );
+      }
+    }
+
     try {
       return await this.queryExecutorRouter.execute({
         datasource,
@@ -90,6 +132,13 @@ export class ExecuteSqlNode {
           requestId: input.requestId,
           accessContext: effectiveAccessContext
         });
+      }
+      if (
+        error instanceof DomainError &&
+        (error.code === "SQL_TERMINAL_VALIDATION_FAILED" ||
+          error.code === "SQL_CORRECTABLE_EXECUTION_FAILED")
+      ) {
+        throw error;
       }
       const correctionDecision = this.sqlCorrectionService.decide(error);
       if (correctionDecision.correctable) {

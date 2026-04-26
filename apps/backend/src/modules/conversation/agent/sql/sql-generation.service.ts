@@ -105,7 +105,8 @@ export class SqlGenerationService {
     const templateResolution = await this.resolvePromptTemplate(selection);
     const semanticIntent = this.resolveSemanticIntent(
       question,
-      selection?.semanticIntent
+      selection?.semanticIntent,
+      selection?.semanticPlan
     );
     const prompt = this.buildPrompt(
       question,
@@ -136,7 +137,8 @@ export class SqlGenerationService {
     const templateResolution = await this.resolvePromptTemplate(selection);
     const semanticIntent = this.resolveSemanticIntent(
       question,
-      selection?.semanticIntent
+      selection?.semanticIntent,
+      selection?.semanticPlan
     );
     const prompt = this.buildPrompt(
       question,
@@ -318,8 +320,13 @@ export class SqlGenerationService {
 
   private resolveSemanticIntent(
     question: string,
-    explicitIntent?: SqlSemanticIntent
+    explicitIntent?: SqlSemanticIntent,
+    semanticPlan?: SemanticPlanV1
   ): SqlSemanticIntent {
+    const routeKind = this.resolveSemanticPlanRouteKind(semanticPlan);
+    if (routeKind === "metadata") {
+      return "metadata";
+    }
     if (explicitIntent && explicitIntent !== "general") {
       return explicitIntent;
     }
@@ -336,10 +343,21 @@ export class SqlGenerationService {
     if (!semanticPlan) {
       return;
     }
-    if (semanticPlan.route === "reject") {
+    const routeKind = this.resolveSemanticPlanRouteKind(semanticPlan);
+    if (semanticPlan.route === "reject" || routeKind === "fail_closed") {
       throw new DomainError(
         "SEMANTIC_PLAN_REJECTED",
         "语义计划路由为 reject，已终止 SQL 生成。",
+        422,
+        {
+          semanticPlan
+        }
+      );
+    }
+    if (semanticPlan.route === "clarify" || routeKind === "clarify") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_REQUIRES_CLARIFICATION",
+        "语义计划要求先澄清问题，已终止 SQL 生成。",
         422,
         {
           semanticPlan
@@ -515,6 +533,27 @@ export class SqlGenerationService {
         missingObjects: []
       };
     }
+    const routeKind = this.resolveSemanticPlanRouteKind(semanticPlan);
+    if (routeKind === "metadata" || routeKind === "general") {
+      return {
+        valid: true,
+        missingObjects: []
+      };
+    }
+    if (routeKind === "clarify") {
+      return {
+        valid: false,
+        reason: "semantic plan requires clarification before SQL generation",
+        missingObjects: []
+      };
+    }
+    if (routeKind === "fail_closed") {
+      return {
+        valid: false,
+        reason: "semantic plan is in fail-closed route",
+        missingObjects: []
+      };
+    }
 
     const references = this.extractSqlReferences(input.sql);
     const allowedTables = this.unique(
@@ -527,6 +566,27 @@ export class SqlGenerationService {
         .map((item) => this.normalizeIdentifier(item))
         .filter((item): item is string => Boolean(item))
     );
+    const selectedTables = this.unique(
+      semanticPlan.selectedTables
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item))
+    );
+    const selectedColumns = new Set(
+      (semanticPlan.selectedColumns ?? [])
+        .map((item) => this.normalizeQualifiedIdentifier(item))
+        .filter((item): item is string => Boolean(item))
+    );
+    const selectedColumnNames = new Set(
+      (semanticPlan.selectedColumns ?? [])
+        .map((item) => {
+          const normalized = this.normalizeQualifiedIdentifier(item);
+          if (!normalized) {
+            return undefined;
+          }
+          return normalized.split(".").at(-1);
+        })
+        .filter((item): item is string => Boolean(item))
+    );
 
     const missingObjects = this.unique([
       ...Array.from(references.tables)
@@ -536,6 +596,25 @@ export class SqlGenerationService {
         ? Array.from(references.tables)
             .filter((table) => !allowedTables.includes(table))
             .map((table) => `table:${table}`)
+        : []),
+      ...(selectedTables.length > 0
+        ? Array.from(references.tables)
+            .filter((table) => !selectedTables.includes(table))
+            .map((table) => `table:${table}`)
+        : []),
+      ...(selectedColumns.size > 0
+        ? Array.from(references.tableColumns)
+            .filter((tableColumn) => {
+              if (selectedColumns.has(tableColumn)) {
+                return false;
+              }
+              const columnName = tableColumn.split(".").at(-1);
+              if (!columnName) {
+                return true;
+              }
+              return !selectedColumnNames.has(columnName);
+            })
+            .map((tableColumn) => `column:${tableColumn}`)
         : [])
     ]);
 
@@ -551,6 +630,36 @@ export class SqlGenerationService {
       valid: true,
       missingObjects: []
     };
+  }
+
+  private resolveSemanticPlanRouteKind(
+    semanticPlan: SemanticPlanV1 | undefined
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" {
+    if (!semanticPlan) {
+      return "text_to_sql";
+    }
+    const routeFilter = semanticPlan.filters?.find((item) =>
+      item.startsWith("route_kind:")
+    );
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
+      }
+    }
+    if (semanticPlan.route === "clarify") {
+      return "clarify";
+    }
+    if (semanticPlan.route === "reject") {
+      return "fail_closed";
+    }
+    return "text_to_sql";
   }
 
   private buildCoverageEvidenceIndex(selection?: SqlGenerationSelection): {
@@ -826,6 +935,28 @@ export class SqlGenerationService {
       ? normalized.split(".").at(-1)
       : normalized;
     return token?.toLowerCase();
+  }
+
+  private normalizeQualifiedIdentifier(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = value
+      .trim()
+      .replace(/^[`"'[\]]+|[`"'[\]]+$/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+    if (!normalized.includes(".")) {
+      return normalized;
+    }
+    const [table, column] = normalized.split(".");
+    if (!table || !column) {
+      return undefined;
+    }
+    return `${table}.${column}`;
   }
 
   private hasTableColumnFallback(

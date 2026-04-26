@@ -29,10 +29,13 @@ export class SafetyCheckNode {
     riskTags?: string[];
   }): Promise<SqlSafetyDecision> {
     if (this.sqlValidationService) {
-      const validation = this.sqlValidationService.validate({
+      const validation = await this.sqlValidationService.validate({
         sql: input.sql,
+        datasourceId: input.datasourceId,
         datasourceType: input.datasourceType,
-        semanticPlan: input.semanticPlan
+        semanticPlan: input.semanticPlan,
+        accessContext: input.accessContext,
+        allowedTables: input.accessContext?.allowedTables
       });
       if (validation.status === "failed" && validation.failure) {
         if (validation.failure.correctable) {
@@ -40,7 +43,11 @@ export class SafetyCheckNode {
             allowed: true,
             mode: "soft-warn",
             riskLevel: "medium",
-            riskTags: ["correctable_validation_failure", validation.failure.code],
+            riskTags: [
+              "correctable_validation_failure",
+              validation.failure.code,
+              `validation_category:${validation.failure.category ?? "unknown"}`
+            ],
             reason: validation.failure.message
           };
         }
@@ -48,7 +55,11 @@ export class SafetyCheckNode {
           allowed: false,
           mode: "hard-block",
           riskLevel: "high",
-          riskTags: ["terminal_validation_failure", validation.failure.code],
+          riskTags: [
+            "terminal_validation_failure",
+            validation.failure.code,
+            `validation_category:${validation.failure.category ?? "unknown"}`
+          ],
           reason: validation.failure.message
         };
       }

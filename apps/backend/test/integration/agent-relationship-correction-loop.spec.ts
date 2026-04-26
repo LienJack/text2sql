@@ -1,4 +1,5 @@
 import { BuildSemanticQueryNode } from "../../src/modules/conversation/agent/nodes/build-semantic-query.node";
+import { DomainError } from "../../src/common/domain-error";
 import { SqlCorrectionService } from "../../src/modules/conversation/agent/v2/sql-correction.service";
 
 describe("agent relationship correction loop", () => {
@@ -40,6 +41,27 @@ describe("agent relationship correction loop", () => {
         retryCount: 0
       })
     ).toBe(false);
+  });
+
+  it("does not retry when validation marks failure as terminal governance", () => {
+    const error = new DomainError(
+      "SQL_TERMINAL_VALIDATION_FAILED",
+      "未授权表: invoices",
+      422,
+      {
+        validationFailure: {
+          code: "SQL_TABLE_PERMISSION_DENIED",
+          message: "未授权表: invoices",
+          category: "governance",
+          terminal: true,
+          correctable: false
+        }
+      }
+    );
+    const decision = correctionService.decide(error);
+    expect(decision.correctable).toBe(false);
+    expect(decision.maxAttempts).toBe(0);
+    expect(decision.category).toBe("governance");
   });
 
   it("retries for correctable syntax/column/dialect style execution errors", () => {

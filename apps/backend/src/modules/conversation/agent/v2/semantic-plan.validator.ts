@@ -7,6 +7,10 @@ export interface SemanticPlanValidationResult {
   unsupportedTables: string[];
   unsupportedColumns: string[];
   reasons: string[];
+  routeKind: "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
+  evidenceComplete: boolean;
+  requiresClarification: boolean;
+  terminal: boolean;
 }
 
 interface ValidateSemanticPlanInput {
@@ -17,15 +21,14 @@ interface ValidateSemanticPlanInput {
 @Injectable()
 export class SemanticPlanValidator {
   validate(input: ValidateSemanticPlanInput): SemanticPlanValidationResult {
-    const minimumConfidence =
-      typeof input.minimumConfidence === "number" && Number.isFinite(input.minimumConfidence)
-        ? input.minimumConfidence
-        : 0.55;
     const plan = input.plan;
+    const routeKind = this.resolveRouteKind(plan);
+    const minimumConfidence = this.resolveMinimumConfidence(routeKind, input.minimumConfidence);
     const allowedTables = new Set(this.normalizeList(plan.allowedTables ?? []));
     const selectedTables = this.normalizeList(plan.selectedTables);
     const selectedColumns = this.normalizeList(plan.selectedColumns);
     const forbiddenTables = new Set(this.normalizeList(plan.forbiddenTables ?? []));
+    const evidenceRefs = this.normalizeEvidenceRefs(plan.evidenceRefs);
 
     const unsupportedTables = selectedTables.filter((table) => {
       if (forbiddenTables.has(table)) {
@@ -55,11 +58,37 @@ export class SemanticPlanValidator {
       return !allowedTables.has(normalizedTable);
     });
 
-    const lowConfidence = plan.confidence < minimumConfidence;
+    const evidenceComplete =
+      evidenceRefs.length > 0 &&
+      (selectedTables.length > 0 ||
+        selectedColumns.length > 0 ||
+        routeKind === "metadata" ||
+        routeKind === "general");
+
+    const lowConfidence =
+      routeKind === "fail_closed" ? false : plan.confidence < minimumConfidence;
     const reasons: string[] = [];
 
-    if (plan.route === "answer" && selectedTables.length === 0) {
+    if (routeKind === "text_to_sql" && plan.route !== "answer") {
+      reasons.push("plan_route_mismatch_text_to_sql");
+    }
+    if (routeKind === "clarify" && plan.route !== "clarify") {
+      reasons.push("plan_route_mismatch_clarify");
+    }
+    if (routeKind === "fail_closed" && plan.route !== "reject") {
+      reasons.push("plan_route_mismatch_fail_closed");
+    }
+    if (routeKind === "text_to_sql" && selectedTables.length === 0) {
       reasons.push("plan_missing_selected_tables");
+    }
+    if (routeKind === "text_to_sql" && !evidenceComplete) {
+      reasons.push("plan_missing_grounding_evidence");
+    }
+    if (routeKind === "text_to_sql" && selectedTables.length > 1) {
+      const joinPath = this.normalizeJoinPath(plan.joinPath ?? []);
+      if (joinPath.length === 0) {
+        reasons.push("plan_missing_join_path");
+      }
     }
     if (unsupportedTables.length > 0) {
       reasons.push("plan_contains_unsupported_tables");
@@ -71,13 +100,74 @@ export class SemanticPlanValidator {
       reasons.push("plan_low_confidence");
     }
 
+    const terminal =
+      routeKind === "fail_closed" ||
+      unsupportedTables.length > 0 ||
+      unsupportedColumns.length > 0;
+
     return {
       valid: reasons.length === 0,
       lowConfidence,
       unsupportedTables,
       unsupportedColumns,
-      reasons
+      reasons,
+      routeKind,
+      evidenceComplete,
+      requiresClarification: routeKind === "clarify",
+      terminal
     };
+  }
+
+  private resolveMinimumConfidence(
+    routeKind: SemanticPlanValidationResult["routeKind"],
+    inputMinimumConfidence?: number
+  ): number {
+    if (typeof inputMinimumConfidence === "number" && Number.isFinite(inputMinimumConfidence)) {
+      return inputMinimumConfidence;
+    }
+    if (routeKind === "metadata" || routeKind === "general") {
+      return 0.35;
+    }
+    return 0.55;
+  }
+
+  private resolveRouteKind(
+    plan: SemanticPlanV1
+  ): SemanticPlanValidationResult["routeKind"] {
+    const routeFilter = (plan.filters ?? []).find((entry) =>
+      entry.startsWith("route_kind:")
+    );
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
+      }
+    }
+    if (plan.route === "clarify") {
+      return "clarify";
+    }
+    if (plan.route === "reject") {
+      return "fail_closed";
+    }
+    return "text_to_sql";
+  }
+
+  private normalizeEvidenceRefs(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+    );
+  }
+
+  private normalizeJoinPath(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+    );
   }
 
   private normalizeList(values: string[]): string[] {
