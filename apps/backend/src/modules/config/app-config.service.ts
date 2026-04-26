@@ -144,6 +144,10 @@ export class AppConfigService {
     return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
   }
 
+  get agentRagRetrievalEnabled(): boolean {
+    return this.config.get<string>("AGENT_RAG_RETRIEVAL_ENABLED", "true") === "true";
+  }
+
   get clarificationHybridEnabled(): boolean {
     return this.config.get<string>("CLARIFICATION_HYBRID_ENABLED", "true") === "true";
   }

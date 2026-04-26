@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type { ContextEnvelopePinningEvidence } from "@text2sql/shared-types";
+import { AppConfigService } from "../../../config/app-config.service";
 import {
   KNOWLEDGE_RAG_CONTRACT,
   type KnowledgeRagContract
@@ -33,6 +34,7 @@ interface RetrievalPinningResult {
 @Injectable()
 export class RetrieveKnowledgeNode {
   constructor(
+    private readonly appConfig: AppConfigService,
     @Inject(KNOWLEDGE_RAG_CONTRACT)
     private readonly ragContract: KnowledgeRagContract
   ) {}
@@ -57,76 +59,25 @@ export class RetrieveKnowledgeNode {
 
     const normalized = question.trim();
     if (!normalized) {
-      return {
-        status: "degraded",
-        snippets: [],
-        summary: "检索输入为空，已降级到最小执行路径。",
-        retrievalBundle: {
-          query: question,
-          run_id: runId,
-          datasource_id: datasourceId,
-          status: "degraded",
-          degrade_reasons: ["empty_question"],
-          lane_results: {
-            lexical: {
-              lane: "lexical",
-              status: "degraded",
-              timeout_ms: 0,
-              elapsed_ms: 0,
-              degrade_reason: "empty_question",
-              hits: []
-            },
-            dense: {
-              lane: "dense",
-              status: "degraded",
-              timeout_ms: 0,
-              elapsed_ms: 0,
-              degrade_reason: "empty_question",
-              hits: []
-            },
-            graph: {
-              lane: "graph",
-              status: "degraded",
-              timeout_ms: 0,
-              elapsed_ms: 0,
-              degrade_reason: "empty_question",
-              hits: []
-            }
-          },
-          candidates: [],
-          reranked: [],
-          selected_context: [],
-          risk_tags: ["rag_zero_recall"],
-          context_pack: {
-            status: "degraded",
-            semantic_lock_status: "degraded",
-            semantic_bindings: {
-              model_keys: [],
-              relationship_keys: [],
-              metric_keys: [],
-              calculated_field_keys: []
-            },
-            instruction_sets: {
-              model_bindings: [],
-              relationship_bindings: [],
-              metric_bindings: [],
-              calculated_field_bindings: []
-            },
-            selected_context_summary: {
-              count: 0,
-              snippets: []
-            },
-            degrade_reasons: ["empty_question"],
-            risk_tags: ["semantic_spine_degraded"]
-          }
-        },
-        pinning: {
-          enabled: pinningConfig.enabled,
-          status: "inactive",
-          candidateFilteredCount: 0,
-          selectedContextFilteredCount: 0
-        }
-      };
+      return this.createDisabledKnowledge({
+        query: question,
+        datasourceId,
+        runId,
+        pinningConfig,
+        degradeReason: "empty_question",
+        summary: "检索输入为空，已降级到最小执行路径。"
+      });
+    }
+
+    if (!this.appConfig.agentRagRetrievalEnabled) {
+      return this.createDisabledKnowledge({
+        query: normalized,
+        datasourceId,
+        runId,
+        pinningConfig,
+        degradeReason: "rag_retrieval_disabled",
+        summary: "RAG 检索开关已关闭，已降级到最小执行路径。"
+      });
     }
 
     const retrieved = await this.ragContract.retrieval.retrieve({
@@ -178,6 +129,102 @@ export class RetrieveKnowledgeNode {
       enabled: pinnedTables.size > 0 || pinnedColumns.size > 0,
       pinnedTables,
       pinnedColumns
+    };
+  }
+
+  private createDisabledKnowledge(input: {
+    query: string;
+    datasourceId: string;
+    runId: string;
+    pinningConfig: RetrievalPinningConfig;
+    degradeReason: string;
+    summary: string;
+  }): RetrievedKnowledge {
+    const retrievalBundle = this.buildDegradedBundle({
+      query: input.query,
+      datasourceId: input.datasourceId,
+      runId: input.runId,
+      degradeReason: input.degradeReason
+    });
+    return {
+      status: "degraded",
+      snippets: [],
+      summary: input.summary,
+      retrievalBundle,
+      contextPack: retrievalBundle.context_pack,
+      pinning: {
+        enabled: input.pinningConfig.enabled,
+        status: "inactive",
+        candidateFilteredCount: 0,
+        selectedContextFilteredCount: 0
+      }
+    };
+  }
+
+  private buildDegradedBundle(input: {
+    query: string;
+    datasourceId: string;
+    runId: string;
+    degradeReason: string;
+  }): RagRetrievalBundle {
+    return {
+      query: input.query,
+      run_id: input.runId,
+      datasource_id: input.datasourceId,
+      status: "degraded",
+      degrade_reasons: [input.degradeReason],
+      lane_results: {
+        lexical: {
+          lane: "lexical",
+          status: "degraded",
+          timeout_ms: 0,
+          elapsed_ms: 0,
+          degrade_reason: input.degradeReason,
+          hits: []
+        },
+        dense: {
+          lane: "dense",
+          status: "degraded",
+          timeout_ms: 0,
+          elapsed_ms: 0,
+          degrade_reason: input.degradeReason,
+          hits: []
+        },
+        graph: {
+          lane: "graph",
+          status: "degraded",
+          timeout_ms: 0,
+          elapsed_ms: 0,
+          degrade_reason: input.degradeReason,
+          hits: []
+        }
+      },
+      candidates: [],
+      reranked: [],
+      selected_context: [],
+      risk_tags: ["rag_zero_recall", input.degradeReason],
+      context_pack: {
+        status: "degraded",
+        semantic_lock_status: "degraded",
+        semantic_bindings: {
+          model_keys: [],
+          relationship_keys: [],
+          metric_keys: [],
+          calculated_field_keys: []
+        },
+        instruction_sets: {
+          model_bindings: [],
+          relationship_bindings: [],
+          metric_bindings: [],
+          calculated_field_bindings: []
+        },
+        selected_context_summary: {
+          count: 0,
+          snippets: []
+        },
+        degrade_reasons: [input.degradeReason],
+        risk_tags: ["semantic_spine_degraded", input.degradeReason]
+      }
     };
   }
 
