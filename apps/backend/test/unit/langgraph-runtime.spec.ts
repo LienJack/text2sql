@@ -1,8 +1,7 @@
 import type { SqlRun } from "@text2sql/shared-types";
 import { createText2SqlV2LangGraph } from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph";
 import {
-  createText2SqlV2LangGraphInitialState,
-  TEXT2SQL_V2_LANGGRAPH_NODE_ORDER
+  createText2SqlV2LangGraphInitialState
 } from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.state";
 import { Text2SqlV2StateMachine } from "../../src/modules/conversation/agent/v2/text2sql-v2-state-machine";
 
@@ -246,9 +245,181 @@ describe("text2sql v2 runtime artifacts", () => {
     expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("skipped");
   });
 
-  it("compiles canonical langgraph backbone and delegates run at answer node", async () => {
+  it("compiles canonical langgraph backbone with conditional routing and no legacy delegation", async () => {
+    const intakeNode = {
+      run: jest.fn().mockReturnValue({
+        originalQuestion: "统计订单总数",
+        normalizedQuestion: "统计订单总数",
+        standaloneQuestion: "统计订单总数",
+        route: "text_to_sql",
+        reasonCodes: ["intake_ready_for_text_to_sql"],
+        confidence: 0.9,
+        evidenceRefs: ["chunk-orders-1"],
+        semanticIntent: "count"
+      })
+    };
+    const retrieveContextNode = {
+      run: jest.fn().mockResolvedValue({
+        state: {
+          status: "ready",
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          evidenceRefs: ["chunk-orders-1"],
+          selectedContextSummary: {
+            count: 1,
+            snippetPreviews: ["orders snippet"]
+          },
+          warnings: []
+        },
+        artifact: {
+          status: "ready",
+          evidenceRefs: ["chunk-orders-1"],
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          retrievalBundle: {
+            run_id: "run-v2-runtime",
+            datasource_id: "sqlite_main",
+            status: "ready",
+            selected_context: [{ chunk_id: "chunk-orders-1", content: "orders snippet" }],
+            degrade_reasons: []
+          },
+          contextPack: {
+            status: "ready",
+            selected_context: [{ chunk_id: "chunk-orders-1", content: "orders snippet" }],
+            degrade_reasons: []
+          }
+        }
+      })
+    };
+    const assembleContextNode = {
+      run: jest.fn().mockReturnValue({
+        contextPack: {
+          status: "ready",
+          selectedEvidenceIds: ["chunk-orders-1"],
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id"]
+        },
+        typedSummary: {
+          status: "ready",
+          selectedEvidenceCount: 1,
+          selectedTableCount: 1,
+          selectedColumnCount: 1,
+          laneStateCounts: {
+            ready: 1,
+            degraded: 0,
+            unavailable: 0,
+            skipped: 0
+          },
+          pruningDecisionCount: 0,
+          permissionReasonCount: 0,
+          warningCount: 0
+        },
+        evidenceRefs: ["chunk-orders-1"]
+      })
+    };
+    const semanticPlanNode = {
+      run: jest.fn().mockReturnValue({
+        route: "ready",
+        plan: {
+          route: "answer",
+          standaloneQuestion: "统计订单总数",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"],
+          filters: ["route_kind:text_to_sql"]
+        },
+        validation: {
+          valid: true,
+          lowConfidence: false,
+          unsupportedTables: [],
+          unsupportedColumns: [],
+          reasons: [],
+          routeKind: "text_to_sql",
+          outcome: "ready",
+          evidenceComplete: true,
+          requiresClarification: false,
+          shouldDirectAnswer: false,
+          terminal: false
+        }
+      })
+    };
+    const generateSqlNode = {
+      run: jest.fn().mockResolvedValue({
+        draft: {
+          provider: "volcengine",
+          model: "mock-model",
+          sql: "SELECT COUNT(*) AS total FROM orders",
+          explanation: "count orders",
+          rawText: "SELECT COUNT(*) AS total FROM orders",
+          prompt: {
+            systemPrompt: "system",
+            userPrompt: "user"
+          }
+        },
+        artifact: {
+          sql: "SELECT COUNT(*) AS total FROM orders",
+          assumptions: ["count orders"],
+          usedTables: ["orders"],
+          usedColumns: ["orders.id"],
+          evidenceRefs: ["chunk-orders-1"],
+          cause: "initial",
+          dialect: "sqlite"
+        }
+      })
+    };
+    const validateSqlNode = {
+      run: jest.fn().mockResolvedValue({
+        outcome: "pass",
+        artifact: {
+          status: "passed",
+          checks: [],
+          correctable: false
+        }
+      })
+    };
+    const correctSqlNode = {
+      run: jest.fn()
+    };
+    const executeSqlNode = {
+      run: jest.fn().mockResolvedValue({
+        rows: [{ total: 10 }],
+        columns: ["total"],
+        rowCount: 1,
+        emptyResult: false
+      })
+    };
+    const answerNode = {
+      run: jest.fn().mockReturnValue({
+        mode: "execution_result",
+        answer: "订单总数为 10",
+        status: "executionResult",
+        evidenceRefs: ["chunk-orders-1"],
+        warnings: []
+      })
+    };
+
     const graph = createText2SqlV2LangGraph({
-      runLegacyRuntime: jest.fn(async () => createBaseRun())
+      intakeNode: intakeNode as never,
+      retrieveContextNode: retrieveContextNode as never,
+      assembleContextNode: assembleContextNode as never,
+      semanticPlanNode: semanticPlanNode as never,
+      generateSqlNode: generateSqlNode as never,
+      validateSqlNode: validateSqlNode as never,
+      correctSqlNode: correctSqlNode as never,
+      executeSqlNode: executeSqlNode as never,
+      answerNode: answerNode as never,
+      resolveSqlTools: jest.fn().mockReturnValue({})
     });
     const finalState = await graph.invoke(
       createText2SqlV2LangGraphInitialState({
@@ -277,8 +448,18 @@ describe("text2sql v2 runtime artifacts", () => {
       })
     );
 
-    expect(finalState.stageProgress).toEqual([...TEXT2SQL_V2_LANGGRAPH_NODE_ORDER]);
-    expect(finalState.legacyRun?.status).toBe("executionResult");
-    expect(finalState.legacyRun?.trace.v2?.version).toBe("v2");
+    expect(finalState.stageProgress).toEqual([
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "execute",
+      "answer"
+    ]);
+    expect(finalState.answerResult?.status).toBe("executionResult");
+    expect(correctSqlNode.run).not.toHaveBeenCalled();
+    expect(generateSqlNode.run).toHaveBeenCalledTimes(1);
   });
 });

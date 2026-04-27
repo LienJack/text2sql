@@ -27,6 +27,8 @@ const SCRIPT_NAME = "check-text2sql-no-legacy-compat";
 const INLINE_ALLOW_MARKER = "text2sql-no-legacy-compat:allow";
 
 export const DEFAULT_SCAN_FILES = [
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
   "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
   "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
   "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
@@ -43,6 +45,10 @@ export const FORBIDDEN_PATTERNS: ForbiddenPattern[] = [
   {
     label: "langgraph stage map",
     pattern: /\bTEXT2SQL_LANGGRAPH_NODE_(STAGE|REASONING_STAGE|TITLE)_MAP\b/g
+  },
+  {
+    label: "langgraph legacy delegation",
+    pattern: /\brunLegacyRuntime\b|\blegacyRunner\b|\bText2SqlV2RunnerService\b/g
   }
 ];
 

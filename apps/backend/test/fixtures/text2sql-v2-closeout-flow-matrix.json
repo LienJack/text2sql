@@ -685,7 +685,17 @@
       "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
       "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts"
     ],
-    "blockerPolicy": "Closeout must stay blocked if a canonical LangGraph owner is missing or if behavior tests still rely on legacy runtime-detail assertions."
+    "blockerPolicy": "Closeout must stay blocked if a canonical LangGraph owner is missing or if behavior tests still rely on legacy runtime-detail assertions.",
+    "delegationPolicy": "phase_a_delegation_zero",
+    "delegationOwners": [
+      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+    ],
+    "delegationForbiddenPatterns": [
+      "runLegacyRuntime",
+      "legacyRunner",
+      "Text2SqlV2RunnerService"
+    ]
   },
   "runtimeCoverageRows": [
     {
@@ -715,6 +725,20 @@
       "coverageOwnerStatus": "covered",
       "critical": true,
       "blocker": "Canonical graph topology, result mapping, and intake node coverage are required before the LangGraph runtime cutover can close out."
+    },
+    {
+      "id": "langgraph-runtime.delegation-zero",
+      "owners": [
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-focused-coverage-gate.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Phase A closeout requires delegation=0 (no graph main-path fallback to legacy runner)."
     }
   ]
 }

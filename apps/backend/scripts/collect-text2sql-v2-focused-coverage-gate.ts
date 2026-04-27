@@ -73,6 +73,9 @@ interface RuntimePathPlan {
   targetActivePath: string[];
   criticalOwners: string[];
   blockerPolicy: string;
+  delegationPolicy?: string;
+  delegationOwners?: string[];
+  delegationForbiddenPatterns?: string[];
 }
 
 export interface CloseoutFlowMatrix {
@@ -100,6 +103,7 @@ export interface FocusedCoverageGateReport {
   matrixPath: string;
   scoped: CoverageSummary & { gatePass: boolean; files: string[]; reasons: string[] };
   criticalFiles: CriticalFileResult[];
+  delegationZero: DelegationZeroGateReport;
   flowMatrix: {
     version: string;
     nodeCount: number;
@@ -109,6 +113,7 @@ export interface FocusedCoverageGateReport {
     incompleteEvalFixtureFamilies: Array<{ family: string; reasons: string[] }>;
     runtimeCoverageRowCount: number;
     incompleteRuntimeCoverageRows: Array<{ id: string; reasons: string[] }>;
+    runtimePathReasons: string[];
     gatePass: boolean;
   };
   rollout: {
@@ -117,6 +122,25 @@ export interface FocusedCoverageGateReport {
     rollbackSuggested: boolean;
     reasons: string[];
   };
+}
+
+export interface DelegationZeroViolation {
+  file: string;
+  label: string;
+  pattern: string;
+}
+
+export interface DelegationZeroGateReport {
+  gatePass: boolean;
+  scannedFiles: string[];
+  violations: DelegationZeroViolation[];
+  reasons: string[];
+}
+
+interface DelegationZeroScanRule {
+  file: string;
+  label: string;
+  pattern: RegExp;
 }
 
 const SCOPED_THRESHOLDS = {
@@ -160,6 +184,29 @@ const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
   {
     file: "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts",
     line: 75
+  }
+];
+
+const DELEGATION_ZERO_SCAN_RULES: DelegationZeroScanRule[] = [
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    label: "legacy runtime delegation",
+    pattern: /\brunLegacyRuntime\b/
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    label: "legacy runner instance",
+    pattern: /\blegacyRunner\b/
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+    label: "legacy v2 runner import",
+    pattern: /\bText2SqlV2RunnerService\b/
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+    label: "legacy runtime callback",
+    pattern: /\brunLegacyRuntime\b/
   }
 ];
 
@@ -341,6 +388,40 @@ function evaluateCriticalFiles(
   });
 }
 
+function evaluateDelegationZero(repoRoot: string): DelegationZeroGateReport {
+  const scannedFiles = unique(DELEGATION_ZERO_SCAN_RULES.map((rule) => rule.file));
+  const violations: DelegationZeroViolation[] = [];
+
+  for (const rule of DELEGATION_ZERO_SCAN_RULES) {
+    const absolutePath = resolve(repoRoot, rule.file);
+    if (!existsSync(absolutePath)) {
+      violations.push({
+        file: rule.file,
+        label: `${rule.label}:missing_file`,
+        pattern: rule.pattern.source
+      });
+      continue;
+    }
+    const content = readFileSync(absolutePath, "utf-8");
+    if (rule.pattern.test(content)) {
+      violations.push({
+        file: rule.file,
+        label: rule.label,
+        pattern: rule.pattern.source
+      });
+    }
+  }
+
+  return {
+    gatePass: violations.length === 0,
+    scannedFiles,
+    violations,
+    reasons: violations.map(
+      (item) => `${item.file}:${item.label}:${item.pattern}`
+    )
+  };
+}
+
 function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateReport["flowMatrix"] {
   const incompleteNodes = matrix.nodes.flatMap((node) => {
     const reasons: string[] = [];
@@ -409,6 +490,39 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     return reasons.length > 0 ? [{ id: row.id, reasons }] : [];
   });
 
+  const runtimePathReasons: string[] = [];
+  if (!matrix.runtimePaths) {
+    runtimePathReasons.push("missing_runtime_paths");
+  } else {
+    if ((matrix.runtimePaths.currentActivePath ?? []).length === 0) {
+      runtimePathReasons.push("missing_runtime_current_active_path");
+    }
+    if ((matrix.runtimePaths.targetActivePath ?? []).length === 0) {
+      runtimePathReasons.push("missing_runtime_target_active_path");
+    }
+    if ((matrix.runtimePaths.criticalOwners ?? []).length === 0) {
+      runtimePathReasons.push("missing_runtime_critical_owners");
+    }
+    if (
+      typeof matrix.runtimePaths.blockerPolicy !== "string" ||
+      matrix.runtimePaths.blockerPolicy.trim().length === 0
+    ) {
+      runtimePathReasons.push("missing_runtime_blocker_policy");
+    }
+    if (
+      typeof matrix.runtimePaths.delegationPolicy !== "string" ||
+      matrix.runtimePaths.delegationPolicy.trim().length === 0
+    ) {
+      runtimePathReasons.push("missing_runtime_delegation_policy");
+    }
+    if ((matrix.runtimePaths.delegationOwners ?? []).length === 0) {
+      runtimePathReasons.push("missing_runtime_delegation_owners");
+    }
+    if ((matrix.runtimePaths.delegationForbiddenPatterns ?? []).length === 0) {
+      runtimePathReasons.push("missing_runtime_delegation_patterns");
+    }
+  }
+
   return {
     version: matrix.version,
     nodeCount: matrix.nodes.length,
@@ -418,10 +532,12 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     incompleteEvalFixtureFamilies,
     runtimeCoverageRowCount: matrix.runtimeCoverageRows?.length ?? 0,
     incompleteRuntimeCoverageRows,
+    runtimePathReasons,
     gatePass:
       incompleteNodes.length === 0 &&
       incompleteEvalFixtureFamilies.length === 0 &&
-      incompleteRuntimeCoverageRows.length === 0
+      incompleteRuntimeCoverageRows.length === 0 &&
+      runtimePathReasons.length === 0
   };
 }
 
@@ -446,6 +562,8 @@ export function evaluateFocusedCoverageGate(params: {
   coveragePath?: string;
   matrixPath?: string;
   generatedAt?: string;
+  repoRoot?: string;
+  delegationZeroOverride?: DelegationZeroGateReport;
 }): FocusedCoverageGateReport {
   const scopedFiles = scopedFilesFromMatrix(params.matrix);
   const scopedReasons: string[] = [];
@@ -472,6 +590,9 @@ export function evaluateFocusedCoverageGate(params: {
   const criticalReasons = criticalFiles.flatMap((item) =>
     item.reasons.map((reason) => `critical:${item.file}:${reason}`)
   );
+  const delegationZero =
+    params.delegationZeroOverride ??
+    evaluateDelegationZero(params.repoRoot ?? resolve(__dirname, "../../.."));
   const flowMatrix = evaluateFlowMatrix(params.matrix);
   const matrixReasons = [
     ...flowMatrix.incompleteNodes.map(
@@ -482,14 +603,21 @@ export function evaluateFocusedCoverageGate(params: {
     ),
     ...flowMatrix.incompleteRuntimeCoverageRows.map(
       (item) => `runtime_row:${item.id}:${item.reasons.join("|")}`
-    )
+    ),
+    ...flowMatrix.runtimePathReasons.map((reason) => `runtime_path:${reason}`)
   ];
 
-  const reasons = [...scopedReasons, ...criticalReasons, ...matrixReasons];
+  const reasons = [
+    ...scopedReasons,
+    ...criticalReasons,
+    ...matrixReasons,
+    ...delegationZero.reasons.map((item) => `delegation_zero:${item}`)
+  ];
   const gatePass =
     scopedReasons.length === 0 &&
     criticalFiles.every((item) => item.gatePass) &&
-    flowMatrix.gatePass;
+    flowMatrix.gatePass &&
+    delegationZero.gatePass;
 
   return {
     generatedAt: params.generatedAt ?? new Date().toISOString(),
@@ -502,6 +630,7 @@ export function evaluateFocusedCoverageGate(params: {
       reasons: scopedReasons
     },
     criticalFiles,
+    delegationZero,
     flowMatrix,
     rollout: {
       gatePass,

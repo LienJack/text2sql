@@ -43,6 +43,15 @@ import { Text2SqlV2LangGraphResultMapper } from "./v2/langgraph/text2sql-v2-lang
 import { Text2SqlV2LangGraphRunnerService } from "./v2/langgraph/text2sql-v2-langgraph-runner.service";
 import { Text2SqlV2StateMachine } from "./v2/text2sql-v2-state-machine";
 import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
+import { AnswerNode as LangGraphAnswerNode } from "./v2/langgraph/nodes/answer.node";
+import { AssembleContextNode as LangGraphAssembleContextNode } from "./v2/langgraph/nodes/assemble-context.node";
+import { CorrectSqlNode as LangGraphCorrectSqlNode } from "./v2/langgraph/nodes/correct-sql.node";
+import { ExecuteSqlNode as LangGraphExecuteSqlNode } from "./v2/langgraph/nodes/execute-sql.node";
+import { GenerateSqlNode as LangGraphGenerateSqlNode } from "./v2/langgraph/nodes/generate-sql.node";
+import { IntakeNode as LangGraphIntakeNode } from "./v2/langgraph/nodes/intake.node";
+import { RetrieveContextNode as LangGraphRetrieveContextNode } from "./v2/langgraph/nodes/retrieve-context.node";
+import { SemanticPlanNode as LangGraphSemanticPlanNode } from "./v2/langgraph/nodes/semantic-plan.node";
+import { ValidateSqlNode as LangGraphValidateSqlNode } from "./v2/langgraph/nodes/validate-sql.node";
 
 @Module({
   imports: [
@@ -93,6 +102,15 @@ import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
     SemanticPlanValidator,
     SqlValidationService,
     SqlCorrectionService,
+    LangGraphIntakeNode,
+    LangGraphRetrieveContextNode,
+    LangGraphAssembleContextNode,
+    LangGraphSemanticPlanNode,
+    LangGraphGenerateSqlNode,
+    LangGraphValidateSqlNode,
+    LangGraphCorrectSqlNode,
+    LangGraphExecuteSqlNode,
+    LangGraphAnswerNode,
     Text2SqlV2ArtifactBuilder,
     Text2SqlV2LangGraphResultMapper,
     Text2SqlV2LangGraphRunnerService,

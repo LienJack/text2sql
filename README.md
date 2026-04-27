@@ -4,7 +4,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ## 技术栈
 - 后端：NestJS + TypeScript + Prisma
-- Agent：Text2SQL v2 LangGraph runtime（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`），由 `conversation/text2sql` 统一入口驱动
+- Agent：Text2SQL v2 LangGraph runtime（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`，Phase A `delegation=0`），由 `conversation/text2sql` 统一入口驱动
 - 前端：Next.js + React + Tailwind CSS v4 + shadcn-ui
 - 查询数据：SQLite / MySQL / PostgreSQL / CSV / Excel（会话绑定数据源路由）
 - 功能数据：Redis 缓冲 + PostgreSQL 持久化
@@ -269,7 +269,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
 - 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
 - rollout 输出：`summary.rollout`（eval 指标门禁）+ `rollout`（closeout 聚合门禁，含 `recommendedStage/rollbackSuggested/reasons`）
-- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`
+- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`（含 `delegationZero`）
 - anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
 - 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
 - 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。

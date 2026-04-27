@@ -189,6 +189,13 @@ function coveredMatrix(): CloseoutFlowMatrix {
         LANGGRAPH_RUNNER_OWNER,
         ...LANGGRAPH_CRITICAL_FILES
       ],
+      delegationPolicy: "phase_a_delegation_zero",
+      delegationOwners: [LANGGRAPH_CRITICAL_FILES[0], LANGGRAPH_RUNNER_OWNER],
+      delegationForbiddenPatterns: [
+        "runLegacyRuntime",
+        "legacyRunner",
+        "Text2SqlV2RunnerService"
+      ],
       blockerPolicy:
         "Closeout must stay blocked if a canonical LangGraph owner is missing or only legacy runtime-detail assertions remain."
     }
@@ -208,6 +215,7 @@ describe("text2sql v2 focused coverage gate", () => {
     expect(report.scoped.linePct).toBe(100);
     expect(report.scoped.branchPct).toBe(100);
     expect(report.criticalFiles.every((item) => item.gatePass)).toBe(true);
+    expect(report.delegationZero.gatePass).toBe(true);
     expect(report.flowMatrix.gatePass).toBe(true);
     expect(report.flowMatrix.incompleteRuntimeCoverageRows).toEqual([]);
     expect(report.rollout).toMatchObject({
@@ -229,6 +237,32 @@ describe("text2sql v2 focused coverage gate", () => {
     expect(report.rollout.gatePass).toBe(false);
     expect(report.rollout.reasons).toContain(
       `critical:${LEGACY_CRITICAL_FILES[0]}:line_coverage_below_75`
+    );
+  });
+
+  it("fails when phase-A delegation=0 static scan reports legacy runtime wiring", () => {
+    const report = evaluateFocusedCoverageGate({
+      coverage: coverageFor(ALL_COVERAGE_FILES),
+      matrix: coveredMatrix(),
+      delegationZeroOverride: {
+        gatePass: false,
+        scannedFiles: [LANGGRAPH_RUNNER_OWNER],
+        violations: [
+          {
+            file: LANGGRAPH_RUNNER_OWNER,
+            label: "legacy v2 runner import",
+            pattern: "Text2SqlV2RunnerService"
+          }
+        ],
+        reasons: [
+          `${LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
+        ]
+      }
+    });
+
+    expect(report.rollout.gatePass).toBe(false);
+    expect(report.rollout.reasons).toContain(
+      `delegation_zero:${LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
     );
   });
 
