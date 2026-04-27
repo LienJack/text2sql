@@ -65,8 +65,12 @@ describe("chat context envelope accuracy integration", () => {
     if (metadataRun.sql) {
       expect(metadataRun.sql.toLowerCase()).toContain("sqlite_master");
     } else {
-      expect(metadataRun.status).toBe("failed");
-      expect(metadataRun.error ?? "").toMatch(/语义计划|SQL/);
+      expect(["executionResult", "failed"]).toContain(metadataRun.status);
+      if (metadataRun.status === "failed") {
+        expect(metadataRun.error ?? "").toMatch(/语义计划|SQL/);
+      } else {
+        expect((metadataRun.answer ?? "").trim().length).toBeGreaterThan(0);
+      }
     }
     expect(["skipped", "success"]).toContain(metadataClarifyStep?.status ?? "skipped");
 

@@ -132,7 +132,8 @@ export class SqlCorrectionService {
       code === "SQL_RELATIONSHIP_PATH_MISSING_JOIN" ||
       code === "SQL_DRY_RUN_PARSE_REJECTED" ||
       code === "SQL_DRY_PLAN_RELATIONSHIP_MISMATCH" ||
-      code === "SQL_PLAN_COVERAGE_OUTSIDE_SELECTED_TABLES"
+      code === "SQL_PLAN_COVERAGE_OUTSIDE_SELECTED_TABLES" ||
+      code === "SQL_MISSING_COLUMN"
     );
   }
 

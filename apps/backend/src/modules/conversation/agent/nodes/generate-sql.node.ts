@@ -109,6 +109,30 @@ export class GenerateSqlNode {
         }
       );
     }
+    if (semanticPlanResult.validation.routeKind === "metadata") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_METADATA_ANSWER",
+        "这是元数据查询，不需要生成或执行 SQL。",
+        200,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan,
+          answer: "这是元数据查询，请查看当前数据源的表、字段与语义证据。"
+        }
+      );
+    }
+    if (semanticPlanResult.validation.routeKind === "general") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_GENERAL_ANSWER",
+        "这是通用说明问题，不需要生成或执行 SQL。",
+        200,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan,
+          answer: "这是通用说明问题，不需要执行 SQL；我会基于已有语义证据直接解释。"
+        }
+      );
+    }
     if (
       !semanticPlanResult.validation.valid &&
       semanticPlanResult.validation.reasons.some(

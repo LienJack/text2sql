@@ -53,7 +53,7 @@ export const TEXT2SQL_STAGE_CATALOG: Record<
   }
 };
 
-const TEXT2SQL_LANGGRAPH_NODE_REASONING_STAGE_MAP: Record<string, ReasoningStage> = {
+const TEXT2SQL_V1_NODE_REASONING_STAGE_FALLBACK: Record<string, ReasoningStage> = {
   clarify: "analysis",
   "retrieve-knowledge": "analysis",
   "build-intent-plan": "analysis",
@@ -66,7 +66,7 @@ const TEXT2SQL_LANGGRAPH_NODE_REASONING_STAGE_MAP: Record<string, ReasoningStage
   "format-answer": "response"
 };
 
-const TEXT2SQL_LANGGRAPH_NODE_TITLE_MAP: Record<string, string> = {
+const TEXT2SQL_V1_NODE_TITLE_FALLBACK: Record<string, string> = {
   clarify: "理解问题",
   "retrieve-knowledge": "检索上下文",
   "build-intent-plan": "意图规划",
@@ -153,9 +153,9 @@ export const resolveText2SqlV2StageCatalogEntry = (
 };
 
 export const resolveText2SqlReasoningStage = (node: string): ReasoningStage => {
-  return TEXT2SQL_LANGGRAPH_NODE_REASONING_STAGE_MAP[node] ?? "unknown";
+  return TEXT2SQL_V1_NODE_REASONING_STAGE_FALLBACK[node] ?? "unknown";
 };
 
 export const resolveText2SqlTitle = (node: string): string => {
-  return TEXT2SQL_LANGGRAPH_NODE_TITLE_MAP[node] ?? node;
+  return TEXT2SQL_V1_NODE_TITLE_FALLBACK[node] ?? node;
 };

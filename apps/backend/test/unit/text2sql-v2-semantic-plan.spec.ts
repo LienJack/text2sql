@@ -80,6 +80,55 @@ describe("text2sql v2 semantic plan", () => {
     );
   });
 
+  it("maps general business-definition questions to non-SQL answer route", () => {
+    const result = planService.build({
+      question: "什么是 GMV 口径？",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: ["metric.gmv"],
+        selectedTables: [],
+        selectedColumns: []
+      }
+    });
+
+    expect(result.plan.route).toBe("answer");
+    expect(result.validation.routeKind).toBe("general");
+    expect(result.validation.valid).toBe(true);
+    expect(result.plan.filters).toEqual(
+      expect.arrayContaining(["route_kind:general"])
+    );
+  });
+
+  it("keeps text_to_sql plan snapshot stable across generation validation and correction consumers", () => {
+    const result = planService.build({
+      question: "按月统计近30天订单 GMV",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: ["chunk-orders", "metric.gmv"],
+        selectedTables: ["orders", "customers"],
+        selectedColumns: ["orders.amount", "orders.customer_id", "customers.id"]
+      },
+      allowedTables: ["orders", "customers"]
+    });
+
+    const generationPlanSnapshot = result.plan;
+    const validationPlanSnapshot = result.plan;
+    const correctionPlanSnapshot = result.plan;
+
+    expect(result.validation.valid).toBe(true);
+    expect(result.validation.routeKind).toBe("text_to_sql");
+    expect(result.plan.metrics).toEqual(
+      expect.arrayContaining(["gmv", "orders.amount"])
+    );
+    expect(result.plan.grain).toBe("month");
+    expect(result.plan.filters).toEqual(
+      expect.arrayContaining(["route_kind:text_to_sql", "time_range:relative"])
+    );
+    expect(result.plan.joinPath).toEqual(["orders->customers"]);
+    expect(generationPlanSnapshot).toBe(validationPlanSnapshot);
+    expect(validationPlanSnapshot).toBe(correctionPlanSnapshot);
+  });
+
   it("keeps text-to-sql route when degraded context has no rag grounding", () => {
     const result = planService.build({
       question: "统计 GMV",
@@ -108,6 +157,38 @@ describe("text2sql v2 semantic plan", () => {
     ]);
     expect(result.validation.reasons).toEqual(
       expect.arrayContaining(["plan_missing_selected_tables", "plan_missing_grounding_evidence"])
+    );
+  });
+
+  it("asks one clarification when grounding is incomplete and budget remains", () => {
+    const result = planService.build({
+      question: "统计活跃用户",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: [],
+        selectedTables: [],
+        selectedColumns: [],
+        warnings: ["clarification_round:1", "clarification_max_rounds:2"]
+      }
+    });
+
+    expect(result.plan.route).toBe("clarify");
+    expect(result.validation.requiresClarification).toBe(true);
+    expect(result.plan.filters).toEqual(
+      expect.arrayContaining([
+        "route_kind:clarify",
+        "clarification_round:1",
+        "clarification_max_rounds:2"
+      ])
+    );
+    expect(result.plan.coverageGaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          gapType: "user_decision_gap",
+          reasonCode: "semantic_plan_requires_clarification",
+          impactScope: "clarification"
+        })
+      ])
     );
   });
 

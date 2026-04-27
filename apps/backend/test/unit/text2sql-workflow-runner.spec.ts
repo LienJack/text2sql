@@ -1,5 +1,6 @@
 import { DomainError } from "../../src/common/domain-error";
 import { Text2SQLWorkflowRunner } from "../../src/modules/conversation/text2sql/text2sql-workflow-runner.service";
+import { RunV2StateMachineStage } from "../../src/modules/conversation/text2sql/stages/run-v2-state-machine.stage";
 
 describe("Text2SQLWorkflowRunner", () => {
   const createPrepared = () => ({
@@ -107,6 +108,38 @@ describe("Text2SQLWorkflowRunner", () => {
       run: result,
       requestId: "req-1"
     });
+  });
+
+  it("routes sync flow through the real v2 state-machine stage wrapper", async () => {
+    const prepared = createPrepared();
+    const v2Runner = {
+      runSync: jest.fn().mockResolvedValue(createRun()),
+      runStream: jest.fn()
+    };
+    const runV2StateMachineStage = new RunV2StateMachineStage(v2Runner as never);
+    const runner = new Text2SQLWorkflowRunner(
+      { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
+      { run: jest.fn().mockResolvedValue(prepared) } as never,
+      runV2StateMachineStage,
+      { run: jest.fn(async (run) => run) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        createEnvelope: jest.fn(),
+        mapLlmEvent: jest.fn(),
+        mapStepEvent: jest.fn()
+      } as never
+    );
+
+    await runner.runSync({
+      sessionId: "session-1",
+      message: "统计订单总数"
+    });
+
+    expect(v2Runner.runSync).toHaveBeenCalledWith(
+      prepared,
+      "/api/v1/sessions/:sessionId/messages"
+    );
   });
 
   it("adds readonly fallback answer for rejected runs when datasource allows fallback", async () => {
@@ -235,6 +268,153 @@ describe("Text2SQLWorkflowRunner", () => {
     ]);
     expect(new Set(events.map((item) => item.runId))).toEqual(new Set(["run-1"]));
     expect(persistRunStage.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("streams finish delivery from the same canonical v2 run facts", async () => {
+    const prepared = createPrepared();
+    const canonicalRun = createRun({
+      sql: "SELECT COUNT(*) AS total FROM orders",
+      answer: "订单总数为 10",
+      rows: [{ total: 10 }],
+      columns: ["total"],
+      trace: {
+        runId: "run-1",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: ["intake", "generate-sql", "validate", "execute", "answer"],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "generate-sql", status: "success" },
+            { stage: "validate", status: "success" },
+            { stage: "execute", status: "success" },
+            { stage: "answer", status: "success" }
+          ]
+        }
+      }
+    }) as any;
+    const v2Runner = {
+      runSync: jest.fn(),
+      runStream: jest.fn(async (_input, _route, options) => {
+        await options?.onStep?.({
+          step: {
+            node: "generate-sql",
+            status: "success",
+            at: "2026-04-26T00:00:01.000Z",
+            outputSummary: JSON.stringify({
+              sql: canonicalRun.sql,
+              v2: {
+                stageArtifact: {
+                  stage: "generate-sql",
+                  status: "success"
+                }
+              }
+            })
+          }
+        });
+        return canonicalRun;
+      })
+    };
+    const runV2StateMachineStage = new RunV2StateMachineStage(v2Runner as never);
+    const delivery = {
+      answer: {
+        text: "订单总数为 10",
+        status: "executionResult",
+        provider: "volcengine"
+      },
+      evidence: {
+        runId: "run-1",
+        v2: {
+          version: "v2",
+          stageOrder: canonicalRun.trace.v2.stageOrder,
+          stageArtifacts: canonicalRun.trace.v2.stages
+        }
+      },
+      artifact: {
+        sql: canonicalRun.sql,
+        columns: canonicalRun.columns,
+        rowCount: 1,
+        rowsPreview: canonicalRun.rows,
+        hasError: false
+      }
+    };
+    const runner = new Text2SQLWorkflowRunner(
+      { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
+      { run: jest.fn().mockResolvedValue(prepared) } as never,
+      runV2StateMachineStage,
+      {
+        run: jest.fn(async (run) => ({
+          ...run,
+          delivery
+        }))
+      } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
+          type,
+          data,
+          runId,
+          sessionId,
+          at: "2026-04-26T00:00:02.000Z"
+        })),
+        mapLlmEvent: jest.fn(),
+        mapStepEvent: jest.fn(() => ({
+          data: {
+            node: "generate-sql",
+            status: "success",
+            v2: {
+              stageArtifact: {
+                stage: "generate-sql",
+                status: "success"
+              }
+            }
+          },
+          nextSequence: 1
+        }))
+      } as never
+    );
+
+    const events: Array<{ type: string; data: any }> = [];
+    const run = await runner.runStream({
+      sessionId: "session-1",
+      message: "统计订单总数",
+      onEvent: (event) => {
+        events.push({
+          type: event.type,
+          data: event.data
+        });
+      }
+    });
+
+    expect(v2Runner.runStream).toHaveBeenCalledWith(
+      prepared,
+      "/api/v1/sessions/:sessionId/messages/stream",
+      expect.any(Object)
+    );
+    expect(run.delivery).toEqual(delivery);
+    expect(events.map((event) => event.type)).toEqual(["start", "state", "finish"]);
+    expect(events.at(-1)?.data).toMatchObject({
+      status: "executionResult",
+      rowCount: 1,
+      delivery: {
+        answer: {
+          text: "订单总数为 10"
+        },
+        evidence: {
+          v2: {
+            version: "v2",
+            stageOrder: ["intake", "generate-sql", "validate", "execute", "answer"]
+          }
+        },
+        artifact: {
+          sql: "SELECT COUNT(*) AS total FROM orders",
+          rowCount: 1
+        }
+      }
+    });
   });
 
   it("emits stream error event and persists failed run on graph failure", async () => {

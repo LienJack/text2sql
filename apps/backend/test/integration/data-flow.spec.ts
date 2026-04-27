@@ -104,4 +104,18 @@ describe("data flow", () => {
 
     await moduleRef.close();
   });
+
+  it("should keep run-not-found priority before hard-cut checks", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const runViewUsecase = moduleRef.get(RunViewUsecase, { strict: false });
+
+    await expect(runViewUsecase.getRunById("run-missing-priority")).rejects.toMatchObject({
+      code: "RUN_NOT_FOUND",
+      statusCode: 404
+    });
+
+    await moduleRef.close();
+  });
 });

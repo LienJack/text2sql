@@ -29,7 +29,7 @@ interface ClarificationPolicy {
 const METADATA_INTENT_REGEX =
   /(有哪些表|哪些表|schema|表结构|字段|列名|show\s+tables|describe|sqlite_master|sqlite_schema|information_schema|pg_catalog|pragma)/i;
 const GENERAL_INTENT_REGEX =
-  /^(你好|您好|hi|hello|thanks|谢谢|help|帮助|你是谁|你能做什么)\b/i;
+  /^(你好|您好|hi|hello|thanks|谢谢|help|帮助|你是谁|你能做什么)(?:$|\s|[，。,.!?])|(?:什么是|解释|说明).{0,24}(?:口径|定义|含义)|(?:口径|定义|含义)(?:是什么|说明|解释)/i;
 const METRIC_KEYWORD_REGEX =
   /(count|sum|avg|average|max|min|总数|数量|金额|平均|均值|占比|转化率|留存|gmv)/gi;
 const TIME_GRAIN_DAY_REGEX = /(按天|每天|daily|day\b|date_trunc\(['"]day['"]\))/i;

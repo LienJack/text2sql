@@ -262,10 +262,14 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 
 ## Text2SQL v2 评估门禁（新增）
 - 评估脚本：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- 评估脚本（发布阻断模式）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+- focused coverage gate：先运行后端 Jest coverage，再执行 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`；发布阻断模式使用 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
+- focused flow matrix：`apps/backend/test/fixtures/text2sql-v2-closeout-flow-matrix.json`
 - fixture：`apps/backend/test/fixtures/text2sql-v2-eval-cases.json`
 - characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
 - 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
-- rollout 输出：`summary.rollout`（eval 单门禁）+ `rollout`（eval + characterization 双门禁聚合，含 `recommendedStage/rollbackSuggested/reasons`）
+- rollout 输出：`summary.rollout`（eval 指标门禁）+ `rollout`（closeout 聚合门禁，含 `recommendedStage/rollbackSuggested/reasons`）
+- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`
 - anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
 - 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
 - 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。
@@ -292,6 +296,8 @@ pnpm test:frontend
   - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 - Text2SQL v2 评估：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- Text2SQL v2 评估（严格）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+- Text2SQL v2 focused coverage：`pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
 - Text2SQL hard-cut anti-regression：`pnpm run text2sql:no-legacy-compat:check`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`

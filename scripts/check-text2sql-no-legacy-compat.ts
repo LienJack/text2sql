@@ -1,12 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-type ForbiddenPattern = {
+export type ForbiddenPattern = {
   label: string;
   pattern: RegExp;
 };
 
-type Violation = {
+export type Violation = {
   file: string;
   line: number;
   column: number;
@@ -14,18 +14,29 @@ type Violation = {
   text: string;
 };
 
+export interface NoLegacyCompatReport {
+  scriptName: string;
+  repoRoot: string;
+  scannedCount: number;
+  scanFiles: string[];
+  violations: Violation[];
+  gatePass: boolean;
+}
+
 const SCRIPT_NAME = "check-text2sql-no-legacy-compat";
 const INLINE_ALLOW_MARKER = "text2sql-no-legacy-compat:allow";
 
-const DEFAULT_SCAN_FILES = [
+export const DEFAULT_SCAN_FILES = [
   "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
   "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
   "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
   "apps/backend/src/modules/conversation/chat/application/save-view-from-run.usecase.ts",
-  "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts"
+  "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts",
+  "apps/backend/src/modules/data/persistence/chat.repository.ts",
+  "apps/backend/src/modules/conversation/text2sql/stages/text2sql-stage-catalog.ts"
 ];
 
-const FORBIDDEN_PATTERNS: ForbiddenPattern[] = [
+export const FORBIDDEN_PATTERNS: ForbiddenPattern[] = [
   { label: "prompt_template alias", pattern: /\bprompt_template(_evidence)?\b/g },
   { label: "effective_context_summary alias", pattern: /\beffective_context_summary\b/g },
   { label: "context_conflict_hint alias", pattern: /\bcontext_conflict_hint\b/g },
@@ -64,9 +75,21 @@ function compactLine(line: string): string {
   return line.trim().replace(/\s+/g, " ").slice(0, 180);
 }
 
-async function main(): Promise<void> {
-  const repoRoot = await findRepoRoot(process.cwd());
-  const scanFiles = DEFAULT_SCAN_FILES.map((item) => path.resolve(repoRoot, item));
+function normalizeScanPaths(repoRoot: string, scanFiles: string[]): string[] {
+  return scanFiles.map((item) =>
+    path.isAbsolute(item) ? item : path.resolve(repoRoot, item)
+  );
+}
+
+export async function evaluateNoLegacyCompat(options?: {
+  repoRoot?: string;
+  scanFiles?: string[];
+}): Promise<NoLegacyCompatReport> {
+  const repoRoot = options?.repoRoot
+    ? path.resolve(options.repoRoot)
+    : await findRepoRoot(process.cwd());
+  const configuredScanFiles = options?.scanFiles ?? DEFAULT_SCAN_FILES;
+  const scanFiles = normalizeScanPaths(repoRoot, configuredScanFiles);
   const violations: Violation[] = [];
   let scannedCount = 0;
 
@@ -102,11 +125,24 @@ async function main(): Promise<void> {
     }
   }
 
-  if (violations.length > 0) {
+  return {
+    scriptName: SCRIPT_NAME,
+    repoRoot,
+    scannedCount,
+    scanFiles: configuredScanFiles,
+    violations,
+    gatePass: violations.length === 0
+  };
+}
+
+async function main(): Promise<void> {
+  const report = await evaluateNoLegacyCompat();
+
+  if (!report.gatePass) {
     console.error(
-      `[${SCRIPT_NAME}] failed: found ${violations.length} forbidden compatibility symbol(s).`
+      `[${report.scriptName}] failed: found ${report.violations.length} forbidden compatibility symbol(s).`
     );
-    for (const violation of violations) {
+    for (const violation of report.violations) {
       console.error(
         `- ${violation.file}:${violation.line}:${violation.column} [${violation.label}] ${violation.text}`
       );
@@ -120,8 +156,10 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `[${SCRIPT_NAME}] passed: scanned ${scannedCount} file(s), no forbidden symbols detected.`
+    `[${report.scriptName}] passed: scanned ${report.scannedCount} file(s), no forbidden symbols detected.`
   );
 }
 
-void main();
+if (require.main === module) {
+  void main();
+}

@@ -196,4 +196,14 @@ describe("rag audit replay integration", () => {
       statusCode: 410
     });
   });
+
+  it("keeps missing-run requests non-leaky and deterministic", async () => {
+    const chain = await auditReplayService.queryChain({
+      runId: "run-rag-audit-missing"
+    });
+
+    expect(chain.runId).toBe("run-rag-audit-missing");
+    expect(chain.events).toEqual([]);
+    expect(chain.runTrace).toBeUndefined();
+  });
 });

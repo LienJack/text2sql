@@ -73,6 +73,8 @@ CI 参考：
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
 - 若本次改动涉及 Text2SQL v2 read-model/delivery hard-cut：执行
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - （发布阻断）`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
   - `pnpm run text2sql:no-legacy-compat:check`
   - 并核对 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 - 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
@@ -132,7 +134,8 @@ CI 参考：
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 - `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
-- `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 eval + characterization 双门禁 `rollout.recommendedStage/rollbackSuggested/reasons`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 closeout 五门禁（`evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage`）及 `rollout.recommendedStage/rollbackSuggested/reasons`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate` 输出需包含 scoped coverage、关键文件门槛、A-M flow blockers 与 eval fixture 行为测试追溯。
 - `pnpm run text2sql:no-legacy-compat:check` 必须通过。
 
 ### D. Governance 术语硬切规范

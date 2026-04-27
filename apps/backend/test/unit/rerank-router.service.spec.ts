@@ -4,12 +4,15 @@ import { RerankRouterService } from "../../src/modules/llm/rerank-router.service
 describe("RerankRouterService", () => {
   const createService = (overrides?: {
     rerankMockMode?: boolean;
+    llmMockMode?: boolean;
+    nodeEnv?: string;
     generateRawText?: string;
+    runtimeError?: unknown;
   }): RerankRouterService => {
     const config = {
       rerankMockMode: overrides?.rerankMockMode ?? false,
-      llmMockMode: false,
-      nodeEnv: "development",
+      llmMockMode: overrides?.llmMockMode ?? false,
+      nodeEnv: overrides?.nodeEnv ?? "development",
       rerankProvider: "openai",
       rerankModel: "gpt-4.1-mini"
     };
@@ -31,16 +34,18 @@ describe("RerankRouterService", () => {
       })
     };
     const ragTaskConfigService = {
-      resolveRerankRuntime: jest.fn().mockResolvedValue({
-        taskType: "rerank",
-        provider: "openai",
-        model: "gpt-4.1-mini",
-        baseUrl: "https://api.openai.com/v1",
-        apiKey: "test-key",
-        timeoutMs: 5000,
-        configSource: "settings",
-        configId: "rag-rerank-1"
-      })
+      resolveRerankRuntime: overrides?.runtimeError
+        ? jest.fn().mockRejectedValue(overrides.runtimeError)
+        : jest.fn().mockResolvedValue({
+            taskType: "rerank",
+            provider: "openai",
+            model: "gpt-4.1-mini",
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "test-key",
+            timeoutMs: 5000,
+            configSource: "settings",
+            configId: "rag-rerank-1"
+          })
     };
 
     return new RerankRouterService(
@@ -87,6 +92,20 @@ describe("RerankRouterService", () => {
     });
   });
 
+  it("surfaces provider missing errors instead of silently falling back", async () => {
+    const service = createService({
+      llmMockMode: true,
+      nodeEnv: "development",
+      runtimeError: new DomainError("LLM_CONFIG_MISSING", "rerank config missing", 503)
+    });
+
+    await expect(service.rerankCandidatesWithMetadata(rerankInput)).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "LLM_CONFIG_MISSING"
+    });
+  });
+
   it("uses deterministic mock rerank in explicit rerank mock mode", async () => {
     const service = createService({ rerankMockMode: true });
 
@@ -96,5 +115,36 @@ describe("RerankRouterService", () => {
     expect(response.results[0]?.reason).toContain("mock rerank");
     expect(response.metadata.mode).toBe("mock");
     expect(response.metadata.fallbackReason).toBe("rerank_mock_mode");
+  });
+
+  it("allows llm mock mode only inside NODE_ENV=test", async () => {
+    const service = createService({
+      llmMockMode: true,
+      nodeEnv: "test"
+    });
+
+    const response = await service.rerankCandidatesWithMetadata(rerankInput);
+
+    expect(response.results).toHaveLength(1);
+    expect(response.metadata.mode).toBe("mock");
+    expect(response.metadata.fallbackReason).toBe("llm_mock_mode");
+  });
+
+  it("returns empty metadata for empty candidate input", async () => {
+    const service = createService();
+
+    await expect(
+      service.rerankCandidatesWithMetadata({
+        query: "orders",
+        candidates: []
+      })
+    ).resolves.toMatchObject({
+      results: [],
+      metadata: {
+        mode: "provider",
+        inputCount: 0,
+        outputCount: 0
+      }
+    });
   });
 });

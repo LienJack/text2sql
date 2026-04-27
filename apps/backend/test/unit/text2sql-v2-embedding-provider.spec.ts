@@ -15,6 +15,13 @@ const createConfigServiceMock = (
 });
 
 describe("Text2Sql v2 embedding provider", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
   const createRagTaskConfigServiceMock = (runtime?: {
     taskType: "embedding";
     provider: string;
@@ -140,5 +147,215 @@ describe("Text2Sql v2 embedding provider", () => {
     ).rejects.toMatchObject<Partial<DomainError>>({
       code: "EMBEDDING_PROVIDER_UNAVAILABLE"
     });
+  });
+
+  it("returns empty vectors for empty query text without provider calls", async () => {
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1"
+      }) as ConfigService
+    );
+    const resolveEmbeddingRuntime = jest.fn();
+    const service = new EmbeddingRouterService(
+      config,
+      { resolveEmbeddingRuntime } as unknown as RagTaskConfigService
+    );
+
+    await expect(service.embed({ texts: [" ", ""] })).resolves.toEqual([]);
+    expect(resolveEmbeddingRuntime).not.toHaveBeenCalled();
+  });
+
+  it("throws explicit request failure with provider metadata", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("network down")) as never;
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1"
+      }) as ConfigService
+    );
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-v1",
+        baseUrl: "https://embedding.example/v1",
+        apiKey: "test-key",
+        dimensions: 2,
+        vectorVersion: "v1",
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
+
+    await expect(service.embed({ texts: ["orders"] })).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "EMBEDDING_PROVIDER_REQUEST_FAILED",
+      details: {
+        provider: "openai",
+        configSource: "settings"
+      }
+    });
+  });
+
+  it("throws explicit response error with status and bounded body", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: jest.fn().mockResolvedValue("rate limited")
+    }) as never;
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1"
+      }) as ConfigService
+    );
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-v1",
+        baseUrl: "https://embedding.example/v1",
+        apiKey: "test-key",
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
+
+    await expect(service.embed({ texts: ["orders"] })).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "EMBEDDING_PROVIDER_RESPONSE_ERROR",
+      details: {
+        statusCode: 429,
+        body: "rate limited"
+      }
+    });
+  });
+
+  it("rejects invalid payload count, invalid vectors, and dimension mismatch", async () => {
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1",
+        EMBEDDING_VECTOR_VERSION: "v7"
+      }) as ConfigService
+    );
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-v1",
+        baseUrl: "https://embedding.example/v1",
+        apiKey: "test-key",
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
+
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ data: [] })
+    }) as never;
+    await expect(service.embed({ texts: ["orders"] })).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "EMBEDDING_PROVIDER_INVALID_PAYLOAD"
+    });
+
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: jest.fn().mockResolvedValue({ data: [{ embedding: [] }] })
+    }) as never;
+    await expect(service.embed({ texts: ["orders"] })).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "EMBEDDING_PROVIDER_INVALID_VECTOR"
+    });
+
+    global.fetch = jest.fn().mockResolvedValueOnce({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        data: [{ embedding: [0.1, 0.2] }, { embedding: [0.3] }]
+      })
+    }) as never;
+    await expect(
+      service.embed({ texts: ["orders", "customers"] })
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "EMBEDDING_PROVIDER_DIMENSION_MISMATCH",
+      details: {
+        expectedDimensions: 2,
+        actualDimensions: 1
+      }
+    });
+  });
+
+  it("keeps provider metadata on successful external requests", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        data: [{ embedding: [0.1, 0.2] }]
+      })
+    }) as never;
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1",
+        EMBEDDING_VECTOR_VERSION: "env-vector"
+      }) as ConfigService
+    );
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-v1",
+        baseUrl: "https://embedding.example/v1",
+        apiKey: "test-key",
+        dimensions: 2,
+        vectorVersion: "runtime-vector",
+        timeoutMs: 1000,
+        configSource: "settings",
+        configId: "embedding-config-1"
+      }) as RagTaskConfigService
+    );
+
+    const vectors = await service.embed({
+      texts: ["orders"],
+      indexVersion: "idx-v2",
+      scope: "datasource",
+      assetType: "rag_chunk"
+    });
+
+    expect(vectors).toEqual([
+      {
+        vector: [0.1, 0.2],
+        metadata: {
+          provider: "openai",
+          model: "embedding-v1",
+          dimensions: 2,
+          vectorVersion: "runtime-vector",
+          configSource: "settings",
+          configId: "embedding-config-1",
+          indexVersion: "idx-v2",
+          scope: "datasource",
+          assetType: "rag_chunk"
+        }
+      }
+    ]);
   });
 });

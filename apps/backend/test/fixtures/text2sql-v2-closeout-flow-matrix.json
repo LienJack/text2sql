@@ -1,0 +1,546 @@
+{
+  "version": "2026-04-27.text2sql-v2-closeout.v1",
+  "nodes": [
+    {
+      "id": "A.context-envelope",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R4",
+        "R13",
+        "R15"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
+        "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[].input",
+        "run.delivery.evidence.v2"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-workflow-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "B.intake",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R20",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[intake]",
+        "run.trace.v2.route"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "C.route",
+      "requirementIds": [
+        "R3",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.route",
+        "run.delivery.evidence.v2.route"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "C1.targeted-clarification",
+      "requirementIds": [
+        "R3",
+        "R21",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan]",
+        "run.delivery.evidence.v2.clarification"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "C2.general-metadata-answer",
+      "requirementIds": [
+        "R3",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.route",
+        "run.delivery.evidence.v2.answer"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "D.retrieve-context",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R16",
+        "R19",
+        "R21"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+        "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[retrieve]",
+        "run.delivery.evidence.v2.retrieval"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/integration/rag-retrieval.service.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "D1.external-embedding-rerank",
+      "requirementIds": [
+        "R16",
+        "R17",
+        "R18"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/llm/embedding-router.service.ts",
+        "apps/backend/src/modules/llm/rerank-router.service.ts",
+        "apps/backend/src/modules/rag/rerank/rag-rerank.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[retrieve].provider",
+        "run.delivery.evidence.v2.retrieval.unavailable"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
+        "apps/backend/test/unit/rag-rerank.service.spec.ts",
+        "apps/backend/test/unit/rerank-router.service.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "D2.schema-ddl-supplement",
+      "requirementIds": [
+        "R2",
+        "R19"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[assemble-context].ddlSupplement",
+        "run.delivery.evidence.v2.context"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "E.semantic-context-pack",
+      "requirementIds": [
+        "R2",
+        "R19"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[assemble-context]",
+        "run.delivery.evidence.v2.context"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "F.semantic-plan",
+      "requirementIds": [
+        "R2",
+        "R20",
+        "R21"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.validator.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan]",
+        "run.delivery.evidence.v2.semanticPlan"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "G.plan-confidence",
+      "requirementIds": [
+        "R3",
+        "R21",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan].confidence",
+        "run.trace.v2.routeDecision"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "H.structured-sql-generation",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[generate-sql]",
+        "run.delivery.evidence.v2.sqlGeneration"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "I.validation",
+      "requirementIds": [
+        "R9",
+        "R10",
+        "R11",
+        "R12"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/sql-validation.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[validate]",
+        "run.delivery.evidence.v2.validation"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "J.read-only-execution",
+      "requirementIds": [
+        "R3",
+        "R11",
+        "R12"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[execute]",
+        "run.delivery.evidence.v2.execution"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "K.diagnosis-bounded-correction",
+      "requirementIds": [
+        "R9",
+        "R10",
+        "R11"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[correct]",
+        "run.delivery.evidence.v2.correction"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "L.fail-closed-evidence",
+      "requirementIds": [
+        "R3",
+        "R11",
+        "R16",
+        "R17",
+        "R23"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+        "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
+        "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.failure",
+        "run.delivery.evidence.v2.failure"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/rag-audit-replay.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "id": "M.final-answer-replay-artifacts",
+      "requirementIds": [
+        "R2",
+        "R4",
+        "R14",
+        "R15",
+        "R23",
+        "R24",
+        "R25"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/text2sql/stream/text2sql-stream-event.mapper.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
+        "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
+        "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
+        "apps/backend/src/modules/conversation/chat/application/save-view-from-run.usecase.ts",
+        "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2",
+        "run.delivery.evidence.v2",
+        "SSE.state.data.v2.stageArtifact"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts",
+        "apps/backend/test/integration/save-view-from-run.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    }
+  ],
+  "evalFixtureFamilies": [
+    {
+      "family": "chinese-alias",
+      "evalCases": [
+        "zh-alias-gmv-001"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "F.semantic-plan",
+        "H.structured-sql-generation"
+      ]
+    },
+    {
+      "family": "ambiguous-business-term",
+      "evalCases": [
+        "zh-ambiguous-term-clarify-002"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C1.targeted-clarification",
+        "G.plan-confidence"
+      ]
+    },
+    {
+      "family": "multi-table-join",
+      "evalCases": [
+        "zh-join-multi-table-003"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts"
+      ],
+      "flowNodes": [
+        "F.semantic-plan",
+        "I.validation",
+        "K.diagnosis-bounded-correction"
+      ]
+    },
+    {
+      "family": "follow-up",
+      "evalCases": [
+        "zh-follow-up-004"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "A.context-envelope",
+        "B.intake"
+      ]
+    },
+    {
+      "family": "metadata-general",
+      "evalCases": [
+        "zh-metadata-route-005",
+        "zh-general-route-006"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C.route",
+        "C2.general-metadata-answer"
+      ]
+    },
+    {
+      "family": "unsafe-write",
+      "evalCases": [
+        "zh-unsafe-write-007"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    },
+    {
+      "family": "dense-unavailable",
+      "evalCases": [
+        "zh-dense-unavailable-008"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "L.fail-closed-evidence"
+      ]
+    },
+    {
+      "family": "rerank-unavailable",
+      "evalCases": [
+        "zh-rerank-unavailable-009"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/rerank-router.service.spec.ts",
+        "apps/backend/test/unit/rag-rerank.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "correction-success",
+      "evalCases": [
+        "zh-correction-success-010"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "K.diagnosis-bounded-correction"
+      ]
+    },
+    {
+      "family": "terminal-governance-failure",
+      "evalCases": [
+        "zh-terminal-governance-failure-011"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    }
+  ],
+  "criticalFileOwnerMigrations": []
+}

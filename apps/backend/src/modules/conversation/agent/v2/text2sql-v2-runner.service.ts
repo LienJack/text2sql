@@ -417,7 +417,9 @@ export class Text2SqlV2RunnerService {
       }
       if (
         runError.code !== "SEMANTIC_PLAN_REQUIRES_CLARIFICATION" &&
-        runError.code !== "SEMANTIC_PLAN_FAIL_CLOSED"
+        runError.code !== "SEMANTIC_PLAN_FAIL_CLOSED" &&
+        runError.code !== "SEMANTIC_PLAN_METADATA_ANSWER" &&
+        runError.code !== "SEMANTIC_PLAN_GENERAL_ANSWER"
       ) {
         return undefined;
       }
@@ -432,13 +434,24 @@ export class Text2SqlV2RunnerService {
       const nextTerminationReason: Text2SqlV2TerminationReason =
         runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
           ? "semantic_plan_requires_clarification"
-          : "semantic_plan_fail_closed";
+          : runError.code === "SEMANTIC_PLAN_FAIL_CLOSED"
+            ? "semantic_plan_fail_closed"
+            : runError.code === "SEMANTIC_PLAN_METADATA_ANSWER"
+              ? "semantic_plan_metadata_answer"
+              : "semantic_plan_general_answer";
 
       const lastStep = trace.steps[trace.steps.length - 1];
       if (lastStep?.node === "generate-sql") {
+        if (
+          runError.code === "SEMANTIC_PLAN_METADATA_ANSWER" ||
+          runError.code === "SEMANTIC_PLAN_GENERAL_ANSWER"
+        ) {
+          lastStep.status = "skipped";
+          lastStep.lifecycle = "skipped";
+        }
         lastStep.outputSummary = this.stringifyStepSummary(
           "generate-sql",
-          "failed",
+          lastStep.status === "skipped" ? "skipped" : "failed",
           {
             error: runError.message,
             validation: controlDetails.validation,
@@ -456,12 +469,16 @@ export class Text2SqlV2RunnerService {
           actionType:
             runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
               ? "clarify"
-              : "fail_closed",
+              : runError.code === "SEMANTIC_PLAN_FAIL_CLOSED"
+                ? "fail_closed"
+                : "continue",
           terminationReason: nextTerminationReason,
           convergencePath:
             runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
               ? ["retrieve", "assemble-context", "semantic-plan", "generate-sql", "clarification"]
-              : ["retrieve", "assemble-context", "semantic-plan", "generate-sql", "reject"],
+              : runError.code === "SEMANTIC_PLAN_FAIL_CLOSED"
+                ? ["retrieve", "assemble-context", "semantic-plan", "generate-sql", "reject"]
+                : ["retrieve", "assemble-context", "semantic-plan", "answer"],
           semanticPlan: semanticPlanFromError,
           reasonCodes
         })
@@ -485,6 +502,34 @@ export class Text2SqlV2RunnerService {
         };
         skipRemainingStages(["validate", "correct", "execute", "answer"], runError.code.toLowerCase());
         return finalizeAndTrace("clarification");
+      }
+
+      if (
+        runError.code === "SEMANTIC_PLAN_METADATA_ANSWER" ||
+        runError.code === "SEMANTIC_PLAN_GENERAL_ANSWER"
+      ) {
+        completeStage("generate-sql", {
+          status: "skipped",
+          metadata: {
+            routeKind:
+              runError.code === "SEMANTIC_PLAN_METADATA_ANSWER"
+                ? "metadata"
+                : "general"
+          },
+          warnings: [`${runError.code.toLowerCase()}_skipped_sql_generation`]
+        });
+        answer = this.readSemanticPlanDirectAnswer(runError);
+        skipRemainingStages(["validate", "correct", "execute"], runError.code.toLowerCase());
+        completeStage("answer", {
+          status: "success",
+          metadata: {
+            routeKind:
+              runError.code === "SEMANTIC_PLAN_METADATA_ANSWER"
+                ? "metadata"
+                : "general"
+          }
+        });
+        return finalizeAndTrace("executionResult");
       }
 
       error = runError.message;
@@ -1314,6 +1359,17 @@ export class Text2SqlV2RunnerService {
       validation,
       validationReasons
     };
+  }
+
+  private readSemanticPlanDirectAnswer(error: DomainError): string {
+    const details = error.details;
+    if (details && typeof details === "object" && !Array.isArray(details)) {
+      const answer = (details as Record<string, unknown>).answer;
+      if (typeof answer === "string" && answer.trim().length > 0) {
+        return answer.trim();
+      }
+    }
+    return error.message;
   }
 
   private readSemanticPlan(value: unknown): SemanticPlanV1 | undefined {

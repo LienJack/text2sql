@@ -145,6 +145,9 @@ describe("chat run prompt-template trace integration", () => {
 
     await repository.persistRun(legacyRun);
 
+    const persistedLegacyRun = await repository.getRunById("run-template-trace-legacy");
+    expect(persistedLegacyRun?.trace.promptTemplate).toBeUndefined();
+
     await expect(
       runViewUsecase.getRunById("run-template-trace-legacy")
     ).rejects.toMatchObject({

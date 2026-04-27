@@ -350,4 +350,30 @@ describe("save view from run integration", () => {
       statusCode: 410
     });
   });
+
+  it("keeps run-not-found priority when run session metadata is missing", async () => {
+    const { usecase, chatRepository } = buildUsecase();
+
+    await chatRepository.persistRun({
+      runId: "run-orphan-session",
+      sessionId: "session-missing",
+      question: "legacy",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT 1",
+      trace: createV2Trace("run-orphan-session"),
+      createdAt: "2026-04-23T01:00:00.000Z"
+    });
+
+    await expect(
+      usecase.execute({
+        runId: "run-orphan-session",
+        name: "orphan_view",
+        actorId: "user-admin"
+      })
+    ).rejects.toMatchObject({
+      code: "RUN_NOT_FOUND",
+      statusCode: 404
+    });
+  });
 });

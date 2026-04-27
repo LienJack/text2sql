@@ -78,6 +78,14 @@ jobs:
       - name: Backend test
         run: pnpm --filter @text2sql/backend run test
 
+      - name: Text2SQL v2 focused coverage report
+        run: |
+          pnpm --filter @text2sql/backend exec jest \
+            --coverage \
+            --runInBand \
+            text2sql-v2-focused-coverage-gate.spec.ts
+          pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate
+
       - name: R6 scenario package tests
         env:
           R6_REPORT_DIR: /tmp/r6-evidence

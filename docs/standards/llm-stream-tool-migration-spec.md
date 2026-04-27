@@ -99,3 +99,11 @@
   - `modelingWorkspace.metrics.deployBlockRate / rollbackRate / schemaBacklogAvg`
   - `modelingWorkspace.signalCoverage.*`（样本信号覆盖率）
   - `rollout.recommendedStage` 与 `rollout.rollbackSuggested`
+- Text2SQL v2 closeout must also collect focused coverage evidence after a Jest coverage run:
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+  - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
+  - the report must include scoped line/branch coverage, critical file thresholds, A-M flow-node blockers, and eval fixture behavior-test traceability.
+- Text2SQL v2 closeout rollout must use `collect:text2sql-v2-eval-gate` as the aggregated report entry:
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+  - output must include `closeoutGates.evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage` and final `rollout.recommendedStage/rollbackSuggested/reasons`.

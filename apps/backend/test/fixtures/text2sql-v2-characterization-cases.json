@@ -94,6 +94,15 @@
         "stageArtifactCount": 9,
         "hasSemanticPlan": true
       }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "A.context-envelope",
+        "M.final-answer-replay-artifacts"
+      ]
     }
   },
   {
@@ -191,6 +200,15 @@
         "stageArtifactCount": 9,
         "hasSemanticPlan": false
       }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "C1.targeted-clarification",
+        "M.final-answer-replay-artifacts"
+      ]
     }
   },
   {
@@ -288,6 +306,16 @@
         "stageArtifactCount": 9,
         "hasSemanticPlan": true
       }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence",
+        "M.final-answer-replay-artifacts"
+      ]
     }
   }
 ]

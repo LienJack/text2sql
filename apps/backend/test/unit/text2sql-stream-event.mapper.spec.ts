@@ -155,4 +155,94 @@ describe("Text2SqlStreamEventMapper", () => {
     };
     expect(data.v2?.stageArtifact?.stage).toBe("validate");
   });
+
+  it.each([
+    {
+      node: "retrieve-knowledge",
+      artifact: {
+        stage: "retrieve",
+        status: "degraded",
+        warnings: ["dense_unavailable"],
+        provider: {
+          provider: "embedding-provider",
+          unavailableReason: "provider_missing"
+        }
+      }
+    },
+    {
+      node: "safety-check",
+      artifact: {
+        stage: "validate",
+        status: "success",
+        warnings: ["dry-run skipped: datasource type unknown"]
+      }
+    },
+    {
+      node: "relationship-correction",
+      artifact: {
+        stage: "correct",
+        status: "success",
+        metadata: {
+          retryCount: 1,
+          maxAttempts: 2
+        }
+      }
+    },
+    {
+      node: "generate-sql",
+      artifact: {
+        stage: "generate-sql",
+        status: "success",
+        metadata: {
+          sql: "SELECT COUNT(*) AS total FROM orders"
+        }
+      }
+    },
+    {
+      node: "format-answer",
+      artifact: {
+        stage: "answer",
+        status: "success",
+        metadata: {
+          answerPreview: "订单总数为 10"
+        }
+      }
+    }
+  ])("maps $artifact.stage progress with v2 artifact and stable shell", ({ node, artifact }) => {
+    const mapped = mapper.mapStepEvent({
+      step: {
+        node,
+        status: artifact.status === "degraded" ? "success" : "success",
+        at: "2026-04-26T00:00:01.000Z",
+        outputSummary: JSON.stringify({
+          v2: {
+            stageArtifact: artifact
+          }
+        })
+      },
+      runId: "run-v2-progress",
+      lastSequence: 7
+    });
+    const envelope = mapper.createEnvelope({
+      type: "state",
+      runId: "run-v2-progress",
+      sessionId: "session-v2-progress",
+      at: "2026-04-26T00:00:01.000Z",
+      data: mapped.data
+    });
+
+    expect(envelope).toMatchObject({
+      type: "state",
+      runId: "run-v2-progress",
+      sessionId: "session-v2-progress",
+      at: "2026-04-26T00:00:01.000Z",
+      data: {
+        node,
+        sequence: 8,
+        v2: {
+          stageArtifact: artifact
+        }
+      }
+    });
+  });
 });

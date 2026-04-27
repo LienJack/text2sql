@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { DomainError } from "../../../common/domain-error";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
 import { RagBudgetPolicy } from "../perf/rag-budget-policy";
 import { RagCacheKeyFactory } from "../perf/rag-cache-key.factory";
@@ -353,6 +354,19 @@ export class RagRerankService {
         score: Math.max(0, Math.min(1, Number(item.score.toFixed(6)))),
         reason: item.reason
       };
+    }
+    if (Object.keys(scoreMap).length !== candidates.length) {
+      throw new DomainError(
+        "RERANK_PROVIDER_OUTPUT_COUNT_MISMATCH",
+        "Rerank provider 返回结果数量与候选数量不一致。",
+        502,
+        {
+          provider: response.metadata.provider,
+          model: response.metadata.model,
+          expected: candidates.length,
+          actual: Object.keys(scoreMap).length
+        }
+      );
     }
     const evidenceIds = candidates.map((candidate) => candidate.chunk_id);
     const metadata: RagRerankStageMetadata = {

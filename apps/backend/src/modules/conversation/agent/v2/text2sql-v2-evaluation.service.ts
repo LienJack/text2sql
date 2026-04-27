@@ -1,5 +1,30 @@
 import { Injectable } from "@nestjs/common";
 
+export const TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES = [
+  "chinese-question",
+  "alias",
+  "ambiguous-business-term",
+  "multi-table-join",
+  "metrics",
+  "filters",
+  "follow-up",
+  "metadata-general",
+  "unsafe-write",
+  "dense-unavailable",
+  "rerank-unavailable",
+  "correction-success",
+  "terminal-governance-failure"
+] as const;
+
+export type Text2SqlV2RequiredFixtureFamily =
+  (typeof TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES)[number];
+
+export interface Text2SqlV2EvalCaseTraceability {
+  fixtureFamilies: string[];
+  behaviorTests: string[];
+  flowNodes: string[];
+}
+
 export interface Text2SqlV2EvalCase {
   id: string;
   question: string;
@@ -15,6 +40,7 @@ export interface Text2SqlV2EvalCase {
   latencyMs: number;
   denseUnavailable: boolean;
   rerankUnavailable: boolean;
+  traceability?: Text2SqlV2EvalCaseTraceability;
 }
 
 export interface Text2SqlV2EvalRolloutThresholds {
@@ -40,6 +66,23 @@ export interface Text2SqlV2EvalRolloutRecommendation {
   thresholds: Text2SqlV2EvalRolloutThresholds;
 }
 
+export interface Text2SqlV2EvalTraceabilityFamilySummary {
+  family: string;
+  caseIds: string[];
+  behaviorTests: string[];
+  flowNodes: string[];
+  gatePass: boolean;
+  reasons: string[];
+}
+
+export interface Text2SqlV2EvalTraceabilitySummary {
+  requiredFamilies: string[];
+  coveredFamilies: string[];
+  missingFamilies: string[];
+  familyCoverage: Text2SqlV2EvalTraceabilityFamilySummary[];
+  gatePass: boolean;
+}
+
 export interface Text2SqlV2EvalSummary {
   totalCases: number;
   retrievalRelevance: number;
@@ -54,8 +97,11 @@ export interface Text2SqlV2EvalSummary {
   latencyP95Ms: number;
   denseUnavailableRate: number;
   rerankUnavailableRate: number;
+  traceability: Text2SqlV2EvalTraceabilitySummary;
   rollout: Text2SqlV2EvalRolloutRecommendation;
 }
+
+type Text2SqlV2EvalMetricSummary = Omit<Text2SqlV2EvalSummary, "traceability" | "rollout">;
 
 const DEFAULT_ROLLOUT_THRESHOLDS: Text2SqlV2EvalRolloutThresholds = {
   minSamples: 8,
@@ -82,26 +128,9 @@ export class Text2SqlV2EvaluationService {
     thresholds: Text2SqlV2EvalRolloutThresholds = DEFAULT_ROLLOUT_THRESHOLDS
   ): Text2SqlV2EvalSummary {
     const totalCases = cases.length;
+    const traceability = this.summarizeTraceability(cases);
     if (totalCases === 0) {
-      const rollout = this.evaluateRollout(
-        {
-          totalCases: 0,
-          retrievalRelevance: 0,
-          rerankLift: 0,
-          planCoverageRate: 0,
-          validationPassRate: 0,
-          correctionSuccessRate: 0,
-          clarificationRate: 0,
-          executionSuccessRate: 0,
-          userVisibleFailureQuality: 0,
-          latencyP50Ms: 0,
-          latencyP95Ms: 0,
-          denseUnavailableRate: 0,
-          rerankUnavailableRate: 0
-        },
-        thresholds
-      );
-      return {
+      const metricSummary: Text2SqlV2EvalMetricSummary = {
         totalCases: 0,
         retrievalRelevance: 0,
         rerankLift: 0,
@@ -114,7 +143,12 @@ export class Text2SqlV2EvaluationService {
         latencyP50Ms: 0,
         latencyP95Ms: 0,
         denseUnavailableRate: 0,
-        rerankUnavailableRate: 0,
+        rerankUnavailableRate: 0
+      };
+      const rollout = this.evaluateRollout(metricSummary, thresholds);
+      return {
+        ...metricSummary,
+        traceability,
         rollout
       };
     }
@@ -157,7 +191,7 @@ export class Text2SqlV2EvaluationService {
     const rerankUnavailableRate =
       cases.filter((item) => item.rerankUnavailable).length / totalCases;
 
-    const summaryWithoutRollout = {
+    const metricSummary: Text2SqlV2EvalMetricSummary = {
       totalCases,
       retrievalRelevance: Number(retrievalRelevance.toFixed(4)),
       rerankLift: Number(rerankLift.toFixed(4)),
@@ -174,13 +208,89 @@ export class Text2SqlV2EvaluationService {
     };
 
     return {
-      ...summaryWithoutRollout,
-      rollout: this.evaluateRollout(summaryWithoutRollout, thresholds)
+      ...metricSummary,
+      traceability,
+      rollout: this.evaluateRollout(metricSummary, thresholds)
+    };
+  }
+
+  private summarizeTraceability(
+    cases: Text2SqlV2EvalCase[]
+  ): Text2SqlV2EvalTraceabilitySummary {
+    const familyIndex = new Map<
+      string,
+      {
+        caseIds: Set<string>;
+        behaviorTests: Set<string>;
+        flowNodes: Set<string>;
+      }
+    >();
+
+    for (const item of cases) {
+      const traceability = item.traceability;
+      if (!traceability) {
+        continue;
+      }
+      const families = this.normalizeStringArray(traceability.fixtureFamilies);
+      const behaviorTests = this.normalizeStringArray(traceability.behaviorTests);
+      const flowNodes = this.normalizeStringArray(traceability.flowNodes);
+      for (const family of families) {
+        const current = familyIndex.get(family) ?? {
+          caseIds: new Set<string>(),
+          behaviorTests: new Set<string>(),
+          flowNodes: new Set<string>()
+        };
+        current.caseIds.add(item.id);
+        for (const behaviorTest of behaviorTests) {
+          current.behaviorTests.add(behaviorTest);
+        }
+        for (const flowNode of flowNodes) {
+          current.flowNodes.add(flowNode);
+        }
+        familyIndex.set(family, current);
+      }
+    }
+
+    const familyCoverage = TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES.map((family) => {
+      const coverage = familyIndex.get(family);
+      const reasons: string[] = [];
+      if (!coverage || coverage.caseIds.size === 0) {
+        reasons.push("missing_eval_cases");
+      }
+      if (!coverage || coverage.behaviorTests.size === 0) {
+        reasons.push("missing_behavior_test_traceability");
+      }
+      if (!coverage || coverage.flowNodes.size === 0) {
+        reasons.push("missing_flow_node_traceability");
+      }
+      return {
+        family,
+        caseIds: [...(coverage?.caseIds ?? [])].sort(),
+        behaviorTests: [...(coverage?.behaviorTests ?? [])].sort(),
+        flowNodes: [...(coverage?.flowNodes ?? [])].sort(),
+        gatePass: reasons.length === 0,
+        reasons
+      };
+    });
+
+    const missingFamilies = familyCoverage
+      .filter((item) => item.reasons.length > 0)
+      .map((item) => item.family);
+    const coveredFamilies = familyCoverage
+      .filter((item) => item.reasons.length === 0)
+      .map((item) => item.family);
+
+    return {
+      requiredFamilies: [...TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES],
+      coveredFamilies,
+      missingFamilies,
+      familyCoverage,
+      gatePass: missingFamilies.length === 0
     };
   }
 
   private evaluateRollout(
-    summary: Omit<Text2SqlV2EvalSummary, "rollout">,
+    summary: Text2SqlV2EvalMetricSummary,
     thresholds: Text2SqlV2EvalRolloutThresholds
   ): Text2SqlV2EvalRolloutRecommendation {
     const reasons: string[] = [];
@@ -286,5 +396,15 @@ export class Text2SqlV2EvaluationService {
       return 0;
     }
     return Math.max(0, Math.min(1, value));
+  }
+
+  private normalizeStringArray(values: string[] | undefined): string[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    const normalized = values
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item) => item.length > 0);
+    return [...new Set(normalized)].sort();
   }
 }
