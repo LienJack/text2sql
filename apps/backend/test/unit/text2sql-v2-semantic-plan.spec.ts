@@ -38,6 +38,8 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.plan.selectedTables).toEqual(["orders"]);
     expect(result.plan.selectedColumns).toEqual(["id", "amount", "status"]);
     expect(result.plan.evidenceRefs).toEqual(["chunk-orders-1"]);
+    expect(result.plan.snapshotId).toBe("semantic-plan:text-to-sql:ready:t1:c3:e1:g0:orders");
+    expect(result.plan.coverageGaps).toBeUndefined();
     expect(result.validation.valid).toBe(true);
   });
 
@@ -95,6 +97,15 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.validation.requiresClarification).toBe(false);
     expect(result.validation.evidenceComplete).toBe(false);
     expect(result.validation.lowConfidence).toBe(true);
+    expect(result.plan.snapshotId).toBe("semantic-plan:text-to-sql:degraded:t0:c0:e0:g1:none");
+    expect(result.plan.coverageGaps).toEqual([
+      expect.objectContaining({
+        gapType: "evidence_gap",
+        reasonCode: "missing_selected_evidence_refs",
+        evidenceRefs: [],
+        impactScope: "sql_generation"
+      })
+    ]);
     expect(result.validation.reasons).toEqual(
       expect.arrayContaining(["plan_missing_selected_tables", "plan_missing_grounding_evidence"])
     );
@@ -113,7 +124,57 @@ describe("text2sql v2 semantic plan", () => {
     });
 
     expect(result.plan.route).toBe("reject");
+    expect(result.plan.snapshotId).toBe("semantic-plan:fail-closed:degraded:t0:c0:e0:g2:none");
+    expect(result.plan.coverageGaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          gapType: "evidence_gap",
+          reasonCode: "missing_selected_evidence_refs",
+          evidenceRefs: [],
+          impactScope: "sql_generation"
+        }),
+        expect.objectContaining({
+          gapType: "user_decision_gap",
+          reasonCode: "clarification_budget_exhausted",
+          evidenceRefs: [],
+          impactScope: "execution"
+        })
+      ])
+    );
     expect(result.validation.routeKind).toBe("fail_closed");
     expect(result.validation.terminal).toBe(true);
+  });
+
+  it("rejects malformed coverage gap payloads during validation", () => {
+    const result = validator.validate({
+      plan: {
+        route: "clarify",
+        standaloneQuestion: "统计 GMV",
+        selectedTables: [],
+        selectedColumns: [],
+        confidence: 0.3,
+        evidenceRefs: [],
+        coverageGaps: [
+          {
+            gapType: "user_decision_gap",
+            subjectKind: "metric",
+            reasonCode: "",
+            evidenceRefs: "chunk-1",
+            impactScope: "clarification"
+          } as never
+        ],
+        snapshotId: "   "
+      }
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        "plan_invalid_coverage_gap_shape",
+        "plan_missing_coverage_gaps",
+        "plan_invalid_snapshot_id",
+        "plan_low_confidence"
+      ])
+    );
   });
 });

@@ -33,7 +33,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ### 数据库结构改动铁律（必须遵守）
 - 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。
-- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>` 生成迁移。
+- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>` 生成迁移。
 - 每次结构变更必须执行 `pnpm --filter @text2sql/backend run prisma:generate`。
 
 ## 目录结构
@@ -88,7 +88,15 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `EMBEDDING_MODEL=text-embedding-3-small`
 - `EMBEDDING_DIMENSIONS=<optional>`
 - `EMBEDDING_VECTOR_VERSION=v1`
-- Rerank 默认走 LLM provider runtime（模型目录或 `LLM_*`）；`LLM_MOCK_MODE=true` 仅用于测试/本地假数据，不作为生产 fallback。
+- `RERANK_PROVIDER=<provider>`（可选，默认回退到 `LLM_PROVIDER`）
+- `RERANK_BASE_URL=<openai-compatible-base-url>`（可选，默认回退到 `LLM_BASE_URL`）
+- `RERANK_API_KEY=<api-key>`（可选，默认回退到 `LLM_API_KEY`）
+- `RERANK_MODEL=<model-name>`（可选，默认回退到 `LLM_MODEL`）
+- `RERANK_TIMEOUT_MS=<timeout-ms>`（可选，默认回退到 `LLM_TIMEOUT_MS`）
+- `/settings` 页面职责：
+  - `LLM 模型`：provider/model 目录治理
+  - `RAG 配置`：Embedding / Rerank 运行配置（settings first, env fallback）
+  - `RAG 运行`：运行态观测与回放证据
 - `LANGSMITH_TRACING=true|false`（是否启用 LangSmith 追踪）
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
 - `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
@@ -189,6 +197,9 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `POST /api/v1/settings/prompts`（管理员）
 - `PATCH /api/v1/settings/prompts/:templateId`（管理员）
 - `DELETE /api/v1/settings/prompts/:templateId`（管理员，软删除）
+- `GET /api/v1/settings/rag-configs`
+- `PUT /api/v1/settings/rag-configs/:taskType`（管理员，`taskType=embedding|rerank`）
+- `POST /api/v1/settings/rag-configs/:taskType/health`（管理员）
 - `GET /api/v1/datasources`
 - `POST /api/v1/datasources`
 - `POST /api/v1/datasources/upload`

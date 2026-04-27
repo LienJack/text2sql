@@ -38,9 +38,12 @@ export interface RerankExecutionMetadata {
   mode: "provider" | "mock";
   provider?: string;
   model?: string;
+  configSource?: "settings" | "env_fallback" | "missing";
+  configId?: string;
   inputCount: number;
   outputCount: number;
   fallbackReason?: string;
+  unavailableReason?: string;
 }
 
 export interface RerankCandidatesResponse {

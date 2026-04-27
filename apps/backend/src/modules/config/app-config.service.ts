@@ -191,6 +191,34 @@ export class AppConfigService {
     return this.config.get<string>("EMBEDDING_MOCK_MODE", "false") === "true";
   }
 
+  get rerankProvider(): string {
+    return this.config.get<string>("RERANK_PROVIDER", this.llmProvider);
+  }
+
+  get rerankApiKey(): string {
+    return this.config.get<string>("RERANK_API_KEY", this.llmApiKey);
+  }
+
+  get rerankBaseUrl(): string {
+    return this.config.get<string>("RERANK_BASE_URL", this.llmBaseUrl);
+  }
+
+  get rerankModel(): string {
+    return this.config.get<string>("RERANK_MODEL", this.llmModel);
+  }
+
+  get rerankTimeoutMs(): number {
+    const raw = this.config.get<string>("RERANK_TIMEOUT_MS", String(this.llmTimeoutMs));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `RERANK_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${this.llmTimeoutMs}。`
+    );
+    return this.llmTimeoutMs;
+  }
+
   get rerankMockMode(): boolean {
     return this.config.get<string>("RERANK_MOCK_MODE", "false") === "true";
   }

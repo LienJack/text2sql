@@ -100,6 +100,7 @@ describe("settings provider capability integration", () => {
       )
     ).toBe(true);
     expect(Array.isArray(viewRes.body.data.models)).toBe(true);
+    expect(viewRes.body.data.items).toBeUndefined();
   });
 
   it("returns degraded health with stable reason when provider api key is missing", async () => {

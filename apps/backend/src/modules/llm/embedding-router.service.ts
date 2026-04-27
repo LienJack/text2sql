@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
+import { RagTaskConfigService } from "./rag-task-config.service";
 import type {
   EmbeddingGateway,
   EmbeddingGatewayRequest,
@@ -17,7 +18,10 @@ interface OpenAiEmbeddingResponse {
 
 @Injectable()
 export class EmbeddingRouterService implements EmbeddingGateway {
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly ragTaskConfigService: RagTaskConfigService
+  ) {}
 
   async embed(input: EmbeddingGatewayRequest): Promise<EmbeddingVectorPayload[]> {
     const texts = input.texts
@@ -32,18 +36,9 @@ export class EmbeddingRouterService implements EmbeddingGateway {
       return this.embedInMockMode(texts, input);
     }
 
-    const baseUrl = this.config.embeddingBaseUrl.trim();
-    const apiKey = this.config.embeddingApiKey.trim();
-    if (!baseUrl || !apiKey) {
-      throw new DomainError(
-        "EMBEDDING_PROVIDER_UNAVAILABLE",
-        "Embedding provider 配置不完整，dense lane 将标记 unavailable。",
-        503,
-        {
-          provider: this.config.embeddingProvider
-        }
-      );
-    }
+    const runtime = await this.ragTaskConfigService.resolveEmbeddingRuntime();
+    const baseUrl = runtime.baseUrl.trim();
+    const apiKey = runtime.apiKey.trim();
 
     const endpoint = `${baseUrl.replace(/\/$/, "")}/embeddings`;
     const response = await fetch(endpoint, {
@@ -53,15 +48,15 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         Authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: input.model ?? this.config.embeddingModel,
+        model: input.model ?? runtime.model,
         input: texts,
-        ...(this.config.embeddingDimensions
+        ...(runtime.dimensions
           ? {
-              dimensions: this.config.embeddingDimensions
+              dimensions: runtime.dimensions
             }
           : {})
       }),
-      signal: AbortSignal.timeout(this.config.embeddingTimeoutMs)
+      signal: AbortSignal.timeout(runtime.timeoutMs)
     }).catch((error: unknown) => {
       throw new DomainError(
         "EMBEDDING_PROVIDER_REQUEST_FAILED",
@@ -70,7 +65,8 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         }`,
         502,
         {
-          provider: this.config.embeddingProvider
+          provider: runtime.provider,
+          configSource: runtime.configSource
         }
       );
     });
@@ -82,7 +78,8 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         `Embedding provider 返回异常 (${response.status})。`,
         502,
         {
-          provider: this.config.embeddingProvider,
+          provider: runtime.provider,
+          configSource: runtime.configSource,
           statusCode: response.status,
           body: responseText.slice(0, 500)
         }
@@ -97,7 +94,8 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         "Embedding provider 返回向量数量与请求不一致。",
         502,
         {
-          provider: this.config.embeddingProvider,
+          provider: runtime.provider,
+          configSource: runtime.configSource,
           expected: texts.length,
           actual: rows.length
         }
@@ -112,16 +110,19 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         "Embedding provider 未返回可用向量。",
         502,
         {
-          provider: this.config.embeddingProvider
+          provider: runtime.provider,
+          configSource: runtime.configSource
         }
       );
     }
 
     const metadata: EmbeddingProviderMetadata = {
-      provider: this.config.embeddingProvider,
-      model: input.model ?? this.config.embeddingModel,
+      provider: runtime.provider,
+      model: input.model ?? runtime.model,
       dimensions,
-      vectorVersion: this.config.embeddingVectorVersion,
+      vectorVersion: runtime.vectorVersion ?? this.config.embeddingVectorVersion,
+      configSource: runtime.configSource,
+      configId: runtime.configId,
       indexVersion: input.indexVersion,
       scope: input.scope,
       assetType: input.assetType

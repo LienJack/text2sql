@@ -14,6 +14,8 @@ import type {
   GlossaryAnchor,
   LlmSettingsView,
   ModelCatalogItem,
+  RagTaskConfig,
+  RagTaskSettingsView,
   RagMemoryStatus,
   RagQualityGateReport,
   RagReplayCompletenessReport,
@@ -23,6 +25,9 @@ import type {
 import { RagFoundationStatusCard } from "@/components/chat/rag-foundation-status-card";
 import { ModelCatalogTable } from "@/components/settings/model-catalog-table";
 import { ProviderConfigSheet } from "@/components/settings/provider-config-sheet";
+import { RagActiveIndexProfileCard } from "@/components/settings/rag-active-index-profile-card";
+import { RagEmbeddingConfigPanel } from "@/components/settings/rag-embedding-config-panel";
+import { RagRerankConfigPanel } from "@/components/settings/rag-rerank-config-panel";
 import { UsersManagementPanel } from "@/components/settings/users-management-panel";
 import { WorkspaceManagementPanel } from "@/components/settings/workspace-management-panel";
 import { Badge } from "@/components/ui/badge";
@@ -43,12 +48,14 @@ import { getRun } from "@/lib/api-client";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "@/lib/datasource-session-context";
 import {
   batchSetModelsEnabled,
+  checkRagTaskConfigHealth,
   checkProviderHealth,
   createProviderConfig,
   extractRagFoundationSnapshot,
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
   fetchSettingsView,
@@ -56,13 +63,14 @@ import {
   resolveRagQualityLatestRunId,
   setModelEnabled,
   submitRagMemoryFeedback,
-  syncProviderModels
+  syncProviderModels,
+  upsertRagTaskConfig
 } from "@/lib/settings-api-client";
 
-type SettingsTab = "users" | "workspaces" | "models" | "rag";
+type SettingsTab = "users" | "workspaces" | "models" | "rag-config" | "rag";
 type RagRunSource = "deep-link" | "latest-run" | "none";
-const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models", "rag"];
-const USER_TABS: SettingsTab[] = ["models", "rag"];
+const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models", "rag-config", "rag"];
+const USER_TABS: SettingsTab[] = ["models", "rag-config", "rag"];
 
 function readWorkspaceIdFromQuery(): string {
   if (typeof window === "undefined") {
@@ -146,6 +154,9 @@ export default function SettingsPage() {
       supportsModelListing: boolean;
     }>
   >([]);
+  const [ragConfigLoading, setRagConfigLoading] = useState(false);
+  const [ragConfigError, setRagConfigError] = useState("");
+  const [ragConfigView, setRagConfigView] = useState<RagTaskSettingsView | null>(null);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragError, setRagError] = useState("");
   const [ragFoundationError, setRagFoundationError] = useState("");
@@ -204,6 +215,22 @@ export default function SettingsPage() {
       setWorkspaceId("");
     } finally {
       setWorkspaceLoading(false);
+    }
+  }, []);
+
+  const loadRagConfigView = useCallback(async (): Promise<void> => {
+    setRagConfigLoading(true);
+    setRagConfigError("");
+    try {
+      const result = await fetchRagTaskConfigs();
+      setRagConfigView(result);
+    } catch (configError) {
+      setRagConfigError(
+        configError instanceof Error ? configError.message : "加载 RAG 配置失败"
+      );
+      setRagConfigView(null);
+    } finally {
+      setRagConfigLoading(false);
     }
   }, []);
 
@@ -340,6 +367,7 @@ export default function SettingsPage() {
         setSupportedProviders(providerOptions);
         await Promise.all([
           loadWorkspaceOptions(settingsView.actor.role === "admin"),
+          loadRagConfigView(),
           loadRagView()
         ]);
       } catch (loadError) {
@@ -352,7 +380,7 @@ export default function SettingsPage() {
         }
       }
     },
-    [loadRagView, loadWorkspaceOptions]
+    [loadRagConfigView, loadRagView, loadWorkspaceOptions]
   );
 
   const refreshModels = async () => {
@@ -421,6 +449,20 @@ export default function SettingsPage() {
   const foundationSnapshot = useMemo(
     () => extractRagFoundationSnapshot(ragHealth),
     [ragHealth]
+  );
+  const embeddingConfig = useMemo(
+    () =>
+      ragConfigView?.items.find(
+        (item): item is RagTaskConfig => item.taskType === "embedding"
+      ) ?? null,
+    [ragConfigView]
+  );
+  const rerankConfig = useMemo(
+    () =>
+      ragConfigView?.items.find(
+        (item): item is RagTaskConfig => item.taskType === "rerank"
+      ) ?? null,
+    [ragConfigView]
   );
 
   const filteredView = useMemo(() => {
@@ -586,6 +628,8 @@ export default function SettingsPage() {
           <span className="rounded-full border border-[rgba(148,163,184,0.45)] bg-[rgba(248,250,252,0.7)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
             {tab === "models"
               ? "模型治理视图"
+              : tab === "rag-config"
+                ? "RAG 配置视图"
               : tab === "rag"
                 ? "RAG 运行视图"
                 : "组织治理视图"}
@@ -623,6 +667,13 @@ export default function SettingsPage() {
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 LLM 模型
+              </TabsTrigger>
+              <TabsTrigger
+                value="rag-config"
+                className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                RAG 配置
               </TabsTrigger>
               <TabsTrigger
                 value="rag"
@@ -663,6 +714,10 @@ export default function SettingsPage() {
               <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                 RAG 运行与记忆治理
               </p>
+            ) : tab === "rag-config" ? (
+              <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                Embedding / Rerank 配置治理
+              </p>
             ) : (
               <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                 工作空间与成员管理
@@ -679,8 +734,13 @@ export default function SettingsPage() {
                   void loadRagView();
                   return;
                 }
+                if (tab === "rag-config") {
+                  void loadRagConfigView();
+                  return;
+                }
                 if (actorRole === "admin") {
                   void loadWorkspaceOptions(true);
+                  void loadRagConfigView();
                   void loadRagView();
                 }
                 setManagementRefreshToken((previous) => previous + 1);
@@ -786,6 +846,75 @@ export default function SettingsPage() {
                   当前账号仅可查看与切换模型，不可管理配置。
                 </StateBlock>
               )}
+            </div>
+          ) : tab === "rag-config" ? (
+            <div className="space-y-4">
+              <StateBlock variant="idle">
+                RAG 配置负责运行参数（Embedding / Rerank），RAG 运行页仅负责观测与回放。
+              </StateBlock>
+              {ragConfigError ? <StateBlock variant="error">{ragConfigError}</StateBlock> : null}
+              <RagActiveIndexProfileCard
+                foundation={foundationSnapshot}
+                embeddingConfig={embeddingConfig}
+              />
+              <RagEmbeddingConfigPanel
+                actorRole={actorRole}
+                config={embeddingConfig}
+                loading={ragConfigLoading}
+                onSave={async (payload) => {
+                  try {
+                    await upsertRagTaskConfig("embedding", payload);
+                    await loadRagConfigView();
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "保存 Embedding 配置失败";
+                    setRagConfigError(message);
+                    throw new Error(message);
+                  }
+                }}
+                onHealthCheck={async () => {
+                  try {
+                    const result = await checkRagTaskConfigHealth("embedding");
+                    await loadRagConfigView();
+                    return result;
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "Embedding 健康检查失败";
+                    setRagConfigError(message);
+                    throw new Error(message);
+                  }
+                }}
+              />
+              <RagRerankConfigPanel
+                actorRole={actorRole}
+                config={rerankConfig}
+                loading={ragConfigLoading}
+                onSave={async (payload) => {
+                  try {
+                    await upsertRagTaskConfig("rerank", payload);
+                    await loadRagConfigView();
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "保存 Rerank 配置失败";
+                    setRagConfigError(message);
+                    throw new Error(message);
+                  }
+                }}
+                onHealthCheck={async () => {
+                  try {
+                    const result = await checkRagTaskConfigHealth("rerank", {
+                      sampleQuery: "revenue by status"
+                    });
+                    await loadRagConfigView();
+                    return result;
+                  } catch (error) {
+                    const message =
+                      error instanceof Error ? error.message : "Rerank 健康检查失败";
+                    setRagConfigError(message);
+                    throw new Error(message);
+                  }
+                }}
+              />
             </div>
           ) : tab === "rag" ? (
             <div className="space-y-4">

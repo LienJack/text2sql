@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { AppConfigService } from "../../../config/app-config.service";
+import { RagTaskConfigService } from "../../../llm/rag-task-config.service";
 import { ModelingGraphRepository } from "../../../platform/data/persistence/modeling-graph.repository";
 import { RagIndexRepository } from "../../../rag/index/rag-index.repository";
 import { BuildRagIndexJob } from "../../../rag/jobs/build-rag-index.job";
@@ -37,6 +38,7 @@ export interface SemanticAssetReindexResult {
     model: string;
     dimensions?: number;
     vectorVersion: string;
+    configSource: "settings" | "env_fallback" | "missing";
   };
   triggerSummary: Record<SemanticAssetReindexTrigger, boolean>;
   modelingRevision?: number;
@@ -49,6 +51,7 @@ export interface SemanticAssetReindexResult {
 export class SemanticAssetReindexService {
   constructor(
     private readonly appConfig: AppConfigService,
+    private readonly ragTaskConfigService: RagTaskConfigService,
     private readonly indexRepository: RagIndexRepository,
     private readonly buildIndexJob: BuildRagIndexJob,
     private readonly modelingGraphRepository: ModelingGraphRepository
@@ -64,12 +67,7 @@ export class SemanticAssetReindexService {
       datasourceId,
       includeModelingRevision: triggerSummary.modeling_revision
     });
-    const embeddingProfile = {
-      provider: this.appConfig.embeddingProvider,
-      model: this.appConfig.embeddingModel,
-      dimensions: this.appConfig.embeddingDimensions,
-      vectorVersion: this.appConfig.embeddingVectorVersion
-    };
+    const embeddingProfile = await this.resolveEmbeddingProfile();
 
     const semanticAssetVersion = this.buildSemanticAssetVersion({
       datasourceId,
@@ -180,6 +178,7 @@ export class SemanticAssetReindexService {
       model: string;
       dimensions?: number;
       vectorVersion: string;
+      configSource: "settings" | "env_fallback" | "missing";
     };
   }): string {
     const fingerprint = createHash("sha256")
@@ -204,10 +203,38 @@ export class SemanticAssetReindexService {
       provider: string;
       model: string;
       vectorVersion: string;
+      configSource: "settings" | "env_fallback" | "missing";
     };
   }): string {
     const triggerPart = input.triggers.join("+") || "none";
-    return `${input.semanticAssetVersion}:${input.embeddingProfile.provider}:${input.embeddingProfile.model}:${input.embeddingProfile.vectorVersion}:${triggerPart}`;
+    return `${input.semanticAssetVersion}:${input.embeddingProfile.provider}:${input.embeddingProfile.model}:${input.embeddingProfile.vectorVersion}:${input.embeddingProfile.configSource}:${triggerPart}`;
+  }
+
+  private async resolveEmbeddingProfile(): Promise<{
+    provider: string;
+    model: string;
+    dimensions?: number;
+    vectorVersion: string;
+    configSource: "settings" | "env_fallback" | "missing";
+  }> {
+    try {
+      const runtime = await this.ragTaskConfigService.resolveEmbeddingRuntime();
+      return {
+        provider: runtime.provider,
+        model: runtime.model,
+        dimensions: runtime.dimensions,
+        vectorVersion: runtime.vectorVersion ?? this.appConfig.embeddingVectorVersion,
+        configSource: runtime.configSource
+      };
+    } catch {
+      return {
+        provider: this.appConfig.embeddingProvider,
+        model: this.appConfig.embeddingModel,
+        dimensions: this.appConfig.embeddingDimensions,
+        vectorVersion: this.appConfig.embeddingVectorVersion,
+        configSource: "missing"
+      };
+    }
   }
 
   private async resolveModelingRevision(input: {

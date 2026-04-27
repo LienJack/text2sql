@@ -354,7 +354,8 @@ describe("DeliveryContractMapper", () => {
             selectedTables: ["orders"],
             selectedColumns: ["orders.id"],
             confidence: 0.2,
-            evidenceRefs: ["chunk:1"]
+            evidenceRefs: ["chunk:1"],
+            snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders"
           },
           sqlValidation: {
             status: "failed",
@@ -366,7 +367,28 @@ describe("DeliveryContractMapper", () => {
               }
             ],
             correctable: false
-          }
+          },
+          loopEvidence: [
+            {
+              loopIndex: 1,
+              triggerReason: "clarification_budget_exhausted|semantic_plan_fail_closed",
+              actionType: "fail_closed",
+              planDelta: {
+                route: {
+                  to: "reject"
+                },
+                snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders",
+                addedCoverageGapTypes: ["user_decision_gap"],
+                reasonCodes: [
+                  "clarification_budget_exhausted",
+                  "semantic_plan_fail_closed"
+                ]
+              },
+              terminationReason: "semantic_plan_fail_closed",
+              convergencePath: ["semantic-plan", "generate-sql", "reject"]
+            }
+          ],
+          terminationReason: "semantic_plan_fail_closed"
         }
       } as SqlRun["trace"]
     });
@@ -391,7 +413,31 @@ describe("DeliveryContractMapper", () => {
     ]);
     expect(delivery.evidence?.v2?.stageArtifacts).toHaveLength(2);
     expect(delivery.evidence?.v2?.semanticPlan?.route).toBe("reject");
+    expect(delivery.evidence?.v2?.semanticPlan?.snapshotId).toBe(
+      "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders"
+    );
     expect(delivery.evidence?.v2?.sqlValidation?.status).toBe("failed");
+    expect(delivery.evidence?.v2?.loopEvidence).toEqual([
+      {
+        loopIndex: 1,
+        triggerReason: "clarification_budget_exhausted|semantic_plan_fail_closed",
+        actionType: "fail_closed",
+        planDelta: {
+          route: {
+            to: "reject"
+          },
+          snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders",
+          addedCoverageGapTypes: ["user_decision_gap"],
+          reasonCodes: [
+            "clarification_budget_exhausted",
+            "semantic_plan_fail_closed"
+          ]
+        },
+        terminationReason: "semantic_plan_fail_closed",
+        convergencePath: ["semantic-plan", "generate-sql", "reject"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.terminationReason).toBe("semantic_plan_fail_closed");
     expect(delivery.evidence?.v2?.failure?.code).toBe("VALIDATION_FAILED");
   });
 

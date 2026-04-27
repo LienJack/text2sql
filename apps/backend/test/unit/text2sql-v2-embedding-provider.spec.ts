@@ -2,6 +2,7 @@ import type { ConfigService } from "@nestjs/config";
 import { DomainError } from "../../src/common/domain-error";
 import { AppConfigService } from "../../src/modules/config/app-config.service";
 import { EmbeddingRouterService } from "../../src/modules/llm/embedding-router.service";
+import type { RagTaskConfigService } from "../../src/modules/llm/rag-task-config.service";
 
 const createConfigServiceMock = (
   entries: Record<string, string>
@@ -14,6 +15,30 @@ const createConfigServiceMock = (
 });
 
 describe("Text2Sql v2 embedding provider", () => {
+  const createRagTaskConfigServiceMock = (runtime?: {
+    taskType: "embedding";
+    provider: string;
+    model: string;
+    baseUrl: string;
+    apiKey: string;
+    dimensions?: number;
+    vectorVersion?: string;
+    timeoutMs: number;
+    configSource: "settings" | "env_fallback" | "missing";
+    configId?: string;
+  }): Pick<RagTaskConfigService, "resolveEmbeddingRuntime"> => ({
+    resolveEmbeddingRuntime: async () => {
+      if (!runtime) {
+        throw new DomainError(
+          "EMBEDDING_PROVIDER_UNAVAILABLE",
+          "Embedding provider 配置不完整，dense lane 将标记 unavailable。",
+          503
+        );
+      }
+      return runtime;
+    }
+  });
+
   it("returns deterministic mock vectors when embedding mock mode is explicitly enabled", async () => {
     const config = new AppConfigService(
       createConfigServiceMock({
@@ -26,7 +51,20 @@ describe("Text2Sql v2 embedding provider", () => {
         EMBEDDING_DIMENSIONS: "8"
       }) as ConfigService
     );
-    const service = new EmbeddingRouterService(config);
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "volcengine",
+        model: "embedding-v1",
+        baseUrl: "https://mock",
+        apiKey: "mock-key",
+        dimensions: 8,
+        vectorVersion: "v2",
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
 
     const first = await service.embed({
       texts: ["orders amount"],
@@ -58,7 +96,20 @@ describe("Text2Sql v2 embedding provider", () => {
         EMBEDDING_MODEL: "embedding-test"
       }) as ConfigService
     );
-    const service = new EmbeddingRouterService(config);
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-test",
+        baseUrl: "https://mock",
+        apiKey: "mock-key",
+        dimensions: 8,
+        vectorVersion: "v1",
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
     const vectors = await service.embed({
       texts: ["orders amount"]
     });
@@ -77,7 +128,10 @@ describe("Text2Sql v2 embedding provider", () => {
         EMBEDDING_API_KEY: ""
       }) as ConfigService
     );
-    const service = new EmbeddingRouterService(config);
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock() as RagTaskConfigService
+    );
 
     await expect(
       service.embed({

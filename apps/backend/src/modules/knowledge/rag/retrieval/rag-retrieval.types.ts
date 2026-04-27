@@ -88,6 +88,8 @@ export interface RagRerankStageMetadata {
   provider?: string;
   model?: string;
   mode?: "provider" | "mock";
+  config_source?: "settings" | "env_fallback" | "missing";
+  config_id?: string;
   timeout_ms?: number;
   input_count?: number;
   output_count?: number;
@@ -99,6 +101,8 @@ export interface RagRerankStageMetadata {
   outputCount?: number;
   fallbackReason?: string;
   unavailableReason?: string;
+  configSource?: "settings" | "env_fallback" | "missing";
+  configId?: string;
   evidenceIds?: string[];
 }
 

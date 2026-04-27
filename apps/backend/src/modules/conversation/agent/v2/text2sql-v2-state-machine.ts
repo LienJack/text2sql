@@ -5,6 +5,8 @@ import type {
   SemanticPlanV1,
   SqlGenerationArtifactV1,
   SqlRun,
+  Text2SqlV2LoopEvidence,
+  Text2SqlV2TerminationReason,
   SqlValidationArtifactV1,
   Text2SqlV2FailureSemantic,
   Text2SqlV2RunArtifact,
@@ -36,7 +38,9 @@ export class Text2SqlV2StateMachine {
       contextPack: options?.contextPack ?? this.buildContextPack(run),
       semanticPlan: options?.semanticPlan ?? this.buildSemanticPlan(run),
       sqlGeneration: options?.sqlGeneration ?? this.buildSqlGenerationArtifact(run),
-      sqlValidation: options?.sqlValidation ?? this.buildSqlValidationArtifact(run)
+      sqlValidation: options?.sqlValidation ?? this.buildSqlValidationArtifact(run),
+      loopEvidence: this.readLoopEvidence(run.trace.loopEvidence),
+      terminationReason: this.readTerminationReason(run.trace.terminationReason)
     };
   }
 
@@ -290,6 +294,8 @@ export class Text2SqlV2StateMachine {
     const selectedColumns = this.readStringArray(raw.selectedColumns);
     const confidence = Number(raw.confidence);
     const evidenceRefs = this.readStringArray(raw.evidenceRefs);
+    const coverageGaps = this.readCoverageGaps(raw.coverageGaps);
+    const snapshotId = this.readString(raw.snapshotId);
     if (!route || !standaloneQuestion || !Number.isFinite(confidence)) {
       return undefined;
     }
@@ -300,6 +306,8 @@ export class Text2SqlV2StateMachine {
       selectedColumns,
       confidence: Math.max(0, Math.min(1, confidence)),
       evidenceRefs,
+      ...(coverageGaps.length > 0 ? { coverageGaps } : {}),
+      ...(snapshotId ? { snapshotId } : {}),
       ...(this.readStringArray(raw.metrics).length > 0
         ? { metrics: this.readStringArray(raw.metrics) }
         : {}),
@@ -317,6 +325,110 @@ export class Text2SqlV2StateMachine {
         ? { forbiddenTables: this.readStringArray(raw.forbiddenTables) }
         : {})
     };
+  }
+
+  private readCoverageGaps(
+    value: unknown
+  ): NonNullable<SemanticPlanV1["coverageGaps"]> {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => {
+        if (!this.isRecord(item)) {
+          return undefined;
+        }
+        const gapType = this.readString(item.gapType);
+        const subjectKind = this.readString(item.subjectKind);
+        const reasonCode = this.readString(item.reasonCode);
+        const impactScope = this.readString(item.impactScope);
+        const evidenceRefs = this.readStringArray(item.evidenceRefs);
+        if (!gapType || !subjectKind || !reasonCode || !impactScope) {
+          return undefined;
+        }
+        return {
+          gapType,
+          subjectKind,
+          reasonCode,
+          evidenceRefs,
+          impactScope
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }
+
+  private readLoopEvidence(value: unknown): Text2SqlV2LoopEvidence[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const normalized = value
+      .map((item) => {
+        if (!this.isRecord(item)) {
+          return undefined;
+        }
+        const loopIndex = this.readNumber(item.loopIndex);
+        const triggerReason = this.readString(item.triggerReason);
+        const actionType = this.readString(item.actionType);
+        const terminationReason = this.readTerminationReason(item.terminationReason);
+        const convergencePath = this.readStringArray(item.convergencePath);
+        const planDeltaRaw = this.readRecord(item.planDelta);
+        const routeDeltaRaw = this.readRecord(planDeltaRaw?.route);
+        const planDelta =
+          planDeltaRaw || routeDeltaRaw
+            ? {
+                ...(routeDeltaRaw
+                  ? {
+                      route: {
+                        ...(this.readString(routeDeltaRaw.from)
+                          ? { from: this.readString(routeDeltaRaw.from) as SemanticPlanV1["route"] }
+                          : {}),
+                        ...(this.readString(routeDeltaRaw.to)
+                          ? { to: this.readString(routeDeltaRaw.to) as SemanticPlanV1["route"] }
+                          : {})
+                      }
+                    }
+                  : {}),
+                ...(this.readString(planDeltaRaw?.snapshotId)
+                  ? { snapshotId: this.readString(planDeltaRaw?.snapshotId) }
+                  : {}),
+                ...(this.readStringArray(planDeltaRaw?.addedCoverageGapTypes).length > 0
+                  ? {
+                      addedCoverageGapTypes: this.readStringArray(
+                        planDeltaRaw?.addedCoverageGapTypes
+                      ) as string[]
+                    }
+                  : {}),
+                ...(this.readStringArray(planDeltaRaw?.reasonCodes).length > 0
+                  ? { reasonCodes: this.readStringArray(planDeltaRaw?.reasonCodes) }
+                  : {})
+              }
+            : undefined;
+        if (
+          typeof loopIndex !== "number" ||
+          !Number.isFinite(loopIndex) ||
+          !triggerReason ||
+          !actionType
+        ) {
+          return undefined;
+        }
+        return {
+          loopIndex,
+          triggerReason,
+          actionType,
+          ...(planDelta ? { planDelta } : {}),
+          ...(terminationReason ? { terminationReason } : {}),
+          ...(convergencePath.length > 0 ? { convergencePath } : {})
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private readTerminationReason(
+    value: unknown
+  ): Text2SqlV2TerminationReason | undefined {
+    const normalized = this.readString(value);
+    return normalized as Text2SqlV2TerminationReason | undefined;
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
@@ -483,4 +595,3 @@ export class Text2SqlV2StateMachine {
     return Math.max(0, ended - started);
   }
 }
-

@@ -29,6 +29,9 @@ export type LlmProviderCode =
   | "tongyi";
 export type ProviderSyncStatus = "idle" | "syncing" | "healthy" | "degraded" | "failed";
 export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
+export type RagTaskType = "embedding" | "rerank";
+export type RagConfigSource = "settings" | "env_fallback" | "missing";
+export type RagConfigHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 
 export interface Session {
   id: string;
@@ -241,6 +244,31 @@ export interface SemanticPlanV1 {
   forbiddenTables?: string[];
   confidence: number;
   evidenceRefs: string[];
+  coverageGaps?: SemanticPlanCoverageGapV1[];
+  snapshotId?: string;
+}
+
+export interface SemanticPlanCoverageGapV1 {
+  gapType: "evidence_gap" | "user_decision_gap" | (string & {});
+  subjectKind:
+    | "metric"
+    | "dimension"
+    | "filter"
+    | "time"
+    | "table"
+    | "column"
+    | "join_path"
+    | "general"
+    | (string & {});
+  reasonCode: string;
+  evidenceRefs: string[];
+  impactScope:
+    | "semantic_plan"
+    | "sql_generation"
+    | "answer"
+    | "execution"
+    | "clarification"
+    | (string & {});
 }
 
 export interface SqlGenerationArtifactV1 {
@@ -281,7 +309,32 @@ export interface Text2SqlV2RunArtifact {
   semanticPlan?: SemanticPlanV1;
   sqlGeneration?: SqlGenerationArtifactV1;
   sqlValidation?: SqlValidationArtifactV1;
+  loopEvidence?: Text2SqlV2LoopEvidence[];
+  terminationReason?: Text2SqlV2TerminationReason;
 }
+
+export interface Text2SqlV2LoopEvidence {
+  loopIndex: number;
+  triggerReason: string;
+  actionType: "clarify" | "fail_closed" | "continue" | "replan" | (string & {});
+  planDelta?: {
+    route?: {
+      from?: SemanticPlanV1["route"];
+      to?: SemanticPlanV1["route"];
+    };
+    snapshotId?: string;
+    addedCoverageGapTypes?: Array<SemanticPlanCoverageGapV1["gapType"]>;
+    reasonCodes?: string[];
+  };
+  terminationReason?: Text2SqlV2TerminationReason;
+  convergencePath?: string[];
+}
+
+export type Text2SqlV2TerminationReason =
+  | "clarification_requested"
+  | "semantic_plan_requires_clarification"
+  | "semantic_plan_fail_closed"
+  | (string & {});
 
 export interface ExecutionTraceStep {
   node: string;
@@ -338,6 +391,8 @@ export interface ExecutionTrace {
     reasonCodes?: string[];
   };
   clarificationDecision?: ClarificationDecisionEvidence;
+  loopEvidence?: Text2SqlV2LoopEvidence[];
+  terminationReason?: Text2SqlV2TerminationReason;
   v2?: Text2SqlV2RunArtifact;
 }
 
@@ -435,6 +490,8 @@ export interface DeliveryEvidenceLayer {
     semanticPlan?: SemanticPlanV1;
     sqlGeneration?: SqlGenerationArtifactV1;
     sqlValidation?: SqlValidationArtifactV1;
+    loopEvidence?: Text2SqlV2LoopEvidence[];
+    terminationReason?: Text2SqlV2TerminationReason;
     failure?: Text2SqlV2FailureSemantic;
   };
 }
@@ -753,6 +810,35 @@ export interface ModelCatalogItem {
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RagTaskConfig {
+  id: string;
+  taskType: RagTaskType;
+  provider: string;
+  model: string;
+  baseUrl?: string | null;
+  enabled: boolean;
+  hasApiKey: boolean;
+  apiKeyMasked?: string | null;
+  dimensions?: number | null;
+  vectorVersion?: string | null;
+  timeoutMs?: number | null;
+  note?: string | null;
+  healthStatus: RagConfigHealthStatus;
+  lastCheckedAt?: string | null;
+  lastHealthLatencyMs?: number | null;
+  lastHealthMessage?: string | null;
+  lastError?: string | null;
+  configSource: RagConfigSource;
+  configSourceNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RagTaskSettingsView {
+  actor: SettingsActor;
+  items: RagTaskConfig[];
 }
 
 export interface SettingsActor {

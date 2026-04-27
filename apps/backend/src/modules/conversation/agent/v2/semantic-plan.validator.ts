@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import type { SemanticPlanV1 } from "@text2sql/shared-types";
+import type {
+  SemanticPlanCoverageGapV1,
+  SemanticPlanV1
+} from "@text2sql/shared-types";
 
 export interface SemanticPlanValidationResult {
   valid: boolean;
@@ -29,6 +32,9 @@ export class SemanticPlanValidator {
     const selectedColumns = this.normalizeList(plan.selectedColumns);
     const forbiddenTables = new Set(this.normalizeList(plan.forbiddenTables ?? []));
     const evidenceRefs = this.normalizeEvidenceRefs(plan.evidenceRefs);
+    const coverageGaps = this.readCoverageGaps(plan.coverageGaps);
+    const invalidCoverageGapCount = this.countInvalidCoverageGaps(plan.coverageGaps);
+    const snapshotId = this.readOptionalText((plan as { snapshotId?: unknown }).snapshotId);
 
     const unsupportedTables = selectedTables.filter((table) => {
       if (forbiddenTables.has(table)) {
@@ -99,6 +105,15 @@ export class SemanticPlanValidator {
     if (lowConfidence) {
       reasons.push("plan_low_confidence");
     }
+    if (invalidCoverageGapCount > 0) {
+      reasons.push("plan_invalid_coverage_gap_shape");
+    }
+    if ((routeKind === "clarify" || routeKind === "fail_closed" || !evidenceComplete) && coverageGaps.length === 0) {
+      reasons.push("plan_missing_coverage_gaps");
+    }
+    if ("snapshotId" in plan && snapshotId === undefined) {
+      reasons.push("plan_invalid_snapshot_id");
+    }
 
     const terminal =
       routeKind === "fail_closed" ||
@@ -164,6 +179,41 @@ export class SemanticPlanValidator {
     );
   }
 
+  private readCoverageGaps(value: unknown): SemanticPlanCoverageGapV1[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is SemanticPlanCoverageGapV1 =>
+      this.isValidCoverageGap(item)
+    );
+  }
+
+  private countInvalidCoverageGaps(value: unknown): number {
+    if (!Array.isArray(value)) {
+      return 0;
+    }
+    return value.filter((item) => !this.isValidCoverageGap(item)).length;
+  }
+
+  private isValidCoverageGap(value: unknown): value is SemanticPlanCoverageGapV1 {
+    if (!this.isRecord(value)) {
+      return false;
+    }
+    const gapType = this.readOptionalText(value.gapType);
+    const subjectKind = this.readOptionalText(value.subjectKind);
+    const reasonCode = this.readOptionalText(value.reasonCode);
+    const impactScope = this.readOptionalText(value.impactScope);
+    const evidenceRefs = value.evidenceRefs;
+    return (
+      Boolean(gapType) &&
+      Boolean(subjectKind) &&
+      Boolean(reasonCode) &&
+      Boolean(impactScope) &&
+      Array.isArray(evidenceRefs) &&
+      evidenceRefs.every((item) => typeof item === "string")
+    );
+  }
+
   private normalizeJoinPath(values: string[]): string[] {
     return Array.from(
       new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
@@ -189,6 +239,18 @@ export class SemanticPlanValidator {
       .replace(/^[`"'\[\]]+|[`"'\[\]]+$/g, "")
       .replace(/\s+/g, "")
       .toLowerCase();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private readOptionalText(value: unknown): string | undefined {
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
   }
 }

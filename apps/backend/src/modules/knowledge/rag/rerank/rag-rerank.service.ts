@@ -410,12 +410,18 @@ export class RagRerankService {
       mode: response.metadata.mode,
       provider: response.metadata.provider,
       model: response.metadata.model,
+      config_source: response.metadata.configSource,
+      configSource: response.metadata.configSource,
+      config_id: response.metadata.configId,
+      configId: response.metadata.configId,
       input_count: response.metadata.inputCount,
       inputCount: response.metadata.inputCount,
       output_count: Object.keys(scoreMap).length,
       outputCount: Object.keys(scoreMap).length,
       fallback_reason: response.metadata.fallbackReason,
       fallbackReason: response.metadata.fallbackReason,
+      unavailable_reason: response.metadata.unavailableReason,
+      unavailableReason: response.metadata.unavailableReason,
       evidence_ids: evidenceIds,
       evidenceIds
     };

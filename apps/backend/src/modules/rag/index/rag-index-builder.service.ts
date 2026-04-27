@@ -27,6 +27,7 @@ export interface RagIndexBuildResult {
   denseUnavailableReason?: string;
   denseProvider?: string;
   denseModel?: string;
+  denseConfigSource?: "settings" | "env_fallback" | "missing";
   denseDimensions?: number;
   vectorVersion?: string;
   indexVersion?: string;
@@ -94,6 +95,7 @@ export class RagIndexBuilderService {
         denseUnavailableReason: denseEmbedding.unavailableReason,
         denseProvider: denseEmbedding.metadata?.provider,
         denseModel: denseEmbedding.metadata?.model,
+        denseConfigSource: denseEmbedding.metadata?.configSource,
         denseDimensions: denseEmbedding.metadata?.dimensions,
         vectorVersion: denseEmbedding.metadata?.vectorVersion,
         indexVersion: denseEmbedding.metadata?.indexVersion
@@ -163,6 +165,7 @@ export class RagIndexBuilderService {
       indexVersion: denseEmbedding.metadata?.indexVersion,
       scope: denseEmbedding.metadata?.scope ?? "datasource",
       assetType: chunkDomain,
+      configSource: denseEmbedding.metadata?.configSource,
       unavailableReason: denseEmbedding.unavailableReason
     };
 
@@ -251,6 +254,7 @@ interface DenseEmbeddingResolution {
     model: string;
     dimensions: number;
     vectorVersion: string;
+    configSource?: "settings" | "env_fallback" | "missing";
     indexVersion?: string;
     scope?: string;
   };

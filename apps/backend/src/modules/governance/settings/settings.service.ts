@@ -1,17 +1,24 @@
 import { Injectable } from "@nestjs/common";
 import type { SettingsActor } from "@text2sql/shared-types";
 import { ProviderCatalogService } from "../../llm/provider-catalog.service";
+import {
+  type CheckRagTaskConfigHealthInput,
+  type UpsertRagTaskConfigInput,
+  RagTaskConfigService
+} from "../../llm/rag-task-config.service";
 import { CreateProviderDto } from "./dto/create-provider.dto";
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";
 import { UpdatePromptTemplateDto } from "./dto/update-prompt-template.dto";
 import { PromptTemplateService } from "./prompt-template.service";
+import type { RagTaskType } from "@text2sql/shared-types";
 
 @Injectable()
 export class SettingsService {
   constructor(
     private readonly providerCatalog: ProviderCatalogService,
-    private readonly promptTemplateService: PromptTemplateService
+    private readonly promptTemplateService: PromptTemplateService,
+    private readonly ragTaskConfigService: RagTaskConfigService
   ) {}
 
   async getSettingsView(actor: SettingsActor) {
@@ -20,6 +27,25 @@ export class SettingsService {
 
   async listSupportedProviders() {
     return this.providerCatalog.listSupportedProviders();
+  }
+
+  async listRagTaskConfigs(actor: SettingsActor) {
+    return this.ragTaskConfigService.listSettingsView(actor);
+  }
+
+  async upsertRagTaskConfig(
+    actor: SettingsActor,
+    taskType: RagTaskType,
+    body: UpsertRagTaskConfigInput
+  ) {
+    return this.ragTaskConfigService.upsertConfig(taskType, body, actor);
+  }
+
+  async checkRagTaskConfigHealth(
+    taskType: RagTaskType,
+    body: CheckRagTaskConfigHealthInput
+  ) {
+    return this.ragTaskConfigService.checkConfigHealth(taskType, body);
   }
 
   async createProvider(actor: SettingsActor, body: CreateProviderDto) {

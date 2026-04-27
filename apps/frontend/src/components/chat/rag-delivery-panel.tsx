@@ -178,6 +178,27 @@ function resolveSavedPriorSqlSummary(delivery?: DeliveryContract): {
   };
 }
 
+function resolveLoopEvidenceSummary(delivery?: DeliveryContract): {
+  summary: string;
+  detail: string;
+} {
+  const loopEvidence = delivery?.evidence?.v2?.loopEvidence ?? [];
+  const terminationReason = delivery?.evidence?.v2?.terminationReason;
+  if (loopEvidence.length === 0 && !terminationReason) {
+    return {
+      summary: "无 loop evidence",
+      detail: "未记录 loop 轨迹。"
+    };
+  }
+  const last = loopEvidence[loopEvidence.length - 1];
+  return {
+    summary: `loops=${loopEvidence.length}`,
+    detail: `lastAction=${last?.actionType ?? "unknown"} · termination=${
+      terminationReason ?? last?.terminationReason ?? "none"
+    }`
+  };
+}
+
 function renderSelectedContextState(
   delivery: DeliveryContract
 ): { state: SelectedContextState; node: JSX.Element } {
@@ -241,6 +262,7 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
   const artifact = delivery?.artifact;
   const promptTemplateSummary = resolvePromptTemplateSummary(delivery);
   const savedPriorSqlSummary = resolveSavedPriorSqlSummary(delivery);
+  const loopEvidenceSummary = resolveLoopEvidenceSummary(delivery);
   const runLifecycleKey = runId?.trim() || evidence?.runId?.trim() || "__unknown-run__";
   const semanticVersionText = evidence?.semanticVersion ?? "版本不可用（字段缺失）";
   const semanticLockStatusText =
@@ -371,6 +393,7 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
             <p>模板命中摘要：{promptTemplateSummary.summary}</p>
             <p>模板降级原因：{promptTemplateSummary.fallbackReasonText}</p>
             <p>Saved Prior SQL：{savedPriorSqlSummary.summary}</p>
+            <p>Loop Evidence：{loopEvidenceSummary.summary}</p>
           </div>
           <StateBlock
             variant={
@@ -384,6 +407,7 @@ export function RagDeliveryPanel({ delivery, runId }: RagDeliveryPanelProps) {
           >
             {savedPriorSqlSummary.detail}
           </StateBlock>
+          <StateBlock variant="idle">{loopEvidenceSummary.detail}</StateBlock>
           {selectedContextState.node}
           {(evidence?.degradeReasons?.length ?? 0) > 0 ? (
             <p className="text-xs text-[var(--text-secondary)]">

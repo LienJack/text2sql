@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Put,
   Post,
   Query,
   Req,
@@ -12,15 +13,17 @@ import {
   UseGuards
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import type { ApiResponse } from "@text2sql/shared-types";
+import type { ApiResponse, RagTaskType } from "@text2sql/shared-types";
 import { fail, ok } from "../../../common/api-response";
 import { DomainError } from "../../../common/domain-error";
 import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { BatchUpdateModelStatusDto } from "./dto/batch-update-model-status.dto";
+import { CheckRagTaskConfigHealthDto } from "./dto/check-rag-task-config-health.dto";
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { CreateProviderDto } from "./dto/create-provider.dto";
 import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";
 import { RefreshProviderModelsDto } from "./dto/refresh-provider-models.dto";
+import { UpsertRagTaskConfigDto } from "./dto/upsert-rag-task-config.dto";
 import { UpdatePromptTemplateDto } from "./dto/update-prompt-template.dto";
 import { UpdateModelStatusDto } from "./dto/update-model-status.dto";
 import { SettingsService } from "./settings.service";
@@ -43,6 +46,52 @@ export class SettingsController {
   async listSupportedProviders(@Req() req: Request): Promise<ApiResponse<unknown>> {
     try {
       const data = await this.settingsService.listSupportedProviders();
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Get("/rag-configs")
+  async listRagTaskConfigs(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    try {
+      const data = await this.settingsService.listRagTaskConfigs(req.actor);
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Put("/rag-configs/:taskType")
+  @UseGuards(AdminOnlyGuard)
+  async upsertRagTaskConfig(
+    @Param("taskType") taskTypeRaw: string,
+    @Body() body: UpsertRagTaskConfigDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const taskType = this.parseTaskType(taskTypeRaw);
+      const data = await this.settingsService.upsertRagTaskConfig(
+        req.actor,
+        taskType,
+        body
+      );
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/rag-configs/:taskType/health")
+  @UseGuards(AdminOnlyGuard)
+  async checkRagTaskConfigHealth(
+    @Param("taskType") taskTypeRaw: string,
+    @Body() body: CheckRagTaskConfigHealthDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const taskType = this.parseTaskType(taskTypeRaw);
+      const data = await this.settingsService.checkRagTaskConfigHealth(taskType, body);
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);
@@ -249,5 +298,14 @@ export class SettingsController {
       "INTERNAL_ERROR",
       error instanceof Error ? error.message : "未知错误"
     );
+  }
+
+  private parseTaskType(value: string): RagTaskType {
+    if (value === "embedding" || value === "rerank") {
+      return value;
+    }
+    throw new DomainError("RAG_TASK_TYPE_INVALID", "仅支持 embedding/rerank。", 400, {
+      taskType: value
+    });
   }
 }

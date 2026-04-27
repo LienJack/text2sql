@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   SemanticContextPackV1,
+  SemanticPlanCoverageGapV1,
   SemanticPlanV1
 } from "@text2sql/shared-types";
 import type { SqlSemanticIntent } from "../sql/sql-prompt.builder";
@@ -93,6 +94,22 @@ export class SemanticPlanService {
       ),
       ...this.readForbiddenTables(input.contextPack.warnings)
     ]);
+    const coverageGaps = this.buildCoverageGaps({
+      question: standaloneQuestion,
+      routeKind,
+      selectedTables,
+      selectedColumns,
+      evidenceRefs,
+      clarificationPolicy
+    });
+    const snapshotId = this.buildSnapshotId({
+      routeKind,
+      contextStatus: input.contextPack.status,
+      selectedTables,
+      selectedColumns,
+      evidenceRefs,
+      coverageGaps
+    });
 
     const plan: SemanticPlanV1 = {
       route,
@@ -108,7 +125,9 @@ export class SemanticPlanService {
       ...(allowedTables.length > 0 ? { allowedTables } : {}),
       ...(forbiddenTables.length > 0 ? { forbiddenTables } : {}),
       confidence,
-      evidenceRefs
+      evidenceRefs,
+      ...(coverageGaps.length > 0 ? { coverageGaps } : {}),
+      snapshotId
     };
 
     return {
@@ -316,6 +335,111 @@ export class SemanticPlanService {
       joins.push(`${source}->${target}`);
     }
     return joins;
+  }
+
+  private buildCoverageGaps(input: {
+    question: string;
+    routeKind: SemanticPlanRouteKind;
+    selectedTables: string[];
+    selectedColumns: string[];
+    evidenceRefs: string[];
+    clarificationPolicy: ClarificationPolicy;
+  }): SemanticPlanCoverageGapV1[] {
+    const gaps: SemanticPlanCoverageGapV1[] = [];
+    const hasGrounding =
+      input.selectedTables.length > 0 || input.selectedColumns.length > 0;
+
+    if (input.evidenceRefs.length === 0 || !hasGrounding) {
+      gaps.push({
+        gapType: "evidence_gap",
+        subjectKind: this.resolveEvidenceGapSubjectKind(input),
+        reasonCode:
+          input.evidenceRefs.length === 0
+            ? "missing_selected_evidence_refs"
+            : "missing_structured_grounding",
+        evidenceRefs: input.evidenceRefs,
+        impactScope: "sql_generation"
+      });
+    }
+
+    if (input.routeKind === "clarify" || input.routeKind === "fail_closed") {
+      gaps.push({
+        gapType: "user_decision_gap",
+        subjectKind: this.resolveDecisionGapSubjectKind(input.question),
+        reasonCode:
+          input.routeKind === "fail_closed"
+            ? input.clarificationPolicy.round >= input.clarificationPolicy.maxRounds
+              ? "clarification_budget_exhausted"
+              : "semantic_plan_fail_closed"
+            : "semantic_plan_requires_clarification",
+        evidenceRefs: input.evidenceRefs,
+        impactScope:
+          input.routeKind === "fail_closed" ? "execution" : "clarification"
+      });
+    }
+
+    return gaps;
+  }
+
+  private resolveEvidenceGapSubjectKind(input: {
+    question: string;
+    selectedTables: string[];
+    selectedColumns: string[];
+    evidenceRefs: string[];
+  }): SemanticPlanCoverageGapV1["subjectKind"] {
+    if (input.selectedTables.length === 0 && input.selectedColumns.length === 0) {
+      if (this.resolveDecisionGapSubjectKind(input.question) === "time") {
+        return "time";
+      }
+      if (this.resolveDecisionGapSubjectKind(input.question) === "metric") {
+        return "metric";
+      }
+      return "table";
+    }
+    if (input.evidenceRefs.length === 0) {
+      return input.selectedColumns.length > 0 ? "column" : "table";
+    }
+    return "general";
+  }
+
+  private resolveDecisionGapSubjectKind(
+    question: string
+  ): SemanticPlanCoverageGapV1["subjectKind"] {
+    if (!question.trim()) {
+      return "general";
+    }
+    if (!question.match(METRIC_KEYWORD_REGEX)) {
+      return "metric";
+    }
+    if (!this.extractGrain(question) && !/近\d+\s*(天|周|月|年)|昨天|今天|本周|本月|本季度|本年/i.test(question)) {
+      return "time";
+    }
+    return "general";
+  }
+
+  private buildSnapshotId(input: {
+    routeKind: SemanticPlanRouteKind;
+    contextStatus: SemanticContextPackV1["status"];
+    selectedTables: string[];
+    selectedColumns: string[];
+    evidenceRefs: string[];
+    coverageGaps: SemanticPlanCoverageGapV1[];
+  }): string {
+    const routeToken = input.routeKind.replace(/[^a-z0-9]+/gi, "-");
+    const contextToken = input.contextStatus === "degraded" ? "degraded" : "ready";
+    const tableToken =
+      input.selectedTables.slice(0, 2).join("+").replace(/[^a-z0-9+_.-]+/gi, "-") ||
+      "none";
+    return [
+      "semantic-plan",
+      routeToken,
+      contextToken,
+      `t${input.selectedTables.length}`,
+      `c${input.selectedColumns.length}`,
+      `e${input.evidenceRefs.length}`,
+      `g${input.coverageGaps.length}`,
+      tableToken
+    ].join(":");
   }
 
   private readForbiddenTables(warnings?: string[]): string[] {

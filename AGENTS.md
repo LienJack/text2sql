@@ -39,7 +39,7 @@
 
 常用后端 DB 命令：
 - 生成 Prisma Client：`pnpm --filter @text2sql/backend run prisma:generate`
-- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 - 空库回放校验：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 
 ## 3) 质量门禁
@@ -67,6 +67,7 @@ CI 参考：
 ## 4) 联调最小检查
 
 - 统一入口：`http://localhost:3000` 可访问，`/data-sources -> 创建会话 -> 发送消息` 主链路可用。
+- `/settings` 入口可访问，至少包含 `LLM 模型`、`RAG 配置`、`RAG 运行` 三个 tab；其中配置变更仅在 `RAG 配置` 下操作。
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
 - 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
@@ -179,7 +180,7 @@ CI 参考：
 
 1. 修改 `apps/backend/prisma/schema.prisma`
 2. 生成迁移：
-   - `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+   - `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 3. 生成 Client（必跑）：
    - `pnpm --filter @text2sql/backend run prisma:generate`
 

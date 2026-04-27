@@ -245,6 +245,8 @@ export class DeliveryContractMapper {
               semanticPlan: traceV2Artifact.semanticPlan,
               sqlGeneration: traceV2Artifact.sqlGeneration,
               sqlValidation: traceV2Artifact.sqlValidation,
+              loopEvidence: traceV2Artifact.loopEvidence,
+              terminationReason: traceV2Artifact.terminationReason,
               failure: this.resolveTraceV2Failure(traceV2Artifact)
             }
           }

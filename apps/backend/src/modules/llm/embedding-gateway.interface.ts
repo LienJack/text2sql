@@ -3,6 +3,8 @@ export interface EmbeddingProviderMetadata {
   model: string;
   dimensions: number;
   vectorVersion: string;
+  configSource?: "settings" | "env_fallback" | "missing";
+  configId?: string;
   indexVersion?: string;
   scope?: string;
   assetType?: string;
@@ -24,4 +26,3 @@ export interface EmbeddingGatewayRequest {
 export interface EmbeddingGateway {
   embed(input: EmbeddingGatewayRequest): Promise<EmbeddingVectorPayload[]>;
 }
-

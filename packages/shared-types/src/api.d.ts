@@ -12,6 +12,9 @@ export type ReasoningStage = "analysis" | "generation" | "validation" | "executi
 export type LlmProviderCode = "openai" | "gemini" | "deepseek" | "kimi" | "volcengine" | "siliconflow" | "openrouter" | "minimax" | "tencent-hunyuan" | "tongyi";
 export type ProviderSyncStatus = "idle" | "syncing" | "healthy" | "degraded" | "failed";
 export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
+export type RagTaskType = "embedding" | "rerank";
+export type RagConfigSource = "settings" | "env_fallback" | "missing";
+export type RagConfigHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export interface Session {
     id: string;
     datasource: string;
@@ -121,6 +124,117 @@ export interface PromptTemplateTraceEvidenceCompat extends PromptTemplateTraceEv
     template_version?: number;
     fallback_reason?: string;
 }
+export type Text2SqlV2StageName = "intake" | "retrieve" | "assemble-context" | "semantic-plan" | "generate-sql" | "validate" | "correct" | "execute" | "answer";
+export interface Text2SqlV2ProviderMetadata {
+    provider?: string;
+    model?: string;
+    dimensions?: number;
+    vectorVersion?: string;
+    indexVersion?: string;
+    scope?: string;
+    assetType?: string;
+    timeoutMs?: number;
+    inputCount?: number;
+    outputCount?: number;
+    fallbackReason?: string;
+    unavailableReason?: string;
+}
+export interface Text2SqlV2FailureSemantic {
+    code: string;
+    message: string;
+    category?: "intake" | "retrieval" | "planning" | "generation" | "validation" | "governance" | "execution" | "unknown";
+    terminal?: boolean;
+    correctable?: boolean;
+}
+export interface Text2SqlV2StageArtifact {
+    stage: Text2SqlV2StageName;
+    status: "success" | "skipped" | "degraded" | "failed" | "clarification";
+    startedAt?: string;
+    endedAt?: string;
+    durationMs?: number;
+    warnings?: string[];
+    evidenceIds?: string[];
+    provider?: Text2SqlV2ProviderMetadata;
+    failure?: Text2SqlV2FailureSemantic;
+    metadata?: Record<string, unknown>;
+}
+export interface SemanticContextPackV1 {
+    status: "ready" | "degraded";
+    selectedEvidenceIds: string[];
+    selectedTables: string[];
+    selectedColumns: string[];
+    warnings?: string[];
+}
+export interface SemanticPlanCoverageGapV1 {
+    gapType: "evidence_gap" | "user_decision_gap" | (string & {});
+    subjectKind: "metric" | "dimension" | "filter" | "time" | "table" | "column" | "join_path" | "general" | (string & {});
+    reasonCode: string;
+    evidenceRefs: string[];
+    impactScope: "semantic_plan" | "sql_generation" | "answer" | "execution" | "clarification" | (string & {});
+}
+export interface SemanticPlanV1 {
+    route: "answer" | "clarify" | "reject";
+    standaloneQuestion: string;
+    selectedTables: string[];
+    selectedColumns: string[];
+    metrics?: string[];
+    grain?: string;
+    filters?: string[];
+    joinPath?: string[];
+    allowedTables?: string[];
+    forbiddenTables?: string[];
+    confidence: number;
+    evidenceRefs: string[];
+    coverageGaps?: SemanticPlanCoverageGapV1[];
+    snapshotId?: string;
+}
+export interface SqlGenerationArtifactV1 {
+    sql: string;
+    assumptions?: string[];
+    usedTables: string[];
+    usedColumns: string[];
+    evidenceRefs: string[];
+}
+export interface SqlValidationCheckV1 {
+    check: "parse" | "read-only" | "permission" | "plan-coverage" | "relationship-path" | "dialect" | "dry-run" | "dry-plan";
+    status: "passed" | "failed" | "skipped";
+    code?: string;
+    message?: string;
+}
+export interface SqlValidationArtifactV1 {
+    status: "passed" | "failed" | "skipped";
+    checks: SqlValidationCheckV1[];
+    correctable: boolean;
+    failure?: Text2SqlV2FailureSemantic;
+}
+export interface Text2SqlV2LoopEvidence {
+    loopIndex: number;
+    triggerReason: string;
+    actionType: "clarify" | "fail_closed" | "continue" | "replan" | (string & {});
+    planDelta?: {
+        route?: {
+            from?: SemanticPlanV1["route"];
+            to?: SemanticPlanV1["route"];
+        };
+        snapshotId?: string;
+        addedCoverageGapTypes?: Array<SemanticPlanCoverageGapV1["gapType"]>;
+        reasonCodes?: string[];
+    };
+    terminationReason?: Text2SqlV2TerminationReason;
+    convergencePath?: string[];
+}
+export type Text2SqlV2TerminationReason = "clarification_requested" | "semantic_plan_requires_clarification" | "semantic_plan_fail_closed" | (string & {});
+export interface Text2SqlV2RunArtifact {
+    version: "v2";
+    stageOrder: Text2SqlV2StageName[];
+    stages: Text2SqlV2StageArtifact[];
+    contextPack?: SemanticContextPackV1;
+    semanticPlan?: SemanticPlanV1;
+    sqlGeneration?: SqlGenerationArtifactV1;
+    sqlValidation?: SqlValidationArtifactV1;
+    loopEvidence?: Text2SqlV2LoopEvidence[];
+    terminationReason?: Text2SqlV2TerminationReason;
+}
 export interface ExecutionTraceStep {
     node: string;
     status: "success" | "failed" | "skipped";
@@ -175,6 +289,9 @@ export interface ExecutionTrace {
         reasonCodes?: string[];
     };
     clarificationDecision?: ClarificationDecisionEvidence;
+    loopEvidence?: Text2SqlV2LoopEvidence[];
+    terminationReason?: Text2SqlV2TerminationReason;
+    v2?: Text2SqlV2RunArtifact;
 }
 export interface LlmRawOutput {
     provider: string;
@@ -258,6 +375,18 @@ export interface DeliveryEvidenceLayer {
     clarificationDecision?: ClarificationDecisionEvidence;
     savedPriorSql?: DeliverySavedPriorSqlEvidence;
     evidenceStale?: boolean;
+    v2?: {
+        version?: "v2";
+        stageOrder?: Text2SqlV2StageName[];
+        stageArtifacts?: Text2SqlV2StageArtifact[];
+        contextPack?: SemanticContextPackV1;
+        semanticPlan?: SemanticPlanV1;
+        sqlGeneration?: SqlGenerationArtifactV1;
+        sqlValidation?: SqlValidationArtifactV1;
+        loopEvidence?: Text2SqlV2LoopEvidence[];
+        terminationReason?: Text2SqlV2TerminationReason;
+        failure?: Text2SqlV2FailureSemantic;
+    };
 }
 export type DeliveryArtifactChartType = "table" | "metric" | "bar" | "line" | "pie";
 export type DeliveryArtifactDisplayType = "summary" | "chart" | "table" | "sql" | DeliveryArtifactChartType;
@@ -514,6 +643,33 @@ export interface ModelCatalogItem {
     metadata?: Record<string, unknown>;
     createdAt: string;
     updatedAt: string;
+}
+export interface RagTaskConfig {
+    id: string;
+    taskType: RagTaskType;
+    provider: string;
+    model: string;
+    baseUrl?: string | null;
+    enabled: boolean;
+    hasApiKey: boolean;
+    apiKeyMasked?: string | null;
+    dimensions?: number | null;
+    vectorVersion?: string | null;
+    timeoutMs?: number | null;
+    note?: string | null;
+    healthStatus: RagConfigHealthStatus;
+    lastCheckedAt?: string | null;
+    lastHealthLatencyMs?: number | null;
+    lastHealthMessage?: string | null;
+    lastError?: string | null;
+    configSource: RagConfigSource;
+    configSourceNote?: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface RagTaskSettingsView {
+    actor: SettingsActor;
+    items: RagTaskConfig[];
 }
 export interface SettingsActor {
     id: string;

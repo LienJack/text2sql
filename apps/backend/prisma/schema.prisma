@@ -398,6 +398,37 @@ model ProviderConfig {
   @@map("provider_configs")
 }
 
+enum RagTaskType {
+  embedding
+  rerank
+}
+
+model RagTaskConfig {
+  id                String      @id
+  taskType          RagTaskType @unique
+  provider          String
+  model             String
+  baseUrl           String?
+  apiKeyCiphertext  String?
+  apiKeyMasked      String?
+  enabled           Boolean     @default(true)
+  dimensions        Int?
+  vectorVersion     String?
+  timeoutMs         Int?
+  note              String?
+  healthStatus      String      @default("unknown")
+  lastCheckedAt     DateTime?
+  lastHealthLatencyMs Int?
+  lastHealthMessage String?
+  lastError         String?
+  createdBy         String?
+  updatedBy         String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@map("rag_task_configs")
+}
+
 model ModelCatalog {
   id                String   @id
   providerConfigId  String

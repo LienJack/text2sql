@@ -5,7 +5,10 @@ import type {
   ContextEnvelope,
   ExecutionTrace,
   ExecutionTraceStep,
+  SemanticPlanV1,
   SqlRun,
+  Text2SqlV2LoopEvidence,
+  Text2SqlV2TerminationReason,
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
 } from "@text2sql/shared-types";
@@ -111,6 +114,8 @@ export class Text2SqlV2RunnerService {
       retryCount: 0,
       steps: []
     };
+    const loopEvidence: Text2SqlV2LoopEvidence[] = [];
+    let terminationReason: Text2SqlV2TerminationReason | undefined;
 
     let provider = input.session.modelProvider ?? "unknown";
     let model = input.session.modelName ?? undefined;
@@ -390,6 +395,103 @@ export class Text2SqlV2RunnerService {
       });
     };
 
+    const skipRemainingStages = (
+      stages: Text2SqlV2StageName[],
+      warningPrefix: string
+    ) => {
+      for (const stage of stages) {
+        if (getStageArtifact(stage)) {
+          continue;
+        }
+        skipStage(stage, {
+          warnings: [`${warningPrefix}_terminated_before_stage_execution`]
+        });
+      }
+    };
+
+    const handleSemanticPlanControlSignal = (
+      runError: unknown
+    ): SqlRun | undefined => {
+      if (!(runError instanceof DomainError)) {
+        return undefined;
+      }
+      if (
+        runError.code !== "SEMANTIC_PLAN_REQUIRES_CLARIFICATION" &&
+        runError.code !== "SEMANTIC_PLAN_FAIL_CLOSED"
+      ) {
+        return undefined;
+      }
+
+      const controlDetails = this.readSemanticPlanControlDetails(runError);
+      const semanticPlanFromError = controlDetails.semanticPlan;
+      const reasonCodes = this.unique([
+        ...controlDetails.validationReasons,
+        ...(semanticPlanFromError?.coverageGaps?.map((item) => item.reasonCode) ?? []),
+        runError.code.toLowerCase()
+      ]);
+      const nextTerminationReason: Text2SqlV2TerminationReason =
+        runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
+          ? "semantic_plan_requires_clarification"
+          : "semantic_plan_fail_closed";
+
+      const lastStep = trace.steps[trace.steps.length - 1];
+      if (lastStep?.node === "generate-sql") {
+        lastStep.outputSummary = this.stringifyStepSummary(
+          "generate-sql",
+          "failed",
+          {
+            error: runError.message,
+            validation: controlDetails.validation,
+            semanticPlan: semanticPlanFromError
+          },
+          getStageArtifact("generate-sql")
+        );
+        lastStep.errorSummary = runError.message;
+      }
+
+      loopEvidence.push(
+        this.buildLoopEvidence({
+          loopIndex: loopEvidence.length + 1,
+          triggerReason: this.resolveLoopTriggerReason(reasonCodes, runError.message),
+          actionType:
+            runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
+              ? "clarify"
+              : "fail_closed",
+          terminationReason: nextTerminationReason,
+          convergencePath:
+            runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION"
+              ? ["retrieve", "assemble-context", "semantic-plan", "generate-sql", "clarification"]
+              : ["retrieve", "assemble-context", "semantic-plan", "generate-sql", "reject"],
+          semanticPlan: semanticPlanFromError,
+          reasonCodes
+        })
+      );
+      terminationReason = nextTerminationReason;
+
+      if (runError.code === "SEMANTIC_PLAN_REQUIRES_CLARIFICATION") {
+        clarification =
+          clarification ??
+          this.buildSemanticPlanClarificationPrompt(semanticPlanFromError, runError.message);
+        answer = clarification.question;
+        trace.clarificationDecision = {
+          ...trace.clarificationDecision,
+          decision: "clarify",
+          question: clarification.question,
+          reason: clarification.reason,
+          reasonCodes: this.unique([
+            ...(trace.clarificationDecision?.reasonCodes ?? []),
+            ...reasonCodes
+          ])
+        };
+        skipRemainingStages(["validate", "correct", "execute", "answer"], runError.code.toLowerCase());
+        return finalizeAndTrace("clarification");
+      }
+
+      error = runError.message;
+      skipRemainingStages(["validate", "correct", "execute", "answer"], runError.code.toLowerCase());
+      return finalizeAndTrace("rejected");
+    };
+
     const finalize = (status: SqlRun["status"]): SqlRun => {
       const contextEvidence = this.buildContextEvidence({
         contextEnvelope: input.contextEnvelope,
@@ -415,7 +517,13 @@ export class Text2SqlV2RunnerService {
         columns,
         error,
         clarification,
-        trace: this.withContextEvidence(trace, contextEvidence),
+        trace: this.withLoopEvidence(
+          this.withContextEvidence(trace, contextEvidence),
+          {
+            loopEvidence,
+            terminationReason
+          }
+        ),
         llmRaw,
         createdAt: startedAt
       };
@@ -505,6 +613,20 @@ export class Text2SqlV2RunnerService {
       });
 
       if (clarification) {
+        loopEvidence.push(
+          this.buildLoopEvidence({
+            loopIndex: loopEvidence.length + 1,
+            triggerReason: this.resolveLoopTriggerReason(
+              trace.clarificationDecision?.reasonCodes,
+              clarification.reason
+            ),
+            actionType: "clarify",
+            terminationReason: "clarification_requested",
+            convergencePath: ["intake", "clarification"],
+            reasonCodes: trace.clarificationDecision?.reasonCodes
+          })
+        );
+        terminationReason = "clarification_requested";
         answer = clarification.question;
         skipStage("retrieve", {
           warnings: ["clarification_terminated_before_stage_execution"]
@@ -803,7 +925,15 @@ export class Text2SqlV2RunnerService {
           }
         });
       } else {
-        generatedDraft = await runGenerateSql("initial");
+        try {
+          generatedDraft = await runGenerateSql("initial");
+        } catch (runError) {
+          const handledRun = handleSemanticPlanControlSignal(runError);
+          if (handledRun) {
+            return handledRun;
+          }
+          throw runError;
+        }
         sql = generatedDraft.sql;
         explanation = generatedDraft.explanation;
       }
@@ -881,7 +1011,15 @@ export class Text2SqlV2RunnerService {
 
       let safetyDecision = await runSafetyCheck("执行 SQL 安全校验");
       if (!safetyDecision.allowed && savedPriorSql.status === "hit") {
-        generatedDraft = await runGenerateSql("shortcut-fallback");
+        try {
+          generatedDraft = await runGenerateSql("shortcut-fallback");
+        } catch (runError) {
+          const handledRun = handleSemanticPlanControlSignal(runError);
+          if (handledRun) {
+            return handledRun;
+          }
+          throw runError;
+        }
         sql = generatedDraft.sql;
         explanation = generatedDraft.explanation;
         safetyDecision = await runSafetyCheck("shortcut 回退后重新执行安全校验");
@@ -953,7 +1091,15 @@ export class Text2SqlV2RunnerService {
             onRun: async () => undefined
           });
 
-          generatedDraft = await runGenerateSql("correction");
+          try {
+            generatedDraft = await runGenerateSql("correction");
+          } catch (runError) {
+            const handledRun = handleSemanticPlanControlSignal(runError);
+            if (handledRun) {
+              return handledRun;
+            }
+            throw runError;
+          }
           sql = generatedDraft.sql;
           explanation = generatedDraft.explanation;
 
@@ -1098,6 +1244,193 @@ export class Text2SqlV2RunnerService {
           }
         : {})
     };
+  }
+
+  private withLoopEvidence(
+    trace: ExecutionTrace,
+    input: {
+      loopEvidence: Text2SqlV2LoopEvidence[];
+      terminationReason?: Text2SqlV2TerminationReason;
+    }
+  ): ExecutionTrace {
+    if (input.loopEvidence.length === 0 && !input.terminationReason) {
+      return trace;
+    }
+    return {
+      ...trace,
+      ...(input.loopEvidence.length > 0
+        ? {
+            loopEvidence: input.loopEvidence.map((item) => ({
+              ...item,
+              ...(item.planDelta
+                ? {
+                    planDelta: {
+                      ...item.planDelta,
+                      ...(item.planDelta.route
+                        ? {
+                            route: {
+                              ...item.planDelta.route
+                            }
+                          }
+                        : {})
+                    }
+                  }
+                : {})
+            }))
+          }
+        : {}),
+      ...(input.terminationReason
+        ? {
+            terminationReason: input.terminationReason
+          }
+        : {})
+    };
+  }
+
+  private readSemanticPlanControlDetails(error: DomainError): {
+    semanticPlan?: SemanticPlanV1;
+    validation?: Record<string, unknown>;
+    validationReasons: string[];
+  } {
+    const details = error.details;
+    if (!details || typeof details !== "object" || Array.isArray(details)) {
+      return {
+        validationReasons: []
+      };
+    }
+    const detailRecord = details as Record<string, unknown>;
+    const semanticPlan = this.readSemanticPlan(detailRecord.semanticPlan);
+    const validation =
+      detailRecord.validation &&
+      typeof detailRecord.validation === "object" &&
+      !Array.isArray(detailRecord.validation)
+        ? (detailRecord.validation as Record<string, unknown>)
+        : undefined;
+    const validationReasons = Array.isArray(validation?.reasons)
+      ? validation.reasons.filter((item): item is string => typeof item === "string")
+      : [];
+    return {
+      semanticPlan,
+      validation,
+      validationReasons
+    };
+  }
+
+  private readSemanticPlan(value: unknown): SemanticPlanV1 | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const plan = value as Partial<SemanticPlanV1>;
+    if (
+      plan.route !== "answer" &&
+      plan.route !== "clarify" &&
+      plan.route !== "reject"
+    ) {
+      return undefined;
+    }
+    if (typeof plan.standaloneQuestion !== "string") {
+      return undefined;
+    }
+    return {
+      route: plan.route,
+      standaloneQuestion: plan.standaloneQuestion,
+      selectedTables: Array.isArray(plan.selectedTables) ? plan.selectedTables : [],
+      selectedColumns: Array.isArray(plan.selectedColumns) ? plan.selectedColumns : [],
+      confidence:
+        typeof plan.confidence === "number" && Number.isFinite(plan.confidence)
+          ? plan.confidence
+          : 0,
+      evidenceRefs: Array.isArray(plan.evidenceRefs) ? plan.evidenceRefs : [],
+      ...(Array.isArray(plan.metrics) ? { metrics: plan.metrics } : {}),
+      ...(typeof plan.grain === "string" ? { grain: plan.grain } : {}),
+      ...(Array.isArray(plan.filters) ? { filters: plan.filters } : {}),
+      ...(Array.isArray(plan.joinPath) ? { joinPath: plan.joinPath } : {}),
+      ...(Array.isArray(plan.allowedTables) ? { allowedTables: plan.allowedTables } : {}),
+      ...(Array.isArray(plan.forbiddenTables)
+        ? { forbiddenTables: plan.forbiddenTables }
+        : {}),
+      ...(Array.isArray(plan.coverageGaps) ? { coverageGaps: plan.coverageGaps } : {}),
+      ...(typeof plan.snapshotId === "string" ? { snapshotId: plan.snapshotId } : {})
+    };
+  }
+
+  private buildSemanticPlanClarificationPrompt(
+    semanticPlan: SemanticPlanV1 | undefined,
+    fallbackReason: string
+  ): ClarificationPrompt {
+    const coverageReason =
+      semanticPlan?.coverageGaps
+        ?.map((item) => item.reasonCode)
+        .slice(0, 2)
+        .join("、") ?? "";
+    const question =
+      semanticPlan?.coverageGaps?.some((item) => item.subjectKind === "time")
+        ? "请补充时间范围或统计窗口，以便继续生成 SQL。"
+        : semanticPlan?.coverageGaps?.some((item) => item.subjectKind === "metric")
+          ? "请补充要统计的指标或分析对象，以便继续生成 SQL。"
+          : "请补充更明确的分析对象、指标或时间范围，以便继续生成 SQL。";
+    return {
+      question,
+      reason: coverageReason || fallbackReason,
+      decision: "clarify",
+      triggerPath: "semantic",
+      confidenceLevel: "low",
+      reasonCodes: this.unique([
+        ...(semanticPlan?.coverageGaps?.map((item) => item.reasonCode) ?? []),
+        "semantic_plan_requires_clarification"
+      ])
+    };
+  }
+
+  private buildLoopEvidence(input: {
+    loopIndex: number;
+    triggerReason: string;
+    actionType: Text2SqlV2LoopEvidence["actionType"];
+    terminationReason: Text2SqlV2TerminationReason;
+    convergencePath: string[];
+    semanticPlan?: SemanticPlanV1;
+    reasonCodes?: string[];
+  }): Text2SqlV2LoopEvidence {
+    return {
+      loopIndex: input.loopIndex,
+      triggerReason: input.triggerReason,
+      actionType: input.actionType,
+      planDelta: {
+        route: {
+          to: input.semanticPlan?.route ?? (input.actionType === "fail_closed" ? "reject" : "clarify")
+        },
+        ...(input.semanticPlan?.snapshotId
+          ? {
+              snapshotId: input.semanticPlan.snapshotId
+            }
+          : {}),
+        ...(input.semanticPlan?.coverageGaps?.length
+          ? {
+              addedCoverageGapTypes: input.semanticPlan.coverageGaps.map(
+                (item) => item.gapType
+              )
+            }
+          : {}),
+        ...(input.reasonCodes?.length
+          ? {
+              reasonCodes: this.unique(input.reasonCodes)
+            }
+          : {})
+      },
+      terminationReason: input.terminationReason,
+      convergencePath: input.convergencePath
+    };
+  }
+
+  private resolveLoopTriggerReason(
+    reasonCodes: string[] | undefined,
+    fallbackMessage: string
+  ): string {
+    const normalized = this.unique(reasonCodes ?? []);
+    if (normalized.length > 0) {
+      return normalized.join("|");
+    }
+    return fallbackMessage.trim();
   }
 
   private buildContextEvidence(input: {
