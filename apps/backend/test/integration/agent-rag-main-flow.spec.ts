@@ -73,26 +73,22 @@ describe("agent rag main flow integration", () => {
     const stepNames = run.trace.steps.map((step) => step.node);
     expect(stepNames).toEqual(
       expect.arrayContaining([
-        "retrieve-knowledge",
-        "build-intent-plan",
-        "build-semantic-query",
+        "retrieve-context",
+        "semantic-plan",
         "generate-sql"
       ])
     );
 
+    const retrieveStep = run.trace.steps.find((step) => step.node === "retrieve-context");
+    expect(retrieveStep?.outputSummary).toContain("selectedContextCount");
     const generateStep = run.trace.steps.find((step) => step.node === "generate-sql");
-    expect(generateStep?.inputSummary).toContain("selectedContextCount");
-
-    const safetyStep = run.trace.steps.find((step) => step.node === "safety-check");
-    if (safetyStep) {
-      if (safetyStep.outputSummary) {
-        expect(safetyStep.outputSummary).toContain("riskTags");
-      }
+    const validateStep = run.trace.steps.find((step) => step.node === "validate-sql");
+    if (generateStep?.status === "failed") {
+      expect(generateStep.errorSummary ?? run.error ?? "").toMatch(/语义计划|SQL|校验/i);
     } else {
-      expect(generateStep?.status).toBe("failed");
-      expect(generateStep?.errorSummary ?? run.error ?? "").toMatch(/语义计划|SQL 超出/);
+      expect(generateStep?.status).toBe("success");
+      expect(validateStep).toBeDefined();
     }
-    expect(run.trace.clarificationDecision).toBeDefined();
 
     const unpinnedKnowledge = await retrieveKnowledgeNode.run({
       question: "统计订单 GMV",
@@ -165,7 +161,7 @@ describe("agent rag main flow integration", () => {
     const degradedRun = await chatService.sendMessage(degradedSession.id, "统计订单 GMV");
 
     const degradedRetrieveStep = degradedRun.trace.steps.find(
-      (step) => step.node === "retrieve-knowledge"
+      (step) => step.node === "retrieve-context"
     );
     const degradedGenerateStep = degradedRun.trace.steps.find(
       (step) => step.node === "generate-sql"
@@ -174,7 +170,6 @@ describe("agent rag main flow integration", () => {
     expect(degradedRetrieveStep?.outputSummary ?? "").toMatch(
       /semantic_promoted_linkage_deg/
     );
-    expect(degradedGenerateStep?.inputSummary).toContain("retrievalDegradeReasons");
     expect(degradedGenerateStep).toBeDefined();
 
     await moduleRef.close();

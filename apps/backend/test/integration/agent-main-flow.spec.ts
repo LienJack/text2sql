@@ -34,8 +34,9 @@ describe("agent main flow", () => {
     expect(firstStep?.sequence).toBe(1);
     expect(firstStep?.stepId).toContain(`${run.runId}:`);
     expect(firstStep?.lifecycle).toBeTruthy();
-    expect(run.trace.clarificationDecision).toBeDefined();
-    expect(["continue", "clarify"]).toContain(run.trace.clarificationDecision?.decision);
+    const stepNames = run.trace.steps.map((step) => step.node);
+    expect(stepNames).toContain("intake");
+    expect(stepNames).toContain("answer");
     if (run.status === "executionResult") {
       expect(typeof run.answer).toBe("string");
       expect(run.answer?.trim().length).toBeGreaterThan(0);
@@ -55,8 +56,11 @@ describe("agent main flow", () => {
     const run = await chatService.sendMessage(session.id, "DELETE orders where id = 1");
 
     expect(["rejected", "failed"]).toContain(run.status);
-    expect(run.trace.clarificationDecision?.decisionSource).toBe("sql-write-intent");
-    expect(run.trace.clarificationDecision?.bypassed).toBe(true);
+    const intakeStep = run.trace.steps.find((step) => step.node === "intake");
+    expect(intakeStep?.status).toBe("failed");
+    expect(intakeStep?.detail ?? "").toContain("unsafe");
+    const intakeStage = run.trace.v2?.stages.find((stage) => stage.stage === "intake");
+    expect(intakeStage?.metadata?.route).toBe("unsafe");
     await moduleRef.close();
   });
 });

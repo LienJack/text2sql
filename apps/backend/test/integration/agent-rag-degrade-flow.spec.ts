@@ -29,13 +29,12 @@ describe("agent rag degrade flow integration", () => {
     const session = await chatService.createSession("sqlite_main");
     const run = await chatService.sendMessage(session.id, "按状态统计订单数量");
 
-    const retrieveStep = run.trace.steps.find((step) => step.node === "retrieve-knowledge");
+    const retrieveStep = run.trace.steps.find((step) => step.node === "retrieve-context");
     expect(retrieveStep).toBeDefined();
     expect(retrieveStep?.outputSummary ?? "").toMatch(/degrad|降级|retrievalStatus/i);
 
     const generateStep = run.trace.steps.find((step) => step.node === "generate-sql");
-    expect(generateStep?.inputSummary).toContain("retrievalStatus");
-    expect(generateStep?.inputSummary).toContain("selectedContextCount");
+    expect(generateStep?.status).toBe("success");
 
     expect(["executionResult", "failed", "rejected"]).toContain(run.status);
 
@@ -58,15 +57,7 @@ describe("agent rag degrade flow integration", () => {
       expect(generateStep).toBeDefined();
       expect(generateStep?.status).toBe("success");
 
-      const parsedSummary =
-        typeof generateStep?.outputSummary === "string"
-          ? (JSON.parse(generateStep.outputSummary) as {
-              semanticPlan?: {
-                route?: string;
-              };
-            })
-          : undefined;
-      expect(parsedSummary?.semanticPlan?.route).toBe("answer");
+      expect(run.trace.v2?.semanticPlan?.route).toBe("answer");
       expect(run.status).not.toBe("clarification");
 
       await moduleRef.close();

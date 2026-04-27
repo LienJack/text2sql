@@ -46,38 +46,30 @@ describe("chat context envelope accuracy integration", () => {
       expect(businessRun.status).toBe("failed");
       expect(businessRun.error ?? "").toMatch(/语义计划|SQL 超出|校验失败/);
     }
-    expect(
-      businessRun.trace.effectiveContextSummary?.userEnvelope.metricDefinitionProvided
-    ).toBe(true);
-    expect(
-      businessWithDelivery.delivery?.evidence?.effectiveContextSummary?.sourcePriority
-    ).toBe("user_explicit_over_system");
+    expect(businessRun.trace.v2?.version).toBe("v2");
+    expect(businessWithDelivery.delivery?.evidence?.v2?.version).toBe("v2");
+    expect(businessWithDelivery.delivery?.evidence?.v2?.stageOrder).toEqual(
+      businessRun.trace.v2?.stageOrder
+    );
 
     const metadataSession = await chatService.createSession("sqlite_main");
     const metadataRun = await chatService.sendMessage(
       metadataSession.id,
       "数据库有哪些表"
     );
-    const metadataClarifyStep = metadataRun.trace.steps.find(
-      (step) => step.node === "clarify"
-    );
     expect(metadataRun.status).not.toBe("clarification");
-    if (metadataRun.sql) {
-      expect(metadataRun.sql.toLowerCase()).toContain("sqlite_master");
-    } else {
-      expect(["executionResult", "failed"]).toContain(metadataRun.status);
-      if (metadataRun.status === "failed") {
-        expect(metadataRun.error ?? "").toMatch(/语义计划|SQL/);
-      } else {
-        expect((metadataRun.answer ?? "").trim().length).toBeGreaterThan(0);
-      }
-    }
-    expect(["skipped", "success"]).toContain(metadataClarifyStep?.status ?? "skipped");
+    expect(metadataRun.trace.steps.map((step) => step.node)).toEqual(["intake", "answer"]);
+    const metadataIntakeStage = metadataRun.trace.v2?.stages.find(
+      (stage) => stage.stage === "intake"
+    );
+    expect(metadataIntakeStage?.metadata?.route).toBe("metadata");
+    expect((metadataRun.answer ?? "").trim().length).toBeGreaterThan(0);
 
     const clarifySession = await chatService.createSession("sqlite_main");
     const clarifyRun = await chatService.sendMessage(clarifySession.id, "退款");
     expect(clarifyRun.status).toBe("clarification");
     expect(clarifyRun.clarification?.question).toBeTruthy();
+    expect(clarifyRun.trace.v2?.terminationReason).toBe("clarification_requested");
 
     const conflictSession = await chatService.createSession("sqlite_main");
     const conflictRun = await chatService.sendMessage(
@@ -92,13 +84,12 @@ describe("chat context envelope accuracy integration", () => {
     );
     const conflictWithDelivery = await enrichment.attachDeliveryContract(conflictRun);
 
-    expect(conflictRun.trace.conflictHint?.hasConflict).toBe(true);
-    expect(conflictWithDelivery.delivery?.evidence?.conflictHint?.hasConflict).toBe(
-      true
+    expect(conflictRun.trace.v2?.version).toBe("v2");
+    expect(conflictWithDelivery.delivery?.evidence?.v2?.stageOrder).toEqual(
+      conflictRun.trace.v2?.stageOrder
     );
-    expect(conflictWithDelivery.delivery?.evidence?.riskTags).toEqual(
-      expect.arrayContaining(["context_conflict_detected"])
-    );
+    expect(conflictRun.trace.conflictHint).toBeUndefined();
+    expect(conflictWithDelivery.delivery?.evidence?.conflictHint).toBeUndefined();
 
     const pinnedSession = await chatService.createSession("sqlite_main");
     const pinnedContextRun = await chatService.sendMessage(
@@ -110,21 +101,9 @@ describe("chat context envelope accuracy integration", () => {
         pinnedColumns: ["amount"]
       }
     );
-    const pinnedTableCount =
-      pinnedContextRun.trace.effectiveContextSummary?.userEnvelope.pinnedTableCount;
-    const pinnedColumnCount =
-      pinnedContextRun.trace.effectiveContextSummary?.userEnvelope.pinnedColumnCount;
-    if (pinnedTableCount !== undefined) {
-      expect(pinnedTableCount).toBe(1);
-    }
-    if (pinnedColumnCount !== undefined) {
-      expect(pinnedColumnCount).toBe(1);
-    }
-    const pinningStatus =
-      pinnedContextRun.trace.effectiveContextSummary?.retrievalContext?.pinning?.status;
-    if (pinningStatus !== undefined) {
-      expect(pinningStatus).toBeTruthy();
-    }
+    expect(pinnedContextRun.trace.effectiveContextSummary).toBeUndefined();
+    expect(pinnedContextRun.delivery?.evidence?.effectiveContextSummary).toBeUndefined();
+    expect(pinnedContextRun.trace.steps.map((step) => step.node)).toEqual(["intake", "answer"]);
 
     await moduleRef.close();
   });

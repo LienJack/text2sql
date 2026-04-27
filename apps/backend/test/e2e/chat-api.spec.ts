@@ -51,9 +51,7 @@ describe("chat api (e2e)", () => {
     expect(runRes.body.data.run.runId).toBeDefined();
     expect(runRes.body.data.run.sql).toMatch(/select/i);
     expect(runRes.body.data.run.explanation).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw.provider).toBe("volcengine");
-    expect(runRes.body.data.run.llmRaw.model).toBeTruthy();
+    expect(runRes.body.data.run.llmRaw).toBeNull();
     expect(runRes.body.data.delivery).toBeTruthy();
     expect(runRes.body.data.run.delivery).toEqual(runRes.body.data.delivery);
     expect(runRes.body.data.run.answer).toBe(runRes.body.data.delivery.answer.text);
