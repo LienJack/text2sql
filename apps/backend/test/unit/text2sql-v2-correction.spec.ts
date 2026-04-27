@@ -144,4 +144,23 @@ describe("text2sql v2 sql correction decision", () => {
       source: "execution"
     });
   });
+
+  it("tracks correction budget explicitly for graph loop control", () => {
+    expect(
+      service.resolveBudget({
+        attemptCount: 1
+      })
+    ).toEqual({
+      attemptCount: 1,
+      maxAttempts: 2,
+      remainingAttempts: 1,
+      exhausted: false
+    });
+
+    expect(
+      service.resolveBudget({
+        attemptCount: 2
+      }).exhausted
+    ).toBe(true);
+  });
 });

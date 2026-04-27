@@ -15,6 +15,13 @@ export interface SqlCorrectionDecision {
   failureCode?: string;
 }
 
+export interface SqlCorrectionBudget {
+  attemptCount: number;
+  maxAttempts: number;
+  remainingAttempts: number;
+  exhausted: boolean;
+}
+
 const CORRECTABLE_ERROR_MARKERS = [
   "syntax",
   "missing column",
@@ -78,6 +85,24 @@ export class SqlCorrectionService {
       maxAttempts: correctable ? this.maxAttempts : 0,
       category: correctable ? "execution" : "unknown",
       source: "execution"
+    };
+  }
+
+  resolveBudget(input: {
+    attemptCount: number;
+    maxAttempts?: number;
+  }): SqlCorrectionBudget {
+    const maxAttempts = Math.max(
+      0,
+      Number.isFinite(input.maxAttempts) ? Number(input.maxAttempts) : this.maxAttempts
+    );
+    const attemptCount = Math.max(0, Number(input.attemptCount));
+    const remainingAttempts = Math.max(0, maxAttempts - attemptCount);
+    return {
+      attemptCount,
+      maxAttempts,
+      remainingAttempts,
+      exhausted: attemptCount >= maxAttempts
     };
   }
 

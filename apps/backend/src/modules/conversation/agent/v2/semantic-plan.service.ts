@@ -14,7 +14,7 @@ export interface BuildSemanticPlanInput {
   allowedTables?: string[];
 }
 
-type SemanticPlanRouteKind =
+export type SemanticPlanRouteKind =
   | "text_to_sql"
   | "metadata"
   | "general"
@@ -35,7 +35,7 @@ const METRIC_KEYWORD_REGEX =
 const TIME_GRAIN_DAY_REGEX = /(按天|每天|daily|day\b|date_trunc\(['"]day['"]\))/i;
 const TIME_GRAIN_WEEK_REGEX = /(按周|每周|weekly|week\b|date_trunc\(['"]week['"]\))/i;
 const TIME_GRAIN_MONTH_REGEX = /(按月|每月|monthly|month\b|date_trunc\(['"]month['"]\))/i;
-const FOLLOW_UP_PREFIX_REGEX = /^(那|那么|这个|这些|它们|those|them|that)\b/i;
+const FOLLOW_UP_PREFIX_REGEX = /^(那|那么|这个|这些|它们|those|them|that)/i;
 const MAX_EVIDENCE_REF_COUNT = 32;
 const MAX_METRIC_COUNT = 8;
 const MAX_FILTER_COUNT = 12;

@@ -35,6 +35,7 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.plan.route).toBe("answer");
     expect(result.validation.routeKind).toBe("text_to_sql");
+    expect(result.validation.outcome).toBe("ready");
     expect(result.plan.selectedTables).toEqual(["orders"]);
     expect(result.plan.selectedColumns).toEqual(["id", "amount", "status"]);
     expect(result.plan.evidenceRefs).toEqual(["chunk-orders-1"]);
@@ -75,6 +76,8 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.plan.route).toBe("answer");
     expect(result.validation.routeKind).toBe("metadata");
+    expect(result.validation.outcome).toBe("direct_answer");
+    expect(result.validation.shouldDirectAnswer).toBe(true);
     expect(result.plan.filters).toEqual(
       expect.arrayContaining(["route_kind:metadata"])
     );
@@ -93,6 +96,7 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.plan.route).toBe("answer");
     expect(result.validation.routeKind).toBe("general");
+    expect(result.validation.outcome).toBe("direct_answer");
     expect(result.validation.valid).toBe(true);
     expect(result.plan.filters).toEqual(
       expect.arrayContaining(["route_kind:general"])
@@ -117,6 +121,7 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.validation.valid).toBe(true);
     expect(result.validation.routeKind).toBe("text_to_sql");
+    expect(result.validation.outcome).toBe("ready");
     expect(result.plan.metrics).toEqual(
       expect.arrayContaining(["gmv", "orders.amount"])
     );
@@ -143,6 +148,7 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.plan.route).toBe("answer");
     expect(result.validation.routeKind).toBe("text_to_sql");
+    expect(result.validation.outcome).toBe("ready");
     expect(result.validation.requiresClarification).toBe(false);
     expect(result.validation.evidenceComplete).toBe(false);
     expect(result.validation.lowConfidence).toBe(true);
@@ -174,6 +180,7 @@ describe("text2sql v2 semantic plan", () => {
 
     expect(result.plan.route).toBe("clarify");
     expect(result.validation.requiresClarification).toBe(true);
+    expect(result.validation.outcome).toBe("needs_clarification");
     expect(result.plan.filters).toEqual(
       expect.arrayContaining([
         "route_kind:clarify",
@@ -223,6 +230,7 @@ describe("text2sql v2 semantic plan", () => {
       ])
     );
     expect(result.validation.routeKind).toBe("fail_closed");
+    expect(result.validation.outcome).toBe("fail_closed");
     expect(result.validation.terminal).toBe(true);
   });
 

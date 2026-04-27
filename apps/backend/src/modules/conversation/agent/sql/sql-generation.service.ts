@@ -2,7 +2,9 @@ import { Injectable } from "@nestjs/common";
 import type {
   DatasourceType,
   PromptTemplateTraceEvidence,
-  SemanticPlanV1
+  SemanticPlanV1,
+  SqlGenerationArtifactV1,
+  Text2SqlV2ProviderMetadata
 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import type {
@@ -42,6 +44,21 @@ export interface SqlGenerationExplicitPinningEvidence {
   source?: string;
   tables?: string[];
   columns?: string[];
+}
+
+export type SqlGenerationCause =
+  | "initial"
+  | "saved-prior"
+  | "shortcut-fallback"
+  | "correction";
+
+export interface StructuredSqlGenerationArtifact extends SqlGenerationArtifactV1 {
+  cause: SqlGenerationCause;
+  dialect: DatasourceType;
+  provider?: Text2SqlV2ProviderMetadata;
+  promptTemplate?: PromptTemplateTraceEvidence;
+  retryReason?: string;
+  coverage?: SqlEvidenceCoverage;
 }
 
 const MAX_SEMANTIC_REPAIR_RETRY = 1;
@@ -165,6 +182,42 @@ export class SqlGenerationService {
       templateOverlay: templateResolution.templateOverlay,
       promptTemplate: templateResolution.evidence
     });
+  }
+
+  buildStructuredArtifact(input: {
+    draft: SqlDraft;
+    datasourceType?: DatasourceType;
+    cause: SqlGenerationCause;
+    retryReason?: string;
+  }): StructuredSqlGenerationArtifact {
+    const references = this.extractSqlReferences(input.draft.sql);
+    const evidenceRefs = this.unique(input.draft.semanticPlan?.evidenceRefs ?? []);
+    const provider =
+      input.draft.provider || input.draft.model || input.draft.modelCatalogId
+        ? {
+            provider: input.draft.provider,
+            model: input.draft.model
+          }
+        : undefined;
+
+    return {
+      sql: input.draft.sql,
+      assumptions: input.draft.explanation
+        ? [input.draft.explanation]
+        : undefined,
+      usedTables: Array.from(references.tables),
+      usedColumns: this.unique([
+        ...Array.from(references.tableColumns),
+        ...Array.from(references.columns)
+      ]),
+      evidenceRefs,
+      cause: input.cause,
+      dialect: input.datasourceType ?? "sqlite",
+      provider,
+      promptTemplate: input.draft.promptTemplate,
+      retryReason: input.retryReason?.trim() || undefined,
+      coverage: input.draft.coverage
+    };
   }
 
   private shouldRetryAsNonStream(error: unknown): boolean {

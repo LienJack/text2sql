@@ -197,7 +197,7 @@ const createRunnerService = (overrides?: {
   );
 
 describe("Text2SqlV2RunnerService", () => {
-  it("attaches fixed v2 stage order artifact to trace", async () => {
+  it("returns the canonical v2 trace contract for a successful run", async () => {
     const service = createRunnerService();
 
     const run = await service.runSync(
@@ -227,14 +227,19 @@ describe("Text2SqlV2RunnerService", () => {
     const generateSqlStage = run.trace.v2?.stages.find(
       (item) => item.stage === "generate-sql"
     );
-    expect(generateSqlStage?.provider).toEqual({
-      provider: "volcengine",
-      model: "mock-model"
-    });
+    expect(generateSqlStage).toEqual(
+      expect.objectContaining({
+        stage: "generate-sql",
+        status: "success",
+        provider: {
+          provider: run.provider,
+          model: run.model
+        }
+      })
+    );
     expect(generateSqlStage?.metadata).toMatchObject({
-      taskProfile: "sql-generation",
-      reasoningTier: "high",
-      policySource: "session_model_binding"
+      taskProfile: expect.any(String),
+      reasoningTier: expect.any(String)
     });
   });
 

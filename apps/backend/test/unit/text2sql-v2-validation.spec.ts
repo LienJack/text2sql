@@ -53,6 +53,7 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.correctable).toBe(false);
+    expect(service.resolveOutcome(result)).toBe("terminal");
     expect(result.failure?.category).toBe("governance");
     expect(result.failure?.terminal).toBe(true);
     expect(result.failure?.code).toBe("SQL_READ_ONLY_VIOLATION");
@@ -65,6 +66,7 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.correctable).toBe(true);
+    expect(service.resolveOutcome(result)).toBe("correctable");
     expect(result.failure?.category).toBe("validation");
     expect(result.failure?.terminal).toBe(false);
     expect(result.failure?.code).toBe("SQL_PARSE_UNSUPPORTED_STATEMENT");
@@ -154,6 +156,7 @@ describe("text2sql v2 sql validation", () => {
     });
 
     expect(result.status).toBe("passed");
+    expect(service.resolveOutcome(result)).toBe("pass");
     expect(result.checks.find((check) => check.check === "plan-coverage")).toMatchObject({
       status: "passed",
       message: "non text-to-sql route"

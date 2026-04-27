@@ -115,6 +115,19 @@ export class EmbeddingRouterService implements EmbeddingGateway {
         }
       );
     }
+    if (runtime.dimensions && runtime.dimensions > 0 && dimensions !== runtime.dimensions) {
+      throw new DomainError(
+        "EMBEDDING_PROVIDER_DIMENSION_MISMATCH",
+        "Embedding provider 返回向量维度与运行时配置不一致。",
+        502,
+        {
+          provider: runtime.provider,
+          configSource: runtime.configSource,
+          expectedDimensions: runtime.dimensions,
+          actualDimensions: dimensions
+        }
+      );
+    }
     const mismatchedVector = vectors.find((vector) => vector.length !== dimensions);
     if (mismatchedVector) {
       throw new DomainError(

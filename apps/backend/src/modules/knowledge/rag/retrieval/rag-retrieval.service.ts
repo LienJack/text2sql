@@ -89,6 +89,25 @@ interface ColumnPruningResult {
   evidence?: ColumnPruningEvidence;
 }
 
+interface PermissionFilteringEvidence {
+  status: "applied" | "skipped";
+  denied_evidence_ids: string[];
+  denied_table_names: string[];
+  denied_column_names: string[];
+  reason_codes: string[];
+  kept_candidate_count: number;
+  deniedEvidenceIds?: string[];
+  deniedTableNames?: string[];
+  deniedColumnNames?: string[];
+  reasonCodes?: string[];
+  keptCandidateCount?: number;
+}
+
+interface PermissionFilteringResult {
+  candidates: RagRetrievalCandidate[];
+  evidence: PermissionFilteringEvidence;
+}
+
 interface WideTableProfile {
   tableName: string;
   normalizedTableName: string;
@@ -293,11 +312,16 @@ export class RagRetrievalService {
       query,
       candidates: decoratedCandidates
     });
-    const candidates = columnPruning.candidates;
+    const permissionFiltering = this.applyPermissionFiltering({
+      candidates: columnPruning.candidates,
+      allowedTables
+    });
+    const candidates = permissionFiltering.candidates;
     const skillContext = await this.resolveSkillContext(query, candidates);
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
     degradeReasons.push(...this.collectSemanticLinkageDegradeReasons(candidates));
+    degradeReasons.push(...permissionFiltering.evidence.reason_codes);
     if (skillContext.degrade_reason) {
       degradeReasons.push(skillContext.degrade_reason);
     }
@@ -326,6 +350,10 @@ export class RagRetrievalService {
       }
     };
     this.attachColumnPruningEvidence(response.retrieval_bundle, columnPruning.evidence);
+    this.attachPermissionFilteringEvidence(
+      response.retrieval_bundle,
+      permissionFiltering.evidence
+    );
     response.retrieval_bundle.context_pack = await this.buildContextPack({
       bundle: response.retrieval_bundle,
       workspaceId,
@@ -376,6 +404,7 @@ export class RagRetrievalService {
   }): Promise<RagRetrievalResponse["retrieval_bundle"]> {
     const priorSqlLane = this.readPriorSqlLaneEvidence(input.cachedBundle);
     const columnPruning = this.readColumnPruningEvidence(input.cachedBundle);
+    const permissionFiltering = this.readPermissionFilteringEvidence(input.cachedBundle);
     const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
@@ -394,6 +423,7 @@ export class RagRetrievalService {
       ])
     };
     this.attachColumnPruningEvidence(hydratedBundle, columnPruning);
+    this.attachPermissionFilteringEvidence(hydratedBundle, permissionFiltering);
     hydratedBundle.context_pack = await this.buildContextPack({
       bundle: hydratedBundle,
       workspaceId: input.workspaceId,
@@ -1186,6 +1216,78 @@ export class RagRetrievalService {
     return selected.slice(0, limit);
   }
 
+  private applyPermissionFiltering(input: {
+    candidates: RagRetrievalCandidate[];
+    allowedTables: string[];
+  }): PermissionFilteringResult {
+    if (input.allowedTables.length === 0) {
+      return {
+        candidates: input.candidates,
+        evidence: {
+          status: "skipped",
+          denied_evidence_ids: [],
+          denied_table_names: [],
+          denied_column_names: [],
+          reason_codes: [],
+          kept_candidate_count: input.candidates.length,
+          deniedEvidenceIds: [],
+          deniedTableNames: [],
+          deniedColumnNames: [],
+          reasonCodes: [],
+          keptCandidateCount: input.candidates.length
+        }
+      };
+    }
+
+    const allowedTableSet = new Set(input.allowedTables.map((table) => table.trim().toLowerCase()));
+    const deniedEvidenceIds: string[] = [];
+    const deniedTableNames: string[] = [];
+    const deniedColumnNames: string[] = [];
+    const keptCandidates: RagRetrievalCandidate[] = [];
+
+    for (const candidate of input.candidates) {
+      const tableNames = candidate.chunk.metadata.tableNames
+        .map((tableName) => tableName.trim().toLowerCase())
+        .filter((tableName) => tableName.length > 0);
+      if (tableNames.length === 0) {
+        keptCandidates.push(candidate);
+        continue;
+      }
+      const deniedTables = tableNames.filter((tableName) => !allowedTableSet.has(tableName));
+      if (deniedTables.length === 0) {
+        keptCandidates.push(candidate);
+        continue;
+      }
+      deniedEvidenceIds.push(candidate.chunk_id);
+      deniedTableNames.push(...deniedTables);
+      deniedColumnNames.push(...candidate.chunk.metadata.columnNames);
+    }
+
+    const uniqueDeniedEvidenceIds = this.unique(deniedEvidenceIds).slice(0, 128);
+    const uniqueDeniedTableNames = this.unique(deniedTableNames).slice(0, 64);
+    const uniqueDeniedColumnNames = this.unique(deniedColumnNames).slice(0, 128);
+    const reasonCodes =
+      uniqueDeniedEvidenceIds.length > 0
+        ? ["permission_filtered_not_in_allowed_tables"]
+        : [];
+    return {
+      candidates: keptCandidates,
+      evidence: {
+        status: uniqueDeniedEvidenceIds.length > 0 ? "applied" : "skipped",
+        denied_evidence_ids: uniqueDeniedEvidenceIds,
+        denied_table_names: uniqueDeniedTableNames,
+        denied_column_names: uniqueDeniedColumnNames,
+        reason_codes: reasonCodes,
+        kept_candidate_count: keptCandidates.length,
+        deniedEvidenceIds: uniqueDeniedEvidenceIds,
+        deniedTableNames: uniqueDeniedTableNames,
+        deniedColumnNames: uniqueDeniedColumnNames,
+        reasonCodes: reasonCodes,
+        keptCandidateCount: keptCandidates.length
+      }
+    };
+  }
+
   private createEmptyLaneResults(
     laneTimeoutMs: Record<RagRetrievalLane, number>,
     degradeReason: string
@@ -1721,6 +1823,33 @@ export class RagRetrievalService {
     return source.column_pruning ?? source.columnPruning;
   }
 
+  private attachPermissionFilteringEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"],
+    evidence: PermissionFilteringEvidence | undefined
+  ): void {
+    const target = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      permission_filtering?: PermissionFilteringEvidence;
+      permissionFiltering?: PermissionFilteringEvidence;
+    };
+    if (!evidence) {
+      delete target.permission_filtering;
+      delete target.permissionFiltering;
+      return;
+    }
+    target.permission_filtering = evidence;
+    target.permissionFiltering = evidence;
+  }
+
+  private readPermissionFilteringEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"]
+  ): PermissionFilteringEvidence | undefined {
+    const source = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      permission_filtering?: PermissionFilteringEvidence;
+      permissionFiltering?: PermissionFilteringEvidence;
+    };
+    return source.permission_filtering ?? source.permissionFiltering;
+  }
+
   private readDenseVectorMetadata(
     context: RagRetrievalEntryContext
   ): DenseVectorMetadata | undefined {
@@ -1994,6 +2123,8 @@ export class RagRetrievalService {
       bundle.context_pack?.instructionSets?.modelBindings?.length ??
       0;
     const priorSqlLane = bundle.prior_sql_lane ?? bundle.priorSqlLane;
+    const permissionFiltering = this.readPermissionFilteringEvidence(bundle);
+    const permissionReasonCodes = this.unique(permissionFiltering?.reason_codes ?? []);
 
     laneMetadata.push(
       {
@@ -2006,7 +2137,9 @@ export class RagRetrievalService {
         selected_count: selectedContext.filter((chunk) => chunk.metadata.domain === "schema").length,
         selectedCount: selectedContext.filter((chunk) => chunk.metadata.domain === "schema").length,
         evidence_ids: schemaCandidates.map((candidate) => candidate.chunk_id),
-        evidenceIds: schemaCandidates.map((candidate) => candidate.chunk_id)
+        evidenceIds: schemaCandidates.map((candidate) => candidate.chunk_id),
+        reason_codes: permissionReasonCodes,
+        reasonCodes: permissionReasonCodes
       },
       {
         lane: "example_sql",
@@ -2139,6 +2272,22 @@ export class RagRetrievalService {
       });
     }
 
+    const permissionFiltering = this.readPermissionFilteringEvidence(bundle);
+    if (permissionFiltering?.status === "applied") {
+      const reasonCodes = this.unique(permissionFiltering.reason_codes ?? []);
+      decisions.push({
+        budget_source: "context_pack",
+        removed_evidence_ids: permissionFiltering.denied_evidence_ids ?? [],
+        kept_evidence_ids: selectedEvidenceIds,
+        reason_codes: reasonCodes,
+        summary: `context_pack:permission_filtering:${reasonCodes.join("|") || "applied"}`,
+        budgetSource: "context_pack",
+        removedEvidenceIds: permissionFiltering.denied_evidence_ids ?? [],
+        keptEvidenceIds: selectedEvidenceIds,
+        reasonCodes
+      });
+    }
+
     return decisions;
   }
 
@@ -2179,6 +2328,9 @@ export class RagRetrievalService {
     const selectedContextLanes = this.unique(
       selectedContext.map((entry) => entry.metadata.domain)
     );
+    const permissionFiltering = bundle
+      ? this.readPermissionFilteringEvidence(bundle)
+      : undefined;
 
     return {
       status: input.status,
@@ -2209,7 +2361,11 @@ export class RagRetrievalService {
       degrade_reasons: this.unique(input.degradeReasons),
       risk_tags: this.unique(
         input.status === "degraded"
-          ? ["semantic_spine_degraded", ...(bundle?.risk_tags ?? [])]
+          ? [
+              "semantic_spine_degraded",
+              ...(permissionFiltering?.status === "applied" ? ["permission_filtered"] : []),
+              ...(bundle?.risk_tags ?? [])
+            ]
           : bundle?.risk_tags ?? []
       )
     };
@@ -2371,6 +2527,7 @@ export class RagRetrievalService {
           bundle.context_pack?.pruning_decisions ??
           bundle.context_pack?.pruningDecisions ??
           [],
+        permissionFiltering: this.readPermissionFilteringEvidence(bundle),
         skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
           chunkId: candidate.chunk_id,

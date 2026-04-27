@@ -5,6 +5,7 @@
 - Backend LLM gateway migrates to Vercel AI SDK core (`ai` + `@ai-sdk/openai-compatible`).
 - Chat primary request path supports SSE streaming endpoint.
 - Tool Calling baseline is enabled with allowlisted server-side tools.
+- Text2SQL v2 active runtime seam 是 `RunV2LangGraphStage`（LangGraph internal runtime），不再以 `RunV2StateMachineStage` 作为主路径。
 - 开发联调入口拓扑统一为 `http://localhost:3000`（Nginx）；`/` 转前端内部 `3001`，`/api/*` 转后端内部 `3002`。
 - 上述入口拓扑调整不改变 `/api/v1/*` 路由合同、SSE 事件字段或 Tool Calling 语义。
 

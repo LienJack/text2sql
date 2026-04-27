@@ -92,6 +92,60 @@ describe("RerankRouterService", () => {
     });
   });
 
+  it("throws output count mismatch when provider returns fewer candidates", async () => {
+    const service = createService({
+      generateRawText: JSON.stringify({
+        reranked: [
+          {
+            candidateId: "chunk-1",
+            score: 0.88,
+            reason: "partial result"
+          }
+        ]
+      })
+    });
+    const twoCandidatesInput = {
+      query: "orders amount",
+      candidates: [
+        ...rerankInput.candidates,
+        {
+          candidateId: "chunk-2",
+          content: "table customers(id, city)",
+          domain: "schema",
+          sourceLane: "dense",
+          evidence: ["token:customers"],
+          baseScore: 0.6
+        }
+      ]
+    };
+
+    await expect(service.rerankCandidatesWithMetadata(twoCandidatesInput)).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "RERANK_PROVIDER_OUTPUT_COUNT_MISMATCH"
+    });
+  });
+
+  it("throws invalid payload when provider returns unknown candidate ids", async () => {
+    const service = createService({
+      generateRawText: JSON.stringify({
+        reranked: [
+          {
+            candidateId: "chunk-unknown",
+            score: 0.91,
+            reason: "unknown"
+          }
+        ]
+      })
+    });
+
+    await expect(service.rerankCandidatesWithMetadata(rerankInput)).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "RERANK_PROVIDER_INVALID_PAYLOAD"
+    });
+  });
+
   it("surfaces provider missing errors instead of silently falling back", async () => {
     const service = createService({
       llmMockMode: true,

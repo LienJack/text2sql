@@ -11,8 +11,10 @@ export interface SemanticPlanValidationResult {
   unsupportedColumns: string[];
   reasons: string[];
   routeKind: "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
+  outcome: "ready" | "needs_clarification" | "direct_answer" | "fail_closed";
   evidenceComplete: boolean;
   requiresClarification: boolean;
+  shouldDirectAnswer: boolean;
   terminal: boolean;
 }
 
@@ -119,6 +121,14 @@ export class SemanticPlanValidator {
       routeKind === "fail_closed" ||
       unsupportedTables.length > 0 ||
       unsupportedColumns.length > 0;
+    const shouldDirectAnswer = routeKind === "metadata" || routeKind === "general";
+    const outcome = terminal
+      ? "fail_closed"
+      : shouldDirectAnswer
+        ? "direct_answer"
+        : routeKind === "clarify"
+          ? "needs_clarification"
+          : "ready";
 
     return {
       valid: reasons.length === 0,
@@ -127,8 +137,10 @@ export class SemanticPlanValidator {
       unsupportedColumns,
       reasons,
       routeKind,
+      outcome,
       evidenceComplete,
       requiresClarification: routeKind === "clarify",
+      shouldDirectAnswer,
       terminal
     };
   }

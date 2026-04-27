@@ -561,6 +561,14 @@ export class SqlPromptBuilder {
       plan.evidenceRefs.length > 0
         ? `evidenceRefs=${plan.evidenceRefs.slice(0, 10).join(", ")}`
         : "evidenceRefs=none";
+    const coverageGaps =
+      plan.coverageGaps && plan.coverageGaps.length > 0
+        ? `coverageGaps=${plan.coverageGaps
+            .slice(0, 6)
+            .map((gap) => `${gap.subjectKind}:${gap.reasonCode}`)
+            .join(" | ")}`
+        : "";
+    const snapshotId = plan.snapshotId ? `snapshotId=${plan.snapshotId}` : "";
     const routeGuardrail =
       routeKind === "metadata"
         ? "routeGuardrail=metadata_only"
@@ -586,6 +594,9 @@ export class SqlPromptBuilder {
       allowedTables,
       forbiddenTables,
       evidenceRefs,
+      coverageGaps,
+      snapshotId,
+      "Execution guardrail: stay within selectedTables/selectedColumns and do not invent out-of-plan joins or columns.",
       routeGuardrail
     ]
       .filter((item) => item.trim().length > 0)

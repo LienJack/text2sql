@@ -26,6 +26,22 @@ export class FormatAnswerNode {
       .join("\n");
   }
 
+  runDirectAnswer(answer: string, warnings: string[] = []): string {
+    return [answer.trim(), ...warnings.map((warning) => `说明：${warning}`)]
+      .filter((line) => line.length > 0)
+      .join("\n");
+  }
+
+  runFailClosed(reason: string, guidance?: string): string {
+    return [
+      "当前请求未通过安全或治理校验，系统已按 fail-closed 终止。",
+      reason.trim(),
+      guidance?.trim() || "请改为只读分析问题，或补充更明确且合规的分析范围后重试。"
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n");
+  }
+
   private buildMetricSummary(
     rows: Array<Record<string, unknown>>,
     numericColumns: string[]

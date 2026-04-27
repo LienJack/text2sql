@@ -10,6 +10,7 @@ import {
   type RagRerankStageMetadata,
   type RagRetrievalBundle,
   type RagRetrievalCandidate,
+  type RagRetrievalChunkPayload,
   type RagRerankedCandidate
 } from "../retrieval/rag-retrieval.types";
 import { ModelRerankerAdapter } from "./model-reranker.adapter";
@@ -39,6 +40,50 @@ const RERANK_CACHE_L2_TTL_MS = 3 * 60_000;
 interface SecondaryRerankExecution {
   scores: Record<string, { score: number; reason: string }>;
   metadata: RagRerankStageMetadata;
+}
+
+interface RerankContextPackLaneMetadata {
+  lane: "rerank";
+  state: "ready" | "degraded" | "unavailable" | "skipped";
+  provider?: string;
+  model?: string;
+  input_count?: number;
+  output_count?: number;
+  selected_count?: number;
+  timeout_ms?: number;
+  unavailable_reason?: string;
+  fallback_reason?: string;
+  evidence_ids?: string[];
+  reason_codes?: string[];
+  inputCount?: number;
+  outputCount?: number;
+  selectedCount?: number;
+  timeoutMs?: number;
+  unavailableReason?: string;
+  fallbackReason?: string;
+  evidenceIds?: string[];
+  reasonCodes?: string[];
+}
+
+interface RerankContextPackPruningDecision {
+  budget_source: "rerank_budget";
+  removed_evidence_ids: string[];
+  kept_evidence_ids: string[];
+  reason_codes: string[];
+  summary?: string;
+  budgetSource?: "rerank_budget";
+  removedEvidenceIds?: string[];
+  keptEvidenceIds?: string[];
+  reasonCodes?: string[];
+}
+
+interface ExtendedRagContextPack extends NonNullable<RagRetrievalBundle["context_pack"]> {
+  lane_metadata?: RerankContextPackLaneMetadata[];
+  laneMetadata?: RerankContextPackLaneMetadata[];
+  pruning_decisions?: RerankContextPackPruningDecision[];
+  pruningDecisions?: RerankContextPackPruningDecision[];
+  selected_context_lanes?: string[];
+  selectedContextLanes?: string[];
 }
 
 @Injectable()
@@ -244,7 +289,34 @@ export class RagRerankService {
       }
     };
     const existingContextPack = bundle.context_pack;
-    responseBundle.context_pack = {
+    const existingContextPackExtended = this.toExtendedContextPack(existingContextPack);
+    const existingLaneMetadata =
+      existingContextPackExtended?.lane_metadata ??
+      existingContextPackExtended?.laneMetadata ??
+      [];
+    const existingPruningDecisions =
+      existingContextPackExtended?.pruning_decisions ??
+      existingContextPackExtended?.pruningDecisions ??
+      [];
+    const rerankLaneMetadata = this.buildRerankLaneMetadata({
+      secondaryMetadata,
+      selectedContext
+    });
+    const mergedLaneMetadata = [
+      ...existingLaneMetadata.filter((lane) => lane.lane !== "rerank"),
+      rerankLaneMetadata
+    ];
+    const removedBySelectedContextLimit = reranked
+      .slice(selectedContext.length)
+      .map((candidate) => candidate.chunk_id);
+    const mergedPruningDecisions = this.mergePruningDecisions({
+      existingPruningDecisions,
+      decisionReasons: budgetDecision.decisionReasons,
+      selectedContext,
+      removedBySelectedContextLimit
+    });
+    const selectedContextLanes = this.unique(selectedContext.map((chunk) => chunk.metadata.domain));
+    const nextContextPack: ExtendedRagContextPack = {
       status: responseBundle.status,
       semantic_version: existingContextPack?.semantic_version,
       semantic_lock_status:
@@ -267,6 +339,12 @@ export class RagRerankService {
         count: selectedContext.length,
         snippets: selectedContext.map((chunk) => chunk.content.slice(0, 160)).slice(0, 5)
       },
+      lane_metadata: mergedLaneMetadata,
+      laneMetadata: mergedLaneMetadata,
+      pruning_decisions: mergedPruningDecisions,
+      pruningDecisions: mergedPruningDecisions,
+      selected_context_lanes: selectedContextLanes,
+      selectedContextLanes: selectedContextLanes,
       degrade_reasons: this.unique([
         ...(existingContextPack?.degrade_reasons ?? []),
         ...degradeReasons
@@ -276,6 +354,7 @@ export class RagRerankService {
         ...(responseBundle.risk_tags ?? [])
       ])
     };
+    responseBundle.context_pack = nextContextPack;
     await this.writeBudgetReplay(responseBundle, {
       decisionReasons: budgetDecision.decisionReasons,
       secondaryEnabled: budgetDecision.secondaryEnabled,
@@ -355,6 +434,29 @@ export class RagRerankService {
         reason: item.reason
       };
     }
+    const expectedCandidateIds = new Set(candidates.map((candidate) => candidate.chunk_id));
+    const returnedCandidateIds = Object.keys(scoreMap);
+    const unknownCandidateIds = returnedCandidateIds.filter(
+      (candidateId) => !expectedCandidateIds.has(candidateId)
+    );
+    const missingCandidateIds = candidates
+      .map((candidate) => candidate.chunk_id)
+      .filter((candidateId) => !returnedCandidateIds.includes(candidateId));
+    if (unknownCandidateIds.length > 0 || missingCandidateIds.length > 0) {
+      throw new DomainError(
+        "RERANK_PROVIDER_OUTPUT_CANDIDATE_MISMATCH",
+        "Rerank provider 返回候选集合与输入不一致。",
+        502,
+        {
+          provider: response.metadata.provider,
+          model: response.metadata.model,
+          unknownCandidateIds: unknownCandidateIds.slice(0, 20),
+          missingCandidateIds: missingCandidateIds.slice(0, 20),
+          expected: candidates.length,
+          actual: returnedCandidateIds.length
+        }
+      );
+    }
     if (Object.keys(scoreMap).length !== candidates.length) {
       throw new DomainError(
         "RERANK_PROVIDER_OUTPUT_COUNT_MISMATCH",
@@ -419,6 +521,95 @@ export class RagRerankService {
         }
         return left.chunk_id.localeCompare(right.chunk_id);
       });
+  }
+
+  private buildRerankLaneMetadata(input: {
+    secondaryMetadata: RagRerankStageMetadata;
+    selectedContext: RagRetrievalChunkPayload[];
+  }): RerankContextPackLaneMetadata {
+    const unavailableReason =
+      input.secondaryMetadata.unavailable_reason ?? input.secondaryMetadata.unavailableReason;
+    const fallbackReason =
+      input.secondaryMetadata.fallback_reason ?? input.secondaryMetadata.fallbackReason;
+    const state: RerankContextPackLaneMetadata["state"] =
+      input.secondaryMetadata.status === "ok"
+        ? "ready"
+        : unavailableReason
+          ? "unavailable"
+          : input.secondaryMetadata.status === "skipped"
+            ? "skipped"
+            : "degraded";
+    const evidenceIds =
+      input.secondaryMetadata.evidence_ids ?? input.secondaryMetadata.evidenceIds ?? [];
+    const reasonCodes = this.unique([
+      ...(unavailableReason ? [unavailableReason] : []),
+      ...(fallbackReason ? [fallbackReason] : [])
+    ]);
+    return {
+      lane: "rerank",
+      state,
+      provider: input.secondaryMetadata.provider,
+      model: input.secondaryMetadata.model,
+      input_count: input.secondaryMetadata.input_count ?? input.secondaryMetadata.inputCount ?? 0,
+      inputCount: input.secondaryMetadata.input_count ?? input.secondaryMetadata.inputCount ?? 0,
+      output_count: input.secondaryMetadata.output_count ?? input.secondaryMetadata.outputCount ?? 0,
+      outputCount:
+        input.secondaryMetadata.output_count ?? input.secondaryMetadata.outputCount ?? 0,
+      selected_count: input.selectedContext.length,
+      selectedCount: input.selectedContext.length,
+      timeout_ms: input.secondaryMetadata.timeout_ms ?? input.secondaryMetadata.timeoutMs,
+      timeoutMs: input.secondaryMetadata.timeout_ms ?? input.secondaryMetadata.timeoutMs,
+      unavailable_reason: unavailableReason,
+      unavailableReason: unavailableReason,
+      fallback_reason: fallbackReason,
+      fallbackReason: fallbackReason,
+      evidence_ids: evidenceIds,
+      evidenceIds: evidenceIds,
+      reason_codes: reasonCodes,
+      reasonCodes: reasonCodes
+    };
+  }
+
+  private mergePruningDecisions(input: {
+    existingPruningDecisions: RerankContextPackPruningDecision[];
+    decisionReasons: string[];
+    selectedContext: RagRetrievalChunkPayload[];
+    removedBySelectedContextLimit: string[];
+  }): RerankContextPackPruningDecision[] {
+    const next = [...input.existingPruningDecisions];
+    if (
+      input.removedBySelectedContextLimit.length === 0 &&
+      input.decisionReasons.length === 0
+    ) {
+      return next;
+    }
+    const reasonCodes = this.unique([
+      ...input.decisionReasons,
+      ...(input.removedBySelectedContextLimit.length > 0
+        ? ["selected_context_limit_applied"]
+        : [])
+    ]);
+    next.push({
+      budget_source: "rerank_budget",
+      removed_evidence_ids: input.removedBySelectedContextLimit,
+      kept_evidence_ids: input.selectedContext.map((chunk) => chunk.chunk_id),
+      reason_codes: reasonCodes,
+      summary: `rerank_budget:selected_context_limit=${input.selectedContext.length}`,
+      budgetSource: "rerank_budget",
+      removedEvidenceIds: input.removedBySelectedContextLimit,
+      keptEvidenceIds: input.selectedContext.map((chunk) => chunk.chunk_id),
+      reasonCodes: reasonCodes
+    });
+    return next;
+  }
+
+  private toExtendedContextPack(
+    contextPack: RagRetrievalBundle["context_pack"]
+  ): ExtendedRagContextPack | undefined {
+    if (!contextPack) {
+      return undefined;
+    }
+    return contextPack as ExtendedRagContextPack;
   }
 
   private domainBoost(domain: string): number {

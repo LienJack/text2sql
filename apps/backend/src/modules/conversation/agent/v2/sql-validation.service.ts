@@ -18,6 +18,7 @@ interface ValidateSqlInput {
 }
 
 type RouteKind = "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
+export type SqlValidationOutcome = "pass" | "correctable" | "terminal";
 
 @Injectable()
 export class SqlValidationService {
@@ -96,6 +97,16 @@ export class SqlValidationService {
         correctable
       }
     };
+  }
+
+  resolveOutcome(artifact: SqlValidationArtifactV1): SqlValidationOutcome {
+    if (artifact.status === "passed") {
+      return "pass";
+    }
+    if (artifact.status === "failed" && artifact.correctable && !artifact.failure?.terminal) {
+      return "correctable";
+    }
+    return "terminal";
   }
 
   private validateParse(sql: string): SqlValidationCheckV1 {

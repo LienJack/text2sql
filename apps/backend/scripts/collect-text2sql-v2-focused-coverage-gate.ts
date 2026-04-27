@@ -40,6 +40,9 @@ interface FlowMatrixNode {
   gateRelevance: boolean;
   behaviorTestStatus: "covered" | "partial" | "missing" | "planned";
   coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+  canonicalRuntimeOwners?: string[];
+  canonicalOwnerStatus?: "covered" | "partial" | "missing" | "planned";
+  contractAssertionMode?: "behavior_contract" | "legacy_runtime_detail";
 }
 
 interface EvalFixtureFamily {
@@ -56,11 +59,29 @@ interface CriticalFileOwnerMigration {
   threshold?: { line?: number };
 }
 
+interface RuntimeCoverageRow {
+  id: string;
+  owners: string[];
+  expectedTestFiles: string[];
+  coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+  critical: boolean;
+  blocker?: string;
+}
+
+interface RuntimePathPlan {
+  currentActivePath: string[];
+  targetActivePath: string[];
+  criticalOwners: string[];
+  blockerPolicy: string;
+}
+
 export interface CloseoutFlowMatrix {
   version: string;
   nodes: FlowMatrixNode[];
   evalFixtureFamilies: EvalFixtureFamily[];
   criticalFileOwnerMigrations?: CriticalFileOwnerMigration[];
+  runtimeCoverageRows?: RuntimeCoverageRow[];
+  runtimePaths?: RuntimePathPlan;
 }
 
 interface CriticalFileResult {
@@ -86,6 +107,8 @@ export interface FocusedCoverageGateReport {
     incompleteNodes: Array<{ id: string; reasons: string[] }>;
     evalFixtureFamilyCount: number;
     incompleteEvalFixtureFamilies: Array<{ family: string; reasons: string[] }>;
+    runtimeCoverageRowCount: number;
+    incompleteRuntimeCoverageRows: Array<{ id: string; reasons: string[] }>;
     gatePass: boolean;
   };
   rollout: {
@@ -107,7 +130,7 @@ const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
     line: 75
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
     line: 80
   },
   {
@@ -123,8 +146,20 @@ const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
     line: 75
   },
   {
-    file: "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts",
+    file: "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
     line: 80
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    line: 80
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+    line: 80
+  },
+  {
+    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts",
+    line: 75
   }
 ];
 
@@ -218,6 +253,22 @@ function resolveCriticalFile(
   matrix: CloseoutFlowMatrix,
   threshold: CriticalFileThreshold
 ): { file: string; entry?: IstanbulFileCoverage; migrated: boolean; reason?: string; lineThreshold: number } {
+  const migration = matrix.criticalFileOwnerMigrations?.find(
+    (item) => item.from === threshold.file
+  );
+  if (migration) {
+    const migratedEntry = findCoverageEntry(coverage, migration.to);
+    if (migratedEntry) {
+      return {
+        file: migration.to,
+        entry: migratedEntry,
+        migrated: true,
+        reason: migration.reason,
+        lineThreshold: migration.threshold?.line ?? threshold.line
+      };
+    }
+  }
+
   const directEntry = findCoverageEntry(coverage, threshold.file);
   if (directEntry) {
     return {
@@ -228,9 +279,6 @@ function resolveCriticalFile(
     };
   }
 
-  const migration = matrix.criticalFileOwnerMigrations?.find(
-    (item) => item.from === threshold.file
-  );
   if (!migration) {
     return {
       file: threshold.file,
@@ -314,6 +362,19 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     if (node.coverageOwnerStatus !== "covered") {
       reasons.push(`coverage_owner_status_${node.coverageOwnerStatus}`);
     }
+    if (!node.canonicalRuntimeOwners || node.canonicalRuntimeOwners.length === 0) {
+      reasons.push("missing_canonical_runtime_owners");
+    }
+    if (!node.canonicalOwnerStatus) {
+      reasons.push("missing_canonical_owner_status");
+    } else if (node.canonicalOwnerStatus === "missing") {
+      reasons.push("canonical_owner_status_missing");
+    }
+    if (node.contractAssertionMode !== "behavior_contract") {
+      reasons.push(
+        `contract_assertion_mode_${node.contractAssertionMode ?? "missing"}`
+      );
+    }
     return reasons.length > 0 ? [{ id: node.id, reasons }] : [];
   });
 
@@ -331,6 +392,23 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     return reasons.length > 0 ? [{ family: family.family, reasons }] : [];
   });
 
+  const incompleteRuntimeCoverageRows = (matrix.runtimeCoverageRows ?? []).flatMap((row) => {
+    const reasons: string[] = [];
+    if (row.owners.length === 0) {
+      reasons.push("missing_runtime_owners");
+    }
+    if (row.expectedTestFiles.length === 0) {
+      reasons.push("missing_runtime_expected_tests");
+    }
+    if (row.coverageOwnerStatus === "missing") {
+      reasons.push("runtime_coverage_owner_status_missing");
+    }
+    if (row.critical && typeof row.blocker !== "string") {
+      reasons.push("missing_runtime_blocker");
+    }
+    return reasons.length > 0 ? [{ id: row.id, reasons }] : [];
+  });
+
   return {
     version: matrix.version,
     nodeCount: matrix.nodes.length,
@@ -338,7 +416,12 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     incompleteNodes,
     evalFixtureFamilyCount: matrix.evalFixtureFamilies.length,
     incompleteEvalFixtureFamilies,
-    gatePass: incompleteNodes.length === 0 && incompleteEvalFixtureFamilies.length === 0
+    runtimeCoverageRowCount: matrix.runtimeCoverageRows?.length ?? 0,
+    incompleteRuntimeCoverageRows,
+    gatePass:
+      incompleteNodes.length === 0 &&
+      incompleteEvalFixtureFamilies.length === 0 &&
+      incompleteRuntimeCoverageRows.length === 0
   };
 }
 
@@ -396,6 +479,9 @@ export function evaluateFocusedCoverageGate(params: {
     ),
     ...flowMatrix.incompleteEvalFixtureFamilies.map(
       (item) => `eval_family:${item.family}:${item.reasons.join("|")}`
+    ),
+    ...flowMatrix.incompleteRuntimeCoverageRows.map(
+      (item) => `runtime_row:${item.id}:${item.reasons.join("|")}`
     )
   ];
 

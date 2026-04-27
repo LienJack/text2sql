@@ -96,4 +96,41 @@ describe("SqlPromptBuilder", () => {
       "Relationship bindings: rel.orders_customers"
     );
   });
+
+  it("renders semantic-plan guardrails including coverage gaps and snapshot id", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("统计订单 GMV", "sqlite", undefined, {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "统计订单 GMV",
+        selectedTables: ["orders", "customers"],
+        selectedColumns: ["orders.amount", "orders.customer_id", "customers.id"],
+        confidence: 0.91,
+        evidenceRefs: ["chunk-orders-1"],
+        filters: ["route_kind:text_to_sql"],
+        joinPath: ["orders->customers"],
+        coverageGaps: [
+          {
+            gapType: "evidence_gap",
+            subjectKind: "join_path",
+            reasonCode: "relationship_path_needs_review",
+            evidenceRefs: ["chunk-orders-1"],
+            impactScope: "sql_generation"
+          }
+        ],
+        snapshotId: "semantic-plan:text-to-sql:ready:t2:c3:e1:g1:orders"
+      }
+    });
+
+    expect(prompt.systemPrompt).toContain("Typed semantic plan (must follow):");
+    expect(prompt.systemPrompt).toContain(
+      "coverageGaps=join_path:relationship_path_needs_review"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "snapshotId=semantic-plan:text-to-sql:ready:t2:c3:e1:g1:orders"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "Execution guardrail: stay within selectedTables/selectedColumns"
+    );
+  });
 });

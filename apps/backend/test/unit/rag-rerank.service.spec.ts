@@ -251,12 +251,25 @@ describe("rag rerank service", () => {
 
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining([
-        "secondary_rerank_unavailable_rerank_provider_output_count_mismatch"
+        "secondary_rerank_unavailable_rerank_provider_output_candidate_mismatch"
       ])
     );
     expect(response.retrieval_bundle.reranked?.[0]?.chunk_id).toBe("chunk-a");
     expect(response.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
       true
+    );
+    const contextPack = response.retrieval_bundle.context_pack as
+      | {
+          lane_metadata?: Array<{ lane?: string; state?: string }>;
+        }
+      | undefined;
+    expect(contextPack?.lane_metadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lane: "rerank",
+          state: "unavailable"
+        })
+      ])
     );
   });
 

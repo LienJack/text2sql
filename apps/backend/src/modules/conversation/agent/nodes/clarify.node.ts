@@ -6,7 +6,7 @@ import {
   type SlotFillingDecision
 } from "./slot-filling-context";
 
-interface ClarificationRoundPolicy {
+export interface ClarificationRoundPolicy {
   round: number;
   maxRounds: number;
 }
@@ -65,6 +65,10 @@ export class ClarifyNode {
     contextEnvelope?: ContextEnvelope
   ): ClarificationPrompt | undefined {
     const decision = this.evaluate(question, contextEnvelope);
+    return this.toPrompt(decision);
+  }
+
+  toPrompt(decision: SlotFillingDecision): ClarificationPrompt | undefined {
     if (!decision.shouldClarify) {
       return undefined;
     }
@@ -82,7 +86,7 @@ export class ClarifyNode {
     };
   }
 
-  private resolveRoundPolicy(contextEnvelope?: ContextEnvelope): ClarificationRoundPolicy {
+  resolveRoundPolicy(contextEnvelope?: ContextEnvelope): ClarificationRoundPolicy {
     const policy: ClarificationRoundPolicy = {
       round: 0,
       maxRounds: 2

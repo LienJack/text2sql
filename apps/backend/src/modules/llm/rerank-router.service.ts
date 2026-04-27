@@ -115,6 +115,11 @@ export class RerankRouterService {
         }
       );
     }
+    this.assertProviderCandidateCoverage(parsed, input.candidates, {
+      provider: completion.provider,
+      model: completion.model,
+      configSource: runtime.configSource
+    });
     return {
       results: parsed,
       metadata: {
@@ -225,6 +230,63 @@ export class RerankRouterService {
       return [];
     }
     return Array.from(new Set(tokens.filter((token) => token.trim().length > 0)));
+  }
+
+  private assertProviderCandidateCoverage(
+    parsed: RerankCandidateResult[],
+    candidates: RerankCandidateInput[],
+    metadata: {
+      provider: string;
+      model: string;
+      configSource: "settings" | "env_fallback" | "missing";
+    }
+  ): void {
+    const candidateIds = new Set(candidates.map((candidate) => candidate.candidateId));
+    const parsedIds = parsed.map((item) => item.candidateId);
+    const duplicateIds = parsedIds.filter(
+      (candidateId, index) => parsedIds.indexOf(candidateId) !== index
+    );
+    if (duplicateIds.length > 0) {
+      throw new DomainError(
+        "RERANK_PROVIDER_INVALID_PAYLOAD",
+        "Rerank provider 返回重复 candidateId。",
+        502,
+        {
+          provider: metadata.provider,
+          model: metadata.model,
+          configSource: metadata.configSource,
+          duplicateCandidateIds: Array.from(new Set(duplicateIds)).slice(0, 20)
+        }
+      );
+    }
+    const unknownCandidateIds = parsedIds.filter((candidateId) => !candidateIds.has(candidateId));
+    if (unknownCandidateIds.length > 0) {
+      throw new DomainError(
+        "RERANK_PROVIDER_INVALID_PAYLOAD",
+        "Rerank provider 返回未知 candidateId。",
+        502,
+        {
+          provider: metadata.provider,
+          model: metadata.model,
+          configSource: metadata.configSource,
+          unknownCandidateIds: Array.from(new Set(unknownCandidateIds)).slice(0, 20)
+        }
+      );
+    }
+    if (parsed.length !== candidates.length) {
+      throw new DomainError(
+        "RERANK_PROVIDER_OUTPUT_COUNT_MISMATCH",
+        "Rerank provider 返回结果数量与候选数量不一致。",
+        502,
+        {
+          provider: metadata.provider,
+          model: metadata.model,
+          configSource: metadata.configSource,
+          expected: candidates.length,
+          actual: parsed.length
+        }
+      );
+    }
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

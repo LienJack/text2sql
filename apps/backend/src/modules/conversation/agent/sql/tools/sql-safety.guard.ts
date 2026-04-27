@@ -112,6 +112,8 @@ export class SqlSafetyGuard {
         decision.reason ?? "Tool SQL 未通过只读安全校验。",
         400,
         {
+          terminal: true,
+          correctable: false,
           mode: decision.mode,
           riskLevel: decision.riskLevel,
           riskTags: decision.riskTags

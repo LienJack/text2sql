@@ -1,6 +1,5 @@
 import { DomainError } from "../../src/common/domain-error";
 import { Text2SQLWorkflowRunner } from "../../src/modules/conversation/text2sql/text2sql-workflow-runner.service";
-import { RunV2StateMachineStage } from "../../src/modules/conversation/text2sql/stages/run-v2-state-machine.stage";
 
 describe("Text2SQLWorkflowRunner", () => {
   const createPrepared = () => ({
@@ -110,17 +109,16 @@ describe("Text2SQLWorkflowRunner", () => {
     });
   });
 
-  it("routes sync flow through the real v2 state-machine stage wrapper", async () => {
+  it("delegates the prepared run to the configured v2 stage contract", async () => {
     const prepared = createPrepared();
-    const v2Runner = {
+    const runAgentGraphStage = {
       runSync: jest.fn().mockResolvedValue(createRun()),
       runStream: jest.fn()
     };
-    const runV2StateMachineStage = new RunV2StateMachineStage(v2Runner as never);
     const runner = new Text2SQLWorkflowRunner(
       { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
       { run: jest.fn().mockResolvedValue(prepared) } as never,
-      runV2StateMachineStage,
+      runAgentGraphStage as never,
       { run: jest.fn(async (run) => run) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
@@ -136,7 +134,7 @@ describe("Text2SQLWorkflowRunner", () => {
       message: "统计订单总数"
     });
 
-    expect(v2Runner.runSync).toHaveBeenCalledWith(
+    expect(runAgentGraphStage.runSync).toHaveBeenCalledWith(
       prepared,
       "/api/v1/sessions/:sessionId/messages"
     );
@@ -295,7 +293,7 @@ describe("Text2SQLWorkflowRunner", () => {
         }
       }
     }) as any;
-    const v2Runner = {
+    const runAgentGraphStage = {
       runSync: jest.fn(),
       runStream: jest.fn(async (_input, _route, options) => {
         await options?.onStep?.({
@@ -317,7 +315,6 @@ describe("Text2SQLWorkflowRunner", () => {
         return canonicalRun;
       })
     };
-    const runV2StateMachineStage = new RunV2StateMachineStage(v2Runner as never);
     const delivery = {
       answer: {
         text: "订单总数为 10",
@@ -343,7 +340,7 @@ describe("Text2SQLWorkflowRunner", () => {
     const runner = new Text2SQLWorkflowRunner(
       { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
       { run: jest.fn().mockResolvedValue(prepared) } as never,
-      runV2StateMachineStage,
+      runAgentGraphStage as never,
       {
         run: jest.fn(async (run) => ({
           ...run,
@@ -389,7 +386,7 @@ describe("Text2SQLWorkflowRunner", () => {
       }
     });
 
-    expect(v2Runner.runStream).toHaveBeenCalledWith(
+    expect(runAgentGraphStage.runStream).toHaveBeenCalledWith(
       prepared,
       "/api/v1/sessions/:sessionId/messages/stream",
       expect.any(Object)

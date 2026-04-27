@@ -91,6 +91,7 @@ export class ExecuteSqlNode {
             422,
             {
               correctable: true,
+              validationOutcome: "correctable",
               correctionReason: validation.failure.code,
               maxAttempts: this.sqlCorrectionService.maxAttempts,
               validationFailure: validation.failure,
@@ -104,6 +105,10 @@ export class ExecuteSqlNode {
           422,
           {
             correctable: false,
+            validationOutcome: "terminal",
+            governanceFailClosed:
+              validation.failure.category === "governance" ||
+              validation.failure.code === "SQL_READ_ONLY_VIOLATION",
             validationFailure: validation.failure,
             validationArtifact: validation
           }

@@ -134,7 +134,21 @@ describe("text2sql v2 semantic context pack", () => {
               reason_codes: ["removed_low_score_examples"],
               summary: "removed 3 low-score examples"
             }
-          ]
+          ],
+          permission_filtering: {
+            status: "applied",
+            denied_evidence_ids: ["chunk-secret-orders"],
+            denied_table_names: ["secret_orders"],
+            denied_column_names: ["secret_orders.internal_note"],
+            reason_codes: ["permission_filtered_not_in_allowed_tables"]
+          }
+        },
+        permission_filtering: {
+          status: "applied",
+          denied_evidence_ids: ["chunk-secret-orders"],
+          denied_table_names: ["secret_orders"],
+          denied_column_names: ["secret_orders.internal_note"],
+          reason_codes: ["permission_filtered_not_in_allowed_tables"]
         }
       },
       additionalWarnings: ["context_source_disclosure:retrieval_bundle"]
@@ -146,12 +160,19 @@ describe("text2sql v2 semantic context pack", () => {
         "lexical_fallback_used",
         "dense_unavailable:dense_unavailable:provider_missing",
         "rerank_unavailable:secondary_rerank_timeout",
+        "dense_state:unavailable",
+        "rerank_state:degraded",
         "dense_unavailable:provider_missing",
         "dense_reason:embedding_provider_missing",
         "rerank_degraded:deterministic_primary_ranking",
         "rerank_reason:secondary_rerank_timeout",
         "pruning_summary:removed 3 low-score examples",
         "pruning_token_budget:removed_low_score_examples",
+        "permission_filter_status:applied",
+        "permission_filter_reason:permission_filtered_not_in_allowed_tables",
+        "permission_denied_table:secret_orders",
+        "permission_denied_column:secret_orders.internal_note",
+        "permission_denied_evidence_count:1",
         "context_source_disclosure:retrieval_bundle"
       ])
     );

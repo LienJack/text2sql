@@ -1,9 +1,11 @@
 import type {
   Text2SqlV2FailureSemantic,
+  Text2SqlV2LoopEvidence,
   Text2SqlV2ProviderMetadata,
   Text2SqlV2RunArtifact,
   Text2SqlV2StageArtifact,
-  Text2SqlV2StageName
+  Text2SqlV2StageName,
+  Text2SqlV2TerminationReason
 } from "@text2sql/shared-types";
 import { TEXT2SQL_V2_STAGE_ORDER } from "./text2sql-v2.types";
 
@@ -74,6 +76,8 @@ export interface Text2SqlV2StageLifecycle {
     semanticPlan?: Text2SqlV2RunArtifact["semanticPlan"];
     sqlGeneration?: Text2SqlV2RunArtifact["sqlGeneration"];
     sqlValidation?: Text2SqlV2RunArtifact["sqlValidation"];
+    loopEvidence?: Text2SqlV2LoopEvidence[];
+    terminationReason?: Text2SqlV2TerminationReason;
   }) => Text2SqlV2RunArtifact;
 }
 
@@ -170,7 +174,9 @@ export const createText2SqlV2StageLifecycle = (): Text2SqlV2StageLifecycle => {
       contextPack: input?.contextPack,
       semanticPlan: input?.semanticPlan,
       sqlGeneration: input?.sqlGeneration,
-      sqlValidation: input?.sqlValidation
+      sqlValidation: input?.sqlValidation,
+      loopEvidence: input?.loopEvidence ? [...input.loopEvidence] : undefined,
+      terminationReason: input?.terminationReason
     })
   };
 };

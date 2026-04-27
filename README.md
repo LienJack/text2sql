@@ -4,7 +4,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ## 技术栈
 - 后端：NestJS + TypeScript + Prisma
-- Agent：Text2SQL v2 Ask 状态机（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`），由 `conversation/text2sql` 统一入口驱动
+- Agent：Text2SQL v2 LangGraph runtime（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`），由 `conversation/text2sql` 统一入口驱动
 - 前端：Next.js + React + Tailwind CSS v4 + shadcn-ui
 - 查询数据：SQLite / MySQL / PostgreSQL / CSV / Excel（会话绑定数据源路由）
 - 功能数据：Redis 缓冲 + PostgreSQL 持久化

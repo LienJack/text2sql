@@ -38,6 +38,9 @@ import { SemanticPlanService } from "./v2/semantic-plan.service";
 import { SemanticPlanValidator } from "./v2/semantic-plan.validator";
 import { SqlValidationService } from "./v2/sql-validation.service";
 import { SqlCorrectionService } from "./v2/sql-correction.service";
+import { Text2SqlV2ArtifactBuilder } from "./v2/text2sql-v2-artifact-builder";
+import { Text2SqlV2LangGraphResultMapper } from "./v2/langgraph/text2sql-v2-langgraph-result.mapper";
+import { Text2SqlV2LangGraphRunnerService } from "./v2/langgraph/text2sql-v2-langgraph-runner.service";
 import { Text2SqlV2StateMachine } from "./v2/text2sql-v2-state-machine";
 import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
 
@@ -90,12 +93,15 @@ import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
     SemanticPlanValidator,
     SqlValidationService,
     SqlCorrectionService,
+    Text2SqlV2ArtifactBuilder,
+    Text2SqlV2LangGraphResultMapper,
+    Text2SqlV2LangGraphRunnerService,
     Text2SqlV2StateMachine,
     Text2SqlV2RunnerService
   ],
   exports: [
     SqlToolRegistryService,
-    Text2SqlV2RunnerService
+    Text2SqlV2LangGraphRunnerService
   ]
 })
 export class AgentModule {}

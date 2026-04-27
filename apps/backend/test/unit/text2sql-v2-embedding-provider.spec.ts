@@ -302,6 +302,46 @@ describe("Text2Sql v2 embedding provider", () => {
     });
   });
 
+  it("rejects vectors when provider dimension mismatches configured runtime dimension", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        data: [{ embedding: [0.1, 0.2] }]
+      })
+    }) as never;
+    const config = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "development",
+        EMBEDDING_MOCK_MODE: "false",
+        EMBEDDING_PROVIDER: "openai",
+        EMBEDDING_MODEL: "embedding-v1"
+      }) as ConfigService
+    );
+    const service = new EmbeddingRouterService(
+      config,
+      createRagTaskConfigServiceMock({
+        taskType: "embedding",
+        provider: "openai",
+        model: "embedding-v1",
+        baseUrl: "https://embedding.example/v1",
+        apiKey: "test-key",
+        dimensions: 3,
+        timeoutMs: 1000,
+        configSource: "settings"
+      }) as RagTaskConfigService
+    );
+
+    await expect(service.embed({ texts: ["orders"] })).rejects.toMatchObject<
+      Partial<DomainError>
+    >({
+      code: "EMBEDDING_PROVIDER_DIMENSION_MISMATCH",
+      details: {
+        expectedDimensions: 3,
+        actualDimensions: 2
+      }
+    });
+  });
+
   it("keeps provider metadata on successful external requests", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,

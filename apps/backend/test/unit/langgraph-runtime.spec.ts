@@ -1,4 +1,9 @@
 import type { SqlRun } from "@text2sql/shared-types";
+import { createText2SqlV2LangGraph } from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph";
+import {
+  createText2SqlV2LangGraphInitialState,
+  TEXT2SQL_V2_LANGGRAPH_NODE_ORDER
+} from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.state";
 import { Text2SqlV2StateMachine } from "../../src/modules/conversation/agent/v2/text2sql-v2-state-machine";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
@@ -239,5 +244,41 @@ describe("text2sql v2 runtime artifacts", () => {
     const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
     expect(artifact.stages.find((stage) => stage.stage === "intake")?.status).toBe("clarification");
     expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("skipped");
+  });
+
+  it("compiles canonical langgraph backbone and delegates run at answer node", async () => {
+    const graph = createText2SqlV2LangGraph({
+      runLegacyRuntime: jest.fn(async () => createBaseRun())
+    });
+    const finalState = await graph.invoke(
+      createText2SqlV2LangGraphInitialState({
+        preparedRun: {
+          runId: "run-v2-runtime",
+          requestId: "req-v2-runtime",
+          question: "统计订单总数",
+          session: {
+            id: "session-v2-runtime",
+            datasource: "sqlite_main",
+            modelProvider: "volcengine",
+            modelName: "mock-model"
+          },
+          datasource: {
+            id: "sqlite_main",
+            type: "sqlite"
+          },
+          sqlAccessContext: undefined,
+          contextEnvelope: undefined,
+          userPersistResult: {
+            primaryPersisted: true
+          }
+        } as never,
+        route: "/api/v1/sessions/:sessionId/messages",
+        streamMode: false
+      })
+    );
+
+    expect(finalState.stageProgress).toEqual([...TEXT2SQL_V2_LANGGRAPH_NODE_ORDER]);
+    expect(finalState.legacyRun?.status).toBe("executionResult");
+    expect(finalState.legacyRun?.trace.v2?.version).toBe("v2");
   });
 });
