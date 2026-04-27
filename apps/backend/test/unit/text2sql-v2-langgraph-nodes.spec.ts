@@ -1,12 +1,14 @@
 import { ClarifyNode } from "../../src/modules/conversation/agent/nodes/clarify.node";
 import { FormatAnswerNode } from "../../src/modules/conversation/agent/nodes/format-answer.node";
 import { IntakeNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/intake.node";
+import { AssembleContextNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/assemble-context.node";
 import { SemanticPlanNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/semantic-plan.node";
 import { GenerateSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/generate-sql.node";
 import { ValidateSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/validate-sql.node";
 import { CorrectSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/correct-sql.node";
 import { ExecuteSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/execute-sql.node";
 import { AnswerNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/answer.node";
+import { SemanticContextPackService } from "../../src/modules/conversation/agent/v2/semantic-context-pack.service";
 import { SemanticPlanService } from "../../src/modules/conversation/agent/v2/semantic-plan.service";
 import { SemanticPlanValidator } from "../../src/modules/conversation/agent/v2/semantic-plan.validator";
 import { SqlValidationService } from "../../src/modules/conversation/agent/v2/sql-validation.service";
@@ -32,7 +34,8 @@ describe("text2sql v2 langgraph nodes", () => {
       expect(node.run({ question: "有哪些表" })).toMatchObject({
         route: "metadata",
         semanticIntent: "metadata",
-        directAnswer: "这是元数据查询，请查看当前数据源的表、字段与语义证据。"
+        directAnswer:
+          "这是元数据问题，我会基于可访问的表结构与语义证据直接说明，不执行 SQL。"
       });
 
       expect(node.run({ question: "什么是 GMV 口径？" })).toMatchObject({
@@ -129,6 +132,104 @@ describe("text2sql v2 langgraph nodes", () => {
     });
   });
 
+  describe("assemble-context node", () => {
+    const node = new AssembleContextNode(new SemanticContextPackService());
+
+    it("emits rich context-pack fields and typed summary counts without raw snippets", () => {
+      const result = node.run({
+        retrievalBundle: {
+          status: "degraded",
+          selected_context: [
+            {
+              chunk_id: "schema-orders",
+              content: "orders schema",
+              metadata: {
+                tableNames: ["Orders"],
+                columnNames: ["Orders.Id"]
+              }
+            }
+          ],
+          context_pack: {
+            lane_metadata: [
+              {
+                lane: "dense",
+                state: "unavailable",
+                unavailable_reason: "provider_missing",
+                reason_codes: ["embedding_provider_missing"],
+                evidence_ids: ["dense.orders.1"]
+              },
+              {
+                lane: "metric",
+                state: "ready",
+                evidence_ids: ["metric.gmv"],
+                reason_codes: ["metric_binding_selected"]
+              }
+            ],
+            pruning_decisions: [
+              {
+                budget_source: "context_pack",
+                kept_evidence_ids: ["schema-orders"],
+                removed_evidence_ids: ["dense.orders.1"],
+                reason_codes: ["token_budget_limited"],
+                summary: "removed low confidence dense chunk"
+              }
+            ],
+            permission_filtering: {
+              status: "applied",
+              denied_evidence_ids: ["secret-chunk"],
+              denied_table_names: ["secret_orders"],
+              denied_column_names: ["secret_orders.internal_note"],
+              reason_codes: ["permission_filtered_not_in_allowed_tables"]
+            },
+            semantic_bindings: {
+              model_keys: ["model.orders"],
+              metric_keys: ["metric.gmv"]
+            }
+          },
+          degrade_reasons: ["lexical_fallback_used"]
+        },
+        additionalWarnings: ["context_source_disclosure:retrieval_bundle"]
+      });
+
+      expect(result.contextPack.version).toBe("v1.rich");
+      expect(result.contextPack.capabilities).toEqual(
+        expect.arrayContaining([
+          "selected_context_summary",
+          "structured_lanes",
+          "structured_degradation",
+          "structured_pruning",
+          "structured_permission_filtering"
+        ])
+      );
+      expect(result.contextPack.selectedContextSummary).toMatchObject({
+        count: 1,
+        evidenceIds: expect.arrayContaining(["schema-orders"])
+      });
+      expect(result.contextPack.selectedContextSummary).toEqual(
+        expect.not.objectContaining({ snippets: expect.anything() })
+      );
+      expect(result.contextPack.degradation).toMatchObject({
+        status: "degraded",
+        reasons: ["lexical_fallback_used"]
+      });
+      expect(result.contextPack.permissionFiltering).toMatchObject({
+        status: "applied",
+        deniedEvidenceCount: 1
+      });
+      expect(result.typedSummary).toMatchObject({
+        status: "degraded",
+        version: "v1.rich",
+        capabilityCount: expect.any(Number),
+        selectedEvidenceCount: expect.any(Number),
+        degradedLaneCount: 1,
+        permissionDeniedEvidenceCount: 1
+      });
+      expect(result.evidenceRefs).toEqual(
+        expect.arrayContaining(["schema-orders", "dense.orders.1", "metric.gmv"])
+      );
+    });
+  });
+
   describe("generate-sql node", () => {
     it("returns a structured artifact with cause, evidence, used tables and columns", async () => {
       const sqlGenerationService = {
@@ -181,13 +282,71 @@ describe("text2sql v2 langgraph nodes", () => {
         }),
         datasourceType: "sqlite",
         cause: "initial",
-        retryReason: undefined
+        retryReason: undefined,
+        correctionGrounding: undefined
       });
       expect(result.artifact).toMatchObject({
         cause: "initial",
         usedTables: ["orders"],
         evidenceRefs: ["chunk-orders-1"]
       });
+    });
+
+    it("passes correction grounding into generation selection and artifact build", async () => {
+      const correctionGrounding = {
+        failedSqlRef: "sql.sha256.abc123abc123abcd",
+        retryReason: "missing column orders.missing_city",
+        attemptCount: 1,
+        maxAttempts: 2,
+        evidenceRefs: ["chunk-orders-1"]
+      };
+      const sqlGenerationService = {
+        generate: jest.fn().mockResolvedValue({
+          provider: "volcengine",
+          model: "mock-model",
+          sql: "SELECT orders.id FROM orders",
+          explanation: "retry with corrected column",
+          rawText: "SELECT orders.id FROM orders",
+          prompt: {
+            systemPrompt: "system",
+            userPrompt: "user"
+          },
+          semanticPlan: readyPlan
+        }),
+        buildStructuredArtifact: jest.fn().mockReturnValue({
+          sql: "SELECT orders.id FROM orders",
+          usedTables: ["orders"],
+          usedColumns: ["orders.id", "id"],
+          evidenceRefs: ["chunk-orders-1"],
+          cause: "correction",
+          dialect: "sqlite",
+          correctionGrounding
+        })
+      };
+      const node = new GenerateSqlNode(sqlGenerationService as never);
+
+      await node.run({
+        question: "统计订单总数",
+        datasourceType: "sqlite",
+        semanticPlan: readyPlan,
+        cause: "correction",
+        retryReason: "missing column orders.missing_city",
+        correctionGrounding
+      });
+
+      expect(sqlGenerationService.generate).toHaveBeenCalledWith(
+        "统计订单总数",
+        expect.objectContaining({
+          correctionGrounding
+        })
+      );
+      expect(sqlGenerationService.buildStructuredArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cause: "correction",
+          retryReason: "missing column orders.missing_city",
+          correctionGrounding
+        })
+      );
     });
 
     it("rejects non text-to-sql semantic plans before generation", async () => {
@@ -294,7 +453,19 @@ describe("text2sql v2 langgraph nodes", () => {
         artifact: {
           shouldRevalidate: true,
           semanticPlanSnapshotId: readyPlan.snapshotId,
-          evidenceRefs: ["chunk-orders-1"]
+          evidenceRefs: ["chunk-orders-1"],
+          grounding: {
+            failedSqlRef: expect.stringMatching(/^sql\.sha256\.[0-9a-f]{16}$/),
+            retryReason: "missing column orders.missing_city",
+            failureCode: "SQL_MISSING_COLUMN",
+            failureCategory: "validation",
+            source: "validation",
+            attemptCount: 1,
+            maxAttempts: 2,
+            semanticPlanSnapshotId: readyPlan.snapshotId,
+            contextPackStatus: "ready",
+            contextPackEvidenceCount: 1
+          }
         }
       });
     });
@@ -465,6 +636,88 @@ describe("text2sql v2 langgraph nodes", () => {
         mode: "fail_closed",
         status: "rejected"
       });
+    });
+
+    it("builds evidence-grounded metadata direct answers and keeps general direct answers lightweight", () => {
+      const metadataAnswer = node.run({
+        question: "有哪些表",
+        directAnswer:
+          "这是元数据问题，我会基于可访问的表结构与语义证据直接说明，不执行 SQL。",
+        semanticPlan: {
+          ...readyPlan,
+          filters: ["route_kind:metadata"],
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id", "orders.amount"],
+          evidenceRefs: ["schema-orders", "metric-gmv"]
+        },
+        contextPack: {
+          status: "degraded",
+          selectedEvidenceIds: ["schema-orders", "metric-gmv"],
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id", "orders.amount"],
+          selectedContextSummary: {
+            count: 2,
+            evidenceIds: ["schema-orders", "metric-gmv"],
+            laneNames: ["schema", "metric"]
+          },
+          lanes: {
+            schemaSupplementRefs: {
+              refs: ["schema-supplement-1"],
+              count: 1
+            }
+          },
+          pruning: {
+            applied: true,
+            decisions: [
+              {
+                keptCount: 2,
+                removedCount: 1,
+                reasonCodes: ["token_budget_limited"]
+              }
+            ]
+          },
+          permissionFiltering: {
+            status: "applied",
+            deniedEvidenceCount: 1,
+            deniedEvidenceIds: ["secret-chunk"],
+            deniedTables: ["secret_orders"],
+            reasonCodes: ["permission_filtered_not_in_allowed_tables"]
+          },
+          degradation: {
+            status: "degraded",
+            reasons: ["lexical_fallback_used"]
+          },
+          laneStates: [
+            {
+              lane: "dense",
+              state: "unavailable",
+              reasonCodes: ["embedding_provider_missing"]
+            }
+          ],
+          warnings: ["dense_unavailable:embedding_provider_missing"]
+        }
+      });
+
+      expect(metadataAnswer).toMatchObject({
+        mode: "direct_answer",
+        status: "executionResult",
+        evidenceRefs: expect.arrayContaining(["schema-orders", "metric-gmv"])
+      });
+      expect(metadataAnswer.answer).toContain("元数据证据摘要：已选中 2 条上下文证据。");
+      expect(metadataAnswer.answer).toContain("裁剪情况：已触发");
+      expect(metadataAnswer.answer).toContain("权限过滤：已应用");
+      expect(metadataAnswer.answer).toContain("证据质量：degraded");
+      expect(metadataAnswer.answer).not.toContain("secret_orders");
+
+      const generalAnswer = node.run({
+        question: "什么是 GMV 口径？",
+        directAnswer: "这是通用说明问题，不需要执行 SQL；我会基于已有语义证据直接解释。",
+        semanticPlan: {
+          ...readyPlan,
+          filters: ["route_kind:general"]
+        }
+      });
+      expect(generalAnswer.answer).not.toContain("元数据证据摘要");
     });
   });
 });

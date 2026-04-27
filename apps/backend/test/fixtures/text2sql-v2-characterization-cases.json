@@ -101,7 +101,8 @@
       ],
       "flowNodes": [
         "A.context-envelope",
-        "M.final-answer-replay-artifacts"
+        "M.final-answer-replay-artifacts",
+        "SC.context-pack-parity"
       ]
     }
   },

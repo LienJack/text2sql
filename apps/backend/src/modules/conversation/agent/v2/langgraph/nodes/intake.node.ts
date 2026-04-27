@@ -103,7 +103,8 @@ export class IntakeNode {
         confidence: 0.95,
         evidenceRefs,
         semanticIntent: "metadata",
-        directAnswer: "这是元数据查询，请查看当前数据源的表、字段与语义证据。"
+        directAnswer:
+          "这是元数据问题，我会基于可访问的表结构与语义证据直接说明，不执行 SQL。"
       };
     }
 

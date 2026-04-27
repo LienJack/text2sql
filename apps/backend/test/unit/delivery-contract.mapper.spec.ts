@@ -137,6 +137,193 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.artifact?.hasError).toBe(false);
   });
 
+  it("mirrors context-pack and metadata-answer summaries from trace.v2", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      sql: undefined,
+      rows: undefined,
+      columns: undefined,
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success",
+              metadata: {
+                route: "metadata"
+              }
+            },
+            { stage: "retrieve", status: "success" },
+            { stage: "assemble-context", status: "success" },
+            { stage: "semantic-plan", status: "success" },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "skipped" },
+            { stage: "correct", status: "skipped" },
+            { stage: "execute", status: "skipped" },
+            { stage: "answer", status: "success" }
+          ],
+          contextPack: {
+            status: "degraded",
+            selectedEvidenceIds: ["schema-orders", "metric-gmv"],
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id", "orders.amount"],
+            selectedContextSummary: {
+              count: 2,
+              evidenceIds: ["schema-orders", "metric-gmv"]
+            },
+            pruning: {
+              applied: true,
+              decisions: [
+                {
+                  removedCount: 1
+                }
+              ]
+            },
+            permissionFiltering: {
+              status: "applied",
+              deniedEvidenceCount: 1
+            },
+            laneStates: [
+              {
+                lane: "dense",
+                state: "unavailable"
+              }
+            ],
+            degradation: {
+              status: "degraded",
+              reasons: ["dense_unavailable:provider_missing"]
+            }
+          },
+          semanticPlan: {
+            route: "answer",
+            standaloneQuestion: "数据库有哪些表",
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id", "orders.amount"],
+            confidence: 0.87,
+            evidenceRefs: ["schema-orders", "metric-gmv"],
+            filters: ["route_kind:metadata"]
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.contextPackSummary).toEqual({
+      status: "degraded",
+      selectedEvidenceCount: 2,
+      selectedTableCount: 1,
+      selectedColumnCount: 2,
+      pruningApplied: true,
+      prunedEvidenceCount: 1,
+      degradedLaneCount: 1,
+      permissionFilteringApplied: true,
+      permissionDeniedEvidenceCount: 1,
+      degradationReasons: ["dense_unavailable:provider_missing"]
+    });
+    expect(delivery.evidence?.metadataAnswer).toEqual({
+      groundedByContextPack: true,
+      routeKind: "metadata",
+      evidenceQuality: "degraded",
+      selectedEvidenceCount: 2,
+      permissionFilteringApplied: true,
+      pruningApplied: true,
+      degradationReasons: ["dense_unavailable:provider_missing"]
+    });
+  });
+
+  it("mirrors correction grounding from trace.v2 sqlGeneration artifact", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 1,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "retrieve", status: "success" },
+            { stage: "assemble-context", status: "success" },
+            { stage: "semantic-plan", status: "success" },
+            { stage: "generate-sql", status: "success" },
+            { stage: "validate", status: "success" },
+            { stage: "correct", status: "success" },
+            { stage: "execute", status: "success" },
+            { stage: "answer", status: "success" }
+          ],
+          sqlGeneration: {
+            sql: "SELECT orders.id FROM orders",
+            usedTables: ["orders"],
+            usedColumns: ["orders.id"],
+            evidenceRefs: ["chunk-orders-1"],
+            correctionGrounding: {
+              failedSqlRef: "sql.sha256.abc123abc123abcd",
+              retryReason: "missing column orders.missing_city",
+              failureCode: "SQL_MISSING_COLUMN",
+              failureCategory: "validation",
+              source: "validation",
+              attemptCount: 1,
+              maxAttempts: 2,
+              evidenceRefs: ["chunk-orders-1"],
+              semanticPlanSnapshotId: "semantic-plan-1",
+              semanticPlanRoute: "answer",
+              semanticPlanRouteKind: "text_to_sql",
+              selectedTableCount: 1,
+              selectedColumnCount: 1,
+              contextPackStatus: "ready",
+              contextPackEvidenceCount: 1
+            }
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.correctionGrounding).toMatchObject({
+      failedSqlRef: "sql.sha256.abc123abc123abcd",
+      retryReason: "missing column orders.missing_city",
+      attemptCount: 1,
+      maxAttempts: 2,
+      failureCode: "SQL_MISSING_COLUMN"
+    });
+  });
+
   it("accepts chartbi artifact override and preserves unified answer semantics", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

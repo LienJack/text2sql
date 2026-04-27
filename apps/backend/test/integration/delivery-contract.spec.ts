@@ -130,6 +130,17 @@ describe("delivery contract integration", () => {
     expect(
       (finishData.delivery as { evidence?: { runId?: string } }).evidence?.runId
     ).toBe(finish?.event.runId);
+    const syncContextPackSummary = (
+      syncRes.body.data.delivery?.evidence?.contextPackSummary as
+        | Record<string, unknown>
+        | undefined
+    );
+    if (syncContextPackSummary) {
+      expect(
+        (finishData.delivery as { evidence?: { contextPackSummary?: unknown } }).evidence
+          ?.contextPackSummary
+      ).toEqual(syncContextPackSummary);
+    }
 
     const messagesRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)

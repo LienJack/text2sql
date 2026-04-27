@@ -408,4 +408,53 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(prompt.systemPrompt).toContain("selectedTables=orders");
     expect(prompt.systemPrompt).toContain("forbiddenTables=refunds");
   });
+
+  it("injects structured correction grounding into retry prompt", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT orders.id FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("查询订单ID", {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "查询订单ID",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.id"],
+        confidence: 0.9,
+        evidenceRefs: ["chunk-orders-1"],
+        filters: ["route_kind:text_to_sql"],
+        snapshotId: "semantic-plan-v1"
+      },
+      correctionGrounding: {
+        failedSqlRef: "sql.sha256.abc123abc123abcd",
+        failedSqlPreview: "SELECT missing_city FROM orders",
+        retryReason: "missing column orders.missing_city",
+        failureCode: "SQL_MISSING_COLUMN",
+        failureCategory: "validation",
+        source: "validation",
+        attemptCount: 1,
+        maxAttempts: 2,
+        evidenceRefs: ["chunk-orders-1"],
+        semanticPlanSnapshotId: "semantic-plan-v1",
+        semanticPlanRouteKind: "text_to_sql"
+      },
+      semanticIntent: "general"
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.systemPrompt).toContain(
+      "Correction grounding (must consume for this retry):"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "failedSqlRef=sql.sha256.abc123abc123abcd"
+    );
+    expect(prompt.systemPrompt).toContain("failureCode=SQL_MISSING_COLUMN");
+    expect(prompt.systemPrompt).toContain("retryReason=missing column orders.missing_city");
+  });
 });

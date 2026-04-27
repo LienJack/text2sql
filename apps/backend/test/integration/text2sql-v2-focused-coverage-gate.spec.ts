@@ -326,6 +326,43 @@ describe("text2sql v2 focused coverage gate", () => {
     ]);
   });
 
+  it("fails when strict-completion rows are missing behavior traceability", () => {
+    const matrix = coveredMatrix();
+    matrix.strictCompletionRows = [
+      {
+        id: "SC.metadata-grounding",
+        implementationOwners: [
+          "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/answer.node.ts"
+        ],
+        evidenceOwners: ["run.delivery.evidence.metadataAnswer"],
+        expectedTestFiles: [],
+        behaviorTestStatus: "partial",
+        coverageOwnerStatus: "covered",
+        contractAssertionMode: "behavior_contract"
+      }
+    ];
+
+    const report = evaluateFocusedCoverageGate({
+      coverage: coverageFor(ALL_COVERAGE_FILES),
+      matrix
+    });
+
+    expect(report.rollout.gatePass).toBe(false);
+    expect(report.flowMatrix.incompleteStrictCompletionRows).toEqual([
+      {
+        id: "SC.metadata-grounding",
+        reasons: ["missing_expected_behavior_tests", "behavior_test_status_partial"]
+      }
+    ]);
+    expect(report.rollout.reasons).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "strict_row:SC.metadata-grounding:missing_expected_behavior_tests|behavior_test_status_partial"
+        )
+      ])
+    );
+  });
+
   it("requires explicit owner migration metadata when a critical file is replaced", () => {
     const replacementFile =
       "apps/backend/src/modules/conversation/agent/v2/sql-correction-decision.service.ts";

@@ -45,6 +45,16 @@ interface FlowMatrixNode {
   contractAssertionMode?: "behavior_contract" | "legacy_runtime_detail";
 }
 
+interface StrictCompletionRow {
+  id: string;
+  implementationOwners: string[];
+  evidenceOwners: string[];
+  expectedTestFiles: string[];
+  behaviorTestStatus: "covered" | "partial" | "missing" | "planned";
+  coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+  contractAssertionMode?: "behavior_contract" | "legacy_runtime_detail";
+}
+
 interface EvalFixtureFamily {
   family: string;
   evalCases: string[];
@@ -81,6 +91,7 @@ interface RuntimePathPlan {
 export interface CloseoutFlowMatrix {
   version: string;
   nodes: FlowMatrixNode[];
+  strictCompletionRows?: StrictCompletionRow[];
   evalFixtureFamilies: EvalFixtureFamily[];
   criticalFileOwnerMigrations?: CriticalFileOwnerMigration[];
   runtimeCoverageRows?: RuntimeCoverageRow[];
@@ -111,6 +122,8 @@ export interface FocusedCoverageGateReport {
     incompleteNodes: Array<{ id: string; reasons: string[] }>;
     evalFixtureFamilyCount: number;
     incompleteEvalFixtureFamilies: Array<{ family: string; reasons: string[] }>;
+    strictCompletionRowCount: number;
+    incompleteStrictCompletionRows: Array<{ id: string; reasons: string[] }>;
     runtimeCoverageRowCount: number;
     incompleteRuntimeCoverageRows: Array<{ id: string; reasons: string[] }>;
     runtimePathReasons: string[];
@@ -473,6 +486,33 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     return reasons.length > 0 ? [{ family: family.family, reasons }] : [];
   });
 
+  const incompleteStrictCompletionRows = (matrix.strictCompletionRows ?? []).flatMap(
+    (row) => {
+      const reasons: string[] = [];
+      if (row.implementationOwners.length === 0) {
+        reasons.push("missing_implementation_owners");
+      }
+      if (row.evidenceOwners.length === 0) {
+        reasons.push("missing_evidence_owners");
+      }
+      if (row.expectedTestFiles.length === 0) {
+        reasons.push("missing_expected_behavior_tests");
+      }
+      if (row.behaviorTestStatus !== "covered") {
+        reasons.push(`behavior_test_status_${row.behaviorTestStatus}`);
+      }
+      if (row.coverageOwnerStatus !== "covered") {
+        reasons.push(`coverage_owner_status_${row.coverageOwnerStatus}`);
+      }
+      if (row.contractAssertionMode !== "behavior_contract") {
+        reasons.push(
+          `contract_assertion_mode_${row.contractAssertionMode ?? "missing"}`
+        );
+      }
+      return reasons.length > 0 ? [{ id: row.id, reasons }] : [];
+    }
+  );
+
   const incompleteRuntimeCoverageRows = (matrix.runtimeCoverageRows ?? []).flatMap((row) => {
     const reasons: string[] = [];
     if (row.owners.length === 0) {
@@ -530,12 +570,15 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     incompleteNodes,
     evalFixtureFamilyCount: matrix.evalFixtureFamilies.length,
     incompleteEvalFixtureFamilies,
+    strictCompletionRowCount: matrix.strictCompletionRows?.length ?? 0,
+    incompleteStrictCompletionRows,
     runtimeCoverageRowCount: matrix.runtimeCoverageRows?.length ?? 0,
     incompleteRuntimeCoverageRows,
     runtimePathReasons,
     gatePass:
       incompleteNodes.length === 0 &&
       incompleteEvalFixtureFamilies.length === 0 &&
+      incompleteStrictCompletionRows.length === 0 &&
       incompleteRuntimeCoverageRows.length === 0 &&
       runtimePathReasons.length === 0
   };
@@ -600,6 +643,9 @@ export function evaluateFocusedCoverageGate(params: {
     ),
     ...flowMatrix.incompleteEvalFixtureFamilies.map(
       (item) => `eval_family:${item.family}:${item.reasons.join("|")}`
+    ),
+    ...flowMatrix.incompleteStrictCompletionRows.map(
+      (item) => `strict_row:${item.id}:${item.reasons.join("|")}`
     ),
     ...flowMatrix.incompleteRuntimeCoverageRows.map(
       (item) => `runtime_row:${item.id}:${item.reasons.join("|")}`

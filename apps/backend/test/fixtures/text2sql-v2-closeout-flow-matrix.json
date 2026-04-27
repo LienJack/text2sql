@@ -506,6 +506,73 @@
       "contractAssertionMode": "behavior_contract"
     }
   ],
+  "strictCompletionRows": [
+    {
+      "id": "SC.metadata-grounding",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/answer.node.ts",
+        "apps/backend/src/modules/conversation/agent/nodes/format-answer.node.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[intake].metadata.route",
+        "run.delivery.evidence.metadataAnswer",
+        "run.delivery.evidence.contextPackSummary"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/integration/chat-context-envelope-accuracy.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "SC.correction-grounding",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/correct-sql.node.ts",
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/generate-sql.node.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-prompt.builder.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.sqlGeneration.correctionGrounding",
+        "run.delivery.evidence.correctionGrounding"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "SC.context-pack-parity",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts",
+        "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/assemble-context.node.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.contextPack",
+        "run.delivery.evidence.contextPackSummary",
+        "run.delivery.evidence.v2.contextPack"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/integration/delivery-contract.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    }
+  ],
   "evalFixtureFamilies": [
     {
       "family": "chinese-alias",

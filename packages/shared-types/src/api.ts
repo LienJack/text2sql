@@ -223,12 +223,128 @@ export interface Text2SqlV2StageArtifact {
   metadata?: Record<string, unknown>;
 }
 
+export type SemanticContextPackStatusV1 = "ready" | "degraded";
+export type SemanticContextPackCapabilityV1 =
+  | "structured_lanes"
+  | "structured_degradation"
+  | "structured_pruning"
+  | "structured_permission_filtering"
+  | "selected_context_summary"
+  | "semantic_binding_refs"
+  | (string & {});
+export type SemanticContextPackLaneStateV1Status =
+  | "ready"
+  | "degraded"
+  | "unavailable"
+  | "skipped"
+  | (string & {});
+export type SemanticContextPackPermissionFilteringStatusV1 =
+  | "applied"
+  | "skipped"
+  | (string & {});
+
+export interface SemanticContextPackIdentifierLaneV1 {
+  ids: string[];
+  count: number;
+  reasonCodes?: string[];
+}
+
+export interface SemanticContextPackReferenceLaneV1 {
+  refs: string[];
+  count: number;
+  reasonCodes?: string[];
+}
+
+export interface SemanticContextPackSemanticBindingsV1 {
+  modelKeys?: string[];
+  relationshipKeys?: string[];
+  metricKeys?: string[];
+  calculatedFieldKeys?: string[];
+}
+
+export interface SemanticContextPackStructuredLanesV1 {
+  tables?: SemanticContextPackIdentifierLaneV1;
+  columns?: SemanticContextPackIdentifierLaneV1;
+  aliases?: SemanticContextPackIdentifierLaneV1;
+  relationships?: SemanticContextPackReferenceLaneV1;
+  metrics?: SemanticContextPackReferenceLaneV1;
+  calculatedFields?: SemanticContextPackReferenceLaneV1;
+  examples?: SemanticContextPackReferenceLaneV1;
+  instructions?: SemanticContextPackReferenceLaneV1;
+  priorSql?: SemanticContextPackReferenceLaneV1;
+  schemaSupplementRefs?: SemanticContextPackReferenceLaneV1;
+  dialectFunctions?: SemanticContextPackReferenceLaneV1;
+  semanticBindings?: SemanticContextPackSemanticBindingsV1;
+}
+
+export interface SemanticContextPackSelectedContextSummaryV1 {
+  count: number;
+  evidenceIds: string[];
+  laneNames?: string[];
+}
+
+export interface SemanticContextPackLaneStateV1 {
+  lane: string;
+  state: SemanticContextPackLaneStateV1Status;
+  refs?: string[];
+  reasonCodes?: string[];
+  unavailableReason?: string;
+  fallbackReason?: string;
+  inputCount?: number;
+  outputCount?: number;
+  selectedCount?: number;
+}
+
+export interface SemanticContextPackDegradationV1 {
+  status: SemanticContextPackStatusV1;
+  reasons: string[];
+  riskTags?: string[];
+  denseUnavailableReason?: string;
+  rerankUnavailableReason?: string;
+  laneIssues?: SemanticContextPackLaneStateV1[];
+}
+
+export interface SemanticContextPackPruningDecisionV1 {
+  budgetSource?: string;
+  keptEvidenceIds?: string[];
+  removedEvidenceIds?: string[];
+  keptCount?: number;
+  removedCount?: number;
+  reasonCodes?: string[];
+  summary?: string;
+}
+
+export interface SemanticContextPackPruningV1 {
+  applied: boolean;
+  decisions: SemanticContextPackPruningDecisionV1[];
+}
+
+export interface SemanticContextPackPermissionFilteringV1 {
+  status: SemanticContextPackPermissionFilteringStatusV1;
+  deniedEvidenceIds?: string[];
+  deniedEvidenceCount?: number;
+  deniedTables?: string[];
+  deniedColumns?: string[];
+  reasonCodes?: string[];
+}
+
 export interface SemanticContextPackV1 {
-  status: "ready" | "degraded";
+  status: SemanticContextPackStatusV1;
   selectedEvidenceIds: string[];
   selectedTables: string[];
   selectedColumns: string[];
   warnings?: string[];
+  version?: string;
+  capabilities?: SemanticContextPackCapabilityV1[];
+  semanticVersion?: number;
+  modelingRevision?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  selectedContextSummary?: SemanticContextPackSelectedContextSummaryV1;
+  lanes?: SemanticContextPackStructuredLanesV1;
+  laneStates?: SemanticContextPackLaneStateV1[];
+  degradation?: SemanticContextPackDegradationV1;
+  pruning?: SemanticContextPackPruningV1;
+  permissionFiltering?: SemanticContextPackPermissionFilteringV1;
 }
 
 export interface SemanticPlanV1 {
@@ -271,12 +387,38 @@ export interface SemanticPlanCoverageGapV1 {
     | (string & {});
 }
 
+export interface SqlCorrectionGroundingV1 {
+  failedSqlRef: string;
+  failedSqlPreview?: string;
+  retryReason: string;
+  failureCode?: string;
+  failureCategory?:
+    | "validation"
+    | "governance"
+    | "safety"
+    | "provider"
+    | "execution"
+    | "unknown";
+  source?: "validation" | "execution";
+  attemptCount: number;
+  maxAttempts: number;
+  evidenceRefs: string[];
+  semanticPlanSnapshotId?: string;
+  semanticPlanRoute?: SemanticPlanV1["route"];
+  semanticPlanRouteKind?: "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
+  selectedTableCount?: number;
+  selectedColumnCount?: number;
+  contextPackStatus?: SemanticContextPackStatusV1;
+  contextPackEvidenceCount?: number;
+}
+
 export interface SqlGenerationArtifactV1 {
   sql: string;
   assumptions?: string[];
   usedTables: string[];
   usedColumns: string[];
   evidenceRefs: string[];
+  correctionGrounding?: SqlCorrectionGroundingV1;
 }
 
 export interface SqlValidationCheckV1 {
@@ -428,6 +570,29 @@ export interface DeliverySavedPriorSqlEvidence {
   safetyResult?: "passed" | "rejected" | "fallback_generated";
 }
 
+export interface DeliveryContextPackSummaryV1 {
+  status: SemanticContextPackStatusV1;
+  selectedEvidenceCount: number;
+  selectedTableCount: number;
+  selectedColumnCount: number;
+  pruningApplied: boolean;
+  prunedEvidenceCount?: number;
+  degradedLaneCount?: number;
+  permissionFilteringApplied: boolean;
+  permissionDeniedEvidenceCount?: number;
+  degradationReasons?: string[];
+}
+
+export interface DeliveryMetadataAnswerSummaryV1 {
+  groundedByContextPack: boolean;
+  routeKind?: "metadata" | "general";
+  evidenceQuality: "ready" | "degraded";
+  selectedEvidenceCount: number;
+  permissionFilteringApplied: boolean;
+  pruningApplied: boolean;
+  degradationReasons?: string[];
+}
+
 export interface DeliveryEvidenceLayer {
   runId: string;
   retrievalStatus?: "ready" | "degraded";
@@ -481,6 +646,9 @@ export interface DeliveryEvidenceLayer {
   };
   clarificationDecision?: ClarificationDecisionEvidence;
   savedPriorSql?: DeliverySavedPriorSqlEvidence;
+  contextPackSummary?: DeliveryContextPackSummaryV1;
+  metadataAnswer?: DeliveryMetadataAnswerSummaryV1;
+  correctionGrounding?: SqlCorrectionGroundingV1;
   evidenceStale?: boolean;
   v2?: {
     version?: "v2";

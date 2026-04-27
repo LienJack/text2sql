@@ -462,4 +462,498 @@ describe("text2sql v2 runtime artifacts", () => {
     expect(correctSqlNode.run).not.toHaveBeenCalled();
     expect(generateSqlNode.run).toHaveBeenCalledTimes(1);
   });
+
+  it("routes metadata intent through retrieve/assemble/semantic-plan and skips SQL stages", async () => {
+    const intakeNode = {
+      run: jest.fn().mockReturnValue({
+        originalQuestion: "数据库有哪些表",
+        normalizedQuestion: "数据库有哪些表",
+        standaloneQuestion: "数据库有哪些表",
+        route: "metadata",
+        reasonCodes: ["intake_metadata_detected"],
+        confidence: 0.95,
+        evidenceRefs: ["chunk-schema-orders"],
+        semanticIntent: "metadata",
+        directAnswer:
+          "这是元数据问题，我会基于可访问的表结构与语义证据直接说明，不执行 SQL。"
+      })
+    };
+    const retrieveContextNode = {
+      run: jest.fn().mockResolvedValue({
+        state: {
+          status: "ready",
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          evidenceRefs: ["chunk-schema-orders"],
+          selectedContextSummary: {
+            count: 1,
+            snippetPreviews: ["orders table schema"]
+          },
+          warnings: []
+        },
+        artifact: {
+          status: "ready",
+          evidenceRefs: ["chunk-schema-orders"],
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          retrievalBundle: {
+            run_id: "run-v2-runtime",
+            datasource_id: "sqlite_main",
+            status: "ready",
+            selected_context: [
+              {
+                chunk_id: "chunk-schema-orders",
+                content: "orders(id, amount, status)"
+              }
+            ],
+            degrade_reasons: []
+          },
+          contextPack: {
+            status: "ready",
+            selected_context: [
+              {
+                chunk_id: "chunk-schema-orders",
+                content: "orders(id, amount, status)"
+              }
+            ],
+            degrade_reasons: []
+          }
+        }
+      })
+    };
+    const assembleContextNode = {
+      run: jest.fn().mockReturnValue({
+        contextPack: {
+          status: "ready",
+          selectedEvidenceIds: ["chunk-schema-orders"],
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id", "orders.amount"]
+        },
+        typedSummary: {
+          status: "ready",
+          selectedEvidenceCount: 1,
+          selectedTableCount: 1,
+          selectedColumnCount: 2,
+          laneStateCounts: {
+            ready: 1,
+            degraded: 0,
+            unavailable: 0,
+            skipped: 0
+          },
+          pruningDecisionCount: 0,
+          permissionReasonCount: 0,
+          warningCount: 0
+        },
+        evidenceRefs: ["chunk-schema-orders"]
+      })
+    };
+    const semanticPlanNode = {
+      run: jest.fn().mockReturnValue({
+        route: "direct_answer",
+        plan: {
+          route: "answer",
+          standaloneQuestion: "数据库有哪些表",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id", "orders.amount"],
+          confidence: 0.88,
+          evidenceRefs: ["chunk-schema-orders"],
+          filters: ["route_kind:metadata"]
+        },
+        validation: {
+          valid: true,
+          lowConfidence: false,
+          unsupportedTables: [],
+          unsupportedColumns: [],
+          reasons: [],
+          routeKind: "metadata",
+          outcome: "direct_answer",
+          evidenceComplete: true,
+          requiresClarification: false,
+          shouldDirectAnswer: true,
+          terminal: false
+        }
+      })
+    };
+    const generateSqlNode = {
+      run: jest.fn()
+    };
+    const validateSqlNode = {
+      run: jest.fn()
+    };
+    const correctSqlNode = {
+      run: jest.fn()
+    };
+    const executeSqlNode = {
+      run: jest.fn()
+    };
+    const answerNode = {
+      run: jest.fn().mockReturnValue({
+        mode: "direct_answer",
+        answer: "orders 表包含 id、amount、status 字段。",
+        status: "executionResult",
+        evidenceRefs: ["chunk-schema-orders"],
+        warnings: []
+      })
+    };
+
+    const graph = createText2SqlV2LangGraph({
+      intakeNode: intakeNode as never,
+      retrieveContextNode: retrieveContextNode as never,
+      assembleContextNode: assembleContextNode as never,
+      semanticPlanNode: semanticPlanNode as never,
+      generateSqlNode: generateSqlNode as never,
+      validateSqlNode: validateSqlNode as never,
+      correctSqlNode: correctSqlNode as never,
+      executeSqlNode: executeSqlNode as never,
+      answerNode: answerNode as never,
+      resolveSqlTools: jest.fn().mockReturnValue({})
+    });
+    const finalState = await graph.invoke(
+      createText2SqlV2LangGraphInitialState({
+        preparedRun: {
+          runId: "run-v2-runtime",
+          requestId: "req-v2-runtime",
+          question: "数据库有哪些表",
+          session: {
+            id: "session-v2-runtime",
+            datasource: "sqlite_main",
+            modelProvider: "volcengine",
+            modelName: "mock-model"
+          },
+          datasource: {
+            id: "sqlite_main",
+            type: "sqlite"
+          },
+          sqlAccessContext: undefined,
+          contextEnvelope: undefined,
+          userPersistResult: {
+            primaryPersisted: true
+          }
+        } as never,
+        route: "/api/v1/sessions/:sessionId/messages",
+        streamMode: false
+      })
+    );
+
+    expect(finalState.stageProgress).toEqual([
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "answer"
+    ]);
+    expect(generateSqlNode.run).not.toHaveBeenCalled();
+    expect(validateSqlNode.run).not.toHaveBeenCalled();
+    expect(executeSqlNode.run).not.toHaveBeenCalled();
+    expect(answerNode.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes correction grounding into second generation attempt after correctable validation", async () => {
+    const intakeNode = {
+      run: jest.fn().mockReturnValue({
+        originalQuestion: "统计订单总数",
+        normalizedQuestion: "统计订单总数",
+        standaloneQuestion: "统计订单总数",
+        route: "text_to_sql",
+        reasonCodes: ["intake_ready_for_text_to_sql"],
+        confidence: 0.9,
+        evidenceRefs: ["chunk-orders-1"],
+        semanticIntent: "count"
+      })
+    };
+    const retrieveContextNode = {
+      run: jest.fn().mockResolvedValue({
+        state: {
+          status: "ready",
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          evidenceRefs: ["chunk-orders-1"],
+          selectedContextSummary: {
+            count: 1,
+            snippetPreviews: ["orders snippet"]
+          },
+          warnings: []
+        },
+        artifact: {
+          status: "ready",
+          evidenceRefs: ["chunk-orders-1"],
+          typedSummary: {
+            denseState: "ready",
+            denseReason: undefined,
+            rerankState: "ready",
+            rerankReason: undefined,
+            degradeReasons: []
+          },
+          retrievalBundle: {
+            run_id: "run-v2-runtime",
+            datasource_id: "sqlite_main",
+            status: "ready",
+            selected_context: [{ chunk_id: "chunk-orders-1", content: "orders snippet" }],
+            degrade_reasons: []
+          },
+          contextPack: {
+            status: "ready",
+            selected_context: [{ chunk_id: "chunk-orders-1", content: "orders snippet" }],
+            degrade_reasons: []
+          }
+        }
+      })
+    };
+    const assembleContextNode = {
+      run: jest.fn().mockReturnValue({
+        contextPack: {
+          status: "ready",
+          selectedEvidenceIds: ["chunk-orders-1"],
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id"]
+        },
+        typedSummary: {
+          status: "ready",
+          selectedEvidenceCount: 1,
+          selectedTableCount: 1,
+          selectedColumnCount: 1,
+          laneStateCounts: {
+            ready: 1,
+            degraded: 0,
+            unavailable: 0,
+            skipped: 0
+          },
+          pruningDecisionCount: 0,
+          permissionReasonCount: 0,
+          warningCount: 0
+        },
+        evidenceRefs: ["chunk-orders-1"]
+      })
+    };
+    const semanticPlanNode = {
+      run: jest.fn().mockReturnValue({
+        route: "ready",
+        plan: {
+          route: "answer",
+          standaloneQuestion: "统计订单总数",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.id"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"],
+          snapshotId: "semantic-plan-1",
+          filters: ["route_kind:text_to_sql"]
+        },
+        validation: {
+          valid: true,
+          lowConfidence: false,
+          unsupportedTables: [],
+          unsupportedColumns: [],
+          reasons: [],
+          routeKind: "text_to_sql",
+          outcome: "ready",
+          evidenceComplete: true,
+          requiresClarification: false,
+          shouldDirectAnswer: false,
+          terminal: false
+        }
+      })
+    };
+    const generateSqlNode = {
+      run: jest
+        .fn()
+        .mockResolvedValueOnce({
+          draft: {
+            provider: "volcengine",
+            model: "mock-model",
+            sql: "SELECT missing_city FROM orders",
+            explanation: "initial attempt",
+            rawText: "SELECT missing_city FROM orders",
+            prompt: {
+              systemPrompt: "system",
+              userPrompt: "user"
+            }
+          },
+          artifact: {
+            sql: "SELECT missing_city FROM orders",
+            assumptions: ["initial attempt"],
+            usedTables: ["orders"],
+            usedColumns: ["orders.missing_city"],
+            evidenceRefs: ["chunk-orders-1"],
+            cause: "initial",
+            dialect: "sqlite"
+          }
+        })
+        .mockResolvedValueOnce({
+          draft: {
+            provider: "volcengine",
+            model: "mock-model",
+            sql: "SELECT orders.id FROM orders",
+            explanation: "retry attempt",
+            rawText: "SELECT orders.id FROM orders",
+            prompt: {
+              systemPrompt: "system",
+              userPrompt: "user"
+            }
+          },
+          artifact: {
+            sql: "SELECT orders.id FROM orders",
+            assumptions: ["retry attempt"],
+            usedTables: ["orders"],
+            usedColumns: ["orders.id"],
+            evidenceRefs: ["chunk-orders-1"],
+            cause: "correction",
+            dialect: "sqlite"
+          }
+        })
+    };
+    const validateSqlNode = {
+      run: jest
+        .fn()
+        .mockResolvedValueOnce({
+          outcome: "correctable",
+          artifact: {
+            status: "failed",
+            checks: [],
+            correctable: true,
+            failure: {
+              code: "SQL_MISSING_COLUMN",
+              message: "missing column orders.missing_city",
+              category: "validation",
+              terminal: false,
+              correctable: true
+            }
+          }
+        })
+        .mockResolvedValueOnce({
+          outcome: "pass",
+          artifact: {
+            status: "passed",
+            checks: [],
+            correctable: false
+          }
+        })
+    };
+    const correctSqlNode = {
+      run: jest.fn().mockReturnValue({
+        outcome: "retry_generation",
+        budget: {
+          attemptCount: 1,
+          maxAttempts: 2,
+          remainingAttempts: 1,
+          exhausted: false
+        },
+        artifact: {
+          failedSql: "SELECT missing_city FROM orders",
+          retryReason: "missing column orders.missing_city",
+          category: "validation",
+          source: "validation",
+          failureCode: "SQL_MISSING_COLUMN",
+          attemptCount: 1,
+          maxAttempts: 2,
+          semanticPlanSnapshotId: "semantic-plan-1",
+          evidenceRefs: ["chunk-orders-1"],
+          shouldRevalidate: true,
+          grounding: {
+            failedSqlRef: "sql.sha256.abc123abc123abcd",
+            retryReason: "missing column orders.missing_city",
+            failureCode: "SQL_MISSING_COLUMN",
+            failureCategory: "validation",
+            source: "validation",
+            attemptCount: 1,
+            maxAttempts: 2,
+            evidenceRefs: ["chunk-orders-1"],
+            semanticPlanSnapshotId: "semantic-plan-1",
+            semanticPlanRoute: "answer",
+            semanticPlanRouteKind: "text_to_sql",
+            selectedTableCount: 1,
+            selectedColumnCount: 1,
+            contextPackStatus: "ready",
+            contextPackEvidenceCount: 1
+          }
+        }
+      })
+    };
+    const executeSqlNode = {
+      run: jest.fn().mockResolvedValue({
+        rows: [{ total: 10 }],
+        columns: ["total"],
+        rowCount: 1,
+        emptyResult: false
+      })
+    };
+    const answerNode = {
+      run: jest.fn().mockReturnValue({
+        mode: "execution_result",
+        answer: "订单总数为 10",
+        status: "executionResult",
+        evidenceRefs: ["chunk-orders-1"],
+        warnings: []
+      })
+    };
+
+    const graph = createText2SqlV2LangGraph({
+      intakeNode: intakeNode as never,
+      retrieveContextNode: retrieveContextNode as never,
+      assembleContextNode: assembleContextNode as never,
+      semanticPlanNode: semanticPlanNode as never,
+      generateSqlNode: generateSqlNode as never,
+      validateSqlNode: validateSqlNode as never,
+      correctSqlNode: correctSqlNode as never,
+      executeSqlNode: executeSqlNode as never,
+      answerNode: answerNode as never,
+      resolveSqlTools: jest.fn().mockReturnValue({})
+    });
+    const finalState = await graph.invoke(
+      createText2SqlV2LangGraphInitialState({
+        preparedRun: {
+          runId: "run-v2-runtime",
+          requestId: "req-v2-runtime",
+          question: "统计订单总数",
+          session: {
+            id: "session-v2-runtime",
+            datasource: "sqlite_main",
+            modelProvider: "volcengine",
+            modelName: "mock-model"
+          },
+          datasource: {
+            id: "sqlite_main",
+            type: "sqlite"
+          },
+          sqlAccessContext: undefined,
+          contextEnvelope: undefined,
+          userPersistResult: {
+            primaryPersisted: true
+          }
+        } as never,
+        route: "/api/v1/sessions/:sessionId/messages",
+        streamMode: false
+      })
+    );
+
+    expect(generateSqlNode.run).toHaveBeenCalledTimes(2);
+    expect(generateSqlNode.run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        cause: "correction",
+        retryReason: "missing column orders.missing_city",
+        correctionGrounding: expect.objectContaining({
+          failedSqlRef: "sql.sha256.abc123abc123abcd",
+          attemptCount: 1,
+          maxAttempts: 2,
+          failureCode: "SQL_MISSING_COLUMN"
+        })
+      })
+    );
+    expect(finalState.answerResult?.status).toBe("executionResult");
+  });
 });

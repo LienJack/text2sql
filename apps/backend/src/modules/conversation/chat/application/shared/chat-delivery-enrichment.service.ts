@@ -460,7 +460,15 @@ export class ChatDeliveryEnrichmentService {
       contextPack: traceV2.contextPack,
       semanticPlan: traceV2.semanticPlan,
       sqlGeneration: traceV2.sqlGeneration,
-      sqlValidation: traceV2.sqlValidation
+      sqlValidation: traceV2.sqlValidation,
+      loopEvidence: traceV2.loopEvidence,
+      terminationReason: traceV2.terminationReason,
+      failure:
+        traceV2.sqlValidation?.failure ??
+        traceV2.stages
+          .slice()
+          .reverse()
+          .find((stage) => stage.status === "failed")?.failure
     };
   }
 

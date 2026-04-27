@@ -11,33 +11,99 @@ interface SemanticContextChunkPayload {
 interface AssembleContextRetrievalBundle {
   status?: "ready" | "degraded";
   selected_context?: SemanticContextChunkPayload[];
+  degrade_reasons?: string[];
+  degradeReasons?: string[];
   context_pack?: {
+    semantic_bindings?: {
+      model_keys?: string[];
+      relationship_keys?: string[];
+      metric_keys?: string[];
+      calculated_field_keys?: string[];
+      modelKeys?: string[];
+      relationshipKeys?: string[];
+      metricKeys?: string[];
+      calculatedFieldKeys?: string[];
+    };
+    semanticBindings?: {
+      model_keys?: string[];
+      relationship_keys?: string[];
+      metric_keys?: string[];
+      calculated_field_keys?: string[];
+      modelKeys?: string[];
+      relationshipKeys?: string[];
+      metricKeys?: string[];
+      calculatedFieldKeys?: string[];
+    };
     lane_metadata?: Array<{
       lane?: string;
       state?: string;
+      unavailable_reason?: string;
+      fallback_reason?: string;
+      evidence_ids?: string[];
+      denied_evidence_ids?: string[];
       reason_codes?: string[];
+      unavailableReason?: string;
+      fallbackReason?: string;
+      evidenceIds?: string[];
+      deniedEvidenceIds?: string[];
       reasonCodes?: string[];
     }>;
     laneMetadata?: Array<{
       lane?: string;
       state?: string;
+      unavailable_reason?: string;
+      fallback_reason?: string;
+      evidence_ids?: string[];
+      denied_evidence_ids?: string[];
       reason_codes?: string[];
+      unavailableReason?: string;
+      fallbackReason?: string;
+      evidenceIds?: string[];
+      deniedEvidenceIds?: string[];
       reasonCodes?: string[];
     }>;
     pruning_decisions?: Array<{
+      budget_source?: string;
+      kept_evidence_ids?: string[];
+      removed_evidence_ids?: string[];
       reason_codes?: string[];
+      budgetSource?: string;
+      keptEvidenceIds?: string[];
+      removedEvidenceIds?: string[];
       reasonCodes?: string[];
+      summary?: string;
     }>;
     pruningDecisions?: Array<{
+      budget_source?: string;
+      kept_evidence_ids?: string[];
+      removed_evidence_ids?: string[];
       reason_codes?: string[];
+      budgetSource?: string;
+      keptEvidenceIds?: string[];
+      removedEvidenceIds?: string[];
       reasonCodes?: string[];
+      summary?: string;
     }>;
     permission_filtering?: {
+      status?: "applied" | "skipped";
+      denied_evidence_ids?: string[];
+      denied_table_names?: string[];
+      denied_column_names?: string[];
       reason_codes?: string[];
+      deniedEvidenceIds?: string[];
+      deniedTableNames?: string[];
+      deniedColumnNames?: string[];
       reasonCodes?: string[];
     };
     permissionFiltering?: {
+      status?: "applied" | "skipped";
+      denied_evidence_ids?: string[];
+      denied_table_names?: string[];
+      denied_column_names?: string[];
       reason_codes?: string[];
+      deniedEvidenceIds?: string[];
+      deniedTableNames?: string[];
+      deniedColumnNames?: string[];
       reasonCodes?: string[];
     };
   };
@@ -51,9 +117,12 @@ export interface AssembleContextNodeInput {
 
 export interface AssembleContextNodeSummary {
   status: "ready" | "degraded";
+  version?: string;
+  capabilityCount: number;
   selectedEvidenceCount: number;
   selectedTableCount: number;
   selectedColumnCount: number;
+  degradedLaneCount: number;
   laneStateCounts: {
     ready: number;
     degraded: number;
@@ -62,6 +131,7 @@ export interface AssembleContextNodeSummary {
   };
   pruningDecisionCount: number;
   permissionReasonCount: number;
+  permissionDeniedEvidenceCount: number;
   warningCount: number;
 }
 
@@ -115,18 +185,26 @@ export class AssembleContextNode {
       input.retrievalBundle?.context_pack?.permissionFiltering?.reason_codes ??
       input.retrievalBundle?.context_pack?.permissionFiltering?.reasonCodes ??
       [];
+    const degradedLaneCount =
+      (contextPack.laneStates ?? []).filter((lane) => lane.state !== "ready").length;
+    const permissionDeniedEvidenceCount =
+      contextPack.permissionFiltering?.deniedEvidenceCount ?? 0;
 
     return {
       contextPack,
       typedSummary: {
         status: contextPack.status,
+        version: contextPack.version,
+        capabilityCount: contextPack.capabilities?.length ?? 0,
         selectedEvidenceCount: contextPack.selectedEvidenceIds.length,
         selectedTableCount: contextPack.selectedTables.length,
         selectedColumnCount: contextPack.selectedColumns.length,
+        degradedLaneCount,
         laneStateCounts,
         pruningDecisionCount: pruningDecisions.length,
         permissionReasonCount: permissionReasonCodes.filter((item) => item.trim().length > 0)
           .length,
+        permissionDeniedEvidenceCount,
         warningCount: contextPack.warnings?.length ?? 0
       },
       evidenceRefs: contextPack.selectedEvidenceIds.slice(0, 128)

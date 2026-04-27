@@ -258,6 +258,11 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
 - 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
 - Text2SQL v2 artifact 通过 `run.trace.v2`、`run.delivery.evidence.v2`、SSE `state` 事件 `data.v2.stageArtifact` 暴露；不会破坏既有 `type/runId/sessionId/at/data` 合同。
+- Full Mermaid strict-completion（2026-04-27）语义补齐：
+  - metadata 路径走 `retrieve -> assemble-context -> semantic-plan -> answer`，不进入 `generate/validate/execute`。
+  - correction 重试携带结构化 `correctionGrounding`（失败 SQL 引用、失败码、重试原因、证据引用、attempt）。
+  - delivery 增补 `contextPackSummary / metadataAnswer / correctionGrounding`，用于 sync/stream/run-view/replay 一致诊断。
+  - 叙事分层：`007 closeout` 证明 LangGraph 拓扑与 `delegation=0`；`008 strict-completion` 额外要求 metadata grounding / correction grounding / context-pack parity 语义闭环。
 - hard-cut read-model policy：`/api/v1/runs/:runId`、`/api/v1/runs/:runId/save-as-view`、RAG audit replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）。授权后若命中历史 shape，会返回 `410 LEGACY_RUN_UNSUPPORTED`（含迁移 runbook 提示）。
 
 ## Text2SQL v2 评估门禁（新增）
@@ -269,7 +274,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
 - 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
 - rollout 输出：`summary.rollout`（eval 指标门禁）+ `rollout`（closeout 聚合门禁，含 `recommendedStage/rollbackSuggested/reasons`）
-- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`（含 `delegationZero`）
+- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`（含 `delegationZero`；Full Mermaid strict-completion 场景还必须包含 `strictCompletionRows`：metadata grounding / correction grounding / context-pack parity）
 - anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
 - 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
 - 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。

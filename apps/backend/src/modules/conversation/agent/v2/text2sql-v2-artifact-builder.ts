@@ -165,12 +165,54 @@ export class Text2SqlV2ArtifactBuilder {
     }
     const selectedContext = run.delivery?.evidence?.selectedContext;
     const snippets = selectedContext?.snippets ?? [];
+    const selectedEvidenceIds = snippets.map((_, index) => `snippet:${index + 1}`);
+    const status = run.delivery?.evidence?.contextPackStatus ?? "degraded";
+    const warnings = run.delivery?.evidence?.degradeReasons;
     return {
-      status: run.delivery?.evidence?.contextPackStatus ?? "degraded",
-      selectedEvidenceIds: snippets.map((_, index) => `snippet:${index + 1}`),
+      status,
+      selectedEvidenceIds,
       selectedTables: [],
       selectedColumns: [],
-      warnings: run.delivery?.evidence?.degradeReasons
+      ...(warnings?.length ? { warnings } : {}),
+      version: "v1.rich",
+      capabilities: [
+        "selected_context_summary",
+        "structured_lanes",
+        "structured_degradation"
+      ],
+      selectedContextSummary: {
+        count: snippets.length,
+        evidenceIds: selectedEvidenceIds.slice(0, 24)
+      },
+      lanes: {
+        tables: {
+          ids: [],
+          count: 0
+        },
+        columns: {
+          ids: [],
+          count: 0
+        },
+        relationships: {
+          refs: [],
+          count: 0
+        },
+        metrics: {
+          refs: [],
+          count: 0
+        }
+      },
+      degradation: {
+        status,
+        reasons: warnings ?? []
+      },
+      pruning: {
+        applied: false,
+        decisions: []
+      },
+      permissionFiltering: {
+        status: "skipped"
+      }
     };
   }
 
@@ -201,6 +243,9 @@ export class Text2SqlV2ArtifactBuilder {
     if (!run.sql) {
       return undefined;
     }
+    const correctionGrounding = this.readGenerateStepCorrectionGrounding(
+      run.trace.steps ?? []
+    );
     return {
       sql: run.sql,
       assumptions: run.explanation ? [run.explanation] : undefined,
@@ -208,7 +253,12 @@ export class Text2SqlV2ArtifactBuilder {
       usedColumns: [],
       evidenceRefs:
         run.delivery?.evidence?.selectedContext?.snippets?.map((_, index) => `snippet:${index + 1}`) ??
-        []
+        [],
+      ...(correctionGrounding
+        ? {
+            correctionGrounding
+          }
+        : {})
     };
   }
 
@@ -265,14 +315,40 @@ export class Text2SqlV2ArtifactBuilder {
     if (!status) {
       return undefined;
     }
+    const warnings = this.readStringArray(raw.warnings);
+    const version = this.readString(raw.version);
+    const capabilities = this.readStringArray(raw.capabilities);
+    const semanticVersion = this.readNumber(raw.semanticVersion);
+    const modelingRevision = this.readNumber(raw.modelingRevision);
+    const semanticLockStatus = this.readSemanticLockStatus(raw.semanticLockStatus);
+    const selectedContextSummary = this.readContextPackSelectedContextSummary(
+      raw.selectedContextSummary
+    );
+    const lanes = this.readContextPackLanes(raw.lanes);
+    const laneStates = this.readContextPackLaneStates(raw.laneStates);
+    const degradation = this.readContextPackDegradation(raw.degradation);
+    const pruning = this.readContextPackPruning(raw.pruning);
+    const permissionFiltering = this.readContextPackPermissionFiltering(
+      raw.permissionFiltering
+    );
+
     return {
       status,
       selectedEvidenceIds,
       selectedTables,
       selectedColumns,
-      ...(this.readStringArray(raw.warnings).length > 0
-        ? { warnings: this.readStringArray(raw.warnings) }
-        : {})
+      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(version ? { version } : {}),
+      ...(capabilities.length > 0 ? { capabilities } : {}),
+      ...(semanticVersion !== undefined ? { semanticVersion } : {}),
+      ...(modelingRevision !== undefined ? { modelingRevision } : {}),
+      ...(semanticLockStatus ? { semanticLockStatus } : {}),
+      ...(selectedContextSummary ? { selectedContextSummary } : {}),
+      ...(lanes ? { lanes } : {}),
+      ...(laneStates.length > 0 ? { laneStates } : {}),
+      ...(degradation ? { degradation } : {}),
+      ...(pruning ? { pruning } : {}),
+      ...(permissionFiltering ? { permissionFiltering } : {})
     };
   }
 
@@ -323,6 +399,104 @@ export class Text2SqlV2ArtifactBuilder {
         : {}),
       ...(this.readStringArray(raw.forbiddenTables).length > 0
         ? { forbiddenTables: this.readStringArray(raw.forbiddenTables) }
+        : {})
+    };
+  }
+
+  private readGenerateStepCorrectionGrounding(
+    steps: ExecutionTraceStep[]
+  ): SqlGenerationArtifactV1["correctionGrounding"] | undefined {
+    const summary = this.readGenerateStepSummary(steps);
+    if (!summary || !this.isRecord(summary.correctionGrounding)) {
+      return undefined;
+    }
+    const raw = summary.correctionGrounding;
+    const failedSqlRef = this.readString(raw.failedSqlRef);
+    const retryReason = this.readString(raw.retryReason);
+    if (!failedSqlRef || !retryReason) {
+      return undefined;
+    }
+    const failureCategory = this.readString(raw.failureCategory);
+    const source = this.readString(raw.source);
+    const semanticPlanRoute = this.readString(raw.semanticPlanRoute);
+    const semanticPlanRouteKind = this.readString(raw.semanticPlanRouteKind);
+    const contextPackStatus = this.readString(raw.contextPackStatus);
+
+    return {
+      failedSqlRef,
+      retryReason,
+      ...(this.readString(raw.failedSqlPreview)
+        ? {
+            failedSqlPreview: this.readString(raw.failedSqlPreview)
+          }
+        : {}),
+      ...(this.readString(raw.failureCode)
+        ? {
+            failureCode: this.readString(raw.failureCode)
+          }
+        : {}),
+      ...(failureCategory &&
+      (failureCategory === "validation" ||
+        failureCategory === "governance" ||
+        failureCategory === "safety" ||
+        failureCategory === "provider" ||
+        failureCategory === "execution" ||
+        failureCategory === "unknown")
+        ? {
+            failureCategory
+          }
+        : {}),
+      ...(source && (source === "validation" || source === "execution")
+        ? {
+            source
+          }
+        : {}),
+      attemptCount: this.readNumber(raw.attemptCount) ?? 0,
+      maxAttempts: this.readNumber(raw.maxAttempts) ?? 0,
+      evidenceRefs: this.readStringArray(raw.evidenceRefs),
+      ...(this.readString(raw.semanticPlanSnapshotId)
+        ? {
+            semanticPlanSnapshotId: this.readString(raw.semanticPlanSnapshotId)
+          }
+        : {}),
+      ...(semanticPlanRoute &&
+      (semanticPlanRoute === "answer" ||
+        semanticPlanRoute === "clarify" ||
+        semanticPlanRoute === "reject")
+        ? {
+            semanticPlanRoute
+          }
+        : {}),
+      ...(semanticPlanRouteKind &&
+      (semanticPlanRouteKind === "text_to_sql" ||
+        semanticPlanRouteKind === "metadata" ||
+        semanticPlanRouteKind === "general" ||
+        semanticPlanRouteKind === "clarify" ||
+        semanticPlanRouteKind === "fail_closed")
+        ? {
+            semanticPlanRouteKind
+          }
+        : {}),
+      ...(this.readNumber(raw.selectedTableCount) !== undefined
+        ? {
+            selectedTableCount: this.readNumber(raw.selectedTableCount)
+          }
+        : {}),
+      ...(this.readNumber(raw.selectedColumnCount) !== undefined
+        ? {
+            selectedColumnCount: this.readNumber(raw.selectedColumnCount)
+          }
+        : {}),
+      ...(contextPackStatus &&
+      (contextPackStatus === "ready" || contextPackStatus === "degraded")
+        ? {
+            contextPackStatus
+          }
+        : {}),
+      ...(this.readNumber(raw.contextPackEvidenceCount) !== undefined
+        ? {
+            contextPackEvidenceCount: this.readNumber(raw.contextPackEvidenceCount)
+          }
         : {})
     };
   }
@@ -467,6 +641,281 @@ export class Text2SqlV2ArtifactBuilder {
     return value
       .map((item) => this.readString(item))
       .filter((item): item is string => Boolean(item));
+  }
+
+  private readSemanticLockStatus(
+    value: unknown
+  ): "locked" | "fallback" | "degraded" | undefined {
+    if (value === "locked" || value === "fallback" || value === "degraded") {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readContextPackSelectedContextSummary(
+    value: unknown
+  ): SemanticContextPackV1["selectedContextSummary"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const count = this.readNumber(value.count);
+    const evidenceIds = this.readStringArray(value.evidenceIds);
+    if (count === undefined) {
+      return undefined;
+    }
+    const laneNames = this.readStringArray(value.laneNames);
+    return {
+      count,
+      evidenceIds,
+      ...(laneNames.length > 0 ? { laneNames } : {})
+    };
+  }
+
+  private readContextPackLanes(
+    value: unknown
+  ): SemanticContextPackV1["lanes"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const tables = this.readIdentifierLane(value.tables);
+    const columns = this.readIdentifierLane(value.columns);
+    const aliases = this.readIdentifierLane(value.aliases);
+    const relationships = this.readReferenceLane(value.relationships);
+    const metrics = this.readReferenceLane(value.metrics);
+    const calculatedFields = this.readReferenceLane(value.calculatedFields);
+    const examples = this.readReferenceLane(value.examples);
+    const instructions = this.readReferenceLane(value.instructions);
+    const priorSql = this.readReferenceLane(value.priorSql);
+    const schemaSupplementRefs = this.readReferenceLane(value.schemaSupplementRefs);
+    const dialectFunctions = this.readReferenceLane(value.dialectFunctions);
+    const semanticBindings = this.readContextPackSemanticBindings(value.semanticBindings);
+
+    if (!tables || !columns || !relationships || !metrics) {
+      return undefined;
+    }
+
+    return {
+      tables,
+      columns,
+      ...(aliases ? { aliases } : {}),
+      relationships,
+      metrics,
+      ...(calculatedFields ? { calculatedFields } : {}),
+      ...(examples ? { examples } : {}),
+      ...(instructions ? { instructions } : {}),
+      ...(priorSql ? { priorSql } : {}),
+      ...(schemaSupplementRefs ? { schemaSupplementRefs } : {}),
+      ...(dialectFunctions ? { dialectFunctions } : {}),
+      ...(semanticBindings ? { semanticBindings } : {})
+    };
+  }
+
+  private readIdentifierLane(
+    value: unknown
+  ): {
+    ids: string[];
+    count: number;
+    reasonCodes?: string[];
+  } | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const ids = this.readStringArray(value.ids);
+    const count = this.readNumber(value.count);
+    if (count === undefined) {
+      return undefined;
+    }
+    const reasonCodes = this.readStringArray(value.reasonCodes);
+    return {
+      ids,
+      count,
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {})
+    };
+  }
+
+  private readReferenceLane(
+    value: unknown
+  ): {
+    refs: string[];
+    count: number;
+    reasonCodes?: string[];
+  } | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const refs = this.readStringArray(value.refs);
+    const count = this.readNumber(value.count);
+    if (count === undefined) {
+      return undefined;
+    }
+    const reasonCodes = this.readStringArray(value.reasonCodes);
+    return {
+      refs,
+      count,
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {})
+    };
+  }
+
+  private readContextPackSemanticBindings(
+    value: unknown
+  ): {
+    modelKeys?: string[];
+    relationshipKeys?: string[];
+    metricKeys?: string[];
+    calculatedFieldKeys?: string[];
+  } | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const modelKeys = this.readStringArray(value.modelKeys);
+    const relationshipKeys = this.readStringArray(value.relationshipKeys);
+    const metricKeys = this.readStringArray(value.metricKeys);
+    const calculatedFieldKeys = this.readStringArray(value.calculatedFieldKeys);
+    if (
+      modelKeys.length === 0 &&
+      relationshipKeys.length === 0 &&
+      metricKeys.length === 0 &&
+      calculatedFieldKeys.length === 0
+    ) {
+      return undefined;
+    }
+    return {
+      ...(modelKeys.length > 0 ? { modelKeys } : {}),
+      ...(relationshipKeys.length > 0 ? { relationshipKeys } : {}),
+      ...(metricKeys.length > 0 ? { metricKeys } : {}),
+      ...(calculatedFieldKeys.length > 0 ? { calculatedFieldKeys } : {})
+    };
+  }
+
+  private readContextPackLaneStates(
+    value: unknown
+  ): NonNullable<SemanticContextPackV1["laneStates"]> {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => {
+        if (!this.isRecord(item)) {
+          return undefined;
+        }
+        const lane = this.readString(item.lane);
+        const state = this.readString(item.state);
+        if (!lane || !state) {
+          return undefined;
+        }
+        const refs = this.readStringArray(item.refs);
+        const reasonCodes = this.readStringArray(item.reasonCodes);
+        const unavailableReason = this.readString(item.unavailableReason);
+        const fallbackReason = this.readString(item.fallbackReason);
+        const inputCount = this.readNumber(item.inputCount);
+        const outputCount = this.readNumber(item.outputCount);
+        const selectedCount = this.readNumber(item.selectedCount);
+        return {
+          lane,
+          state,
+          ...(refs.length > 0 ? { refs } : {}),
+          ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+          ...(unavailableReason ? { unavailableReason } : {}),
+          ...(fallbackReason ? { fallbackReason } : {}),
+          ...(inputCount !== undefined ? { inputCount } : {}),
+          ...(outputCount !== undefined ? { outputCount } : {}),
+          ...(selectedCount !== undefined ? { selectedCount } : {})
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  }
+
+  private readContextPackDegradation(
+    value: unknown
+  ): SemanticContextPackV1["degradation"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const status =
+      value.status === "ready" || value.status === "degraded" ? value.status : undefined;
+    if (!status) {
+      return undefined;
+    }
+    const reasons = this.readStringArray(value.reasons);
+    const riskTags = this.readStringArray(value.riskTags);
+    const denseUnavailableReason = this.readString(value.denseUnavailableReason);
+    const rerankUnavailableReason = this.readString(value.rerankUnavailableReason);
+    const laneIssues = this.readContextPackLaneStates(value.laneIssues);
+    return {
+      status,
+      reasons,
+      ...(riskTags.length > 0 ? { riskTags } : {}),
+      ...(denseUnavailableReason ? { denseUnavailableReason } : {}),
+      ...(rerankUnavailableReason ? { rerankUnavailableReason } : {}),
+      ...(laneIssues.length > 0 ? { laneIssues } : {})
+    };
+  }
+
+  private readContextPackPruning(
+    value: unknown
+  ): SemanticContextPackV1["pruning"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const applied = typeof value.applied === "boolean" ? value.applied : undefined;
+    if (applied === undefined || !Array.isArray(value.decisions)) {
+      return undefined;
+    }
+    const decisions = value.decisions
+      .map((decision) => {
+        if (!this.isRecord(decision)) {
+          return undefined;
+        }
+        const budgetSource = this.readString(decision.budgetSource);
+        const keptEvidenceIds = this.readStringArray(decision.keptEvidenceIds);
+        const removedEvidenceIds = this.readStringArray(decision.removedEvidenceIds);
+        const keptCount = this.readNumber(decision.keptCount);
+        const removedCount = this.readNumber(decision.removedCount);
+        const reasonCodes = this.readStringArray(decision.reasonCodes);
+        const summary = this.readString(decision.summary);
+        return {
+          ...(budgetSource ? { budgetSource } : {}),
+          ...(keptEvidenceIds.length > 0 ? { keptEvidenceIds } : {}),
+          ...(removedEvidenceIds.length > 0 ? { removedEvidenceIds } : {}),
+          ...(keptCount !== undefined ? { keptCount } : {}),
+          ...(removedCount !== undefined ? { removedCount } : {}),
+          ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+          ...(summary ? { summary } : {})
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    return {
+      applied,
+      decisions
+    };
+  }
+
+  private readContextPackPermissionFiltering(
+    value: unknown
+  ): SemanticContextPackV1["permissionFiltering"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const status =
+      value.status === "applied" || value.status === "skipped"
+        ? value.status
+        : undefined;
+    if (!status) {
+      return undefined;
+    }
+    const deniedEvidenceIds = this.readStringArray(value.deniedEvidenceIds);
+    const deniedEvidenceCount = this.readNumber(value.deniedEvidenceCount);
+    const deniedTables = this.readStringArray(value.deniedTables);
+    const deniedColumns = this.readStringArray(value.deniedColumns);
+    const reasonCodes = this.readStringArray(value.reasonCodes);
+    return {
+      status,
+      ...(deniedEvidenceIds.length > 0 ? { deniedEvidenceIds } : {}),
+      ...(deniedEvidenceCount !== undefined ? { deniedEvidenceCount } : {}),
+      ...(deniedTables.length > 0 ? { deniedTables } : {}),
+      ...(deniedColumns.length > 0 ? { deniedColumns } : {}),
+      ...(reasonCodes.length > 0 ? { reasonCodes } : {})
+    };
   }
 
   private uniqueStrings(values: string[] | undefined): string[] | undefined {

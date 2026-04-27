@@ -90,7 +90,8 @@
       ],
       "flowNodes": [
         "I.validation",
-        "K.diagnosis-bounded-correction"
+        "K.diagnosis-bounded-correction",
+        "SC.correction-grounding"
       ]
     }
   },
@@ -181,7 +182,8 @@
       ],
       "flowNodes": [
         "C.route",
-        "C2.general-metadata-answer"
+        "C2.general-metadata-answer",
+        "SC.metadata-grounding"
       ]
     }
   },
@@ -243,7 +245,9 @@
       ],
       "flowNodes": [
         "C.route",
-        "C2.general-metadata-answer"
+        "C2.general-metadata-answer",
+        "SC.metadata-grounding",
+        "SC.context-pack-parity"
       ]
     }
   },

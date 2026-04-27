@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  SqlCorrectionGroundingV1,
   DatasourceType,
   PromptTemplateTraceEvidence,
   SemanticPlanV1,
@@ -38,6 +39,7 @@ interface SqlGenerationSelection {
   semanticIntent?: SqlSemanticIntent;
   explicitPinning?: SqlGenerationExplicitPinningEvidence;
   semanticPlan?: SemanticPlanV1;
+  correctionGrounding?: SqlCorrectionGroundingV1;
 }
 
 export interface SqlGenerationExplicitPinningEvidence {
@@ -189,6 +191,7 @@ export class SqlGenerationService {
     datasourceType?: DatasourceType;
     cause: SqlGenerationCause;
     retryReason?: string;
+    correctionGrounding?: SqlCorrectionGroundingV1;
   }): StructuredSqlGenerationArtifact {
     const references = this.extractSqlReferences(input.draft.sql);
     const evidenceRefs = this.unique(input.draft.semanticPlan?.evidenceRefs ?? []);
@@ -216,7 +219,8 @@ export class SqlGenerationService {
       provider,
       promptTemplate: input.draft.promptTemplate,
       retryReason: input.retryReason?.trim() || undefined,
-      coverage: input.draft.coverage
+      coverage: input.draft.coverage,
+      correctionGrounding: input.correctionGrounding
     };
   }
 
@@ -249,7 +253,8 @@ export class SqlGenerationService {
           retryReason
         },
         semanticContextPack: selection?.semanticContextPack,
-        semanticPlan: selection?.semanticPlan
+        semanticPlan: selection?.semanticPlan,
+        correctionGrounding: selection?.correctionGrounding
       }
     );
   }

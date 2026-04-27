@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { SemanticContextPackV1, SemanticPlanV1 } from "@text2sql/shared-types";
 
 @Injectable()
 export class FormatAnswerNode {
@@ -28,6 +29,46 @@ export class FormatAnswerNode {
 
   runDirectAnswer(answer: string, warnings: string[] = []): string {
     return [answer.trim(), ...warnings.map((warning) => `说明：${warning}`)]
+      .filter((line) => line.length > 0)
+      .join("\n");
+  }
+
+  runMetadataDirectAnswer(input: {
+    answer: string;
+    contextPack?: SemanticContextPackV1;
+    semanticPlan?: SemanticPlanV1;
+    warnings?: string[];
+  }): string {
+    const intro = input.answer.trim();
+    const selectedEvidenceCount =
+      input.contextPack?.selectedContextSummary?.count ??
+      input.contextPack?.selectedEvidenceIds?.length ??
+      input.semanticPlan?.evidenceRefs?.length ??
+      0;
+    const selectedTables = this.normalizeIdentifiers(
+      input.contextPack?.selectedTables ?? input.semanticPlan?.selectedTables ?? []
+    );
+    const selectedColumns = this.normalizeIdentifiers(
+      input.contextPack?.selectedColumns ?? input.semanticPlan?.selectedColumns ?? []
+    );
+    const schemaSupplementCount =
+      input.contextPack?.lanes?.schemaSupplementRefs?.count ??
+      input.contextPack?.lanes?.schemaSupplementRefs?.refs?.length ??
+      0;
+    const warningLines = this.unique(input.warnings ?? [])
+      .slice(0, 3)
+      .map((warning) => `说明：${warning}`);
+
+    return [
+      intro,
+      `元数据证据摘要：已选中 ${selectedEvidenceCount} 条上下文证据。`,
+      `结构覆盖：表 ${this.formatIdentifierList(selectedTables, "未定位到可公开表信息")}；字段 ${this.formatIdentifierList(selectedColumns, "未定位到可公开字段信息")}。`,
+      `Schema 补充：${schemaSupplementCount} 条。`,
+      `裁剪情况：${this.buildPruningSummary(input.contextPack)}`,
+      `权限过滤：${this.buildPermissionFilteringSummary(input.contextPack)}`,
+      `证据质量：${this.buildEvidenceQualitySummary(input.contextPack)}`,
+      ...warningLines
+    ]
       .filter((line) => line.length > 0)
       .join("\n");
   }
@@ -105,5 +146,85 @@ export class FormatAnswerNode {
       return "n/a";
     }
     return String(value);
+  }
+
+  private normalizeIdentifiers(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+    );
+  }
+
+  private formatIdentifierList(values: string[], fallback: string): string {
+    if (values.length === 0) {
+      return fallback;
+    }
+    if (values.length <= 4) {
+      return values.join("、");
+    }
+    return `${values.slice(0, 4).join("、")} 等`;
+  }
+
+  private buildPruningSummary(contextPack?: SemanticContextPackV1): string {
+    if (!contextPack?.pruning?.applied) {
+      return "未触发上下文裁剪。";
+    }
+    const decisions = contextPack.pruning.decisions ?? [];
+    const keptCount = decisions.reduce((total, decision) => {
+      const fallbackCount = decision.keptEvidenceIds?.length ?? 0;
+      return total + this.toCount(decision.keptCount, fallbackCount);
+    }, 0);
+    const removedCount = decisions.reduce((total, decision) => {
+      const fallbackCount = decision.removedEvidenceIds?.length ?? 0;
+      return total + this.toCount(decision.removedCount, fallbackCount);
+    }, 0);
+    const reasonCodes = this.unique(
+      decisions.flatMap((decision) => decision.reasonCodes ?? [])
+    ).slice(0, 2);
+    const reasonSuffix =
+      reasonCodes.length > 0 ? `，原因：${reasonCodes.join("、")}` : "";
+    return `已触发，保留 ${keptCount} 条，裁剪 ${removedCount} 条${reasonSuffix}。`;
+  }
+
+  private buildPermissionFilteringSummary(contextPack?: SemanticContextPackV1): string {
+    const permissionFiltering = contextPack?.permissionFiltering;
+    if (!permissionFiltering || permissionFiltering.status !== "applied") {
+      return "未触发。";
+    }
+    const deniedEvidenceCount =
+      permissionFiltering.deniedEvidenceCount ??
+      permissionFiltering.deniedEvidenceIds?.length ??
+      0;
+    const reasonCodes = this.unique(permissionFiltering.reasonCodes ?? []).slice(0, 2);
+    const reasonSuffix =
+      reasonCodes.length > 0 ? `，原因：${reasonCodes.join("、")}` : "";
+    return `已应用，受限证据 ${deniedEvidenceCount} 条（仅保留可访问摘要）${reasonSuffix}。`;
+  }
+
+  private buildEvidenceQualitySummary(contextPack?: SemanticContextPackV1): string {
+    const degradedReasons = this.unique(contextPack?.degradation?.reasons ?? []);
+    const impactedLaneCount = (contextPack?.laneStates ?? []).filter(
+      (laneState) =>
+        laneState.state === "degraded" || laneState.state === "unavailable"
+    ).length;
+    const degraded =
+      contextPack?.status === "degraded" ||
+      impactedLaneCount > 0 ||
+      degradedReasons.length > 0;
+    if (!degraded) {
+      return "ready。";
+    }
+    const reasonText =
+      degradedReasons.length > 0
+        ? degradedReasons.slice(0, 3).join("、")
+        : "retrieval_degraded";
+    return `degraded（受影响 lane ${impactedLaneCount} 个，原因：${reasonText}）。`;
+  }
+
+  private toCount(value: number | undefined, fallback: number): number {
+    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
   }
 }

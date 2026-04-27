@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  SqlCorrectionGroundingV1,
   DatasourceType,
   PromptTemplateTraceEvidence,
   SemanticContextPackV1,
@@ -62,6 +63,7 @@ export class GenerateSqlNode {
     explicitPinning?: SqlGenerationExplicitPinningEvidence;
     cause?: SqlGenerationCause;
     retryReason?: string;
+    correctionGrounding?: SqlCorrectionGroundingV1;
     stream?: boolean;
     tools?: Record<string, LlmGatewayToolDefinition>;
     onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
@@ -91,7 +93,8 @@ export class GenerateSqlNode {
             semanticContextPack: input.semanticContextPack,
             semanticIntent: input.semanticIntent,
             explicitPinning: input.explicitPinning,
-            semanticPlan: input.semanticPlan
+            semanticPlan: input.semanticPlan,
+            correctionGrounding: input.correctionGrounding
           },
           {
             tools: input.tools,
@@ -107,7 +110,8 @@ export class GenerateSqlNode {
           semanticContextPack: input.semanticContextPack,
           semanticIntent: input.semanticIntent,
           explicitPinning: input.explicitPinning,
-          semanticPlan: input.semanticPlan
+          semanticPlan: input.semanticPlan,
+          correctionGrounding: input.correctionGrounding
         });
 
     return {
@@ -122,7 +126,8 @@ export class GenerateSqlNode {
         draft,
         datasourceType: input.datasourceType,
         cause: input.cause ?? "initial",
-        retryReason: input.retryReason
+        retryReason: input.retryReason,
+        correctionGrounding: input.correctionGrounding
       })
     };
   }

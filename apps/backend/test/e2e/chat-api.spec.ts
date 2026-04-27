@@ -74,6 +74,16 @@ describe("chat api (e2e)", () => {
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
     }
+    const contextPackSummary = runRes.body.data.delivery?.evidence?.contextPackSummary as
+      | {
+          selectedEvidenceCount?: number;
+          status?: string;
+        }
+      | undefined;
+    if (contextPackSummary) {
+      expect(typeof contextPackSummary.selectedEvidenceCount).toBe("number");
+      expect(["ready", "degraded"]).toContain(contextPackSummary.status);
+    }
     const traceV2 = runRes.body.data.run.trace?.v2 as
       | {
           version?: string;
@@ -121,6 +131,11 @@ describe("chat api (e2e)", () => {
     expect(messageViewRes.body.data.latestRun.delivery.evidence.runId).toBe(
       messageViewRes.body.data.latestRun.runId
     );
+    if (contextPackSummary) {
+      expect(
+        messageViewRes.body.data.latestRun.delivery.evidence.contextPackSummary
+      ).toEqual(contextPackSummary);
+    }
     expect(messageViewRes.body.data.latestRun.delivery.artifact.summary.text).toBeTruthy();
     const latestTraceV2 = messageViewRes.body.data.latestRun.trace?.v2 as
       | {

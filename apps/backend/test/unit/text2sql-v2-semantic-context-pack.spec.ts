@@ -3,7 +3,7 @@ import { SemanticContextPackService } from "../../src/modules/conversation/agent
 describe("text2sql v2 semantic context pack", () => {
   const service = new SemanticContextPackService();
 
-  it("collects selected tables, columns, evidence ids, and source disclosure warnings", () => {
+  it("builds a rich versioned contract with structured lanes and selected-context summary", () => {
     const pack = service.build({
       retrievalBundle: {
         status: "ready",
@@ -67,6 +67,14 @@ describe("text2sql v2 semantic context pack", () => {
     });
 
     expect(pack.status).toBe("ready");
+    expect(pack.version).toBe("v1.rich");
+    expect(pack.capabilities).toEqual(
+      expect.arrayContaining([
+        "selected_context_summary",
+        "semantic_binding_refs",
+        "structured_lanes"
+      ])
+    );
     expect(pack.selectedEvidenceIds).toEqual(
       expect.arrayContaining([
         "schema-orders",
@@ -84,6 +92,67 @@ describe("text2sql v2 semantic context pack", () => {
       "orders.amount",
       "orders.status"
     ]);
+    expect(pack.selectedContextSummary).toMatchObject({
+      count: 2
+    });
+    expect(pack.selectedContextSummary?.evidenceIds).toEqual(
+      expect.arrayContaining(["schema-orders", "example-paid-orders"])
+    );
+    expect(pack.selectedContextSummary).toEqual(
+      expect.not.objectContaining({ snippets: expect.anything() })
+    );
+    expect(pack.lanes).toMatchObject({
+      tables: {
+        ids: ["orders", "model.orders"],
+        count: 2
+      },
+      columns: {
+        ids: ["orders.id", "orders.amount", "orders.status"],
+        count: 3
+      },
+      relationships: {
+        refs: ["rel.orders_customers"],
+        count: 1
+      },
+      metrics: {
+        refs: ["metric.gmv"],
+        count: 1
+      },
+      instructions: {
+        refs: ["instruction.readonly"],
+        count: 1
+      },
+      priorSql: {
+        refs: ["prior.sql.001"],
+        count: 1
+      },
+      schemaSupplementRefs: {
+        refs: ["ddl.orders"],
+        count: 1
+      },
+      semanticBindings: {
+        modelKeys: ["model.orders"],
+        relationshipKeys: ["rel.orders_customers"],
+        metricKeys: ["metric.gmv"],
+        calculatedFieldKeys: ["cf.net_amount"]
+      }
+    });
+    expect(pack.laneStates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lane: "relationship",
+          state: "ready",
+          refs: ["rel.orders_customers"],
+          reasonCodes: ["relationship_binding_selected"]
+        }),
+        expect.objectContaining({
+          lane: "metric",
+          state: "ready",
+          refs: ["metric.gmv"],
+          reasonCodes: ["metric_binding_selected"]
+        })
+      ])
+    );
     expect(pack.warnings).toEqual(
       expect.arrayContaining([
         "relationship_reason:relationship_binding_selected",
@@ -95,7 +164,7 @@ describe("text2sql v2 semantic context pack", () => {
     );
   });
 
-  it("records dense unavailable, rerank unavailable, and pruning decisions explicitly", () => {
+  it("records degradation, pruning, and permission filtering as structured artifacts", () => {
     const pack = service.build({
       retrievalBundle: {
         status: "degraded",
@@ -155,6 +224,46 @@ describe("text2sql v2 semantic context pack", () => {
     });
 
     expect(pack.status).toBe("degraded");
+    expect(pack.degradation).toMatchObject({
+      status: "degraded",
+      reasons: ["lexical_fallback_used"],
+      denseUnavailableReason: "dense_unavailable:dense_unavailable:provider_missing",
+      rerankUnavailableReason: "rerank_unavailable:secondary_rerank_timeout"
+    });
+    expect(pack.degradation?.laneIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lane: "dense",
+          state: "unavailable",
+          unavailableReason: "provider_missing"
+        }),
+        expect.objectContaining({
+          lane: "rerank",
+          state: "degraded",
+          fallbackReason: "deterministic_primary_ranking"
+        })
+      ])
+    );
+    expect(pack.pruning).toMatchObject({
+      applied: true,
+      decisions: [
+        expect.objectContaining({
+          budgetSource: "token_budget",
+          keptCount: 0,
+          removedCount: 0,
+          reasonCodes: ["removed_low_score_examples"],
+          summary: "removed 3 low-score examples"
+        })
+      ]
+    });
+    expect(pack.permissionFiltering).toMatchObject({
+      status: "applied",
+      deniedEvidenceIds: ["chunk-secret-orders"],
+      deniedEvidenceCount: 1,
+      deniedTables: ["secret_orders"],
+      deniedColumns: ["secret_orders.internal_note"],
+      reasonCodes: ["permission_filtered_not_in_allowed_tables"]
+    });
     expect(pack.warnings).toEqual(
       expect.arrayContaining([
         "lexical_fallback_used",
@@ -191,5 +300,6 @@ describe("text2sql v2 semantic context pack", () => {
 
     expect(pack.selectedEvidenceIds).toHaveLength(64);
     expect(new Set(pack.selectedEvidenceIds).size).toBe(64);
+    expect(pack.selectedContextSummary?.evidenceIds.length).toBeLessThanOrEqual(24);
   });
 });

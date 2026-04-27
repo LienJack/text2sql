@@ -2,7 +2,10 @@ import { Injectable } from "@nestjs/common";
 import type {
   ClarificationDecisionEvidence,
   DeliveryContract,
+  DeliveryContextPackSummaryV1,
+  DeliveryMetadataAnswerSummaryV1,
   DeliveryEvidenceReplayLog,
+  SqlCorrectionGroundingV1,
   SqlRun,
   Text2SqlV2RunArtifact
 } from "@text2sql/shared-types";
@@ -156,6 +159,15 @@ export class DeliveryContractMapper {
     const sqlCoverage = this.readSqlCoverageEvidence(input.run);
     const savedPriorSql = this.readSavedPriorSqlEvidence(input.run);
     const traceV2Artifact = this.readTraceV2Artifact(input.run);
+    const contextPackSummary = this.readContextPackSummary(
+      traceV2Artifact?.contextPack
+    );
+    const metadataAnswer = this.readMetadataAnswerSummary({
+      run: input.run,
+      traceV2: traceV2Artifact,
+      contextPackSummary
+    });
+    const correctionGrounding = this.readCorrectionGrounding(traceV2Artifact);
     const invalidInput = replayIndex.invalidPayload;
     const artifact = input.artifactOverride ?? this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
@@ -235,6 +247,9 @@ export class DeliveryContractMapper {
       clarificationDecision,
       sqlCoverage,
       savedPriorSql,
+      contextPackSummary,
+      metadataAnswer,
+      correctionGrounding,
       ...(traceV2Artifact
         ? {
             v2: {
@@ -643,6 +658,264 @@ export class DeliveryContractMapper {
       reasonCodes: ["saved_prior_sql_shortcut"],
       ...(safetyResult ? { safetyResult } : {})
     };
+  }
+
+  private readContextPackSummary(
+    contextPack: Text2SqlV2RunArtifact["contextPack"] | undefined
+  ): DeliveryContextPackSummaryV1 | undefined {
+    if (!contextPack) {
+      return undefined;
+    }
+
+    const selectedEvidenceCount =
+      contextPack.selectedContextSummary?.count ??
+      contextPack.selectedEvidenceIds.length;
+    const selectedTableCount = contextPack.selectedTables.length;
+    const selectedColumnCount = contextPack.selectedColumns.length;
+    const pruningApplied = Boolean(contextPack.pruning?.applied);
+    const prunedEvidenceCount = (contextPack.pruning?.decisions ?? []).reduce(
+      (total, decision) =>
+        total +
+        (this.readNonNegativeInteger(decision.removedCount) ??
+          decision.removedEvidenceIds?.length ??
+          0),
+      0
+    );
+    const degradedLaneCount = (contextPack.laneStates ?? []).filter(
+      (lane) => lane.state === "degraded" || lane.state === "unavailable"
+    ).length;
+    const permissionFilteringApplied =
+      contextPack.permissionFiltering?.status === "applied";
+    const permissionDeniedEvidenceCount =
+      contextPack.permissionFiltering?.deniedEvidenceCount ??
+      contextPack.permissionFiltering?.deniedEvidenceIds?.length ??
+      0;
+    const degradationReasons = this.unique([
+      ...(contextPack.degradation?.reasons ?? []),
+      ...(contextPack.warnings ?? [])
+    ]);
+
+    return {
+      status: contextPack.status,
+      selectedEvidenceCount,
+      selectedTableCount,
+      selectedColumnCount,
+      pruningApplied,
+      ...(pruningApplied ? { prunedEvidenceCount } : {}),
+      ...(degradedLaneCount > 0 ? { degradedLaneCount } : {}),
+      permissionFilteringApplied,
+      ...(permissionFilteringApplied
+        ? {
+            permissionDeniedEvidenceCount
+          }
+        : {}),
+      ...(degradationReasons.length > 0 ? { degradationReasons } : {})
+    };
+  }
+
+  private readMetadataAnswerSummary(input: {
+    run: SqlRun;
+    traceV2: Text2SqlV2RunArtifact | undefined;
+    contextPackSummary: DeliveryContextPackSummaryV1 | undefined;
+  }): DeliveryMetadataAnswerSummaryV1 | undefined {
+    const routeKind =
+      this.readSemanticPlanRouteKind(input.traceV2?.semanticPlan) ??
+      this.readRouteKindFromIntakeStage(input.traceV2?.stages);
+    if (routeKind !== "metadata" && routeKind !== "general") {
+      return undefined;
+    }
+
+    const selectedEvidenceCount = input.contextPackSummary?.selectedEvidenceCount ?? 0;
+    const degradationReasons = input.contextPackSummary?.degradationReasons ?? [];
+    const evidenceQuality =
+      input.contextPackSummary?.status === "ready" ? "ready" : "degraded";
+    const groundedByContextPack = Boolean(
+      input.traceV2?.contextPack && selectedEvidenceCount > 0
+    );
+
+    return {
+      groundedByContextPack,
+      routeKind,
+      evidenceQuality,
+      selectedEvidenceCount,
+      permissionFilteringApplied:
+        input.contextPackSummary?.permissionFilteringApplied ?? false,
+      pruningApplied: input.contextPackSummary?.pruningApplied ?? false,
+      ...(degradationReasons.length > 0 ? { degradationReasons } : {})
+    };
+  }
+
+  private readCorrectionGrounding(
+    traceV2: Text2SqlV2RunArtifact | undefined
+  ): SqlCorrectionGroundingV1 | undefined {
+    if (!traceV2) {
+      return undefined;
+    }
+
+    const direct = this.normalizeCorrectionGrounding(
+      traceV2.sqlGeneration?.correctionGrounding
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const generateStage = traceV2.stages.find((stage) => stage.stage === "generate-sql");
+    if (!generateStage?.metadata || !this.isRecord(generateStage.metadata)) {
+      return undefined;
+    }
+    return this.normalizeCorrectionGrounding(
+      (generateStage.metadata as { correctionGrounding?: unknown }).correctionGrounding
+    );
+  }
+
+  private normalizeCorrectionGrounding(
+    value: unknown
+  ): SqlCorrectionGroundingV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const failedSqlRef = this.readString(value.failedSqlRef);
+    const retryReason = this.readString(value.retryReason);
+    if (!failedSqlRef || !retryReason) {
+      return undefined;
+    }
+
+    const failureCategory = this.readString(value.failureCategory);
+    const source = this.readString(value.source);
+    const semanticPlanRoute = this.readString(value.semanticPlanRoute);
+    const semanticPlanRouteKind = this.readString(value.semanticPlanRouteKind);
+    const contextPackStatus = this.readString(value.contextPackStatus);
+
+    return {
+      failedSqlRef,
+      ...(this.readString(value.failedSqlPreview)
+        ? {
+            failedSqlPreview: this.readString(value.failedSqlPreview)
+          }
+        : {}),
+      retryReason,
+      ...(this.readString(value.failureCode)
+        ? {
+            failureCode: this.readString(value.failureCode)
+          }
+        : {}),
+      ...(failureCategory &&
+      (failureCategory === "validation" ||
+        failureCategory === "governance" ||
+        failureCategory === "safety" ||
+        failureCategory === "provider" ||
+        failureCategory === "execution" ||
+        failureCategory === "unknown")
+        ? {
+            failureCategory
+          }
+        : {}),
+      ...(source && (source === "validation" || source === "execution")
+        ? {
+            source
+          }
+        : {}),
+      attemptCount: this.readNonNegativeInt(value.attemptCount),
+      maxAttempts: this.readNonNegativeInt(value.maxAttempts),
+      evidenceRefs: this.readStringArray(value.evidenceRefs),
+      ...(this.readString(value.semanticPlanSnapshotId)
+        ? {
+            semanticPlanSnapshotId: this.readString(value.semanticPlanSnapshotId)
+          }
+        : {}),
+      ...(semanticPlanRoute &&
+      (semanticPlanRoute === "answer" ||
+        semanticPlanRoute === "clarify" ||
+        semanticPlanRoute === "reject")
+        ? {
+            semanticPlanRoute
+          }
+        : {}),
+      ...(semanticPlanRouteKind &&
+      (semanticPlanRouteKind === "text_to_sql" ||
+        semanticPlanRouteKind === "metadata" ||
+        semanticPlanRouteKind === "general" ||
+        semanticPlanRouteKind === "clarify" ||
+        semanticPlanRouteKind === "fail_closed")
+        ? {
+            semanticPlanRouteKind
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.selectedTableCount) !== undefined
+        ? {
+            selectedTableCount: this.readNonNegativeInteger(value.selectedTableCount)
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.selectedColumnCount) !== undefined
+        ? {
+            selectedColumnCount: this.readNonNegativeInteger(value.selectedColumnCount)
+          }
+        : {}),
+      ...(contextPackStatus &&
+      (contextPackStatus === "ready" || contextPackStatus === "degraded")
+        ? {
+            contextPackStatus
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.contextPackEvidenceCount) !== undefined
+        ? {
+            contextPackEvidenceCount: this.readNonNegativeInteger(
+              value.contextPackEvidenceCount
+            )
+          }
+        : {})
+    };
+  }
+
+  private readSemanticPlanRouteKind(
+    semanticPlan: Text2SqlV2RunArtifact["semanticPlan"] | undefined
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" | undefined {
+    const routeFilter = semanticPlan?.filters?.find((item) =>
+      item.startsWith("route_kind:")
+    );
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
+      }
+    }
+
+    if (semanticPlan?.route === "clarify") {
+      return "clarify";
+    }
+    if (semanticPlan?.route === "reject") {
+      return "fail_closed";
+    }
+    return semanticPlan ? "text_to_sql" : undefined;
+  }
+
+  private readRouteKindFromIntakeStage(
+    stages: Text2SqlV2RunArtifact["stages"] | undefined
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" | undefined {
+    if (!Array.isArray(stages)) {
+      return undefined;
+    }
+    const intake = stages.find((stage) => stage.stage === "intake");
+    if (!intake?.metadata || !this.isRecord(intake.metadata)) {
+      return undefined;
+    }
+    const route = this.readString((intake.metadata as { route?: unknown }).route);
+    if (
+      route === "text_to_sql" ||
+      route === "metadata" ||
+      route === "general" ||
+      route === "clarify" ||
+      route === "fail_closed"
+    ) {
+      return route;
+    }
+    return undefined;
   }
 
   private readTraceV2Artifact(run: SqlRun): Text2SqlV2RunArtifact | undefined {

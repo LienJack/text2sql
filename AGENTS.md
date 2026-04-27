@@ -130,12 +130,14 @@ CI 参考：
 - 工具调用走 allowlist，失败可追踪。
 - 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致。
 - hard-cut 生效后，run read/save-view/replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）；历史 shape 必须返回 `410 LEGACY_RUN_UNSUPPORTED`（见 runbook）。
+- 叙事边界必须明确：`007 closeout` 仅覆盖 LangGraph topology + `delegation=0`，`008 strict-completion` 额外覆盖 metadata grounding / correction grounding / context-pack parity（含 `strictCompletionRows` 门禁）。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 - `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
 - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 closeout 五门禁（`evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage`）及 `rollout.recommendedStage/rollbackSuggested/reasons`。
 - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate` 输出需包含 scoped coverage、关键文件门槛、A-M flow blockers 与 eval fixture 行为测试追溯。
+- strict-completion 语义补齐后，focused coverage 输出还需包含 `strictCompletionRows` 评估结果（metadata grounding / correction grounding / context-pack parity）。
 - `pnpm run text2sql:no-legacy-compat:check` 必须通过。
 
 ### D. Governance 术语硬切规范

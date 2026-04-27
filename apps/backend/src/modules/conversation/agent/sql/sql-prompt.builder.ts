@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType, SemanticPlanV1 } from "@text2sql/shared-types";
+import type {
+  DatasourceType,
+  SemanticPlanV1,
+  SqlCorrectionGroundingV1
+} from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
@@ -45,6 +49,7 @@ export class SqlPromptBuilder {
       };
       semanticContextPack?: RagContextPack;
       semanticPlan?: SemanticPlanV1;
+      correctionGrounding?: SqlCorrectionGroundingV1;
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -55,6 +60,9 @@ export class SqlPromptBuilder {
     const contextBlock = this.buildContextBlock(selectedContext);
     const semanticInstructionBlock = this.buildSemanticInstructionBlock(
       options?.semanticContextPack
+    );
+    const correctionGroundingBlock = this.buildCorrectionGroundingBlock(
+      options?.correctionGrounding
     );
     const semanticPlanBlock = this.buildSemanticPlanBlock(options?.semanticPlan);
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
@@ -74,6 +82,7 @@ export class SqlPromptBuilder {
         repairHintBlock,
         tableHint,
         overlayBlock,
+        correctionGroundingBlock,
         semanticPlanBlock,
         semanticInstructionBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
@@ -127,6 +136,39 @@ export class SqlPromptBuilder {
       return "";
     }
     return `Retry repair hint (single automatic retry): previous SQL failed semantic guardrail because ${normalized}. Return corrected final SQL only.`;
+  }
+
+  private buildCorrectionGroundingBlock(
+    correctionGrounding?: SqlCorrectionGroundingV1
+  ): string {
+    if (!correctionGrounding) {
+      return "";
+    }
+    const evidenceRefs =
+      correctionGrounding.evidenceRefs.length > 0
+        ? correctionGrounding.evidenceRefs.slice(0, 8).join(", ")
+        : "none";
+    const retryReason = correctionGrounding.retryReason.trim();
+    const failureCode = correctionGrounding.failureCode ?? "unknown";
+    const failureCategory = correctionGrounding.failureCategory ?? "unknown";
+    const failedSqlPreview = correctionGrounding.failedSqlPreview
+      ? `failedSqlPreview=${correctionGrounding.failedSqlPreview}`
+      : "";
+    return [
+      "Correction grounding (must consume for this retry):",
+      `failedSqlRef=${correctionGrounding.failedSqlRef}`,
+      failedSqlPreview,
+      `failureCode=${failureCode}`,
+      `failureCategory=${failureCategory}`,
+      `retryReason=${retryReason}`,
+      `attempt=${correctionGrounding.attemptCount}/${correctionGrounding.maxAttempts}`,
+      `semanticPlanRouteKind=${correctionGrounding.semanticPlanRouteKind ?? "text_to_sql"}`,
+      `semanticPlanSnapshotId=${correctionGrounding.semanticPlanSnapshotId ?? "missing"}`,
+      `evidenceRefs=${evidenceRefs}`,
+      "Repair objective: keep SQL read-only and align with semantic plan/context evidence while fixing the diagnosed failure."
+    ]
+      .filter((item) => item.trim().length > 0)
+      .join(" ");
   }
 
   private buildContextBlock(selectedContext?: RagRetrievalChunkPayload[]): string {

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type {
   ClarificationPrompt,
+  SemanticContextPackV1,
   SemanticPlanV1,
   Text2SqlV2FailureSemantic
 } from "@text2sql/shared-types";
@@ -33,12 +34,17 @@ export class AnswerNode {
     executionResult?: ExecuteSqlNodeResult;
     sqlArtifact?: StructuredSqlGenerationArtifact;
     semanticPlan?: SemanticPlanV1;
+    contextPack?: SemanticContextPackV1;
+    routeKind?: string;
     failure?: Text2SqlV2FailureSemantic;
     warnings?: string[];
   }): AnswerNodeResult {
+    const routeKind = this.resolveRouteKind(input.semanticPlan, input.routeKind);
+    const metadataRoute = routeKind === "metadata";
     const evidenceRefs = this.unique([
       ...(input.sqlArtifact?.evidenceRefs ?? []),
-      ...(input.semanticPlan?.evidenceRefs ?? [])
+      ...(input.semanticPlan?.evidenceRefs ?? []),
+      ...(metadataRoute ? input.contextPack?.selectedEvidenceIds ?? [] : [])
     ]);
     const warnings = this.unique(input.warnings ?? []);
 
@@ -60,7 +66,14 @@ export class AnswerNode {
     if (input.directAnswer?.trim()) {
       return {
         mode: "direct_answer",
-        answer: this.formatAnswerNode.runDirectAnswer(input.directAnswer, warnings),
+        answer: metadataRoute
+          ? this.formatAnswerNode.runMetadataDirectAnswer({
+              answer: input.directAnswer,
+              contextPack: input.contextPack,
+              semanticPlan: input.semanticPlan,
+              warnings
+            })
+          : this.formatAnswerNode.runDirectAnswer(input.directAnswer, warnings),
         status: "executionResult",
         evidenceRefs,
         warnings,
@@ -108,5 +121,21 @@ export class AnswerNode {
 
   private unique(values: string[]): string[] {
     return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  }
+
+  private resolveRouteKind(
+    semanticPlan?: SemanticPlanV1,
+    routeKind?: string
+  ): string | undefined {
+    if (routeKind?.trim()) {
+      return routeKind.trim();
+    }
+    const routeFilter = semanticPlan?.filters?.find((filter) =>
+      filter.startsWith("route_kind:")
+    );
+    if (!routeFilter) {
+      return undefined;
+    }
+    return routeFilter.slice("route_kind:".length).trim();
   }
 }

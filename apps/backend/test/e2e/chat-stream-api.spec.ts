@@ -241,6 +241,10 @@ describe("chat stream api (e2e)", () => {
         evidence?: {
           runId?: string;
           contextPackStatus?: string;
+          contextPackSummary?: {
+            status?: string;
+            selectedEvidenceCount?: number;
+          };
           v2?: {
             stageArtifacts?: Array<{ stage?: string }>;
           };
@@ -261,6 +265,16 @@ describe("chat stream api (e2e)", () => {
     const contextPackStatus = finishData.delivery?.evidence?.contextPackStatus;
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
+    const streamContextPackSummary = finishData.delivery?.evidence?.contextPackSummary as
+      | {
+          status?: string;
+          selectedEvidenceCount?: number;
+        }
+      | undefined;
+    if (streamContextPackSummary) {
+      expect(["ready", "degraded"]).toContain(streamContextPackSummary.status);
+      expect(typeof streamContextPackSummary.selectedEvidenceCount).toBe("number");
     }
     const deliveryV2 = finishData.delivery?.evidence?.v2 as
       | {
@@ -300,6 +314,11 @@ describe("chat stream api (e2e)", () => {
       messagesRes.body.data.latestRun.delivery.answer.text
     );
     expect(messagesRes.body.data.latestRun.delivery.evidence.runId).toBe(streamRunId);
+    if (streamContextPackSummary) {
+      expect(
+        messagesRes.body.data.latestRun.delivery.evidence.contextPackSummary
+      ).toEqual(streamContextPackSummary);
+    }
     expect(["completed", "failed"]).toContain(latestRun.trace.streamStatus);
     const latestTraceV2 = (messagesRes.body.data.latestRun.trace?.v2 ?? null) as
       | {

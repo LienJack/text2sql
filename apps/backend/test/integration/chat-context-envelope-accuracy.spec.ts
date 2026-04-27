@@ -58,7 +58,19 @@ describe("chat context envelope accuracy integration", () => {
       "数据库有哪些表"
     );
     expect(metadataRun.status).not.toBe("clarification");
-    expect(metadataRun.trace.steps.map((step) => step.node)).toEqual(["intake", "answer"]);
+    const metadataStepNodes = metadataRun.trace.steps.map((step) => step.node);
+    expect(metadataStepNodes).toEqual(
+      expect.arrayContaining([
+        "intake",
+        "retrieve-context",
+        "assemble-context",
+        "semantic-plan",
+        "answer"
+      ])
+    );
+    expect(metadataStepNodes).not.toContain("generate-sql");
+    expect(metadataStepNodes).not.toContain("validate-sql");
+    expect(metadataStepNodes).not.toContain("execute-sql");
     const metadataIntakeStage = metadataRun.trace.v2?.stages.find(
       (stage) => stage.stage === "intake"
     );
@@ -103,7 +115,17 @@ describe("chat context envelope accuracy integration", () => {
     );
     expect(pinnedContextRun.trace.effectiveContextSummary).toBeUndefined();
     expect(pinnedContextRun.delivery?.evidence?.effectiveContextSummary).toBeUndefined();
-    expect(pinnedContextRun.trace.steps.map((step) => step.node)).toEqual(["intake", "answer"]);
+    const pinnedMetadataNodes = pinnedContextRun.trace.steps.map((step) => step.node);
+    expect(pinnedMetadataNodes).toEqual(
+      expect.arrayContaining([
+        "intake",
+        "retrieve-context",
+        "assemble-context",
+        "semantic-plan",
+        "answer"
+      ])
+    );
+    expect(pinnedMetadataNodes).not.toContain("generate-sql");
 
     await moduleRef.close();
   });

@@ -38,6 +38,8 @@
   - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
   - `run.delivery.evidence.modelingRevision?`：与 `run.trace.modelingRevision?` 同源镜像字段，语义必须一致
   - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
+  - Full Mermaid strict-completion（2026-04-27）语义：metadata 仅走 `retrieve -> assemble-context -> semantic-plan -> answer`（no-SQL）；correction 重试必须输出结构化 `correctionGrounding`
+  - `run.delivery.evidence.v2` 在 strict-completion 场景应包含 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`，并与 `run.trace.v2` 保持语义一致
   - hard-cut read-model：run read/save-view/replay 必须命中显式 v2 marker（`run.trace.v2.version === "v2"`、`run.trace.v2.stageOrder.length > 0`、`run.trace.v2.stages.length > 0`）；命中授权但不支持历史 shape 时返回 `410 LEGACY_RUN_UNSUPPORTED`
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
@@ -62,6 +64,7 @@
   - `data`
 - `data` is always a structured object, not raw string.
 - `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
+- strict-completion 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding` 与 `run.trace.v2` 的同语义镜像。
 
 ## Tool Calling Baseline
 
@@ -105,6 +108,8 @@
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
   - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
   - the report must include scoped line/branch coverage, critical file thresholds, A-M flow-node blockers, eval fixture behavior-test traceability, and `delegationZero` static-scan结果。
+  - Full Mermaid strict-completion 场景下，报告还必须包含 `strictCompletionRows`（metadata grounding / correction grounding / context-pack parity）并参与 gate 判定。
+- 叙事边界：`007 closeout` 表示 LangGraph topology + `delegation=0` 收口完成；`008 strict-completion` 在此基础上要求 metadata grounding / correction grounding / context-pack parity 的可观测与可门禁。
 - Text2SQL v2 closeout rollout must use `collect:text2sql-v2-eval-gate` as the aggregated report entry:
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
   - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`

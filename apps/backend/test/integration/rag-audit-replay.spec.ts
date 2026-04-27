@@ -137,6 +137,40 @@ describe("rag audit replay integration", () => {
     );
   });
 
+  it("keeps correction grounding visible in replay runTrace.v2", async () => {
+    const runId = "run-rag-audit-correction-grounding";
+    await chatRepository.persistRun({
+      ...createRun(runId),
+      trace: {
+        ...createRun(runId).trace,
+        v2: {
+          ...(createRun(runId).trace.v2 as NonNullable<SqlRun["trace"]["v2"]>),
+          sqlGeneration: {
+            sql: "SELECT orders.id FROM orders",
+            usedTables: ["orders"],
+            usedColumns: ["orders.id"],
+            evidenceRefs: ["chunk-orders-1"],
+            correctionGrounding: {
+              failedSqlRef: "sql.sha256.abc123abc123abcd",
+              retryReason: "missing column orders.missing_city",
+              attemptCount: 1,
+              maxAttempts: 2,
+              evidenceRefs: ["chunk-orders-1"]
+            }
+          }
+        }
+      }
+    });
+
+    const chain = await auditReplayService.queryChain({ runId });
+    expect(chain.runTrace?.v2?.sqlGeneration?.correctionGrounding).toMatchObject({
+      failedSqlRef: "sql.sha256.abc123abc123abcd",
+      retryReason: "missing column orders.missing_city",
+      attemptCount: 1,
+      maxAttempts: 2
+    });
+  });
+
   it("returns dlq status and failure reason for unrecoverable event", async () => {
     const runId = "run-rag-audit-chain-dlq";
     await chatRepository.persistRun(createRun(runId));

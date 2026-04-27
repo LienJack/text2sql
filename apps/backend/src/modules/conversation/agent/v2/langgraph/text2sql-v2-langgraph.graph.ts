@@ -219,7 +219,8 @@ const resolveIntakeRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
   if (state.failure?.terminal) {
     return "answer";
   }
-  return state.routeArtifact?.route === "text_to_sql" ? "retrieve" : "answer";
+  const route = state.routeArtifact?.route;
+  return route === "text_to_sql" || route === "metadata" ? "retrieve" : "answer";
 };
 
 const resolveRetrieveRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
@@ -232,6 +233,10 @@ const resolveAssembleRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => 
 
 const resolveSemanticPlanRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
   if (state.failure?.terminal) {
+    return "answer";
+  }
+  const semanticRouteKind = state.semanticPlanResult?.validation.routeKind;
+  if (state.routeArtifact?.route === "metadata" || semanticRouteKind === "metadata") {
     return "answer";
   }
   return state.semanticPlanResult?.route === "ready" ? "generate-sql" : "answer";
@@ -524,8 +529,10 @@ export const createText2SqlV2LangGraph = (
           terminationReason = "semantic_plan_requires_clarification";
         } else if (result.route === "direct_answer") {
           directAnswer =
-            state.routeArtifact?.directAnswer ??
-            "这是解释类问题，不需要执行 SQL；我会直接给出说明。";
+            result.validation.routeKind === "metadata"
+              ? "这是元数据问题，我会基于已检索到的表结构与语义证据给出只读说明。"
+              : state.routeArtifact?.directAnswer ??
+                "这是解释类问题，不需要执行 SQL；我会直接给出说明。";
         } else if (result.route === "fail_closed") {
           status = "failed";
           failure = semanticFailClosedFailure(reasons);
@@ -618,6 +625,7 @@ export const createText2SqlV2LangGraph = (
           explicitPinning,
           cause: state.correctionAttemptCount > 0 ? "correction" : "initial",
           retryReason: state.correctionResult?.artifact.retryReason,
+          correctionGrounding: state.correctionResult?.artifact.grounding,
           stream: state.streamMode,
           tools: deps.resolveSqlTools(state),
           onEvent: state.streamOptions?.onLlmEvent
@@ -637,6 +645,7 @@ export const createText2SqlV2LangGraph = (
           metadata: {
             cause: result.artifact.cause,
             retryReason: result.artifact.retryReason,
+            correctionGrounding: result.artifact.correctionGrounding,
             usedTableCount: result.artifact.usedTables.length,
             usedColumnCount: result.artifact.usedColumns.length
           }
@@ -653,7 +662,8 @@ export const createText2SqlV2LangGraph = (
           detail: "generate-sql completed",
           outputSummary: {
             sql: result.artifact.sql,
-            cause: result.artifact.cause
+            cause: result.artifact.cause,
+            correctionGrounding: result.artifact.correctionGrounding
           },
           patch: {
             sqlDraft: summarizeSqlDraft(result.draft),
@@ -787,7 +797,8 @@ export const createText2SqlV2LangGraph = (
           metadata: {
             attemptCount: result.budget.attemptCount,
             maxAttempts: result.budget.maxAttempts,
-            exhausted: result.budget.exhausted
+            exhausted: result.budget.exhausted,
+            correctionGrounding: result.artifact.grounding
           }
         });
         const loopEvidence = [
@@ -818,7 +829,8 @@ export const createText2SqlV2LangGraph = (
           outputSummary: {
             outcome: result.outcome,
             attemptCount: result.budget.attemptCount,
-            maxAttempts: result.budget.maxAttempts
+            maxAttempts: result.budget.maxAttempts,
+            correctionGrounding: result.artifact.grounding
           },
           patch: {
             correctionResult: result,
@@ -931,6 +943,9 @@ export const createText2SqlV2LangGraph = (
         executionResult: state.executionResult,
         sqlArtifact: state.sqlGenerationArtifact,
         semanticPlan: state.semanticPlan,
+        contextPack: state.contextPack,
+        routeKind:
+          state.semanticPlanResult?.validation.routeKind ?? state.routeArtifact?.route,
         failure: state.failure,
         warnings
       });
