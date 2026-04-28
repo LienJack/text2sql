@@ -1,12 +1,12 @@
 # Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-29)
 
 ## Corpus Check
-- 779 files · ~2,262,451 words
+- 779 files · ~2,265,204 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4305 nodes · 8484 edges · 535 communities detected
-- Extraction: 79% EXTRACTED · 21% INFERRED · 0% AMBIGUOUS · INFERRED: 1806 edges (avg confidence: 0.8)
+- 4310 nodes · 8500 edges · 535 communities detected
+- Extraction: 79% EXTRACTED · 21% INFERRED · 0% AMBIGUOUS · INFERRED: 1808 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -561,103 +561,103 @@
 ## Surprising Connections (you probably didn't know these)
 - `loadPreviewForDetails()` --calls--> `getWorkspaceModelingPreview()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/modeling/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/admin-api-client.ts
-- `load()` --calls--> `setError()`  [INFERRED]
-  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/glossary/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/components/settings/workspace-management-panel.tsx
 - `load()` --calls--> `listGlossaryTerms()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/glossary/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/admin-api-client.ts
-- `syncWorkspaceContext()` --calls--> `writeActiveWorkspaceId()`  [INFERRED]
-  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/datasource-session-context.ts
 - `resolveWorkspaceId()` --calls--> `readActiveWorkspaceId()`  [INFERRED]
   /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/datasource-session-context.ts
+- `refreshModels()` --calls--> `setError()`  [INFERRED]
+  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/components/settings/workspace-management-panel.tsx
+- `async()` --calls--> `createProviderConfig()`  [INFERRED]
+  /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/app/settings/modeling/page.tsx → /Users/lienli/Documents/GitHub/text2sql/apps/frontend/src/lib/settings-api-client.ts
 
 ## Communities
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (45): extractLatestUserText(), mapToThreadMessages(), ChartBiGroundingGuard, ChartBiResultProfiler, buildContextEnvelopeFromDraft(), parseEntityMappings(), splitByDelimiters(), trimOrUndefined() (+37 more)
+Nodes (43): extractLatestUserText(), mapToThreadMessages(), ChartBiGroundingGuard, ChartBiResultProfiler, buildContextEnvelopeFromDraft(), parseEntityMappings(), splitByDelimiters(), trimOrUndefined() (+35 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.03
-Nodes (145): addWorkspaceDatasourceBindings(), addWorkspaceMembers(), AdminApiError, commitModelingSetup(), composeApiUrl(), createGlossaryAnchor(), createGlossaryTerm(), createPromptTemplate() (+137 more)
+Nodes (146): addWorkspaceDatasourceBindings(), addWorkspaceMembers(), AdminApiError, commitModelingSetup(), composeApiUrl(), createGlossaryAnchor(), createGlossaryTerm(), createPromptTemplate() (+138 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.02
-Nodes (19): ChatController, ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EnrichDeliveryStage, EvalService (+11 more)
+Nodes (20): setupWorkspaceScopedSession(), ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EvalService, ExecuteMessageUsecase (+12 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.03
-Nodes (19): BuildRagIndexJob, asActor(), asActor(), GlossaryService, LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus() (+11 more)
+Nodes (15): ok(), ChartBiValidator, ChatController, DatasourceController, EvalController, GlossaryController, MemoryController, SettingsController (+7 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.02
-Nodes (35): AppConfigService, DatasourceRegistryService, countTracedRuns(), main(), parseArgs(), computeLangsmithCoverage(), bootstrap(), buildGraph() (+27 more)
+Nodes (33): AppConfigService, DatasourceRegistryService, countTracedRuns(), main(), parseArgs(), computeLangsmithCoverage(), bootstrap(), buildGraph() (+25 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.03
-Nodes (14): ok(), ChartBiValidator, DatasourceController, EvalController, GlossaryController, MemoryController, SettingsController, UserController (+6 more)
+Cohesion: 0.04
+Nodes (13): BuildRagIndexJob, asActor(), asActor(), GlossaryService, RagDocumentRepository, RagIndexBuilderService, RagIndexRepository, withActor() (+5 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.03
 Nodes (94): BuildSemanticQueryNode, buildConversationKnowledgeAllowlistSet(), collectFiles(), compactLine(), createLineStarts(), extractImportReferences(), findRepoRoot(), indexToLineColumn() (+86 more)
 
 ### Community 7 - "Community 7"
-Cohesion: 0.04
-Nodes (9): ModelingSchemaChangeRepository, toScopeKey(), SaveViewFromRunUsecase, normalizeName(), SchemaChangeDetectorService, normalizeName(), WorkspaceModelingSchemaChangeDetectorService, normalizeTableName() (+1 more)
+Cohesion: 0.03
+Nodes (86): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+78 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.03
-Nodes (22): BuildPhysicalPlanNode, ChartBiIntentParser, parseSseEvents(), parseSseEvents(), GateMetricsService, parsePayload(), PlannerCacheService, RagAuditReplayService (+14 more)
+Nodes (11): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, DatasourceWorkflowService, HealthController, MysqlExecutorService (+3 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.03
-Nodes (10): shouldRetryCorrection(), AnswerNode, CorrectSqlNode, FormatAnswerNode, RagDocumentRepository, SavedPriorSqlService, SemanticAssetReindexService, SqlCorrectionService (+2 more)
+Cohesion: 0.05
+Nodes (12): AuditLogRepository, ModelingGraphValidator, nonEmpty(), asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey(), toTablePermissionSetKey() (+4 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.04
-Nodes (7): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, DatasourceWorkflowService, PostgresExecutorService
+Nodes (9): LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus(), ModelRerankerAdapter, PromptTemplateService, ProviderCatalogService, ProviderRouterService (+1 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.06
-Nodes (9): setupWorkspaceScopedSession(), AuditLogRepository, asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey(), toTablePermissionSetKey(), WorkspaceDatasourcePolicyRepository (+1 more)
+Cohesion: 0.03
+Nodes (11): shouldRetryCorrection(), AnswerNode, CorrectSqlNode, FormatAnswerNode, RagDatasourceOrchestratorService, RagDatasourceQuotaPolicy, SavedPriorSqlService, SemanticAssetReindexService (+3 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.04
-Nodes (64): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+56 more)
+Cohesion: 0.03
+Nodes (20): BuildPhysicalPlanNode, ChartBiIntentParser, parseSseEvents(), parseSseEvents(), GateMetricsService, parsePayload(), PlannerCacheService, RagAuditReplayService (+12 more)
 
 ### Community 13 - "Community 13"
+Cohesion: 0.04
+Nodes (15): EmbeddingRouterService, GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl() (+7 more)
+
+### Community 14 - "Community 14"
 Cohesion: 0.05
 Nodes (5): GenerateSqlNode, RagCacheKeyFactory, SqlGenerationService, SqlOutputExtractor, SqlPromptBuilder
 
-### Community 14 - "Community 14"
+### Community 15 - "Community 15"
 Cohesion: 0.06
 Nodes (7): LaneTimeoutError, RagRetrievalService, appendUnique(), fuseWithRrf(), laneOrder(), normalizeRankConstant(), stableSortLaneHits()
 
-### Community 15 - "Community 15"
+### Community 16 - "Community 16"
 Cohesion: 0.04
 Nodes (6): ChatPostRunHooksService, MemoryPromotionPolicy, MemoryPromotionService, RagBudgetPolicy, RagReplayRepository, RagRerankService
 
-### Community 16 - "Community 16"
-Cohesion: 0.04
-Nodes (8): HealthController, MysqlExecutorService, RagIngestionMetricsService, RagQualityController, RagQualityService, SemanticSpineShadowService, SqliteExecutorService, SqliteQueryService
-
 ### Community 17 - "Community 17"
-Cohesion: 0.05
-Nodes (7): QueryExecutorRouterService, RelationshipPublishGateFacade, RowFilterRewriteService, SafetyCheckNode, SqlSafetyGuard, SqlTableAccessGuardService, SqlValidationService
+Cohesion: 0.06
+Nodes (7): DeliveryContractMapper, createDeliverySandboxPolicy(), isSandboxFilesystemWriteAllowed(), isSandboxNetworkAllowed(), isSandboxProcessSpawnAllowed(), normalizeString(), SandboxRuntimeService
 
 ### Community 18 - "Community 18"
 Cohesion: 0.06
-Nodes (62): createIdempotencyKey(), resolveDatasourceWorkflowApiError(), applySessionView(), dedupeSessions(), extractErrorCode(), init(), loadMessages(), mergeSessionMessages() (+54 more)
+Nodes (63): createIdempotencyKey(), resolveDatasourceWorkflowApiError(), applySessionView(), dedupeSessions(), extractErrorCode(), init(), loadMessages(), mergeSessionMessages() (+55 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.06
-Nodes (4): PromptTemplateService, RagTaskConfigRepository, RagTaskConfigService, SettingsService
+Cohesion: 0.05
+Nodes (6): QueryExecutorRouterService, RowFilterRewriteService, SafetyCheckNode, SqlSafetyGuard, SqlTableAccessGuardService, SqlValidationService
 
 ### Community 20 - "Community 20"
 Cohesion: 0.08
 Nodes (7): normalizeValue(), WorkspaceAdminGuard, toMembershipKey(), toWorkspaceMemberRole(), toWorkspaceStatus(), WorkspaceRepository, WorkspaceService
 
 ### Community 21 - "Community 21"
-Cohesion: 0.09
+Cohesion: 0.08
 Nodes (10): toPlatformUserStatus(), UserRepository, UserService, onConfirmBatchDelete(), onConfirmDeleteOne(), onConfirmResetPassword(), onSubmitEditor(), onToggleStatus() (+2 more)
 
 ### Community 22 - "Community 22"
@@ -665,28 +665,28 @@ Cohesion: 0.06
 Nodes (7): getChunkProfileConfig(), RagChunkingService, sha256(), RagDocumentFactory, sha256(), RagEventConsumerService, SemanticRegistryService
 
 ### Community 23 - "Community 23"
-Cohesion: 0.06
-Nodes (20): BuildIntentPlanNode, buildRuleReasonCodes(), ClarificationFusionPolicy, mapRuleDecisionToEvidence(), unique(), ClarifyNode, IntakeNode, buildDecision() (+12 more)
+Cohesion: 0.07
+Nodes (6): GraphAccelerationCircuitBreaker, GraphService, ModelingGraphRepository, toScopeKey(), RelationshipPublishGateFacade, SaveViewFromRunUsecase
 
 ### Community 24 - "Community 24"
 Cohesion: 0.06
-Nodes (13): EmbeddingRouterService, GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl() (+5 more)
+Nodes (20): BuildIntentPlanNode, buildRuleReasonCodes(), ClarificationFusionPolicy, mapRuleDecisionToEvidence(), unique(), ClarifyNode, IntakeNode, buildDecision() (+12 more)
 
 ### Community 25 - "Community 25"
 Cohesion: 0.12
 Nodes (1): Text2SqlV2ArtifactBuilder
 
 ### Community 26 - "Community 26"
-Cohesion: 0.1
-Nodes (6): ModelingGraphRepository, toScopeKey(), ModelingGraphValidator, nonEmpty(), normalizeId(), WorkspaceRelationshipService
+Cohesion: 0.07
+Nodes (5): AssembleContextNode, ChartBiArtifactService, ChatDeliveryEnrichmentService, EnrichDeliveryStage, SemanticPlanNode
 
 ### Community 27 - "Community 27"
-Cohesion: 0.06
-Nodes (7): ChartBiSpecCompiler, LangsmithTraceService, createText2SqlV2LangGraph(), Text2SqlV2LangGraphResultMapper, Text2SqlV2LangGraphRunnerService, createText2SqlV2LangGraphInitialState(), mergeRuntimePlanReducer()
+Cohesion: 0.07
+Nodes (4): RagIngestionMetricsService, RagQualityController, RagQualityService, SemanticSpineShadowService
 
 ### Community 28 - "Community 28"
-Cohesion: 0.08
-Nodes (4): AssembleContextNode, ChartBiArtifactService, ChatDeliveryEnrichmentService, SemanticPlanNode
+Cohesion: 0.06
+Nodes (7): ChartBiSpecCompiler, LangsmithTraceService, createText2SqlV2LangGraph(), Text2SqlV2LangGraphResultMapper, Text2SqlV2LangGraphRunnerService, createText2SqlV2LangGraphInitialState(), mergeRuntimePlanReducer()
 
 ### Community 29 - "Community 29"
 Cohesion: 0.09
@@ -698,127 +698,127 @@ Nodes (40): ApiClientRequestError, composeApiUrl(), createDatasource(), createSe
 
 ### Community 31 - "Community 31"
 Cohesion: 0.08
-Nodes (17): resolveText2SqlReasoningStage(), resolveText2SqlTitle(), resolveText2SqlV2StageCatalogEntry(), Text2SqlStreamEventMapper, createNodeUpdate(), createRuntimePlanUpdate(), createStageArtifact(), createStep() (+9 more)
+Nodes (18): resolveText2SqlReasoningStage(), resolveText2SqlTitle(), resolveText2SqlV2StageCatalogEntry(), Text2SqlStreamEventMapper, computeDurationMs(), createNodeUpdate(), createRuntimePlanUpdate(), createStageArtifact() (+10 more)
 
 ### Community 32 - "Community 32"
 Cohesion: 0.16
 Nodes (35): appendThinkingStep(), ensureRunLoaded(), isRecord(), isTerminalStep(), mergeRunThinkingSteps(), mergeThinkingStep(), normalizeArtifact(), normalizeChartArtifact() (+27 more)
 
 ### Community 33 - "Community 33"
-Cohesion: 0.12
-Nodes (22): buildOperationNotice(), closeDialog(), closeDrawer(), createIdempotencyKey(), formatDate(), handleDelete(), handleToggleTerm(), load() (+14 more)
-
-### Community 34 - "Community 34"
 Cohesion: 0.13
 Nodes (1): SemanticContextPackService
 
-### Community 35 - "Community 35"
-Cohesion: 0.17
+### Community 34 - "Community 34"
+Cohesion: 0.15
 Nodes (1): SemanticPlanService
 
-### Community 36 - "Community 36"
-Cohesion: 0.15
-Nodes (2): ModelRerankerAdapter, ProviderRouterService
-
-### Community 37 - "Community 37"
-Cohesion: 0.16
-Nodes (2): GraphAccelerationCircuitBreaker, GraphService
-
-### Community 38 - "Community 38"
+### Community 35 - "Community 35"
 Cohesion: 0.13
 Nodes (7): formatCell(), normalizeNullableText(), normalizeTableKey(), openEditDialog(), resolveModelRelationships(), resolveRelationshipCounterpartTable(), submitMetadataUpdate()
 
-### Community 39 - "Community 39"
+### Community 36 - "Community 36"
 Cohesion: 0.22
 Nodes (2): ClarificationSemanticEvaluatorService, SemanticEvaluatorTimeoutError
 
-### Community 40 - "Community 40"
+### Community 37 - "Community 37"
 Cohesion: 0.39
 Nodes (14): isRecord(), normalizeArtifact(), normalizeChart(), normalizeChartMappings(), normalizeDisplayType(), normalizeFallback(), normalizeSummary(), normalizeTable() (+6 more)
 
-### Community 41 - "Community 41"
+### Community 38 - "Community 38"
 Cohesion: 0.26
 Nodes (10): createIdempotencyKey(), isConflictError(), isRecord(), normalizeTableNames(), readNumberCandidate(), resolveConflictPolicyVersion(), resolveConflictSummary(), setsEqual() (+2 more)
 
-### Community 42 - "Community 42"
-Cohesion: 0.25
-Nodes (6): createDeliverySandboxPolicy(), isSandboxFilesystemWriteAllowed(), isSandboxNetworkAllowed(), isSandboxProcessSpawnAllowed(), normalizeString(), SandboxRuntimeService
-
-### Community 43 - "Community 43"
+### Community 39 - "Community 39"
 Cohesion: 0.29
 Nodes (1): FileDatasourceExecutorService
 
-### Community 44 - "Community 44"
+### Community 40 - "Community 40"
+Cohesion: 0.25
+Nodes (1): SemanticPlanValidator
+
+### Community 41 - "Community 41"
 Cohesion: 0.27
 Nodes (4): GraphAccelerationAdapter, GraphAccelerationError, GraphAccelerationTimeoutError, GraphAccelerationUnsupportedOperatorError
 
-### Community 45 - "Community 45"
+### Community 42 - "Community 42"
 Cohesion: 0.36
 Nodes (1): SkillRegistryService
 
-### Community 46 - "Community 46"
+### Community 43 - "Community 43"
 Cohesion: 0.24
 Nodes (6): handleOpenChange(), includesFailClosedHint(), normalizeAlerts(), resolveAutoExpandedSection(), resolveFailClosedAlerts(), sectionSeverityScore()
 
-### Community 47 - "Community 47"
+### Community 44 - "Community 44"
 Cohesion: 0.28
 Nodes (3): resetToLatest(), resolveConfigVersion(), syncFromConfig()
 
-### Community 48 - "Community 48"
+### Community 45 - "Community 45"
+Cohesion: 0.47
+Nodes (2): normalizeName(), WorkspaceModelingSchemaChangeDetectorService
+
+### Community 46 - "Community 46"
 Cohesion: 0.42
 Nodes (1): ResolveSavedPriorSqlNode
 
-### Community 49 - "Community 49"
+### Community 47 - "Community 47"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
-### Community 50 - "Community 50"
+### Community 48 - "Community 48"
 Cohesion: 0.32
 Nodes (3): resetToLatest(), resolveConfigVersion(), syncFromConfig()
 
-### Community 51 - "Community 51"
+### Community 49 - "Community 49"
 Cohesion: 0.25
-Nodes (0):
+Nodes (0): 
 
-### Community 52 - "Community 52"
+### Community 50 - "Community 50"
 Cohesion: 0.29
 Nodes (3): InMemorySemanticSpineRepositoryDouble, SemanticSpineContractError, validateSemanticObject()
 
+### Community 51 - "Community 51"
+Cohesion: 0.29
+Nodes (0): 
+
+### Community 52 - "Community 52"
+Cohesion: 0.29
+Nodes (0): 
+
 ### Community 53 - "Community 53"
-Cohesion: 0.29
-Nodes (0):
-
-### Community 54 - "Community 54"
-Cohesion: 0.29
-Nodes (0):
-
-### Community 55 - "Community 55"
 Cohesion: 0.33
 Nodes (2): providerStatusLabel(), providerStatusVariant()
 
-### Community 56 - "Community 56"
+### Community 54 - "Community 54"
+Cohesion: 0.38
+Nodes (4): createModelingFlowFieldHandleId(), createModelingFlowRelationshipHandleId(), ModelingFlowNode(), normalizeHandleToken()
+
+### Community 55 - "Community 55"
 Cohesion: 0.48
 Nodes (6): computeElkLayout(), ElkLayoutTimeoutError, sortEdges(), sortNodes(), toElapsedMs(), withTimeout()
 
-### Community 57 - "Community 57"
+### Community 56 - "Community 56"
 Cohesion: 0.57
 Nodes (2): IngestionSourceAdapter, uniqueNonEmpty()
 
-### Community 58 - "Community 58"
+### Community 57 - "Community 57"
 Cohesion: 0.29
 Nodes (1): KnowledgeChatSupportFacade
 
+### Community 58 - "Community 58"
+Cohesion: 0.33
+Nodes (0): 
+
 ### Community 59 - "Community 59"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 60 - "Community 60"
 Cohesion: 0.33
-Nodes (0):
+Nodes (0): 
 
 ### Community 61 - "Community 61"
-Cohesion: 0.33
-Nodes (0):
+Cohesion: 0.4
+Nodes (2): dedupe(), toggleSuggestion()
 
 ### Community 62 - "Community 62"
 Cohesion: 0.4
@@ -838,15 +838,15 @@ Nodes (1): ResizeObserver
 
 ### Community 66 - "Community 66"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 67 - "Community 67"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 68 - "Community 68"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 69 - "Community 69"
 Cohesion: 0.5
@@ -858,11 +858,11 @@ Nodes (4): nextEdgeId(), RelationshipEdgeEditorDialog(), toEdge(), toForm()
 
 ### Community 71 - "Community 71"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 72 - "Community 72"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 73 - "Community 73"
 Cohesion: 0.6
@@ -870,7 +870,7 @@ Nodes (3): resolveStepTitle(), statusLabel(), statusVariant()
 
 ### Community 74 - "Community 74"
 Cohesion: 0.4
-Nodes (0):
+Nodes (0): 
 
 ### Community 75 - "Community 75"
 Cohesion: 0.4
@@ -894,15 +894,15 @@ Nodes (1): RunV2StateMachineStage
 
 ### Community 80 - "Community 80"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 81 - "Community 81"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 82 - "Community 82"
 Cohesion: 0.5
-Nodes (0):
+Nodes (0): 
 
 ### Community 83 - "Community 83"
 Cohesion: 0.67
@@ -946,11 +946,11 @@ Nodes (1): PostRunHooksStage
 
 ### Community 93 - "Community 93"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 94 - "Community 94"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 95 - "Community 95"
 Cohesion: 1.0
@@ -958,67 +958,67 @@ Nodes (2): createDatasourceAndOpenSetupWizard(), openCreateToStep2()
 
 ### Community 96 - "Community 96"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 97 - "Community 97"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 98 - "Community 98"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 99 - "Community 99"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 100 - "Community 100"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 101 - "Community 101"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 102 - "Community 102"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 103 - "Community 103"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 104 - "Community 104"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 105 - "Community 105"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 106 - "Community 106"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 107 - "Community 107"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 108 - "Community 108"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 109 - "Community 109"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 110 - "Community 110"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 111 - "Community 111"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 112 - "Community 112"
 Cohesion: 1.0
@@ -1026,35 +1026,35 @@ Nodes (2): resolveBadgeLabel(), resolveBadgeVariant()
 
 ### Community 113 - "Community 113"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 114 - "Community 114"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 115 - "Community 115"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 116 - "Community 116"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 117 - "Community 117"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 118 - "Community 118"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 119 - "Community 119"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 120 - "Community 120"
 Cohesion: 0.67
-Nodes (0):
+Nodes (0): 
 
 ### Community 121 - "Community 121"
 Cohesion: 0.67
@@ -1170,35 +1170,35 @@ Nodes (1): RollbackGlossaryAnchorDto
 
 ### Community 149 - "Community 149"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 150 - "Community 150"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 151 - "Community 151"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 152 - "Community 152"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 153 - "Community 153"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 154 - "Community 154"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 155 - "Community 155"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 156 - "Community 156"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 157 - "Community 157"
 Cohesion: 1.0
@@ -1206,315 +1206,315 @@ Nodes (1): ELK
 
 ### Community 158 - "Community 158"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 159 - "Community 159"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 160 - "Community 160"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 161 - "Community 161"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 162 - "Community 162"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 163 - "Community 163"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 164 - "Community 164"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 165 - "Community 165"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 166 - "Community 166"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 167 - "Community 167"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 168 - "Community 168"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 169 - "Community 169"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 170 - "Community 170"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 171 - "Community 171"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 172 - "Community 172"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 173 - "Community 173"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 174 - "Community 174"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 175 - "Community 175"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 176 - "Community 176"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 177 - "Community 177"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 178 - "Community 178"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 179 - "Community 179"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 180 - "Community 180"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 181 - "Community 181"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 182 - "Community 182"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 183 - "Community 183"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 184 - "Community 184"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 185 - "Community 185"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 186 - "Community 186"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 187 - "Community 187"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 188 - "Community 188"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 189 - "Community 189"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 190 - "Community 190"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 191 - "Community 191"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 192 - "Community 192"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 193 - "Community 193"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 194 - "Community 194"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 195 - "Community 195"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 196 - "Community 196"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 197 - "Community 197"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 198 - "Community 198"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 199 - "Community 199"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 200 - "Community 200"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 201 - "Community 201"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 202 - "Community 202"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 203 - "Community 203"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 204 - "Community 204"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 205 - "Community 205"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 206 - "Community 206"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 207 - "Community 207"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 208 - "Community 208"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 209 - "Community 209"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 210 - "Community 210"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 211 - "Community 211"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 212 - "Community 212"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 213 - "Community 213"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 214 - "Community 214"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 215 - "Community 215"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 216 - "Community 216"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 217 - "Community 217"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 218 - "Community 218"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 219 - "Community 219"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 220 - "Community 220"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 221 - "Community 221"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 222 - "Community 222"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 223 - "Community 223"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 224 - "Community 224"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 225 - "Community 225"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 226 - "Community 226"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 227 - "Community 227"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 228 - "Community 228"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 229 - "Community 229"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 230 - "Community 230"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 231 - "Community 231"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 232 - "Community 232"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 233 - "Community 233"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 234 - "Community 234"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 235 - "Community 235"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 236 - "Community 236"
 Cohesion: 1.0
@@ -1522,7 +1522,7 @@ Nodes (1): AppModule
 
 ### Community 237 - "Community 237"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 238 - "Community 238"
 Cohesion: 1.0
@@ -1750,967 +1750,967 @@ Nodes (1): AgentModule
 
 ### Community 294 - "Community 294"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 295 - "Community 295"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 296 - "Community 296"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 297 - "Community 297"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 298 - "Community 298"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 299 - "Community 299"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 300 - "Community 300"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 301 - "Community 301"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 302 - "Community 302"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 303 - "Community 303"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 304 - "Community 304"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 305 - "Community 305"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 306 - "Community 306"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 307 - "Community 307"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 308 - "Community 308"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 309 - "Community 309"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 310 - "Community 310"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 311 - "Community 311"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 312 - "Community 312"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 313 - "Community 313"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 314 - "Community 314"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 315 - "Community 315"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 316 - "Community 316"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 317 - "Community 317"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 318 - "Community 318"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 319 - "Community 319"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 320 - "Community 320"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 321 - "Community 321"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 322 - "Community 322"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 323 - "Community 323"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 324 - "Community 324"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 325 - "Community 325"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 326 - "Community 326"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 327 - "Community 327"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 328 - "Community 328"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 329 - "Community 329"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 330 - "Community 330"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 331 - "Community 331"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 332 - "Community 332"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 333 - "Community 333"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 334 - "Community 334"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 335 - "Community 335"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 336 - "Community 336"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 337 - "Community 337"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 338 - "Community 338"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 339 - "Community 339"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 340 - "Community 340"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 341 - "Community 341"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 342 - "Community 342"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 343 - "Community 343"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 344 - "Community 344"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 345 - "Community 345"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 346 - "Community 346"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 347 - "Community 347"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 348 - "Community 348"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 349 - "Community 349"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 350 - "Community 350"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 351 - "Community 351"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 352 - "Community 352"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 353 - "Community 353"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 354 - "Community 354"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 355 - "Community 355"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 356 - "Community 356"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 357 - "Community 357"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 358 - "Community 358"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 359 - "Community 359"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 360 - "Community 360"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 361 - "Community 361"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 362 - "Community 362"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 363 - "Community 363"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 364 - "Community 364"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 365 - "Community 365"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 366 - "Community 366"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 367 - "Community 367"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 368 - "Community 368"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 369 - "Community 369"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 370 - "Community 370"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 371 - "Community 371"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 372 - "Community 372"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 373 - "Community 373"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 374 - "Community 374"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 375 - "Community 375"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 376 - "Community 376"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 377 - "Community 377"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 378 - "Community 378"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 379 - "Community 379"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 380 - "Community 380"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 381 - "Community 381"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 382 - "Community 382"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 383 - "Community 383"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 384 - "Community 384"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 385 - "Community 385"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 386 - "Community 386"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 387 - "Community 387"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 388 - "Community 388"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 389 - "Community 389"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 390 - "Community 390"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 391 - "Community 391"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 392 - "Community 392"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 393 - "Community 393"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 394 - "Community 394"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 395 - "Community 395"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 396 - "Community 396"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 397 - "Community 397"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 398 - "Community 398"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 399 - "Community 399"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 400 - "Community 400"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 401 - "Community 401"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 402 - "Community 402"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 403 - "Community 403"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 404 - "Community 404"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 405 - "Community 405"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 406 - "Community 406"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 407 - "Community 407"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 408 - "Community 408"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 409 - "Community 409"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 410 - "Community 410"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 411 - "Community 411"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 412 - "Community 412"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 413 - "Community 413"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 414 - "Community 414"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 415 - "Community 415"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 416 - "Community 416"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 417 - "Community 417"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 418 - "Community 418"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 419 - "Community 419"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 420 - "Community 420"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 421 - "Community 421"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 422 - "Community 422"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 423 - "Community 423"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 424 - "Community 424"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 425 - "Community 425"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 426 - "Community 426"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 427 - "Community 427"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 428 - "Community 428"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 429 - "Community 429"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 430 - "Community 430"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 431 - "Community 431"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 432 - "Community 432"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 433 - "Community 433"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 434 - "Community 434"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 435 - "Community 435"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 436 - "Community 436"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 437 - "Community 437"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 438 - "Community 438"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 439 - "Community 439"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 440 - "Community 440"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 441 - "Community 441"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 442 - "Community 442"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 443 - "Community 443"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 444 - "Community 444"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 445 - "Community 445"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 446 - "Community 446"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 447 - "Community 447"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 448 - "Community 448"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 449 - "Community 449"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 450 - "Community 450"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 451 - "Community 451"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 452 - "Community 452"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 453 - "Community 453"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 454 - "Community 454"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 455 - "Community 455"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 456 - "Community 456"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 457 - "Community 457"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 458 - "Community 458"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 459 - "Community 459"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 460 - "Community 460"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 461 - "Community 461"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 462 - "Community 462"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 463 - "Community 463"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 464 - "Community 464"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 465 - "Community 465"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 466 - "Community 466"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 467 - "Community 467"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 468 - "Community 468"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 469 - "Community 469"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 470 - "Community 470"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 471 - "Community 471"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 472 - "Community 472"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 473 - "Community 473"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 474 - "Community 474"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 475 - "Community 475"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 476 - "Community 476"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 477 - "Community 477"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 478 - "Community 478"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 479 - "Community 479"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 480 - "Community 480"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 481 - "Community 481"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 482 - "Community 482"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 483 - "Community 483"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 484 - "Community 484"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 485 - "Community 485"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 486 - "Community 486"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 487 - "Community 487"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 488 - "Community 488"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 489 - "Community 489"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 490 - "Community 490"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 491 - "Community 491"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 492 - "Community 492"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 493 - "Community 493"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 494 - "Community 494"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 495 - "Community 495"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 496 - "Community 496"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 497 - "Community 497"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 498 - "Community 498"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 499 - "Community 499"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 500 - "Community 500"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 501 - "Community 501"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 502 - "Community 502"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 503 - "Community 503"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 504 - "Community 504"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 505 - "Community 505"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 506 - "Community 506"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 507 - "Community 507"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 508 - "Community 508"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 509 - "Community 509"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 510 - "Community 510"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 511 - "Community 511"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 512 - "Community 512"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 513 - "Community 513"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 514 - "Community 514"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 515 - "Community 515"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 516 - "Community 516"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 517 - "Community 517"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 518 - "Community 518"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 519 - "Community 519"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 520 - "Community 520"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 521 - "Community 521"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 522 - "Community 522"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 523 - "Community 523"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 524 - "Community 524"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 525 - "Community 525"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 526 - "Community 526"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 527 - "Community 527"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 528 - "Community 528"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 529 - "Community 529"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 530 - "Community 530"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 531 - "Community 531"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 532 - "Community 532"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 533 - "Community 533"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ### Community 534 - "Community 534"
 Cohesion: 1.0
-Nodes (0):
+Nodes (0): 
 
 ## Knowledge Gaps
 - **93 isolated node(s):** `ELK`, `ElkLayoutTimeoutError`, `AppModule`, `LlmModule`, `ApplyMemoryFeedbackDto` (+88 more)
@@ -3500,8 +3500,10 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ok()` connect `Community 5` to `Community 16`, `Community 2`, `Community 13`, `Community 7`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
+- **Why does `RagRetrievalService` connect `Community 15` to `Community 13`, `Community 23`?**
+  _High betweenness centrality (0.025) - this node is a cross-community bridge._
+- **Why does `ok()` connect `Community 3` to `Community 8`, `Community 0`, `Community 2`, `Community 27`?**
+  _High betweenness centrality (0.016) - this node is a cross-community bridge._
 - **Are the 89 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.report()`) actually correct?**
   _`ok()` has 89 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ELK`, `ElkLayoutTimeoutError`, `AppModule` to the rest of the system?**
@@ -3512,5 +3514,3 @@ _Questions this graph is uniquely positioned to answer:_
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
-- **Should `Community 3` be split into smaller, more focused modules?**
-  _Cohesion score 0.03 - nodes in this community are weakly interconnected._
