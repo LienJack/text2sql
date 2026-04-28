@@ -3,6 +3,7 @@ import type {
   ClarificationPrompt,
   ExecutionTraceStep,
   Text2SqlV2FailureSemantic,
+  Text2SqlV2RuntimePlanV1,
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
 } from "@text2sql/shared-types";
@@ -59,12 +60,6 @@ const STAGE_NODE_TO_STEP_NODE: Record<Text2SqlV2LangGraphNodeName, string> = {
   execute: "execute-sql",
   answer: "answer"
 };
-
-const STAGE_STEP_SEQUENCE = new Map<Text2SqlV2LangGraphNodeName, number>(
-  (Object.keys(STAGE_NODE_TO_STEP_NODE) as Text2SqlV2LangGraphNodeName[]).map(
-    (node, index) => [node, index + 1]
-  )
-);
 
 const toStepStatus = (
   status: Text2SqlV2StageArtifact["status"]
@@ -161,6 +156,7 @@ const createStep = (input: {
   node: Text2SqlV2LangGraphNodeName;
   stageArtifact: Text2SqlV2StageArtifact;
   detail: string;
+  runtimePlanStatus?: Text2SqlV2RuntimePlanV1["items"][number]["status"];
   inputSummary?: Record<string, unknown>;
   outputSummary?: Record<string, unknown>;
 }): ExecutionTraceStep => {
@@ -168,13 +164,23 @@ const createStep = (input: {
   const outputPayload: Record<string, unknown> = {
     ...(input.outputSummary ?? {}),
     v2: {
-      stageArtifact: input.stageArtifact
+      stageArtifact: input.stageArtifact,
+      runtimePlan: createRuntimePlanUpdate({
+        stageArtifact: input.stageArtifact,
+        detail: input.detail,
+        status: input.runtimePlanStatus
+      })
     }
   };
   const inputPayload: Record<string, unknown> = {
     ...(input.inputSummary ?? {}),
     v2: {
-      stageArtifact: input.stageArtifact
+      stageArtifact: input.stageArtifact,
+      runtimePlan: createRuntimePlanUpdate({
+        stageArtifact: input.stageArtifact,
+        detail: input.detail,
+        status: input.runtimePlanStatus
+      })
     }
   };
 
@@ -195,7 +201,88 @@ const createStep = (input: {
   };
 };
 
-const createNodeUpdate = (input: {
+const toRuntimePlanStatus = (
+  status: Text2SqlV2StageArtifact["status"]
+): Text2SqlV2RuntimePlanV1["items"][number]["status"] => {
+  if (status === "success" || status === "degraded") {
+    return "completed";
+  }
+  if (status === "clarification") {
+    return "clarification";
+  }
+  return status;
+};
+
+const createRuntimePlanUpdate = (input: {
+  stageArtifact: Text2SqlV2StageArtifact;
+  detail: string;
+  status?: Text2SqlV2RuntimePlanV1["items"][number]["status"];
+}): Text2SqlV2RuntimePlanV1 => {
+  const catalog = resolveText2SqlV2StageCatalogEntry(input.stageArtifact.stage);
+  const reasonCodes = unique([
+    ...(input.stageArtifact.warnings ?? []),
+    ...(input.stageArtifact.failure?.code ? [input.stageArtifact.failure.code] : [])
+  ]);
+  const evidenceRefs = unique(input.stageArtifact.evidenceIds ?? []);
+  const correctionIntent = readCorrectionIntent(input.stageArtifact);
+  return {
+    version: "runtime-plan.v1",
+    currentItemId: `runtime-plan:${input.stageArtifact.stage}`,
+    summary: input.detail,
+    items: [
+      {
+        id: `runtime-plan:${input.stageArtifact.stage}`,
+        stage: input.stageArtifact.stage,
+        goal: catalog.title,
+        status: input.status ?? toRuntimePlanStatus(input.stageArtifact.status),
+        ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+        ...(evidenceRefs.length > 0 ? { evidenceRefs } : {}),
+        ...(correctionIntent ? { correctionIntent } : {}),
+        ...(input.stageArtifact.startedAt
+          ? { startedAt: input.stageArtifact.startedAt }
+          : {}),
+        ...(input.stageArtifact.endedAt
+          ? { endedAt: input.stageArtifact.endedAt }
+          : {}),
+        summary: input.detail
+      }
+    ]
+  };
+};
+
+const readCorrectionIntent = (
+  artifact: Text2SqlV2StageArtifact
+): Text2SqlV2RuntimePlanV1["items"][number]["correctionIntent"] | undefined => {
+  if (artifact.stage !== "correct" || artifact.status !== "success") {
+    return undefined;
+  }
+  const grounding = artifact.metadata?.correctionGrounding;
+  const retryReason =
+    typeof grounding === "object" &&
+    grounding !== null &&
+    "retryReason" in grounding &&
+    typeof grounding.retryReason === "string"
+      ? grounding.retryReason
+      : artifact.warnings?.[0];
+  if (!retryReason) {
+    return undefined;
+  }
+  const failureCode =
+    typeof grounding === "object" &&
+    grounding !== null &&
+    "failureCode" in grounding &&
+    typeof grounding.failureCode === "string"
+      ? grounding.failureCode
+      : undefined;
+  return {
+    failedStage: "validate",
+    ...(failureCode ? { failureCode } : {}),
+    retryReason,
+    targetStage: "generate-sql"
+  };
+};
+
+const createNodeUpdate = async (input: {
   state: Text2SqlV2LangGraphState;
   node: Text2SqlV2LangGraphNodeName;
   stageArtifact: Text2SqlV2StageArtifact;
@@ -203,7 +290,7 @@ const createNodeUpdate = (input: {
   inputSummary?: Record<string, unknown>;
   outputSummary?: Record<string, unknown>;
   patch?: Partial<Text2SqlV2LangGraphStateUpdate>;
-}): Text2SqlV2LangGraphStateUpdate => {
+}): Promise<Text2SqlV2LangGraphStateUpdate> => {
   const step = createStep({
     state: input.state,
     node: input.node,
@@ -212,11 +299,31 @@ const createNodeUpdate = (input: {
     inputSummary: input.inputSummary,
     outputSummary: input.outputSummary
   });
+  if (input.state.streamMode && input.state.streamOptions?.onStep) {
+    const sequence = input.state.traceSteps.length + 1;
+    await input.state.streamOptions.onStep({
+      step: {
+        ...step,
+        stepId: `${input.state.runId}:${step.node}:${sequence}`,
+        sequence,
+        lifecycle:
+          input.stageArtifact.status === "failed"
+            ? "failed"
+            : input.stageArtifact.status === "skipped"
+              ? "skipped"
+              : "completed"
+      }
+    });
+  }
 
   return {
     stageProgress: [input.node],
     stageArtifacts: [input.stageArtifact],
     traceSteps: [step],
+    runtimePlan: createRuntimePlanUpdate({
+      stageArtifact: input.stageArtifact,
+      detail: input.detail
+    }),
     ...(input.patch ?? {})
   };
 };
@@ -238,13 +345,19 @@ const emitRunningStep = async (input: {
     evidenceIds: input.evidenceIds,
     metadata: input.metadata
   });
-  const sequence = STAGE_STEP_SEQUENCE.get(input.node) ?? 1;
+  const runningStageArtifact = {
+    ...stageArtifact,
+    endedAt: undefined,
+    durationMs: undefined
+  };
+  const sequence = input.state.traceSteps.length + 1;
   const stepNode = STAGE_NODE_TO_STEP_NODE[input.node];
   const step = createStep({
     state: input.state,
     node: input.node,
-    stageArtifact,
-    detail: input.detail
+    stageArtifact: runningStageArtifact,
+    detail: input.detail,
+    runtimePlanStatus: "running"
   });
 
   await input.state.streamOptions.onStep({
@@ -257,6 +370,72 @@ const emitRunningStep = async (input: {
       durationMs: undefined
     }
   });
+};
+
+const emitSkippedStepsBeforeAnswer = async (
+  state: Text2SqlV2LangGraphState
+): Promise<void> => {
+  if (!state.streamMode || !state.streamOptions?.onStep) {
+    return;
+  }
+  const visited = new Set(state.stageProgress);
+  const skippedStages = (Object.keys(STAGE_NODE_TO_STEP_NODE) as Text2SqlV2LangGraphNodeName[])
+    .filter((stage) => stage !== "answer" && !visited.has(stage));
+
+  let offset = 0;
+  for (const stage of skippedStages) {
+    offset += 1;
+    const reasonCodes = resolveSkippedReasonCodes(state, stage);
+    const stageArtifact = createStageArtifact({
+      stage,
+      status: "skipped",
+      warnings: reasonCodes,
+      metadata: {
+        skippedBy: "langgraph-route"
+      }
+    });
+    const step = createStep({
+      state,
+      node: stage,
+      stageArtifact,
+      detail: `stage ${stage} skipped`,
+      runtimePlanStatus: "skipped"
+    });
+    const sequence = state.traceSteps.length + offset;
+    await state.streamOptions.onStep({
+      step: {
+        ...step,
+        stepId: `${state.runId}:${step.node}:${sequence}:skipped`,
+        sequence,
+        lifecycle: "skipped"
+      }
+    });
+  }
+};
+
+const resolveSkippedReasonCodes = (
+  state: Text2SqlV2LangGraphState,
+  stage: Text2SqlV2LangGraphNodeName
+): string[] => {
+  if (
+    state.routeArtifact?.route === "metadata" ||
+    state.semanticPlanResult?.validation.routeKind === "metadata"
+  ) {
+    return ["metadata_no_sql"];
+  }
+  if (
+    state.routeArtifact?.route === "general" ||
+    state.semanticPlanResult?.validation.routeKind === "general"
+  ) {
+    return ["general_no_sql"];
+  }
+  if (stage === "correct" && state.validationOutcome === "pass") {
+    return ["validation_passed"];
+  }
+  if (state.failure?.code) {
+    return [state.failure.code];
+  }
+  return ["route_skipped"];
 };
 
 const resolveIntakeRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
@@ -382,6 +561,11 @@ export const createText2SqlV2LangGraph = (
 ) => {
   const graph = new StateGraph(Text2SqlV2LangGraphStateAnnotation)
     .addNode("intake", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "intake",
+        detail: "intake running"
+      });
       const routeArtifact = deps.intakeNode.run({
         question: state.question,
         contextEnvelope: state.preparedRun.contextEnvelope
@@ -433,6 +617,11 @@ export const createText2SqlV2LangGraph = (
       });
     })
     .addNode("retrieve", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "retrieve",
+        detail: "retrieve-context running"
+      });
       try {
         const output = await deps.retrieveContextNode.run({
           question: state.standaloneQuestion ?? state.question,
@@ -492,6 +681,12 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("assemble-context", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "assemble-context",
+        detail: "assemble-context running",
+        evidenceIds: state.retrieveState?.evidenceRefs
+      });
       try {
         const output = deps.assembleContextNode.run({
           retrievalBundle: state.retrievedArtifact?.retrievalBundle,
@@ -546,6 +741,12 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("semantic-plan", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "semantic-plan",
+        detail: "semantic-plan running",
+        evidenceIds: state.contextPack?.selectedEvidenceIds
+      });
       try {
         if (!state.contextPack) {
           throw new DomainError(
@@ -638,6 +839,17 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("generate-sql", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "generate-sql",
+        detail: "generate-sql running",
+        evidenceIds: state.semanticPlan?.evidenceRefs,
+        metadata: {
+          routeKind: "text_to_sql",
+          selectedTableCount: state.semanticPlan?.selectedTables.length ?? 0,
+          selectedColumnCount: state.semanticPlan?.selectedColumns.length ?? 0
+        }
+      });
       try {
         if (!state.semanticPlan) {
           throw new DomainError(
@@ -655,18 +867,6 @@ export const createText2SqlV2LangGraph = (
                 columns: state.preparedRun.contextEnvelope?.pinnedColumns ?? []
               }
             : undefined;
-
-        await emitRunningStep({
-          state,
-          node: "generate-sql",
-          detail: "正在生成 SQL，可继续等待流式进度。",
-          evidenceIds: state.semanticPlan.evidenceRefs,
-          metadata: {
-            routeKind: "text_to_sql",
-            selectedTableCount: state.semanticPlan.selectedTables.length,
-            selectedColumnCount: state.semanticPlan.selectedColumns.length
-          }
-        });
 
         const result = await deps.generateSqlNode.run({
           question: state.standaloneQuestion ?? state.question,
@@ -751,6 +951,12 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("validate", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "validate",
+        detail: "validate-sql running",
+        evidenceIds: state.semanticPlan?.evidenceRefs
+      });
       try {
         if (!state.sqlGenerationArtifact?.sql) {
           throw new DomainError(
@@ -828,6 +1034,15 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("correct", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "correct",
+        detail: "correct-sql running",
+        evidenceIds: state.semanticPlan?.evidenceRefs,
+        metadata: {
+          attemptCount: state.correctionAttemptCount + 1
+        }
+      });
       try {
         if (!state.sqlValidationArtifact || !state.sqlGenerationArtifact?.sql) {
           throw new DomainError(
@@ -925,6 +1140,12 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("execute", async (state) => {
+      await emitRunningStep({
+        state,
+        node: "execute",
+        detail: "execute-sql running",
+        evidenceIds: state.sqlGenerationArtifact?.evidenceRefs
+      });
       try {
         if (!state.sqlValidationArtifact || !state.sqlGenerationArtifact) {
           throw new DomainError(
@@ -987,6 +1208,16 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("answer", async (state) => {
+      await emitSkippedStepsBeforeAnswer(state);
+      await emitRunningStep({
+        state,
+        node: "answer",
+        detail: "answer running",
+        evidenceIds: [
+          ...(state.contextPack?.selectedEvidenceIds ?? []),
+          ...(state.sqlGenerationArtifact?.evidenceRefs ?? [])
+        ]
+      });
       const warnings = unique([
         ...(state.retrieveState?.warnings ?? []),
         ...(state.contextPack?.warnings ?? []),

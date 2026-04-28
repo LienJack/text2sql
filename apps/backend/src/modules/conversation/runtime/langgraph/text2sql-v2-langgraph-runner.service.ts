@@ -24,6 +24,7 @@ import { IntakeNode } from "../../nodes/intake.node";
 import { RetrieveContextNode } from "../../nodes/retrieve-context.node";
 import { SemanticPlanNode } from "../../nodes/semantic-plan.node";
 import { ValidateSqlNode } from "../../nodes/validate-sql.node";
+import { Text2SqlV2ArtifactRefService } from "../../artifacts/text2sql-v2-artifact-ref.service";
 
 @Injectable()
 export class Text2SqlV2LangGraphRunnerService {
@@ -41,7 +42,8 @@ export class Text2SqlV2LangGraphRunnerService {
     private readonly answerNode: AnswerNode,
     private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly langsmithTrace: LangsmithTraceService,
-    private readonly resultMapper: Text2SqlV2LangGraphResultMapper
+    private readonly resultMapper: Text2SqlV2LangGraphResultMapper,
+    private readonly artifactRefService: Text2SqlV2ArtifactRefService
   ) {}
 
   async runSync(input: Text2SqlPreparedRunContext, route: string): Promise<SqlRun> {
@@ -84,15 +86,13 @@ export class Text2SqlV2LangGraphRunnerService {
       )) as Text2SqlV2LangGraphState;
       const traceSteps = this.resultMapper.mapTraceSteps(finalState);
 
-      if (runtimeInput.streamMode && runtimeInput.streamOptions?.onStep) {
-        for (const step of traceSteps) {
-          await runtimeInput.streamOptions.onStep({ step });
-        }
-      }
-
       this.recordLangsmithSpans(rootTrace, traceSteps);
 
-      const run = this.resultMapper.mapSqlRun(finalState);
+      const mappedRun = this.resultMapper.mapSqlRun(finalState);
+      const run = await this.artifactRefService.attachRunArtifactRefs(
+        mappedRun,
+        runtimeInput.preparedRun.datasource.id
+      );
       this.langsmithTrace.endRoot(rootTrace, {
         status: run.status,
         provider: run.provider,

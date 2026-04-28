@@ -461,6 +461,9 @@ export class ChatDeliveryEnrichmentService {
       semanticPlan: traceV2.semanticPlan,
       sqlGeneration: traceV2.sqlGeneration,
       sqlValidation: traceV2.sqlValidation,
+      runtimePlan: traceV2.runtimePlan,
+      artifactRefs: traceV2.artifactRefs,
+      smartDefaults: traceV2.smartDefaults,
       loopEvidence: traceV2.loopEvidence,
       terminationReason: traceV2.terminationReason,
       failure:

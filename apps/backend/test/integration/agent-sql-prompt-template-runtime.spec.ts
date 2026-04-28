@@ -5,6 +5,7 @@ import { GenerateSqlNode } from "../../src/modules/conversation/agent/nodes/gene
 import { SqlGenerationService } from "../../src/modules/conversation/agent/sql/sql-generation.service";
 import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql-output-extractor";
 import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
+import { Text2SqlSmartDefaultsService } from "../../src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.service";
 import { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
 
 describe("agent sql prompt template runtime integration", () => {
@@ -60,6 +61,7 @@ describe("agent sql prompt template runtime integration", () => {
         SqlPromptBuilder,
         SqlOutputExtractor,
         PromptTemplateService,
+        Text2SqlSmartDefaultsService,
         SqlGenerationService,
         GenerateSqlNode,
         {
@@ -199,7 +201,21 @@ describe("agent sql prompt template runtime integration", () => {
       stream: true,
       datasourceId: "ds_stream",
       workspaceId: "ws_stream",
-      selectedContext,
+      selectedContext: [
+        ...selectedContext,
+        {
+          chunk_id: "chunk-refunds-schema",
+          content: "table refunds(id, order_id, refund_amount)",
+          metadata: {
+            datasourceId: "ds_stream",
+            indexVersionId: "index-v1",
+            chunkId: "chunk-refunds-schema",
+            domain: "schema",
+            tableNames: ["refunds"],
+            columnNames: ["id", "order_id", "refund_amount"]
+          }
+        }
+      ],
       onEvent: async () => {
         return;
       }

@@ -39,8 +39,10 @@ import { SemanticPlanValidator } from "../adapters/semantic-plan.validator";
 import { SqlValidationService } from "../adapters/sql-validation.service";
 import { SqlCorrectionService } from "../adapters/sql-correction.service";
 import { Text2SqlV2ArtifactBuilder } from "../artifacts/text2sql-v2-artifact-builder";
+import { Text2SqlV2ArtifactRefService } from "../artifacts/text2sql-v2-artifact-ref.service";
 import { Text2SqlV2LangGraphResultMapper } from "../runtime/langgraph/text2sql-v2-langgraph-result.mapper";
 import { Text2SqlV2LangGraphRunnerService } from "../runtime/langgraph/text2sql-v2-langgraph-runner.service";
+import { Text2SqlSmartDefaultsService } from "../runtime/smart-defaults/text2sql-smart-defaults.service";
 import { AnswerNode as LangGraphAnswerNode } from "../nodes/answer.node";
 import { AssembleContextNode as LangGraphAssembleContextNode } from "../nodes/assemble-context.node";
 import { CorrectSqlNode as LangGraphCorrectSqlNode } from "../nodes/correct-sql.node";
@@ -100,6 +102,8 @@ import { ValidateSqlNode as LangGraphValidateSqlNode } from "../nodes/validate-s
     SemanticPlanValidator,
     SqlValidationService,
     SqlCorrectionService,
+    Text2SqlV2ArtifactRefService,
+    Text2SqlSmartDefaultsService,
     LangGraphIntakeNode,
     LangGraphRetrieveContextNode,
     LangGraphAssembleContextNode,

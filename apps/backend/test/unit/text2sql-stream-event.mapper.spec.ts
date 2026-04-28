@@ -34,6 +34,20 @@ describe("Text2SqlStreamEventMapper", () => {
               stage: "generate-sql",
               status: "success",
               durationMs: 12
+            },
+            runtimePlan: {
+              version: "runtime-plan.v1",
+              currentItemId: "runtime-plan:generate-sql",
+              items: [
+                {
+                  id: "runtime-plan:generate-sql",
+                  stage: "generate-sql",
+                  goal: "生成 SQL",
+                  status: "completed",
+                  summary: "generate-sql completed",
+                  reasonCodes: ["sql_generated"]
+                }
+              ]
             }
           }
         })
@@ -51,6 +65,13 @@ describe("Text2SqlStreamEventMapper", () => {
           status?: string;
           durationMs?: number;
         };
+        runtimePlan?: {
+          currentItemId?: string;
+          stage?: string;
+          status?: string;
+          summary?: string;
+          reasonCodes?: string[];
+        };
       };
     };
     expect(data.node).toBe("generate-sql");
@@ -59,6 +80,13 @@ describe("Text2SqlStreamEventMapper", () => {
       stage: "generate-sql",
       status: "success",
       durationMs: 12
+    });
+    expect(data.v2?.runtimePlan).toEqual({
+      currentItemId: "runtime-plan:generate-sql",
+      stage: "generate-sql",
+      status: "completed",
+      summary: "generate-sql completed",
+      reasonCodes: ["sql_generated"]
     });
   });
 

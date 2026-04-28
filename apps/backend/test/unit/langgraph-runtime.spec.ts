@@ -4,6 +4,7 @@ import {
   createText2SqlV2LangGraphInitialState
 } from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.state";
 import { Text2SqlV2ArtifactBuilder } from "../../src/modules/conversation/artifacts/text2sql-v2-artifact-builder";
+import { Text2SqlV2LangGraphResultMapper } from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
   runId: "run-v2-runtime",
@@ -421,6 +422,11 @@ describe("text2sql v2 runtime artifacts", () => {
       answerNode: answerNode as never,
       resolveSqlTools: jest.fn().mockReturnValue({})
     });
+    const streamedSteps: Array<{
+      node: string;
+      lifecycle?: "running" | "completed" | "failed" | "skipped";
+      outputSummary?: string;
+    }> = [];
     const finalState = await graph.invoke(
       createText2SqlV2LangGraphInitialState({
         preparedRun: {
@@ -444,7 +450,16 @@ describe("text2sql v2 runtime artifacts", () => {
           }
         } as never,
         route: "/api/v1/sessions/:sessionId/messages",
-        streamMode: false
+        streamMode: true,
+        streamOptions: {
+          onStep: ({ step }) => {
+            streamedSteps.push({
+              node: step.node,
+              lifecycle: step.lifecycle,
+              outputSummary: step.outputSummary
+            });
+          }
+        }
       })
     );
 
@@ -461,6 +476,56 @@ describe("text2sql v2 runtime artifacts", () => {
     expect(finalState.answerResult?.status).toBe("executionResult");
     expect(correctSqlNode.run).not.toHaveBeenCalled();
     expect(generateSqlNode.run).toHaveBeenCalledTimes(1);
+    expect(
+      streamedSteps.filter((step) => step.lifecycle === "running").map((step) => step.node)
+    ).toEqual([
+      "intake",
+      "retrieve-context",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate-sql",
+      "execute-sql",
+      "answer"
+    ]);
+    expect(
+      streamedSteps
+        .filter((step) => step.lifecycle === "completed")
+        .map((step) => step.node)
+    ).toEqual([
+      "intake",
+      "retrieve-context",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate-sql",
+      "execute-sql",
+      "answer"
+    ]);
+    expect(
+      streamedSteps
+        .filter((step) => step.lifecycle === "skipped")
+        .map((step) => step.node)
+    ).toEqual(["correct-sql"]);
+    expect(
+      streamedSteps.some((step) =>
+        step.outputSummary?.includes('"status":"running"')
+      )
+    ).toBe(true);
+    const artifact = new Text2SqlV2LangGraphResultMapper(
+      new Text2SqlV2ArtifactBuilder()
+    ).mapRunArtifact(finalState as never);
+    expect(
+      artifact.runtimePlan?.items.find((item) => item.stage === "generate-sql")
+    ).toMatchObject({
+      status: "completed"
+    });
+    expect(
+      artifact.runtimePlan?.items.find((item) => item.stage === "correct")
+    ).toMatchObject({
+      status: "skipped",
+      reasonCodes: ["validation_passed"]
+    });
   });
 
   it("routes metadata intent through retrieve/assemble/semantic-plan and skips SQL stages", async () => {
@@ -656,6 +721,15 @@ describe("text2sql v2 runtime artifacts", () => {
     expect(validateSqlNode.run).not.toHaveBeenCalled();
     expect(executeSqlNode.run).not.toHaveBeenCalled();
     expect(answerNode.run).toHaveBeenCalledTimes(1);
+    const artifact = new Text2SqlV2LangGraphResultMapper(
+      new Text2SqlV2ArtifactBuilder()
+    ).mapRunArtifact(finalState as never);
+    for (const stage of ["generate-sql", "validate", "correct", "execute"] as const) {
+      expect(artifact.runtimePlan?.items.find((item) => item.stage === stage)).toMatchObject({
+        status: "skipped",
+        reasonCodes: expect.arrayContaining(["metadata_no_sql"])
+      });
+    }
   });
 
   it("passes correction grounding into second generation attempt after correctable validation", async () => {
@@ -955,5 +1029,16 @@ describe("text2sql v2 runtime artifacts", () => {
       })
     );
     expect(finalState.answerResult?.status).toBe("executionResult");
+    expect(
+      finalState.runtimePlan?.items.find((item) => item.stage === "correct")
+    ).toMatchObject({
+      status: "completed",
+      correctionIntent: {
+        failedStage: "validate",
+        failureCode: "SQL_MISSING_COLUMN",
+        retryReason: "missing column orders.missing_city",
+        targetStage: "generate-sql"
+      }
+    });
   });
 });

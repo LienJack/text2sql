@@ -356,17 +356,28 @@ describe("text2sql v2 langgraph nodes", () => {
         buildStructuredArtifact: jest.fn()
       } as never);
 
-      await expect(
-        node.run({
-          question: "有哪些表",
-          semanticPlan: {
-            ...readyPlan,
-            filters: ["route_kind:metadata"]
-          }
-        })
-      ).rejects.toMatchObject({
-        code: "SEMANTIC_PLAN_DIRECT_ANSWER_REQUIRED"
-      });
+      for (const routeKind of ["metadata", "general", "clarify", "fail_closed"]) {
+        await expect(
+          node.run({
+            question: "有哪些表",
+            semanticPlan: {
+              ...readyPlan,
+              route:
+                routeKind === "clarify"
+                  ? "clarify"
+                  : routeKind === "fail_closed"
+                    ? "reject"
+                    : "answer",
+              filters: [`route_kind:${routeKind}`]
+            }
+          })
+        ).rejects.toMatchObject({
+          code: "SEMANTIC_PLAN_DIRECT_ANSWER_REQUIRED",
+          details: expect.objectContaining({
+            routeKind
+          })
+        });
+      }
     });
   });
 

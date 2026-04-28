@@ -444,6 +444,77 @@ export interface SqlValidationArtifactV1 {
   failure?: Text2SqlV2FailureSemantic;
 }
 
+export type Text2SqlV2RuntimePlanItemStatusV1 =
+  | "pending"
+  | "running"
+  | "completed"
+  | "skipped"
+  | "failed"
+  | "clarification";
+
+export interface Text2SqlV2RuntimePlanItemV1 {
+  id: string;
+  stage: Text2SqlV2StageName;
+  goal: string;
+  status: Text2SqlV2RuntimePlanItemStatusV1;
+  reasonCodes?: string[];
+  evidenceRefs?: string[];
+  correctionIntent?: {
+    failedStage?: Text2SqlV2StageName;
+    failureCode?: string;
+    retryReason: string;
+    targetStage?: Text2SqlV2StageName;
+  };
+  startedAt?: string;
+  endedAt?: string;
+  summary?: string;
+}
+
+export interface Text2SqlV2RuntimePlanV1 {
+  version: "runtime-plan.v1";
+  items: Text2SqlV2RuntimePlanItemV1[];
+  currentItemId?: string;
+  summary?: string;
+}
+
+export type Text2SqlV2ArtifactRefCategoryV1 =
+  | "context_snippets"
+  | "schema_supplement"
+  | "prompt_input"
+  | "provider_output_summary"
+  | "validation_diagnostics"
+  | "correction_grounding"
+  | "execution_preview"
+  | (string & {});
+
+export interface Text2SqlV2ArtifactRefV1 {
+  id: string;
+  category: Text2SqlV2ArtifactRefCategoryV1;
+  summary: string;
+  hash: string;
+  version?: string;
+  sizeBytes?: number;
+  replayKeyHint?: string;
+  visibility: "user" | "internal" | "redacted";
+  sensitivity?: "none" | "permission_filtered" | "provider_raw" | "sensitive";
+  reasonCodes?: string[];
+  evidenceRefs?: string[];
+}
+
+export interface Text2SqlV2SmartDefaultsEvidenceV1 {
+  bundleId: string;
+  version: string;
+  coveredStages: Text2SqlV2StageName[];
+  ruleIds: string[];
+  status: "applied" | "fallback";
+  fallbackReason?: string;
+  templateOverlay?: {
+    applied: boolean;
+    templateId?: string;
+    version?: number;
+  };
+}
+
 export interface Text2SqlV2RunArtifact {
   version: "v2";
   stageOrder: Text2SqlV2StageName[];
@@ -452,6 +523,9 @@ export interface Text2SqlV2RunArtifact {
   semanticPlan?: SemanticPlanV1;
   sqlGeneration?: SqlGenerationArtifactV1;
   sqlValidation?: SqlValidationArtifactV1;
+  runtimePlan?: Text2SqlV2RuntimePlanV1;
+  artifactRefs?: Text2SqlV2ArtifactRefV1[];
+  smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
   loopEvidence?: Text2SqlV2LoopEvidence[];
   terminationReason?: Text2SqlV2TerminationReason;
 }
@@ -659,6 +733,9 @@ export interface DeliveryEvidenceLayer {
     semanticPlan?: SemanticPlanV1;
     sqlGeneration?: SqlGenerationArtifactV1;
     sqlValidation?: SqlValidationArtifactV1;
+    runtimePlan?: Text2SqlV2RuntimePlanV1;
+    artifactRefs?: Text2SqlV2ArtifactRefV1[];
+    smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
     loopEvidence?: Text2SqlV2LoopEvidence[];
     terminationReason?: Text2SqlV2TerminationReason;
     failure?: Text2SqlV2FailureSemantic;
@@ -927,6 +1004,13 @@ export type ChatStreamEventData =
       errorSummary?: string;
       v2?: {
         stageArtifact?: Text2SqlV2StageArtifact;
+        runtimePlan?: {
+          currentItemId?: string;
+          stage?: Text2SqlV2StageName;
+          status?: Text2SqlV2RuntimePlanItemStatusV1;
+          summary?: string;
+          reasonCodes?: string[];
+        };
       };
     }
   | {

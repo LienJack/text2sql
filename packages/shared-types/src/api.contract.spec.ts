@@ -16,6 +16,7 @@ import type {
   RollbackGlossaryAnchorResponse,
   SendMessageRequest,
   SqlRun,
+  Text2SqlV2RunArtifact,
   UpdatePromptTemplateRequest,
   UpsertGlossaryTermResponse
 } from "./api";
@@ -190,6 +191,91 @@ const chatbiFullArtifactSample: DeliveryArtifactLayer = {
   hasError: false
 };
 
+const runtimeIntelligenceV2Sample: Text2SqlV2RunArtifact = {
+  version: "v2",
+  stageOrder: [
+    "intake",
+    "retrieve",
+    "assemble-context",
+    "semantic-plan",
+    "generate-sql",
+    "validate",
+    "correct",
+    "execute",
+    "answer"
+  ],
+  stages: [
+    {
+      stage: "intake",
+      status: "success"
+    },
+    {
+      stage: "generate-sql",
+      status: "success"
+    }
+  ],
+  runtimePlan: {
+    version: "runtime-plan.v1",
+    currentItemId: "plan:generate-sql",
+    summary: "Generate SQL from grounded semantic context.",
+    items: [
+      {
+        id: "plan:intake",
+        stage: "intake",
+        goal: "Classify user intent and route safely.",
+        status: "completed",
+        reasonCodes: ["intake_ready_for_text_to_sql"]
+      },
+      {
+        id: "plan:correct",
+        stage: "correct",
+        goal: "Repair SQL only when validation failure is correctable.",
+        status: "skipped",
+        reasonCodes: ["validation_passed"],
+        evidenceRefs: ["validation:read-only"]
+      }
+    ]
+  },
+  artifactRefs: [
+    {
+      id: "artifact:context:orders",
+      category: "context_snippets",
+      summary: "Selected orders schema and metric evidence.",
+      hash: "sha256:context-orders",
+      version: "artifact-ref.v1",
+      sizeBytes: 2048,
+      replayKeyHint: "text2sql:artifact:context_snippets:context-orders",
+      visibility: "user",
+      sensitivity: "none",
+      reasonCodes: ["large_context_compacted"],
+      evidenceRefs: ["chunk-orders-1"]
+    }
+  ],
+  smartDefaults: {
+    bundleId: "text2sql-smart-defaults",
+    version: "2026-04-28",
+    coveredStages: ["generate-sql", "correct", "answer"],
+    ruleIds: ["only-use-context-pack", "fail-closed-read-only"],
+    status: "applied",
+    templateOverlay: {
+      applied: true,
+      templateId: promptTemplateSample.id,
+      version: promptTemplateSample.version
+    }
+  }
+};
+
+const oldV2WithoutRuntimeIntelligenceSample: Text2SqlV2RunArtifact = {
+  version: "v2",
+  stageOrder: runtimeIntelligenceV2Sample.stageOrder,
+  stages: [
+    {
+      stage: "intake",
+      status: "success"
+    }
+  ]
+};
+
 const chatbiTableFallbackArtifactSample: DeliveryArtifactLayer = {
   summary: {
     text: "结果已回退到表格视图，请根据明细继续核验。"
@@ -305,6 +391,14 @@ const deliverySample: DeliveryContract = {
       selectedViewName: "orders_paid_gmv",
       selectedSourceRunId: "run_123",
       safetyResult: "passed"
+    },
+    v2: {
+      version: runtimeIntelligenceV2Sample.version,
+      stageOrder: runtimeIntelligenceV2Sample.stageOrder,
+      stageArtifacts: runtimeIntelligenceV2Sample.stages,
+      runtimePlan: runtimeIntelligenceV2Sample.runtimePlan,
+      artifactRefs: runtimeIntelligenceV2Sample.artifactRefs,
+      smartDefaults: runtimeIntelligenceV2Sample.smartDefaults
     }
   },
   artifact: chatbiFullArtifactSample
@@ -343,10 +437,20 @@ const sqlRunSample: SqlRun = {
     provider: "openai",
     retryCount: 0,
     steps: [],
-    promptTemplate: promptTemplateTraceEvidenceSample
+    promptTemplate: promptTemplateTraceEvidenceSample,
+    v2: runtimeIntelligenceV2Sample
   },
   delivery: deliverySample,
   createdAt: "2026-04-18T00:00:00.000Z"
+};
+
+const oldV2RunWithoutRuntimeIntelligenceSample: SqlRun = {
+  ...sqlRunSample,
+  runId: "run_old_v2",
+  trace: {
+    ...sqlRunSample.trace,
+    v2: oldV2WithoutRuntimeIntelligenceSample
+  }
 };
 
 const agentRunResponseSample: AgentRunResponse = {
@@ -603,6 +707,27 @@ type TracePinningEvidenceShape = Expect<
       NonNullable<SqlRun["trace"]["effectiveContextSummary"]>["retrievalContext"]
     >["pinning"]
   >
+>;
+type TraceV2RuntimePlanShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.runtimePlan,
+    NonNullable<SqlRun["trace"]["v2"]>["runtimePlan"]
+  >
+>;
+type TraceV2ArtifactRefsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.artifactRefs,
+    NonNullable<SqlRun["trace"]["v2"]>["artifactRefs"]
+  >
+>;
+type TraceV2SmartDefaultsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.smartDefaults,
+    NonNullable<SqlRun["trace"]["v2"]>["smartDefaults"]
+  >
+>;
+type OldV2WithoutRuntimeIntelligenceShape = Expect<
+  IsAssignable<typeof oldV2RunWithoutRuntimeIntelligenceSample, SqlRun>
 >;
 type SendMessageRequestContextOptional = Expect<
   IsAssignable<ContextEnvelope | undefined, SendMessageRequest["contextEnvelope"]>

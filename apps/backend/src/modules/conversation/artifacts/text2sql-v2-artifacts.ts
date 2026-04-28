@@ -76,6 +76,9 @@ export interface Text2SqlV2StageLifecycle {
     semanticPlan?: Text2SqlV2RunArtifact["semanticPlan"];
     sqlGeneration?: Text2SqlV2RunArtifact["sqlGeneration"];
     sqlValidation?: Text2SqlV2RunArtifact["sqlValidation"];
+    runtimePlan?: Text2SqlV2RunArtifact["runtimePlan"];
+    artifactRefs?: Text2SqlV2RunArtifact["artifactRefs"];
+    smartDefaults?: Text2SqlV2RunArtifact["smartDefaults"];
     loopEvidence?: Text2SqlV2LoopEvidence[];
     terminationReason?: Text2SqlV2TerminationReason;
   }) => Text2SqlV2RunArtifact;
@@ -175,6 +178,9 @@ export const createText2SqlV2StageLifecycle = (): Text2SqlV2StageLifecycle => {
       semanticPlan: input?.semanticPlan,
       sqlGeneration: input?.sqlGeneration,
       sqlValidation: input?.sqlValidation,
+      runtimePlan: input?.runtimePlan,
+      artifactRefs: input?.artifactRefs,
+      smartDefaults: input?.smartDefaults,
       loopEvidence: input?.loopEvidence ? [...input.loopEvidence] : undefined,
       terminationReason: input?.terminationReason
     })

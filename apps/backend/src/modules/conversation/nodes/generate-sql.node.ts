@@ -4,7 +4,8 @@ import type {
   DatasourceType,
   PromptTemplateTraceEvidence,
   SemanticContextPackV1,
-  SemanticPlanV1
+  SemanticPlanV1,
+  Text2SqlV2SmartDefaultsEvidenceV1
 } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
 import type {
@@ -37,6 +38,7 @@ export interface GenerateSqlNodeResult {
       userPrompt: string;
     };
     promptTemplate?: PromptTemplateTraceEvidence;
+    smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
     retryCount?: number;
     semanticIntent?: SqlSemanticIntent;
     coverage?: SqlEvidenceCoverage;

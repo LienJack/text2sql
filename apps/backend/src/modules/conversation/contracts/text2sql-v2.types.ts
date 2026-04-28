@@ -1,9 +1,12 @@
 import type {
   SemanticContextPackV1,
   SemanticPlanV1,
+  Text2SqlV2ArtifactRefV1,
   SqlGenerationArtifactV1,
   SqlValidationArtifactV1,
   Text2SqlV2RunArtifact,
+  Text2SqlV2RuntimePlanV1,
+  Text2SqlV2SmartDefaultsEvidenceV1,
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
 } from "@text2sql/shared-types";
@@ -32,6 +35,9 @@ export interface Text2SqlV2StateMachineResult {
   semanticPlan?: SemanticPlanV1;
   sqlGeneration?: SqlGenerationArtifactV1;
   sqlValidation?: SqlValidationArtifactV1;
+  runtimePlan?: Text2SqlV2RuntimePlanV1;
+  artifactRefs?: Text2SqlV2ArtifactRefV1[];
+  smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
 }
 
 export type Text2SqlV2MutableRunArtifact = Omit<Text2SqlV2RunArtifact, "version"> & {

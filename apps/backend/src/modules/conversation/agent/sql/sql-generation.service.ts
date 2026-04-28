@@ -5,6 +5,7 @@ import type {
   PromptTemplateTraceEvidence,
   SemanticPlanV1,
   SqlGenerationArtifactV1,
+  Text2SqlV2SmartDefaultsEvidenceV1,
   Text2SqlV2ProviderMetadata
 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
@@ -21,6 +22,7 @@ import {
   type SqlSemanticIntent
 } from "./sql-prompt.builder";
 import { PromptTemplateService } from "../../../governance/settings/prompt-template.service";
+import { Text2SqlSmartDefaultsService } from "../../runtime/smart-defaults/text2sql-smart-defaults.service";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
 
@@ -59,6 +61,7 @@ export interface StructuredSqlGenerationArtifact extends SqlGenerationArtifactV1
   dialect: DatasourceType;
   provider?: Text2SqlV2ProviderMetadata;
   promptTemplate?: PromptTemplateTraceEvidence;
+  smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
   retryReason?: string;
   coverage?: SqlEvidenceCoverage;
 }
@@ -102,6 +105,7 @@ export interface SqlDraft {
   rawText: string;
   prompt: LlmGatewayPrompt;
   promptTemplate?: PromptTemplateTraceEvidence;
+  smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
   retryCount?: number;
   semanticIntent?: SqlSemanticIntent;
   coverage?: SqlEvidenceCoverage;
@@ -114,7 +118,8 @@ export class SqlGenerationService {
     private readonly promptBuilder: SqlPromptBuilder,
     private readonly extractor: SqlOutputExtractor,
     private readonly providerRouter: ProviderRouterService,
-    private readonly promptTemplateService: PromptTemplateService
+    private readonly promptTemplateService: PromptTemplateService,
+    private readonly smartDefaultsService: Text2SqlSmartDefaultsService
   ) {}
 
   async generate(
@@ -127,11 +132,16 @@ export class SqlGenerationService {
       selection?.semanticIntent,
       selection?.semanticPlan
     );
+    const smartDefaults = this.smartDefaultsService.resolve({
+      promptTemplate: templateResolution.evidence,
+      fallbackReason: templateResolution.evidence.fallbackReason
+    });
     const prompt = this.buildPrompt(
       question,
       selection,
       templateResolution.templateOverlay,
-      semanticIntent
+      semanticIntent,
+      smartDefaults.promptBlock
     );
     const completion = await this.providerRouter.generate(prompt, selection);
     return this.finalizeWithSemanticGuardrails({
@@ -141,7 +151,8 @@ export class SqlGenerationService {
       prompt,
       completion,
       templateOverlay: templateResolution.templateOverlay,
-      promptTemplate: templateResolution.evidence
+      promptTemplate: templateResolution.evidence,
+      smartDefaults: smartDefaults.evidence
     });
   }
 
@@ -159,11 +170,16 @@ export class SqlGenerationService {
       selection?.semanticIntent,
       selection?.semanticPlan
     );
+    const smartDefaults = this.smartDefaultsService.resolve({
+      promptTemplate: templateResolution.evidence,
+      fallbackReason: templateResolution.evidence.fallbackReason
+    });
     const prompt = this.buildPrompt(
       question,
       selection,
       templateResolution.templateOverlay,
-      semanticIntent
+      semanticIntent,
+      smartDefaults.promptBlock
     );
     const immediateShortcut =
       this.buildGroupedCountProportionShortcut(question, selection) ??
@@ -203,7 +219,8 @@ export class SqlGenerationService {
       prompt,
       completion,
       templateOverlay: templateResolution.templateOverlay,
-      promptTemplate: templateResolution.evidence
+      promptTemplate: templateResolution.evidence,
+      smartDefaults: smartDefaults.evidence
     });
   }
 
@@ -239,6 +256,7 @@ export class SqlGenerationService {
       dialect: input.datasourceType ?? "sqlite",
       provider,
       promptTemplate: input.draft.promptTemplate,
+      smartDefaults: input.draft.smartDefaults,
       retryReason: input.retryReason?.trim() || undefined,
       coverage: input.draft.coverage,
       correctionGrounding: input.correctionGrounding
@@ -464,8 +482,18 @@ export class SqlGenerationService {
     selection: SqlGenerationSelection | undefined,
     templateOverlay: string | undefined,
     semanticIntent: SqlSemanticIntent,
+    smartDefaults:
+      | { evidence: Text2SqlV2SmartDefaultsEvidenceV1; promptBlock: string }
+      | Text2SqlV2SmartDefaultsEvidenceV1
+      | string,
     retryReason?: string
   ): LlmGatewayPrompt {
+    const smartDefaultsBlock =
+      typeof smartDefaults === "string"
+        ? smartDefaults
+        : "promptBlock" in smartDefaults
+          ? smartDefaults.promptBlock
+          : this.smartDefaultsService.resolve().promptBlock;
     return this.promptBuilder.build(
       question,
       selection?.datasourceType,
@@ -478,7 +506,8 @@ export class SqlGenerationService {
         },
         semanticContextPack: selection?.semanticContextPack,
         semanticPlan: selection?.semanticPlan,
-        correctionGrounding: selection?.correctionGrounding
+        correctionGrounding: selection?.correctionGrounding,
+        smartDefaultsBlock
       }
     );
   }
@@ -497,6 +526,7 @@ export class SqlGenerationService {
     completion: LlmDraft;
     templateOverlay?: string;
     promptTemplate: PromptTemplateTraceEvidence;
+    smartDefaults: Text2SqlV2SmartDefaultsEvidenceV1;
   }): Promise<SqlDraft> {
     this.assertSemanticPlan(input.selection?.semanticPlan);
     let retryCount = 0;
@@ -551,6 +581,7 @@ export class SqlGenerationService {
             rawText: completion.rawText,
             prompt,
             promptTemplate: input.promptTemplate,
+            smartDefaults: input.smartDefaults,
             retryCount,
             semanticIntent: input.semanticIntent,
             coverage: coverage.evidence,
@@ -577,6 +608,7 @@ export class SqlGenerationService {
           input.selection,
           input.templateOverlay,
           input.semanticIntent,
+          input.smartDefaults,
           validation.reason
         );
         completion = await this.providerRouter.generate(prompt, input.selection);
@@ -593,6 +625,7 @@ export class SqlGenerationService {
           input.selection,
           input.templateOverlay,
           input.semanticIntent,
+          input.smartDefaults,
           "no executable SQL was extracted from the previous output"
         );
         completion = await this.providerRouter.generate(prompt, input.selection);

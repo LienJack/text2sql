@@ -7,6 +7,7 @@ import type {
   SqlValidationArtifactV1,
   Text2SqlV2FailureSemantic,
   Text2SqlV2LoopEvidence,
+  Text2SqlV2RuntimePlanV1,
   Text2SqlV2StageArtifact,
   Text2SqlV2TerminationReason
 } from "@text2sql/shared-types";
@@ -55,6 +56,37 @@ export interface Text2SqlV2LangGraphRuntimeInput {
 
 const replaceValueReducer = <T>(_left: T, right: T): T => right;
 
+const mergeRuntimePlanReducer = (
+  left: Text2SqlV2RuntimePlanV1 | undefined,
+  right: Text2SqlV2RuntimePlanV1 | undefined
+): Text2SqlV2RuntimePlanV1 | undefined => {
+  if (!right) {
+    return left;
+  }
+  if (!left) {
+    return right;
+  }
+  const byId = new Map(left.items.map((item) => [item.id, item]));
+  for (const item of right.items) {
+    byId.set(item.id, {
+      ...(byId.get(item.id) ?? {}),
+      ...item,
+      reasonCodes: Array.from(
+        new Set([...(byId.get(item.id)?.reasonCodes ?? []), ...(item.reasonCodes ?? [])])
+      ),
+      evidenceRefs: Array.from(
+        new Set([...(byId.get(item.id)?.evidenceRefs ?? []), ...(item.evidenceRefs ?? [])])
+      )
+    });
+  }
+  return {
+    version: "runtime-plan.v1",
+    items: Array.from(byId.values()),
+    currentItemId: right.currentItemId ?? left.currentItemId,
+    summary: right.summary ?? left.summary
+  };
+};
+
 export type Text2SqlV2LangGraphSqlDraft = Omit<
   GenerateSqlNodeResult["draft"],
   "rawText" | "prompt"
@@ -93,6 +125,10 @@ export const Text2SqlV2LangGraphStateAnnotation = Annotation.Root({
   traceSteps: Annotation<ExecutionTraceStep[]>({
     reducer: (left, right) => left.concat(right),
     default: () => []
+  }),
+  runtimePlan: Annotation<Text2SqlV2RuntimePlanV1 | undefined>({
+    reducer: mergeRuntimePlanReducer,
+    default: () => undefined
   }),
   routeArtifact: Annotation<IntakeRouteArtifact | undefined>({
     reducer: replaceValueReducer,
@@ -206,6 +242,7 @@ export const createText2SqlV2LangGraphInitialState = (
   stageProgress: [],
   stageArtifacts: [],
   traceSteps: [],
+  runtimePlan: undefined,
   routeArtifact: undefined,
   standaloneQuestion: undefined,
   directAnswer: undefined,

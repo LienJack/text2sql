@@ -16,7 +16,22 @@ describe("SqlPromptBuilder", () => {
     });
 
     expect(prompt.systemPrompt).toContain("Runtime template overlay");
+    expect(prompt.systemPrompt).toContain("cannot override Smart Defaults");
     expect(prompt.systemPrompt).toContain("Always join users table with explicit alias.");
+  });
+
+  it("places Smart Defaults baseline before supplemental template overlay", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("统计订单状态分布", "sqlite", undefined, {
+      smartDefaultsBlock:
+        "Text2SQL Smart Defaults text2sql-smart-defaults@2026-04-28: only-use-context-pack",
+      templateOverlay: "Prefer short aliases."
+    });
+
+    expect(prompt.systemPrompt.indexOf("Text2SQL Smart Defaults")).toBeLessThan(
+      prompt.systemPrompt.indexOf("Runtime template overlay")
+    );
+    expect(prompt.systemPrompt).toContain("Prefer short aliases.");
   });
 
   it("adds explicit count-intent guardrail instructions", () => {

@@ -7,7 +7,11 @@ import type {
   DeliveryEvidenceReplayLog,
   SqlCorrectionGroundingV1,
   SqlRun,
-  Text2SqlV2RunArtifact
+  Text2SqlV2ArtifactRefV1,
+  Text2SqlV2RunArtifact,
+  Text2SqlV2RuntimePlanV1,
+  Text2SqlV2SmartDefaultsEvidenceV1,
+  Text2SqlV2StageName
 } from "@text2sql/shared-types";
 import {
   DELIVERY_SANDBOX_REPLAY_KEY,
@@ -260,6 +264,9 @@ export class DeliveryContractMapper {
               semanticPlan: traceV2Artifact.semanticPlan,
               sqlGeneration: traceV2Artifact.sqlGeneration,
               sqlValidation: traceV2Artifact.sqlValidation,
+              runtimePlan: this.readRuntimePlan(traceV2Artifact.runtimePlan),
+              artifactRefs: this.readArtifactRefs(traceV2Artifact.artifactRefs),
+              smartDefaults: this.readSmartDefaults(traceV2Artifact.smartDefaults),
               loopEvidence: traceV2Artifact.loopEvidence,
               terminationReason: traceV2Artifact.terminationReason,
               failure: this.resolveTraceV2Failure(traceV2Artifact)
@@ -768,6 +775,201 @@ export class DeliveryContractMapper {
     );
   }
 
+  private readRuntimePlan(value: unknown): Text2SqlV2RuntimePlanV1 | undefined {
+    if (!this.isRecord(value) || value.version !== "runtime-plan.v1") {
+      return undefined;
+    }
+    const items = Array.isArray(value.items)
+      ? value.items
+          .map((item) => this.readRuntimePlanItem(item))
+          .filter((item): item is Text2SqlV2RuntimePlanV1["items"][number] =>
+            Boolean(item)
+          )
+      : [];
+    if (items.length === 0) {
+      return undefined;
+    }
+    return {
+      version: "runtime-plan.v1",
+      items,
+      ...(this.readString(value.currentItemId)
+        ? { currentItemId: this.readString(value.currentItemId) }
+        : {}),
+      ...(this.readString(value.summary)
+        ? { summary: this.readString(value.summary) }
+        : {})
+    };
+  }
+
+  private readRuntimePlanItem(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const id = this.readString(value.id);
+    const stage = this.readStageName(value.stage);
+    const goal = this.readString(value.goal);
+    const status = this.readRuntimePlanStatus(value.status);
+    if (!id || !stage || !goal || !status) {
+      return undefined;
+    }
+    const correctionIntent = this.readRuntimePlanCorrectionIntent(
+      value.correctionIntent
+    );
+    return {
+      id,
+      stage,
+      goal,
+      status,
+      ...(this.readStringArray(value.reasonCodes).length > 0
+        ? { reasonCodes: this.readStringArray(value.reasonCodes) }
+        : {}),
+      ...(this.readStringArray(value.evidenceRefs).length > 0
+        ? { evidenceRefs: this.readStringArray(value.evidenceRefs) }
+        : {}),
+      ...(correctionIntent ? { correctionIntent } : {}),
+      ...(this.readString(value.startedAt)
+        ? { startedAt: this.readString(value.startedAt) }
+        : {}),
+      ...(this.readString(value.endedAt)
+        ? { endedAt: this.readString(value.endedAt) }
+        : {}),
+      ...(this.readString(value.summary)
+        ? { summary: this.readString(value.summary) }
+        : {})
+    };
+  }
+
+  private readRuntimePlanCorrectionIntent(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number]["correctionIntent"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const retryReason = this.readString(value.retryReason);
+    if (!retryReason) {
+      return undefined;
+    }
+    return {
+      ...(this.readStageName(value.failedStage)
+        ? { failedStage: this.readStageName(value.failedStage) }
+        : {}),
+      ...(this.readString(value.failureCode)
+        ? { failureCode: this.readString(value.failureCode) }
+        : {}),
+      retryReason,
+      ...(this.readStageName(value.targetStage)
+        ? { targetStage: this.readStageName(value.targetStage) }
+        : {})
+    };
+  }
+
+  private readArtifactRefs(value: unknown): Text2SqlV2ArtifactRefV1[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const refs = value
+      .map((item) => this.readArtifactRef(item))
+      .filter((item): item is Text2SqlV2ArtifactRefV1 => Boolean(item));
+    return refs.length > 0 ? refs : undefined;
+  }
+
+  private readArtifactRef(value: unknown): Text2SqlV2ArtifactRefV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const id = this.readString(value.id);
+    const category = this.readString(value.category);
+    const summary = this.readString(value.summary);
+    const hash = this.readString(value.hash);
+    const visibility = this.readArtifactVisibility(value.visibility);
+    if (!id || !category || !summary || !hash || !visibility) {
+      return undefined;
+    }
+    return {
+      id,
+      category,
+      summary,
+      hash,
+      ...(this.readString(value.version)
+        ? { version: this.readString(value.version) }
+        : {}),
+      ...(this.readNonNegativeInteger(value.sizeBytes) !== undefined
+        ? { sizeBytes: this.readNonNegativeInteger(value.sizeBytes) }
+        : {}),
+      ...(this.readString(value.replayKeyHint)
+        ? { replayKeyHint: this.readString(value.replayKeyHint) }
+        : {}),
+      visibility,
+      ...(this.readArtifactSensitivity(value.sensitivity)
+        ? { sensitivity: this.readArtifactSensitivity(value.sensitivity) }
+        : {}),
+      ...(this.readStringArray(value.reasonCodes).length > 0
+        ? { reasonCodes: this.readStringArray(value.reasonCodes) }
+        : {}),
+      ...(this.readStringArray(value.evidenceRefs).length > 0
+        ? { evidenceRefs: this.readStringArray(value.evidenceRefs) }
+        : {})
+    };
+  }
+
+  private readSmartDefaults(
+    value: unknown
+  ): Text2SqlV2SmartDefaultsEvidenceV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const bundleId = this.readString(value.bundleId);
+    const version = this.readString(value.version);
+    const coveredStages = this.readStageNameArray(value.coveredStages);
+    const ruleIds = this.readStringArray(value.ruleIds);
+    const status =
+      value.status === "applied" || value.status === "fallback"
+        ? value.status
+        : undefined;
+    if (
+      !bundleId ||
+      !version ||
+      coveredStages.length === 0 ||
+      ruleIds.length === 0 ||
+      !status
+    ) {
+      return undefined;
+    }
+    const templateOverlay = this.readSmartDefaultsTemplateOverlay(
+      value.templateOverlay
+    );
+    return {
+      bundleId,
+      version,
+      coveredStages,
+      ruleIds,
+      status,
+      ...(this.readString(value.fallbackReason)
+        ? { fallbackReason: this.readString(value.fallbackReason) }
+        : {}),
+      ...(templateOverlay ? { templateOverlay } : {})
+    };
+  }
+
+  private readSmartDefaultsTemplateOverlay(
+    value: unknown
+  ): Text2SqlV2SmartDefaultsEvidenceV1["templateOverlay"] | undefined {
+    if (!this.isRecord(value) || typeof value.applied !== "boolean") {
+      return undefined;
+    }
+    return {
+      applied: value.applied,
+      ...(this.readString(value.templateId)
+        ? { templateId: this.readString(value.templateId) }
+        : {}),
+      ...(this.readPositiveInteger(value.version) !== undefined
+        ? { version: this.readPositiveInteger(value.version) }
+        : {})
+    };
+  }
+
   private normalizeCorrectionGrounding(
     value: unknown
   ): SqlCorrectionGroundingV1 | undefined {
@@ -1270,6 +1472,71 @@ export class DeliveryContractMapper {
         .map((item) => this.readString(item))
         .filter((item): item is string => Boolean(item))
     );
+  }
+
+  private readStageName(value: unknown): Text2SqlV2StageName | undefined {
+    if (
+      value === "intake" ||
+      value === "retrieve" ||
+      value === "assemble-context" ||
+      value === "semantic-plan" ||
+      value === "generate-sql" ||
+      value === "validate" ||
+      value === "correct" ||
+      value === "execute" ||
+      value === "answer"
+    ) {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readStageNameArray(value: unknown): Text2SqlV2StageName[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is Text2SqlV2StageName =>
+      Boolean(this.readStageName(item))
+    );
+  }
+
+  private readRuntimePlanStatus(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number]["status"] | undefined {
+    if (
+      value === "pending" ||
+      value === "running" ||
+      value === "completed" ||
+      value === "skipped" ||
+      value === "failed" ||
+      value === "clarification"
+    ) {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readArtifactVisibility(
+    value: unknown
+  ): Text2SqlV2ArtifactRefV1["visibility"] | undefined {
+    if (value === "user" || value === "internal" || value === "redacted") {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readArtifactSensitivity(
+    value: unknown
+  ): Text2SqlV2ArtifactRefV1["sensitivity"] | undefined {
+    if (
+      value === "none" ||
+      value === "permission_filtered" ||
+      value === "provider_raw" ||
+      value === "sensitive"
+    ) {
+      return value;
+    }
+    return undefined;
   }
 
   private unique(values: string[]): string[] {

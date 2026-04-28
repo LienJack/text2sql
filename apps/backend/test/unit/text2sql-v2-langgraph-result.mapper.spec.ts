@@ -1,6 +1,7 @@
 import { DomainError } from "../../src/common/domain-error";
 import type {
   ExecutionTraceStep,
+  SqlRun,
   Text2SqlV2StageArtifact
 } from "@text2sql/shared-types";
 import { Text2SqlV2ArtifactBuilder } from "../../src/modules/conversation/artifacts/text2sql-v2-artifact-builder";
@@ -140,6 +141,130 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
     expect(mapped.trace.v2?.stages.find((item) => item.stage === "correct")?.status).toBe(
       "skipped"
     );
+    expect(
+      mapped.trace.v2?.runtimePlan?.items.find((item) => item.stage === "generate-sql")
+    ).toMatchObject({
+      id: "runtime-plan:generate-sql",
+      stage: "generate-sql",
+      status: "completed"
+    });
+    expect(
+      mapped.trace.v2?.runtimePlan?.items.find((item) => item.stage === "correct")
+    ).toMatchObject({
+      id: "runtime-plan:correct",
+      stage: "correct",
+      status: "skipped",
+      reasonCodes: ["validation_passed"]
+    });
+  });
+
+  it("preserves valid runtime intelligence fields and ignores malformed optional fields", () => {
+    const builder = new Text2SqlV2ArtifactBuilder();
+    const baseRun = {
+      runId: "run-runtime-intelligence",
+      sessionId: "session-runtime-intelligence",
+      question: "统计订单总数",
+      status: "executionResult",
+      provider: "volcengine",
+      sql: "SELECT COUNT(*) AS total FROM orders",
+      answer: "订单总数为 10",
+      trace: {
+        runId: "run-runtime-intelligence",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            }
+          ],
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            items: [
+              {
+                id: "plan:intake",
+                stage: "intake",
+                goal: "Classify request intent.",
+                status: "completed",
+                reasonCodes: ["intake_ready_for_text_to_sql"]
+              }
+            ]
+          },
+          artifactRefs: [
+            {
+              id: "artifact:context:orders",
+              category: "context_snippets",
+              summary: "Compacted order context.",
+              hash: "sha256:orders",
+              visibility: "user",
+              sensitivity: "none"
+            },
+            {
+              id: "artifact:bad",
+              category: "context_snippets",
+              summary: "missing hash",
+              visibility: "user"
+            }
+          ],
+          smartDefaults: {
+            bundleId: "text2sql-smart-defaults",
+            version: "2026-04-28",
+            coveredStages: ["generate-sql", "answer"],
+            ruleIds: ["only-use-context-pack"],
+            status: "applied"
+          }
+        }
+      },
+      llmRaw: null,
+      createdAt: "2026-04-28T00:00:00.000Z"
+    } as unknown as SqlRun;
+
+    const artifact = builder.buildRunArtifact(baseRun);
+
+    expect(artifact.runtimePlan?.items).toEqual([
+      {
+        id: "plan:intake",
+        stage: "intake",
+        goal: "Classify request intent.",
+        status: "completed",
+        reasonCodes: ["intake_ready_for_text_to_sql"]
+      }
+    ]);
+    expect(artifact.artifactRefs).toEqual([
+      {
+        id: "artifact:context:orders",
+        category: "context_snippets",
+        summary: "Compacted order context.",
+        hash: "sha256:orders",
+        visibility: "user",
+        sensitivity: "none"
+      }
+    ]);
+    expect(artifact.smartDefaults?.bundleId).toBe("text2sql-smart-defaults");
+
+    const oldRunArtifact = builder.buildRunArtifact({
+      ...baseRun,
+      trace: {
+        ...baseRun.trace,
+        v2: {
+          version: "v2",
+          stageOrder: [],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            }
+          ]
+        }
+      }
+    });
+    expect(oldRunArtifact.runtimePlan).toBeUndefined();
+    expect(oldRunArtifact.artifactRefs).toBeUndefined();
+    expect(oldRunArtifact.smartDefaults).toBeUndefined();
   });
 
   it("returns stream-safe progress summary without exposing raw graph state", () => {

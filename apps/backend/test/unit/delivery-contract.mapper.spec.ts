@@ -251,6 +251,89 @@ describe("DeliveryContractMapper", () => {
     });
   });
 
+  it("projects general no-sql answer evidence without pretending SQL or schema execution", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      sql: undefined,
+      rows: undefined,
+      columns: undefined,
+      answer: "GMV 是成交总额口径说明，不需要执行 SQL。",
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success",
+              metadata: {
+                route: "general"
+              }
+            },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "skipped" },
+            { stage: "correct", status: "skipped" },
+            { stage: "execute", status: "skipped" },
+            { stage: "answer", status: "success" }
+          ],
+          semanticPlan: {
+            route: "answer",
+            standaloneQuestion: "什么是 GMV 口径？",
+            selectedTables: [],
+            selectedColumns: [],
+            confidence: 0.8,
+            evidenceRefs: [],
+            filters: ["route_kind:general"]
+          },
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            items: [
+              {
+                id: "runtime-plan:generate-sql",
+                stage: "generate-sql",
+                goal: "生成 SQL",
+                status: "skipped",
+                reasonCodes: ["plain_general_no_sql"]
+              }
+            ]
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.artifact?.sql).toBeUndefined();
+    expect(delivery.evidence?.metadataAnswer).toMatchObject({
+      groundedByContextPack: false,
+      routeKind: "general",
+      evidenceQuality: "degraded",
+      selectedEvidenceCount: 0
+    });
+    expect(delivery.evidence?.v2?.runtimePlan?.items[0]).toMatchObject({
+      stage: "generate-sql",
+      status: "skipped",
+      reasonCodes: ["plain_general_no_sql"]
+    });
+  });
+
   it("mirrors correction grounding from trace.v2 sqlGeneration artifact", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
@@ -555,6 +638,41 @@ describe("DeliveryContractMapper", () => {
             ],
             correctable: false
           },
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            currentItemId: "plan:validate",
+            items: [
+              {
+                id: "plan:validate",
+                stage: "validate",
+                goal: "Validate SQL against permissions and read-only policy.",
+                status: "failed",
+                reasonCodes: ["TABLE_FORBIDDEN"],
+                evidenceRefs: ["chunk:1"]
+              }
+            ]
+          },
+          artifactRefs: [
+            {
+              id: "artifact:validation:table-forbidden",
+              category: "validation_diagnostics",
+              summary: "Permission validation rejected the orders table.",
+              hash: "sha256:validation-table-forbidden",
+              sizeBytes: 512,
+              replayKeyHint:
+                "text2sql:artifact:validation_diagnostics:table-forbidden",
+              visibility: "internal",
+              sensitivity: "permission_filtered",
+              reasonCodes: ["permission_filtered"]
+            }
+          ],
+          smartDefaults: {
+            bundleId: "text2sql-smart-defaults",
+            version: "2026-04-28",
+            coveredStages: ["generate-sql", "validate", "answer"],
+            ruleIds: ["fail-closed-permission", "only-use-context-pack"],
+            status: "applied"
+          },
           loopEvidence: [
             {
               loopIndex: 1,
@@ -604,6 +722,37 @@ describe("DeliveryContractMapper", () => {
       "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders"
     );
     expect(delivery.evidence?.v2?.sqlValidation?.status).toBe("failed");
+    expect(delivery.evidence?.v2?.runtimePlan?.items).toEqual([
+      {
+        id: "plan:validate",
+        stage: "validate",
+        goal: "Validate SQL against permissions and read-only policy.",
+        status: "failed",
+        reasonCodes: ["TABLE_FORBIDDEN"],
+        evidenceRefs: ["chunk:1"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.artifactRefs).toEqual([
+      {
+        id: "artifact:validation:table-forbidden",
+        category: "validation_diagnostics",
+        summary: "Permission validation rejected the orders table.",
+        hash: "sha256:validation-table-forbidden",
+        sizeBytes: 512,
+        replayKeyHint:
+          "text2sql:artifact:validation_diagnostics:table-forbidden",
+        visibility: "internal",
+        sensitivity: "permission_filtered",
+        reasonCodes: ["permission_filtered"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.smartDefaults).toEqual({
+      bundleId: "text2sql-smart-defaults",
+      version: "2026-04-28",
+      coveredStages: ["generate-sql", "validate", "answer"],
+      ruleIds: ["fail-closed-permission", "only-use-context-pack"],
+      status: "applied"
+    });
     expect(delivery.evidence?.v2?.loopEvidence).toEqual([
       {
         loopIndex: 1,
@@ -626,6 +775,74 @@ describe("DeliveryContractMapper", () => {
     ]);
     expect(delivery.evidence?.v2?.terminationReason).toBe("semantic_plan_fail_closed");
     expect(delivery.evidence?.v2?.failure?.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("ignores malformed optional runtime intelligence fields in delivery projection", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            }
+          ],
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            items: [
+              {
+                id: "plan:bad",
+                stage: "not-a-stage",
+                goal: "bad item",
+                status: "completed"
+              }
+            ]
+          },
+          artifactRefs: [
+            {
+              id: "artifact:missing-hash",
+              category: "context_snippets",
+              summary: "missing hash",
+              visibility: "user"
+            }
+          ],
+          smartDefaults: {
+            bundleId: "text2sql-smart-defaults",
+            version: "2026-04-28",
+            coveredStages: [],
+            ruleIds: [],
+            status: "applied"
+          }
+        } as unknown as NonNullable<SqlRun["trace"]["v2"]>
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.v2?.version).toBe("v2");
+    expect(delivery.evidence?.v2?.runtimePlan).toBeUndefined();
+    expect(delivery.evidence?.v2?.artifactRefs).toBeUndefined();
+    expect(delivery.evidence?.v2?.smartDefaults).toBeUndefined();
   });
 
   it("ignores legacy clarify step summaries without canonical trace decision payload", () => {

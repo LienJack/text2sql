@@ -4,6 +4,7 @@ import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql
 import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
 import type { ProviderRouterService } from "../../src/modules/llm/provider-router.service";
 import type { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
+import { Text2SqlSmartDefaultsService } from "../../src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.service";
 
 describe("SqlGenerationService semantic guardrails", () => {
   const promptTemplateService = {
@@ -23,7 +24,8 @@ describe("SqlGenerationService semantic guardrails", () => {
       new SqlPromptBuilder(),
       new SqlOutputExtractor(),
       providerRouter as unknown as ProviderRouterService,
-      promptTemplateService as unknown as PromptTemplateService
+      promptTemplateService as unknown as PromptTemplateService,
+      new Text2SqlSmartDefaultsService()
     );
 
   beforeEach(() => {
@@ -58,6 +60,11 @@ describe("SqlGenerationService semantic guardrails", () => {
     const firstPrompt = providerRouter.generate.mock.calls[0][0];
     const secondPrompt = providerRouter.generate.mock.calls[1][0];
     expect(firstPrompt.systemPrompt).toContain("business count-intent query");
+    expect(firstPrompt.systemPrompt).toContain("Text2SQL Smart Defaults");
+    expect(draft.smartDefaults).toMatchObject({
+      bundleId: "text2sql-smart-defaults",
+      status: "applied"
+    });
     expect(secondPrompt.systemPrompt).toContain("single automatic retry");
     expect(secondPrompt.systemPrompt).toContain(
       "count-intent requires business counting SQL"

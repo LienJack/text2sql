@@ -3,12 +3,14 @@ import type {
   ExecutionTraceStep,
   SqlRun,
   Text2SqlV2RunArtifact,
+  Text2SqlV2RuntimePlanV1,
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import { Text2SqlV2ArtifactBuilder } from "../../artifacts/text2sql-v2-artifact-builder";
 import { TEXT2SQL_V2_STAGE_ORDER } from "../../contracts/text2sql-v2.types";
+import { resolveText2SqlV2StageCatalogEntry } from "../../text2sql/stages/text2sql-stage-catalog";
 import type { Text2SqlV2LangGraphState } from "./text2sql-v2-langgraph.state";
 
 export interface Text2SqlV2LangGraphProgressSummary {
@@ -159,12 +161,16 @@ export class Text2SqlV2LangGraphResultMapper {
         createdAt: state.completedAt ?? state.createdAt
       } as SqlRun);
 
+    const stageArtifacts = this.resolveStageArtifacts(state.stageArtifacts);
+
     return this.artifactBuilder.buildRunArtifact(run, {
-      stageArtifacts: this.resolveStageArtifacts(state.stageArtifacts),
+      stageArtifacts,
       contextPack: state.contextPack,
       semanticPlan: state.semanticPlan,
       sqlGeneration: state.sqlGenerationArtifact,
-      sqlValidation: state.sqlValidationArtifact
+      sqlValidation: state.sqlValidationArtifact,
+      runtimePlan: this.resolveRuntimePlan(state, stageArtifacts),
+      smartDefaults: state.sqlGenerationArtifact?.smartDefaults
     });
   }
 
@@ -225,6 +231,134 @@ export class Text2SqlV2LangGraphResultMapper {
               : "completed"
       };
     });
+  }
+
+  private resolveRuntimePlan(
+    state: Text2SqlV2LangGraphState,
+    stageArtifacts: Text2SqlV2StageArtifact[]
+  ): Text2SqlV2RuntimePlanV1 {
+    const existingByStage = new Map(
+      (state.runtimePlan?.items ?? []).map((item) => [item.stage, item])
+    );
+    const items = stageArtifacts.map((artifact) => {
+      const existing = existingByStage.get(artifact.stage);
+      if (existing) {
+        return existing;
+      }
+      const catalog = resolveText2SqlV2StageCatalogEntry(artifact.stage);
+      const reasonCodes = this.resolveRuntimePlanReasonCodes(state, artifact);
+      return {
+        id: `runtime-plan:${artifact.stage}`,
+        stage: artifact.stage,
+        goal: catalog.title,
+        status: this.toRuntimePlanStatus(artifact.status),
+        ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
+        ...(artifact.evidenceIds?.length ? { evidenceRefs: artifact.evidenceIds } : {}),
+        ...(this.readCorrectionIntent(artifact)
+          ? { correctionIntent: this.readCorrectionIntent(artifact) }
+          : {}),
+        ...(artifact.startedAt ? { startedAt: artifact.startedAt } : {}),
+        ...(artifact.endedAt ? { endedAt: artifact.endedAt } : {}),
+        summary: `stage ${artifact.stage} ${artifact.status}`
+      };
+    });
+
+    return {
+      version: "runtime-plan.v1",
+      items,
+      currentItemId:
+        state.runtimePlan?.currentItemId ??
+        (items.length > 0 ? items[items.length - 1]?.id : undefined),
+      summary: state.runtimePlan?.summary
+    };
+  }
+
+  private resolveRuntimePlanReasonCodes(
+    state: Text2SqlV2LangGraphState,
+    artifact: Text2SqlV2StageArtifact
+  ): string[] {
+    const reasons = [
+      ...(artifact.warnings ?? []),
+      ...(artifact.failure?.code ? [artifact.failure.code] : [])
+    ];
+    if (artifact.status !== "skipped") {
+      return Array.from(new Set(reasons));
+    }
+    if (
+      (state.routeArtifact?.route === "general" ||
+        state.routeArtifact?.route === "needs_clarification") &&
+      (artifact.stage === "generate-sql" ||
+        artifact.stage === "validate" ||
+        artifact.stage === "correct" ||
+        artifact.stage === "execute")
+    ) {
+      reasons.push("plain_general_no_sql");
+    }
+    if (
+      (state.routeArtifact?.route === "metadata" ||
+        state.semanticPlanResult?.validation.routeKind === "metadata") &&
+      (artifact.stage === "generate-sql" ||
+        artifact.stage === "validate" ||
+        artifact.stage === "correct" ||
+        artifact.stage === "execute")
+    ) {
+      reasons.push("metadata_no_sql");
+    }
+    if (state.failure?.terminal) {
+      reasons.push("terminal_governance_failure");
+    }
+    if (
+      artifact.stage === "correct" &&
+      (state.validationOutcome === "pass" ||
+        state.sqlValidationArtifact?.status === "passed")
+    ) {
+      reasons.push("validation_passed");
+    }
+    return Array.from(new Set(reasons));
+  }
+
+  private toRuntimePlanStatus(
+    status: Text2SqlV2StageArtifact["status"]
+  ): Text2SqlV2RuntimePlanV1["items"][number]["status"] {
+    if (status === "success" || status === "degraded") {
+      return "completed";
+    }
+    if (status === "clarification") {
+      return "clarification";
+    }
+    return status;
+  }
+
+  private readCorrectionIntent(
+    artifact: Text2SqlV2StageArtifact
+  ): Text2SqlV2RuntimePlanV1["items"][number]["correctionIntent"] | undefined {
+    if (artifact.stage !== "correct" || artifact.status !== "success") {
+      return undefined;
+    }
+    const grounding = artifact.metadata?.correctionGrounding;
+    const retryReason =
+      typeof grounding === "object" &&
+      grounding !== null &&
+      "retryReason" in grounding &&
+      typeof grounding.retryReason === "string"
+        ? grounding.retryReason
+        : artifact.warnings?.[0];
+    if (!retryReason) {
+      return undefined;
+    }
+    const failureCode =
+      typeof grounding === "object" &&
+      grounding !== null &&
+      "failureCode" in grounding &&
+      typeof grounding.failureCode === "string"
+        ? grounding.failureCode
+        : undefined;
+    return {
+      failedStage: "validate",
+      ...(failureCode ? { failureCode } : {}),
+      retryReason,
+      targetStage: "generate-sql"
+    };
   }
 
   private isStageName(value: string): value is Text2SqlV2StageName {

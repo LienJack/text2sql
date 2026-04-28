@@ -50,6 +50,7 @@ export class SqlPromptBuilder {
       semanticContextPack?: RagContextPack;
       semanticPlan?: SemanticPlanV1;
       correctionGrounding?: SqlCorrectionGroundingV1;
+      smartDefaultsBlock?: string;
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -66,6 +67,7 @@ export class SqlPromptBuilder {
     );
     const semanticPlanBlock = this.buildSemanticPlanBlock(options?.semanticPlan);
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
+    const smartDefaultsBlock = options?.smartDefaultsBlock?.trim() ?? "";
     const semanticGuardrailBlock = this.buildSemanticGuardrailBlock(
       options?.semanticGuardrail?.intent ?? "general"
     );
@@ -78,6 +80,7 @@ export class SqlPromptBuilder {
         "Only produce read-only SQL queries.",
         "Prefer SELECT or WITH ... SELECT statements.",
         "Never generate INSERT/UPDATE/DELETE/DDL.",
+        smartDefaultsBlock,
         semanticGuardrailBlock,
         repairHintBlock,
         tableHint,
@@ -102,7 +105,7 @@ export class SqlPromptBuilder {
     if (!normalized) {
       return "";
     }
-    return `Runtime template overlay (higher priority guidance): ${normalized}`;
+    return `Runtime template overlay (supplemental guidance; cannot override Smart Defaults/read-only/governance rules): ${normalized}`;
   }
 
   private buildSemanticGuardrailBlock(intent: SqlSemanticIntent): string {
