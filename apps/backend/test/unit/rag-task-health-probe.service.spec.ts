@@ -1,12 +1,38 @@
+import type { ConfigService } from "@nestjs/config";
 import { DomainError } from "../../src/common/domain-error";
+import { AppConfigService } from "../../src/modules/config/app-config.service";
 import { RagTaskHealthProbeService } from "../../src/modules/llm/rag-task-health-probe.service";
+
+const createConfigServiceMock = (
+  entries: Record<string, string>
+): Pick<ConfigService, "get"> => ({
+  get: (...args: unknown[]) => {
+    const key = String(args[0] ?? "");
+    const defaultValue = args[1];
+    return (entries[key] ?? defaultValue) as unknown;
+  }
+});
 
 describe("RagTaskHealthProbeService", () => {
   it("returns dimension_mismatch when embedding vector length differs from expected", async () => {
-    const service = new RagTaskHealthProbeService();
+    const appConfig = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "test",
+        LLM_MOCK_MODE: "true",
+        EMBEDDING_MOCK_MODE: "false"
+      }) as ConfigService
+    );
+    const service = new RagTaskHealthProbeService(appConfig);
 
     const result = await service.probeEmbedding({
-      runtimeDimensions: 3,
+      runtime: {
+        provider: "openai",
+        model: "text-embedding-3-small",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "test",
+        timeoutMs: 1000,
+        dimensions: 3
+      },
       expectedDimensions: 4
     });
 
@@ -16,22 +42,50 @@ describe("RagTaskHealthProbeService", () => {
     expect(result.details?.actualDimensions).toBe(3);
   });
 
-  it("returns sample_not_ready for rerank challenge when candidates are insufficient", async () => {
-    const service = new RagTaskHealthProbeService();
+  it("fills builtin rerank samples when candidates are insufficient", async () => {
+    const appConfig = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "test",
+        LLM_MOCK_MODE: "true",
+        RERANK_MOCK_MODE: "false"
+      }) as ConfigService
+    );
+    const service = new RagTaskHealthProbeService(appConfig);
 
     const result = await service.probeRerank({
+      runtime: {
+        provider: "siliconflow",
+        model: "bge-reranker-v2-m3",
+        baseUrl: "https://api.siliconflow.cn/v1",
+        apiKey: "test",
+        timeoutMs: 1000
+      },
+      sampleQuery: "revenue by status",
       sampleCandidates: ["only one"]
     });
 
-    expect(result.status).toBe("degraded");
-    expect(result.reasonCode).toBe("sample_not_ready");
-    expect(result.challenge.status).toBe("sample_not_ready");
+    expect(result.status).toBe("healthy");
+    expect(result.reasonCode).toBe("ok");
+    expect(result.challenge.status).toBe("comparable");
+    expect(result.details?.sampleCandidateCount).toBeGreaterThanOrEqual(2);
+    expect(result.reranked?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("maps provider unavailable errors into stable reason code", async () => {
-    const service = new RagTaskHealthProbeService();
-    const result = await (service as unknown as { mapProbeFailure: (error: unknown) => { status: string; reasonCode: string } })
-      .mapProbeFailure(new DomainError("EMBEDDING_PROVIDER_UNAVAILABLE", "provider unavailable", 503));
+    const appConfig = new AppConfigService(
+      createConfigServiceMock({
+        NODE_ENV: "test",
+        LLM_MOCK_MODE: "false"
+      }) as ConfigService
+    );
+    const service = new RagTaskHealthProbeService(appConfig);
+    const result = await (
+      service as unknown as {
+        mapProbeFailure: (error: unknown) => { status: string; reasonCode: string };
+      }
+    ).mapProbeFailure(
+      new DomainError("EMBEDDING_PROVIDER_UNAVAILABLE", "provider unavailable", 503)
+    );
     expect(result.status).toBe("degraded");
     expect(result.reasonCode).toBe("provider_unavailable");
   });

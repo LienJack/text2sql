@@ -91,7 +91,10 @@ export class SettingsController {
   ): Promise<ApiResponse<unknown>> {
     try {
       const taskType = this.parseTaskType(taskTypeRaw);
-      const data = await this.settingsService.checkRagTaskConfigHealth(taskType, body);
+      const data = await this.settingsService.checkRagTaskConfigHealth(taskType, body, {
+        requestId: req.requestId,
+        traceId: req.requestId
+      });
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);

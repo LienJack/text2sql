@@ -27,8 +27,20 @@ const SCRIPT_NAME = "check-text2sql-no-legacy-compat";
 const INLINE_ALLOW_MARKER = "text2sql-no-legacy-compat:allow";
 
 export const DEFAULT_SCAN_FILES = [
+  "apps/backend/src/modules/conversation/application/workflow/text2sql-workflow-runner.service.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+  "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts",
   "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
   "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+  "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
+  "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts",
   "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
   "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
   "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",

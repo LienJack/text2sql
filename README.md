@@ -95,7 +95,7 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `RERANK_TIMEOUT_MS=<timeout-ms>`（可选，默认回退到 `LLM_TIMEOUT_MS`）
 - `/settings` 页面职责：
   - `LLM 模型`：provider/model 目录治理
-  - `RAG 配置`：Embedding / Rerank 运行配置（settings first, env fallback）
+  - `RAG 配置`：Embedding / Rerank 运行配置（settings first, env fallback），支持 `检测草稿（dry-check）` 与 `已保存配置检测（persisted-check）`
   - `RAG 运行`：运行态观测与回放证据
 - `LANGSMITH_TRACING=true|false`（是否启用 LangSmith 追踪）
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
@@ -158,6 +158,7 @@ pnpm dev
 - `GET http://localhost:3002/health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
 - `GET http://localhost:3002/health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
 - `GET http://localhost:3002/api/v1/rag/quality/report` 中 `glossarySelectedContext` 可查看术语 selected_context 门禁（sampleVersion/relativeLift/status）。
+- `GET http://localhost:3002/health` 中 `dependencies.ragConfig.embedding/rerank` 可查看当前生效 provider + model + configSource 摘要。
 - 前端能经 `http://localhost:3000` 成功创建会话并发送消息，无跨域报错。
 - 前端从 `/data-sources` 选择任一可用数据源后，可自动创建绑定会话并跳转 `/chat`。
 - `GET /api/v1/sessions?datasource=<id>` 返回的会话均属于指定数据源。
@@ -199,7 +200,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `DELETE /api/v1/settings/prompts/:templateId`（管理员，软删除）
 - `GET /api/v1/settings/rag-configs`
 - `PUT /api/v1/settings/rag-configs/:taskType`（管理员，`taskType=embedding|rerank`）
-- `POST /api/v1/settings/rag-configs/:taskType/health`（管理员）
+- `POST /api/v1/settings/rag-configs/:taskType/health`（管理员，支持可选 `draft` payload；返回 `checkedAgainst=draft|persisted` 与结构化 `reasonCode`）
 - `GET /api/v1/datasources`
 - `POST /api/v1/datasources`
 - `POST /api/v1/datasources/upload`

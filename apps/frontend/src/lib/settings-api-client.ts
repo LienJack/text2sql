@@ -5,6 +5,8 @@ import type {
   ModelCatalogItem,
   ProviderConfig,
   RagTaskConfig,
+  RagTaskConfigHealthRequest,
+  RagTaskConfigHealthResult as SharedRagTaskConfigHealthResult,
   RagTaskSettingsView,
   RagTaskType,
   RagMemoryFeedbackRequest,
@@ -232,37 +234,8 @@ export type RagTaskConfigPayload = {
   note?: string;
 };
 
-export type RagTaskConfigHealthPayload = {
-  sampleQuery?: string;
-  sampleCandidates?: string[];
-};
-
-export type RagTaskConfigHealthResult = {
-  taskType: RagTaskType;
-  status: "healthy" | "degraded" | "failed";
-  reasonCode: string;
-  message: string;
-  checkedAt: string;
-  latencyMs: number;
-  configSource: "settings" | "env_fallback" | "missing";
-  config?: RagTaskConfig;
-  details?: Record<string, unknown>;
-  challenge?: {
-    status: "comparable" | "sample_not_ready" | "evidence_missing" | "not_comparable";
-    baselineTopScore?: number;
-    candidateTopScore?: number;
-    delta?: number;
-    topCandidateId?: string;
-    reasonCode: string;
-  };
-  sample?: {
-    reranked: Array<{
-      rank: number;
-      score: number;
-      reason: string;
-    }>;
-  };
-};
+export type RagTaskConfigHealthPayload = RagTaskConfigHealthRequest;
+export type RagTaskConfigHealthResult = SharedRagTaskConfigHealthResult;
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
@@ -320,7 +293,7 @@ export async function upsertRagTaskConfig(
 
 export async function checkRagTaskConfigHealth(
   taskType: RagTaskType,
-  payload?: RagTaskConfigHealthPayload
+  payload?: RagTaskConfigHealthRequest
 ): Promise<RagTaskConfigHealthResult> {
   return request<RagTaskConfigHealthResult>(
     `/api/v1/settings/rag-configs/${encodeURIComponent(taskType)}/health`,

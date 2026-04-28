@@ -5,6 +5,18 @@ export interface ProviderCapability {
   displayName: string;
   supportsModelListing: boolean;
   defaultBaseUrl: string;
+  ragProfiles?: {
+    embedding?: {
+      endpoint: string;
+      recommendedModel?: string;
+      mode?: "compatible" | "native";
+    };
+    rerank?: {
+      endpoint: string;
+      recommendedModel?: string;
+      mode?: "compatible" | "native";
+    };
+  };
 }
 
 export const PROVIDER_CAPABILITIES: Record<LlmProviderCode, ProviderCapability> = {
@@ -36,13 +48,37 @@ export const PROVIDER_CAPABILITIES: Record<LlmProviderCode, ProviderCapability> 
     provider: "volcengine",
     displayName: "火山引擎",
     supportsModelListing: true,
-    defaultBaseUrl: "https://ark.cn-beijing.volces.com/api/v3"
+    defaultBaseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    ragProfiles: {
+      embedding: {
+        endpoint: "/embeddings",
+        recommendedModel: "doubao-embedding-text-240715",
+        mode: "compatible"
+      },
+      rerank: {
+        endpoint: "/rerank",
+        recommendedModel: "doubao-rerank-v1",
+        mode: "compatible"
+      }
+    }
   },
   siliconflow: {
     provider: "siliconflow",
     displayName: "硅基流动",
     supportsModelListing: true,
-    defaultBaseUrl: "https://api.siliconflow.cn/v1"
+    defaultBaseUrl: "https://api.siliconflow.cn/v1",
+    ragProfiles: {
+      embedding: {
+        endpoint: "/embeddings",
+        recommendedModel: "BAAI/bge-m3",
+        mode: "compatible"
+      },
+      rerank: {
+        endpoint: "/rerank",
+        recommendedModel: "BAAI/bge-reranker-v2-m3",
+        mode: "compatible"
+      }
+    }
   },
   openrouter: {
     provider: "openrouter",
@@ -66,7 +102,19 @@ export const PROVIDER_CAPABILITIES: Record<LlmProviderCode, ProviderCapability> 
     provider: "tongyi",
     displayName: "通义",
     supportsModelListing: true,
-    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    defaultBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    ragProfiles: {
+      embedding: {
+        endpoint: "/embeddings",
+        recommendedModel: "text-embedding-v4",
+        mode: "compatible"
+      },
+      rerank: {
+        endpoint: "/rerank",
+        recommendedModel: "gte-rerank-v2",
+        mode: "compatible"
+      }
+    }
   }
 };
 

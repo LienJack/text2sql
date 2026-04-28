@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 const BASE_URL = (process.env.NGINX_GATEWAY_BASE_URL || "http://localhost:3000").replace(/\/+$/, "");
+const BACKEND_HEALTH_URL = (
+  process.env.BACKEND_HEALTH_URL || "http://localhost:3002/health"
+).replace(/\/+$/, "");
 const USER_ID = process.env.SMOKE_USER_ID || "user_system_admin";
 const USER_ROLE = process.env.SMOKE_USER_ROLE || "admin";
 const EXPLICIT_WORKSPACE_ID = process.env.SMOKE_WORKSPACE_ID?.trim() || "";
@@ -297,6 +300,40 @@ const checkBackend = async (workspaceId) => {
   }
 };
 
+const checkHealth = async () => {
+  try {
+    const startedAt = Date.now();
+    const response = await fetchWithTimeout(
+      BACKEND_HEALTH_URL,
+      {
+        method: "GET",
+        headers: defaultHeaders("")
+      }
+    );
+    const bodyText = await response.text();
+    const parsed = parseJsonText(bodyText);
+
+    if (!response.ok) {
+      throw new Error(parseApiError(response.status, bodyText));
+    }
+    const ragConfig = parsed?.status === "success" ? parsed?.data?.dependencies?.ragConfig : null;
+    const embeddingProvider = ragConfig?.embedding?.provider;
+    const rerankProvider = ragConfig?.rerank?.provider;
+    if (typeof embeddingProvider !== "string" || embeddingProvider.length === 0) {
+      throw new Error("health.dependencies.ragConfig.embedding.provider missing");
+    }
+    if (typeof rerankProvider !== "string" || rerankProvider.length === 0) {
+      throw new Error("health.dependencies.ragConfig.rerank.provider missing");
+    }
+    logPass(
+      "health",
+      `GET ${BACKEND_HEALTH_URL} -> embedding=${embeddingProvider}, rerank=${rerankProvider}, latency=${formatMs(Date.now() - startedAt)}`
+    );
+  } catch (error) {
+    addFailure("health", describeError(error));
+  }
+};
+
 const tryCreateSession = async (workspaceId, datasourceId) => {
   const response = await fetchWithTimeout(
     `${BASE_URL}/api/v1/sessions`,
@@ -411,11 +448,13 @@ const checkStream = async (workspaceId, datasourceId) => {
 
 const main = async () => {
   console.log(`[INFO] base url: ${BASE_URL}`);
+  console.log(`[INFO] backend health url: ${BACKEND_HEALTH_URL}`);
   console.log(`[INFO] actor: ${USER_ROLE}/${USER_ID}`);
 
   await checkFrontend();
   const workspaceId = await resolveWorkspaceId();
   const datasourceId = await checkBackend(workspaceId);
+  await checkHealth();
   const { firstSuccessSessionMs } = await checkStream(workspaceId, datasourceId);
   if (typeof firstSuccessSessionMs === "number") {
     logMetric("first_success_session_ms", firstSuccessSessionMs);

@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import type {
   RagConfigSource,
+  RagHealthCheckedAgainst,
   RagTaskConfig,
+  RagTaskConfigDraftInput,
+  RagTaskConfigHealthResult,
   RagTaskSettingsView,
   RagTaskType,
   SettingsActor
@@ -30,6 +33,12 @@ export interface CheckRagTaskConfigHealthInput {
   sampleQuery?: string;
   sampleCandidates?: string[];
   expectedDimensions?: number;
+  draft?: RagTaskConfigDraftInput;
+}
+
+export interface CheckRagTaskConfigHealthContext {
+  requestId?: string;
+  traceId?: string;
 }
 
 export interface RagTaskRuntimeConfig {
@@ -96,44 +105,31 @@ export class RagTaskConfigService {
 
   async checkConfigHealth(
     taskType: RagTaskType,
-    input: CheckRagTaskConfigHealthInput
-  ): Promise<{
-    taskType: RagTaskType;
-    status: "healthy" | "degraded" | "failed";
-    reasonCode: string;
-    message: string;
-    checkedAt: string;
-    latencyMs: number;
-    configSource: RagConfigSource;
-    config?: RagTaskConfig;
-    details?: Record<string, unknown>;
-    challenge?: RagRerankChallengeSummary;
-    sample?: {
-      reranked: Array<{
-        rank: number;
-        score: number;
-        reason: string;
-      }>;
-    };
-  }> {
+    input: CheckRagTaskConfigHealthInput,
+    context?: CheckRagTaskConfigHealthContext
+  ): Promise<RagTaskConfigHealthResult> {
     const start = Date.now();
     const checkedAt = new Date().toISOString();
     const persisted = await this.repository.getConfig(taskType);
+    const checkedAgainst: RagHealthCheckedAgainst = input.draft ? "draft" : "persisted";
 
     try {
-      const runtime = await this.resolveRuntime(taskType);
+      const runtime = input.draft
+        ? await this.resolveRuntimeFromDraft(taskType, input.draft, persisted)
+        : await this.resolveRuntime(taskType);
       const healthProbe =
         taskType === "embedding"
           ? await this.healthProbe.probeEmbedding({
-              runtimeDimensions: runtime.dimensions,
+              runtime,
               expectedDimensions: input.expectedDimensions
             })
           : await this.healthProbe.probeRerank({
+              runtime,
               sampleQuery: input.sampleQuery,
               sampleCandidates: input.sampleCandidates
             });
       const latencyMs = Date.now() - start;
-      if (persisted) {
+      if (persisted && checkedAgainst === "persisted") {
         await this.repository.updateHealth(taskType, {
           healthStatus: healthProbe.status,
           lastCheckedAt: checkedAt,
@@ -143,25 +139,7 @@ export class RagTaskConfigService {
         });
       }
 
-      const response: {
-        taskType: RagTaskType;
-        status: "healthy" | "degraded" | "failed";
-        reasonCode: string;
-        message: string;
-        checkedAt: string;
-        latencyMs: number;
-        configSource: RagConfigSource;
-        config?: RagTaskConfig;
-        details?: Record<string, unknown>;
-        challenge?: RagRerankChallengeSummary;
-        sample?: {
-          reranked: Array<{
-            rank: number;
-            score: number;
-            reason: string;
-          }>;
-        };
-      } = {
+      const response: RagTaskConfigHealthResult = {
         taskType,
         status: healthProbe.status,
         reasonCode: healthProbe.reasonCode,
@@ -169,6 +147,9 @@ export class RagTaskConfigService {
         checkedAt,
         latencyMs: healthProbe.latencyMs,
         configSource: runtime.configSource,
+        checkedAgainst,
+        requestId: context?.requestId,
+        traceId: context?.traceId ?? context?.requestId,
         config: await this.resolveEffectiveConfig(taskType),
         details: healthProbe.details
       };
@@ -178,11 +159,9 @@ export class RagTaskConfigService {
           ReturnType<RagTaskHealthProbeService["probeRerank"]>
         >;
         response.challenge = rerankProbe.challenge;
-        const query = input.sampleQuery?.trim() || "revenue by status";
-        const candidates = input.sampleCandidates?.filter((item) => item.trim().length > 0) ?? [];
-        if (candidates.length > 0) {
+        if (rerankProbe.reranked && rerankProbe.reranked.length > 0) {
           response.sample = {
-            reranked: this.mockSampleRerank(query, candidates)
+            reranked: rerankProbe.reranked
           };
         }
       }
@@ -197,8 +176,12 @@ export class RagTaskConfigService {
             ? error.message
             : "RAG 配置检测失败";
       const status: "degraded" | "failed" =
-        error instanceof DomainError ? "degraded" : "failed";
-      if (persisted) {
+        error instanceof DomainError
+          ? error.code === "RAG_TASK_CONFIG_SCHEMA_INVALID"
+            ? "failed"
+            : "degraded"
+          : "failed";
+      if (persisted && checkedAgainst === "persisted") {
         await this.repository.updateHealth(taskType, {
           healthStatus: status,
           lastCheckedAt: checkedAt,
@@ -210,12 +193,14 @@ export class RagTaskConfigService {
       return {
         taskType,
         status,
-        reasonCode:
-          status === "degraded" ? "provider_unavailable" : "unexpected_error",
+        reasonCode: this.mapHealthReasonCode(error, status),
         message,
         checkedAt,
         latencyMs,
-        configSource: "missing",
+        configSource: this.resolveHealthConfigSource(error, checkedAgainst),
+        checkedAgainst,
+        requestId: context?.requestId,
+        traceId: context?.traceId ?? context?.requestId,
         config: await this.resolveEffectiveConfig(taskType),
         details: {
           error:
@@ -235,6 +220,129 @@ export class RagTaskConfigService {
 
   async resolveRerankRuntime(): Promise<RagTaskRuntimeConfig> {
     return this.resolveRuntime("rerank");
+  }
+
+  private async resolveRuntimeFromDraft(
+    taskType: RagTaskType,
+    draft: RagTaskConfigDraftInput,
+    persisted?: RagTaskConfig | null
+  ): Promise<RagTaskRuntimeConfig> {
+    const provider = draft.provider?.trim() ?? "";
+    const model = draft.model?.trim() ?? "";
+    const baseUrl = draft.baseUrl?.trim() ?? "";
+    const apiKey = draft.apiKey?.trim() ?? "";
+
+    if (!provider || !model || !baseUrl || !apiKey || draft.enabled === false) {
+      throw new DomainError(
+        "RAG_TASK_CONFIG_SCHEMA_INVALID",
+        "草稿配置不完整，至少需要 provider/model/baseUrl/apiKey 且 enabled=true。",
+        400,
+        {
+          taskType,
+          checkedAgainst: "draft",
+          missingFields: {
+            provider: !provider,
+            model: !model,
+            baseUrl: !baseUrl,
+            apiKey: !apiKey,
+            enabled: draft.enabled === false
+          }
+        }
+      );
+    }
+
+    return {
+      taskType,
+      provider,
+      model,
+      baseUrl,
+      apiKey,
+      dimensions:
+        taskType === "embedding"
+          ? (draft.dimensions ?? persisted?.dimensions ?? this.appConfig.embeddingDimensions)
+          : undefined,
+      vectorVersion:
+        taskType === "embedding"
+          ? (draft.vectorVersion?.trim() ||
+            persisted?.vectorVersion ||
+            this.appConfig.embeddingVectorVersion)
+          : undefined,
+      timeoutMs:
+        draft.timeoutMs ??
+        persisted?.timeoutMs ??
+        (taskType === "embedding"
+          ? this.appConfig.embeddingTimeoutMs
+          : this.appConfig.rerankTimeoutMs),
+      configSource: "settings",
+      configId: persisted?.id
+    };
+  }
+
+  private mapHealthReasonCode(
+    error: unknown,
+    status: "degraded" | "failed"
+  ): string {
+    if (error instanceof DomainError) {
+      if (error.code === "RAG_TASK_CONFIG_SCHEMA_INVALID") {
+        return "schema_invalid";
+      }
+      if (
+        error.code === "EMBEDDING_PROVIDER_UNAVAILABLE" ||
+        error.code === "RERANK_PROVIDER_UNAVAILABLE"
+      ) {
+        return "provider_unavailable";
+      }
+      if (error.code.includes("REQUEST_TIMEOUT")) {
+        return "timeout";
+      }
+      if (error.code.includes("AUTH")) {
+        return "auth_failed";
+      }
+      if (error.code.includes("INVALID_PAYLOAD")) {
+        return "schema_invalid";
+      }
+      if (error.code.includes("DIMENSION_MISMATCH")) {
+        return "dimension_mismatch";
+      }
+      if (error.code.includes("MODEL_NOT_FOUND")) {
+        return "model_not_found";
+      }
+      if (error.code.includes("RESPONSE_ERROR")) {
+        const statusCode = Number(error.details?.statusCode);
+        if (Number.isFinite(statusCode) && statusCode >= 500) {
+          return "provider_5xx";
+        }
+        if (statusCode === 401 || statusCode === 403) {
+          return "auth_failed";
+        }
+        if (statusCode === 404) {
+          return "model_not_found";
+        }
+      }
+      return status === "degraded" ? "provider_unavailable" : "unexpected_error";
+    }
+
+    return status === "degraded" ? "provider_unavailable" : "unexpected_error";
+  }
+
+  private resolveHealthConfigSource(
+    error: unknown,
+    checkedAgainst: RagHealthCheckedAgainst
+  ): RagConfigSource {
+    if (checkedAgainst === "draft") {
+      return "settings";
+    }
+    if (error instanceof DomainError) {
+      const source = error.details?.configSource;
+      if (
+        source === "settings" ||
+        source === "env_fallback" ||
+        source === "missing"
+      ) {
+        return source;
+      }
+    }
+    return "missing";
   }
 
   private async resolveRuntime(taskType: RagTaskType): Promise<RagTaskRuntimeConfig> {
@@ -436,32 +544,4 @@ export class RagTaskConfigService {
     return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`;
   }
 
-  private mockSampleRerank(
-    query: string,
-    candidates: string[]
-  ): Array<{ rank: number; score: number; reason: string }> {
-    const tokens = new Set(
-      query
-        .toLowerCase()
-        .split(/[^a-z0-9_\p{L}\p{N}]+/u)
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0)
-    );
-    return candidates
-      .map((candidate) => {
-        const lowered = candidate.toLowerCase();
-        const tokenHit = Array.from(tokens).filter((token) => lowered.includes(token)).length;
-        const score = Math.max(0, Math.min(1, Number((0.4 + tokenHit * 0.18).toFixed(6))));
-        return {
-          score,
-          reason: `token_match=${tokenHit}`
-        };
-      })
-      .sort((left, right) => right.score - left.score)
-      .map((item, index) => ({
-        rank: index + 1,
-        score: item.score,
-        reason: item.reason
-      }));
-  }
 }

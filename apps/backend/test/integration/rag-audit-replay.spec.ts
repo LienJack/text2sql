@@ -1,10 +1,12 @@
 import { Test, type TestingModule } from "@nestjs/testing";
 import type { SqlRun } from "@text2sql/shared-types";
 import { AppModule } from "../../src/app.module";
+import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
 import { ChatRepository } from "../../src/modules/data/persistence/chat.repository";
 import { RagAuditReplayService } from "../../src/modules/rag/audit/rag-audit-replay.service";
 import { RagEventConsumerService } from "../../src/modules/rag/events/rag-event-consumer.service";
 import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.repository";
+import { RagReplayRepository } from "../../src/modules/rag/observability/rag-replay.repository";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 
 function createRun(runId: string): SqlRun {
@@ -57,6 +59,8 @@ describe("rag audit replay integration", () => {
   let eventConsumer: RagEventConsumerService;
   let auditReplayService: RagAuditReplayService;
   let indexRepository: RagIndexRepository;
+  let replayRepository: RagReplayRepository;
+  let auditLogRepository: AuditLogRepository;
   let chatRepository: ChatRepository;
   let cleanupFixture: (() => Promise<void>) | undefined;
 
@@ -80,6 +84,12 @@ describe("rag audit replay integration", () => {
       strict: false
     });
     indexRepository = moduleRef.get(RagIndexRepository, {
+      strict: false
+    });
+    replayRepository = moduleRef.get(RagReplayRepository, {
+      strict: false
+    });
+    auditLogRepository = moduleRef.get(AuditLogRepository, {
       strict: false
     });
     chatRepository = moduleRef.get(ChatRepository, {
@@ -227,8 +237,72 @@ describe("rag audit replay integration", () => {
 
     await expect(auditReplayService.queryChain({ runId })).rejects.toMatchObject({
       code: "LEGACY_RUN_UNSUPPORTED",
-      statusCode: 410
+      statusCode: 410,
+      details: expect.objectContaining({
+        runId,
+        expectedContract: "text2sql-v2-read-model",
+        requiredMarkers: {
+          version: "run.trace.v2.version === 'v2'",
+          stageOrder: "run.trace.v2.stageOrder.length > 0",
+          stageArtifacts: "run.trace.v2.stages.length > 0"
+        },
+        migrationRunbook:
+          "docs/runbooks/text2sql-v2-hardcut-read-model-migration.md"
+      })
     });
+  });
+
+  it("keeps requestId-only replay lookups non-leaky for legacy run traces", async () => {
+    const runId = "run-rag-audit-legacy-request-only";
+    const requestId = "req-rag-audit-legacy-request-only";
+    const eventId = "evt-rag-audit-request-only-1";
+    await chatRepository.persistRun({
+      ...createRun(runId),
+      trace: {
+        runId,
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      }
+    });
+
+    await replayRepository.writeReplay({
+      runId,
+      replayKey: "incremental:event:received:evt-rag-audit-request-only-1",
+      datasourceId: "ds-rag-audit-request-only",
+      stage: "incremental_event_received",
+      payload: {
+        eventId,
+        eventType: "sql_feedback_positive",
+        datasourceId: "ds-rag-audit-request-only",
+        sourceVersion: "schema-v5",
+        idempotencyKey: "idem-rag-audit-request-only-1",
+        replayToken: "replay-rag-audit-request-only-1",
+        requestId,
+        occurredAt: "2026-04-18T03:21:00.000Z",
+        attempt: 1
+      },
+      createdAt: "2026-04-18T03:21:00.000Z"
+    });
+    await auditLogRepository.appendEvent({
+      runId,
+      requestId,
+      phase: "rag_incremental_refresh",
+      severity: "info",
+      eventType: "rag.incremental-refresh.processed",
+      eventCode: "EVENT_PROCESSED",
+      message: `incremental refresh event ${eventId} applied`,
+      metadata: {
+        eventId
+      },
+      createdAt: "2026-04-18T03:21:01.000Z"
+    });
+
+    const chain = await auditReplayService.queryChain({ requestId });
+    expect(chain.runId).toBe(runId);
+    expect(chain.runTrace).toBeUndefined();
+    expect(chain.events).toHaveLength(1);
+    expect(chain.events[0]?.requestId).toBe(requestId);
   });
 
   it("keeps missing-run requests non-leaky and deterministic", async () => {

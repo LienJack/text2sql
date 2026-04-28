@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LlmSettingsView, RagTaskSettingsView } from "@text2sql/shared-types";
@@ -171,7 +171,8 @@ describe("SettingsPage rag config tab", () => {
       message: "ok",
       checkedAt: "2026-04-16T00:00:00.000Z",
       latencyMs: 1,
-      configSource: "settings"
+      configSource: "settings",
+      checkedAgainst: "draft"
     });
     mockFetchBackendHealthSnapshot.mockResolvedValue({
       status: "ok",
@@ -341,5 +342,46 @@ describe("SettingsPage rag config tab", () => {
     expect(await screen.findByText("Embedding 配置")).toBeInTheDocument();
     expect(screen.getAllByText("当前账号只读，可查看配置摘要。").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "保存 Embedding" })).not.toBeInTheDocument();
+  });
+
+  it("passes current draft payload when checking embedding health", async () => {
+    const user = userEvent.setup();
+    mockFetchSettingsView.mockResolvedValue(createSettingsView("admin"));
+    render(<SettingsPage />);
+
+    await screen.findByText("用户列表");
+    await user.click(screen.getByRole("tab", { name: "RAG 配置" }));
+
+    const providerInput = screen.getByLabelText("embedding-provider");
+    const modelInput = screen.getByLabelText("embedding-model");
+    const baseUrlInput = screen.getByLabelText("embedding-base-url");
+    const apiKeyInput = screen.getByLabelText("embedding-api-key");
+
+    await user.clear(providerInput);
+    await user.type(providerInput, "volcengine");
+    await user.clear(modelInput);
+    await user.type(modelInput, "doubao-embedding-large");
+    await user.clear(baseUrlInput);
+    await user.type(baseUrlInput, "https://ark.cn-beijing.volces.com/api/v3");
+    await user.type(apiKeyInput, "sk-draft-embedding");
+    const embeddingSection = screen.getByText("Embedding 配置").closest("section");
+    if (!embeddingSection) {
+      throw new Error("embedding section not found");
+    }
+    await user.click(
+      within(embeddingSection).getByRole("button", { name: "检测草稿（不保存）" })
+    );
+
+    expect(mockCheckRagTaskConfigHealth).toHaveBeenCalledWith(
+      "embedding",
+      expect.objectContaining({
+        draft: expect.objectContaining({
+          provider: "volcengine",
+          model: "doubao-embedding-large",
+          baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+          apiKey: "sk-draft-embedding"
+        })
+      })
+    );
   });
 });

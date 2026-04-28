@@ -288,7 +288,8 @@ describe("SettingsPage governance visibility", () => {
       message: "ok",
       checkedAt: "2026-04-16T00:00:00.000Z",
       latencyMs: 1,
-      configSource: "settings"
+      configSource: "settings",
+      checkedAgainst: "persisted"
     });
     mockFetchBackendHealthSnapshot.mockResolvedValue(createHealthSnapshot());
     mockFetchRagQualityReport.mockResolvedValue(createQualityReport());

@@ -4,6 +4,7 @@ import { PlatformDataPersistenceModule } from "../platform/data/persistence.modu
 import { DatasourceModule } from "../governance/datasource/datasource.module";
 import { ObservabilityModule } from "../observability/observability.module";
 import { RagModule } from "../knowledge/rag/rag.module";
+import { LlmModule } from "../llm/llm.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -12,7 +13,8 @@ import { HealthController } from "./health.controller";
     PlatformDataPersistenceModule,
     DatasourceModule,
     ObservabilityModule,
-    RagModule
+    RagModule,
+    LlmModule
   ],
   controllers: [HealthController]
 })

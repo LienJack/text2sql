@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { SettingsActor } from "@text2sql/shared-types";
 import { ProviderCatalogService } from "../../llm/provider-catalog.service";
 import {
+  type CheckRagTaskConfigHealthContext,
   type CheckRagTaskConfigHealthInput,
   type UpsertRagTaskConfigInput,
   RagTaskConfigService
@@ -43,9 +44,10 @@ export class SettingsService {
 
   async checkRagTaskConfigHealth(
     taskType: RagTaskType,
-    body: CheckRagTaskConfigHealthInput
+    body: CheckRagTaskConfigHealthInput,
+    context?: CheckRagTaskConfigHealthContext
   ) {
-    return this.ragTaskConfigService.checkConfigHealth(taskType, body);
+    return this.ragTaskConfigService.checkConfigHealth(taskType, body, context);
   }
 
   async createProvider(actor: SettingsActor, body: CreateProviderDto) {

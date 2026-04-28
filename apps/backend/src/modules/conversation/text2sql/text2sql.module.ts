@@ -17,13 +17,12 @@ import { ChatDeliveryEnrichmentService } from "../chat/application/shared/chat-d
 import { ChatPolicyGuardService } from "../chat/application/shared/chat-policy-guard.service";
 import { ChatPostRunHooksService } from "../chat/application/shared/chat-post-run-hooks.service";
 import { ChatRunPersistenceService } from "../chat/application/shared/chat-run-persistence.service";
-import { Text2SQLWorkflowRunner } from "./text2sql-workflow-runner.service";
+import { Text2SQLWorkflowRunner } from "../application/workflow/text2sql-workflow-runner.service";
 import { EnrichDeliveryStage } from "./stages/enrich-delivery.stage";
 import { PersistRunStage } from "./stages/persist-run.stage";
 import { PostRunHooksStage } from "./stages/post-run-hooks.stage";
 import { PrepareRunStage } from "./stages/prepare-run.stage";
-import { RunV2LangGraphStage } from "./stages/run-v2-langgraph.stage";
-import { RunV2StateMachineStage } from "./stages/run-v2-state-machine.stage";
+import { RunV2LangGraphStage } from "../runtime/text2sql-v2/stages/run-v2-langgraph.stage";
 import { Text2SqlStreamEventMapper } from "./stream/text2sql-stream-event.mapper";
 
 @Module({
@@ -39,7 +38,6 @@ import { Text2SqlStreamEventMapper } from "./stream/text2sql-stream-event.mapper
     Text2SQLWorkflowRunner,
     PrepareRunStage,
     RunV2LangGraphStage,
-    RunV2StateMachineStage,
     EnrichDeliveryStage,
     PersistRunStage,
     PostRunHooksStage,

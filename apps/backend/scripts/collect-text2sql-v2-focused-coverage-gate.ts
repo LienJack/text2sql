@@ -152,6 +152,7 @@ export interface DelegationZeroGateReport {
 
 interface DelegationZeroScanRule {
   file: string;
+  fallbackFile?: string;
   label: string;
   pattern: RegExp;
 }
@@ -161,21 +162,42 @@ const SCOPED_THRESHOLDS = {
   branch: 70
 };
 
+const LAYERED_RUNTIME_STAGE_OWNER =
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts";
+const LAYERED_LANGGRAPH_GRAPH_OWNER =
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts";
+const LEGACY_LANGGRAPH_GRAPH_OWNER =
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts";
+const LAYERED_LANGGRAPH_RUNNER_OWNER =
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
+const LEGACY_LANGGRAPH_RUNNER_OWNER =
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
+const LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER =
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts";
+const LAYERED_INTAKE_NODE_OWNER =
+  "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts";
+const LAYERED_SQL_CORRECTION_OWNER =
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts";
+const LAYERED_SQL_VALIDATION_OWNER =
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts";
+const LAYERED_SEMANTIC_CONTEXT_PACK_OWNER =
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts";
+
 const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts",
+    file: LAYERED_SQL_CORRECTION_OWNER,
     line: 75
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+    file: LAYERED_LANGGRAPH_RUNNER_OWNER,
     line: 80
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/sql-validation.service.ts",
+    file: LAYERED_SQL_VALIDATION_OWNER,
     line: 75
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts",
+    file: LAYERED_SEMANTIC_CONTEXT_PACK_OWNER,
     line: 75
   },
   {
@@ -183,41 +205,45 @@ const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
     line: 75
   },
   {
-    file: "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
+    file: LAYERED_RUNTIME_STAGE_OWNER,
     line: 80
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    file: LAYERED_LANGGRAPH_GRAPH_OWNER,
     line: 80
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+    file: LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER,
     line: 80
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts",
+    file: LAYERED_INTAKE_NODE_OWNER,
     line: 75
   }
 ];
 
 const DELEGATION_ZERO_SCAN_RULES: DelegationZeroScanRule[] = [
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    file: LAYERED_LANGGRAPH_GRAPH_OWNER,
+    fallbackFile: LEGACY_LANGGRAPH_GRAPH_OWNER,
     label: "legacy runtime delegation",
     pattern: /\brunLegacyRuntime\b/
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+    file: LAYERED_LANGGRAPH_GRAPH_OWNER,
+    fallbackFile: LEGACY_LANGGRAPH_GRAPH_OWNER,
     label: "legacy runner instance",
     pattern: /\blegacyRunner\b/
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+    file: LAYERED_LANGGRAPH_RUNNER_OWNER,
+    fallbackFile: LEGACY_LANGGRAPH_RUNNER_OWNER,
     label: "legacy v2 runner import",
     pattern: /\bText2SqlV2RunnerService\b/
   },
   {
-    file: "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+    file: LAYERED_LANGGRAPH_RUNNER_OWNER,
+    fallbackFile: LEGACY_LANGGRAPH_RUNNER_OWNER,
     label: "legacy runtime callback",
     pattern: /\brunLegacyRuntime\b/
   }
@@ -308,23 +334,35 @@ function unique(items: string[]): string[] {
   return [...new Set(items)].sort();
 }
 
+function findForwardMigration(
+  matrix: CloseoutFlowMatrix,
+  file: string
+): CriticalFileOwnerMigration | undefined {
+  return matrix.criticalFileOwnerMigrations?.find((item) => item.from === file);
+}
+
+function findReverseMigration(
+  matrix: CloseoutFlowMatrix,
+  file: string
+): CriticalFileOwnerMigration | undefined {
+  return matrix.criticalFileOwnerMigrations?.find((item) => item.to === file);
+}
+
 function resolveCriticalFile(
   coverage: IstanbulCoverageMap,
   matrix: CloseoutFlowMatrix,
   threshold: CriticalFileThreshold
 ): { file: string; entry?: IstanbulFileCoverage; migrated: boolean; reason?: string; lineThreshold: number } {
-  const migration = matrix.criticalFileOwnerMigrations?.find(
-    (item) => item.from === threshold.file
-  );
-  if (migration) {
-    const migratedEntry = findCoverageEntry(coverage, migration.to);
+  const forwardMigration = findForwardMigration(matrix, threshold.file);
+  if (forwardMigration) {
+    const migratedEntry = findCoverageEntry(coverage, forwardMigration.to);
     if (migratedEntry) {
       return {
-        file: migration.to,
+        file: forwardMigration.to,
         entry: migratedEntry,
         migrated: true,
-        reason: migration.reason,
-        lineThreshold: migration.threshold?.line ?? threshold.line
+        reason: forwardMigration.reason,
+        lineThreshold: forwardMigration.threshold?.line ?? threshold.line
       };
     }
   }
@@ -339,7 +377,21 @@ function resolveCriticalFile(
     };
   }
 
-  if (!migration) {
+  const reverseMigration = findReverseMigration(matrix, threshold.file);
+  if (reverseMigration) {
+    const fallbackEntry = findCoverageEntry(coverage, reverseMigration.from);
+    if (fallbackEntry) {
+      return {
+        file: reverseMigration.from,
+        entry: fallbackEntry,
+        migrated: true,
+        reason: reverseMigration.reason,
+        lineThreshold: reverseMigration.threshold?.line ?? threshold.line
+      };
+    }
+  }
+
+  if (!forwardMigration && !reverseMigration) {
     return {
       file: threshold.file,
       migrated: false,
@@ -348,12 +400,24 @@ function resolveCriticalFile(
     };
   }
 
+  if (forwardMigration) {
+    return {
+      file: forwardMigration.to,
+      entry: findCoverageEntry(coverage, forwardMigration.to),
+      migrated: true,
+      reason: forwardMigration.reason,
+      lineThreshold: forwardMigration.threshold?.line ?? threshold.line
+    };
+  }
+
   return {
-    file: migration.to,
-    entry: findCoverageEntry(coverage, migration.to),
-    migrated: true,
-    reason: migration.reason,
-    lineThreshold: migration.threshold?.line ?? threshold.line
+    file: reverseMigration?.from ?? threshold.file,
+    entry: reverseMigration
+      ? findCoverageEntry(coverage, reverseMigration.from)
+      : undefined,
+    migrated: Boolean(reverseMigration),
+    reason: reverseMigration?.reason,
+    lineThreshold: reverseMigration?.threshold?.line ?? threshold.line
   };
 }
 
@@ -402,12 +466,18 @@ function evaluateCriticalFiles(
 }
 
 function evaluateDelegationZero(repoRoot: string): DelegationZeroGateReport {
-  const scannedFiles = unique(DELEGATION_ZERO_SCAN_RULES.map((rule) => rule.file));
+  const scannedFiles = new Set<string>();
   const violations: DelegationZeroViolation[] = [];
 
   for (const rule of DELEGATION_ZERO_SCAN_RULES) {
-    const absolutePath = resolve(repoRoot, rule.file);
-    if (!existsSync(absolutePath)) {
+    const candidateFiles = [rule.file, rule.fallbackFile].filter(
+      (item): item is string => typeof item === "string" && item.length > 0
+    );
+    const selectedFile = candidateFiles.find((file) =>
+      existsSync(resolve(repoRoot, file))
+    );
+
+    if (!selectedFile) {
       violations.push({
         file: rule.file,
         label: `${rule.label}:missing_file`,
@@ -415,10 +485,11 @@ function evaluateDelegationZero(repoRoot: string): DelegationZeroGateReport {
       });
       continue;
     }
-    const content = readFileSync(absolutePath, "utf-8");
+    scannedFiles.add(selectedFile);
+    const content = readFileSync(resolve(repoRoot, selectedFile), "utf-8");
     if (rule.pattern.test(content)) {
       violations.push({
-        file: rule.file,
+        file: selectedFile,
         label: rule.label,
         pattern: rule.pattern.source
       });
@@ -427,7 +498,7 @@ function evaluateDelegationZero(repoRoot: string): DelegationZeroGateReport {
 
   return {
     gatePass: violations.length === 0,
-    scannedFiles,
+    scannedFiles: unique([...scannedFiles]),
     violations,
     reasons: violations.map(
       (item) => `${item.file}:${item.label}:${item.pattern}`
@@ -599,6 +670,22 @@ function scopedFilesFromMatrix(matrix: CloseoutFlowMatrix): string[] {
   ]);
 }
 
+function resolveScopedCoverageEntry(
+  coverage: IstanbulCoverageMap,
+  matrix: CloseoutFlowMatrix,
+  file: string
+): IstanbulFileCoverage | undefined {
+  const directEntry = findCoverageEntry(coverage, file);
+  if (directEntry) {
+    return directEntry;
+  }
+  const reverseMigration = findReverseMigration(matrix, file);
+  if (reverseMigration) {
+    return findCoverageEntry(coverage, reverseMigration.from);
+  }
+  return undefined;
+}
+
 export function evaluateFocusedCoverageGate(params: {
   coverage: IstanbulCoverageMap;
   matrix: CloseoutFlowMatrix;
@@ -613,7 +700,7 @@ export function evaluateFocusedCoverageGate(params: {
   const scopedSummaries: CoverageSummary[] = [];
 
   for (const file of scopedFiles) {
-    const entry = findCoverageEntry(params.coverage, file);
+    const entry = resolveScopedCoverageEntry(params.coverage, params.matrix, file);
     if (!entry) {
       scopedReasons.push(`missing_scoped_coverage:${file}`);
       continue;

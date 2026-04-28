@@ -8,6 +8,7 @@ import { StateBlock } from "@/components/ui/state-block";
 interface RagActiveIndexProfileCardProps {
   foundation: RagFoundationSnapshot | null;
   embeddingConfig: RagTaskConfig | null;
+  rerankConfig?: RagTaskConfig | null;
 }
 
 function parseSourceVersionProfile(sourceVersion?: string): {
@@ -69,7 +70,8 @@ function computeReindexHint(input: {
 
 export function RagActiveIndexProfileCard({
   foundation,
-  embeddingConfig
+  embeddingConfig,
+  rerankConfig = null
 }: RagActiveIndexProfileCardProps) {
   const active = foundation?.activeIndexSummary.items[0];
   if (!active) {
@@ -97,6 +99,18 @@ export function RagActiveIndexProfileCard({
         <p>vectorVersion: {profile.vectorVersion ?? "unknown"}</p>
         <p>activatedAt: {active.activatedAt}</p>
         <p>datasourceId: {active.datasourceId}</p>
+        <p>
+          embedding(active):{" "}
+          {embeddingConfig
+            ? `${embeddingConfig.provider}/${embeddingConfig.model} (${embeddingConfig.configSource})`
+            : "unknown"}
+        </p>
+        <p>
+          rerank(active):{" "}
+          {rerankConfig
+            ? `${rerankConfig.provider}/${rerankConfig.model} (${rerankConfig.configSource})`
+            : "unknown"}
+        </p>
       </div>
       {reindexHint.reindexRequired ? (
         <StateBlock variant="error">

@@ -33,25 +33,23 @@ import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
 import { PlannerVersionLockService } from "./planner/planner-version-lock.service";
 import { PlannerCacheService } from "./planner/planner-cache.service";
-import { SemanticContextPackService } from "./v2/semantic-context-pack.service";
-import { SemanticPlanService } from "./v2/semantic-plan.service";
-import { SemanticPlanValidator } from "./v2/semantic-plan.validator";
-import { SqlValidationService } from "./v2/sql-validation.service";
-import { SqlCorrectionService } from "./v2/sql-correction.service";
-import { Text2SqlV2ArtifactBuilder } from "./v2/text2sql-v2-artifact-builder";
-import { Text2SqlV2LangGraphResultMapper } from "./v2/langgraph/text2sql-v2-langgraph-result.mapper";
-import { Text2SqlV2LangGraphRunnerService } from "./v2/langgraph/text2sql-v2-langgraph-runner.service";
-import { Text2SqlV2StateMachine } from "./v2/text2sql-v2-state-machine";
-import { Text2SqlV2RunnerService } from "./v2/text2sql-v2-runner.service";
-import { AnswerNode as LangGraphAnswerNode } from "./v2/langgraph/nodes/answer.node";
-import { AssembleContextNode as LangGraphAssembleContextNode } from "./v2/langgraph/nodes/assemble-context.node";
-import { CorrectSqlNode as LangGraphCorrectSqlNode } from "./v2/langgraph/nodes/correct-sql.node";
-import { ExecuteSqlNode as LangGraphExecuteSqlNode } from "./v2/langgraph/nodes/execute-sql.node";
-import { GenerateSqlNode as LangGraphGenerateSqlNode } from "./v2/langgraph/nodes/generate-sql.node";
-import { IntakeNode as LangGraphIntakeNode } from "./v2/langgraph/nodes/intake.node";
-import { RetrieveContextNode as LangGraphRetrieveContextNode } from "./v2/langgraph/nodes/retrieve-context.node";
-import { SemanticPlanNode as LangGraphSemanticPlanNode } from "./v2/langgraph/nodes/semantic-plan.node";
-import { ValidateSqlNode as LangGraphValidateSqlNode } from "./v2/langgraph/nodes/validate-sql.node";
+import { SemanticContextPackService } from "../adapters/text2sql-v2/semantic-context-pack.service";
+import { SemanticPlanService } from "../adapters/text2sql-v2/semantic-plan.service";
+import { SemanticPlanValidator } from "../adapters/text2sql-v2/semantic-plan.validator";
+import { SqlValidationService } from "../adapters/text2sql-v2/sql-validation.service";
+import { SqlCorrectionService } from "../adapters/text2sql-v2/sql-correction.service";
+import { Text2SqlV2ArtifactBuilder } from "../artifacts/text2sql-v2/text2sql-v2-artifact-builder";
+import { Text2SqlV2LangGraphResultMapper } from "../runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper";
+import { Text2SqlV2LangGraphRunnerService } from "../runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service";
+import { AnswerNode as LangGraphAnswerNode } from "../nodes/text2sql-v2/answer.node";
+import { AssembleContextNode as LangGraphAssembleContextNode } from "../nodes/text2sql-v2/assemble-context.node";
+import { CorrectSqlNode as LangGraphCorrectSqlNode } from "../nodes/text2sql-v2/correct-sql.node";
+import { ExecuteSqlNode as LangGraphExecuteSqlNode } from "../nodes/text2sql-v2/execute-sql.node";
+import { GenerateSqlNode as LangGraphGenerateSqlNode } from "../nodes/text2sql-v2/generate-sql.node";
+import { IntakeNode as LangGraphIntakeNode } from "../nodes/text2sql-v2/intake.node";
+import { RetrieveContextNode as LangGraphRetrieveContextNode } from "../nodes/text2sql-v2/retrieve-context.node";
+import { SemanticPlanNode as LangGraphSemanticPlanNode } from "../nodes/text2sql-v2/semantic-plan.node";
+import { ValidateSqlNode as LangGraphValidateSqlNode } from "../nodes/text2sql-v2/validate-sql.node";
 
 @Module({
   imports: [
@@ -113,9 +111,7 @@ import { ValidateSqlNode as LangGraphValidateSqlNode } from "./v2/langgraph/node
     LangGraphAnswerNode,
     Text2SqlV2ArtifactBuilder,
     Text2SqlV2LangGraphResultMapper,
-    Text2SqlV2LangGraphRunnerService,
-    Text2SqlV2StateMachine,
-    Text2SqlV2RunnerService
+    Text2SqlV2LangGraphRunnerService
   ],
   exports: [
     SqlToolRegistryService,

@@ -75,4 +75,29 @@ describe("settings rag readiness integration", () => {
     expect(healthRes.body.data.details.expectedDimensions).toBe(1024);
     expect(healthRes.body.data.details.actualDimensions).toBeGreaterThan(0);
   });
+
+  it("exposes active embedding/rerank provider summary in /health", async () => {
+    const upsertRerank = await withActor(
+      request(app.getHttpServer()).put("/api/v1/settings/rag-configs/rerank"),
+      "admin",
+      "admin-rag-readiness"
+    ).send({
+      provider: "siliconflow",
+      model: "BAAI/bge-reranker-v2-m3",
+      baseUrl: "https://api.siliconflow.cn/v1",
+      apiKey: "rerank-health-key",
+      enabled: true,
+      timeoutMs: 8000
+    });
+    expect(upsertRerank.status).toBe(200);
+
+    const healthRes = await request(app.getHttpServer()).get("/health");
+
+    expect(healthRes.status).toBe(200);
+    expect(healthRes.body.status).toBe("success");
+    expect(healthRes.body.data.dependencies.ragConfig.embedding.provider).toBe("openai");
+    expect(healthRes.body.data.dependencies.ragConfig.rerank.provider).toBe(
+      "siliconflow"
+    );
+  });
 });

@@ -347,7 +347,18 @@ describe("save view from run integration", () => {
       })
     ).rejects.toMatchObject({
       code: "LEGACY_RUN_UNSUPPORTED",
-      statusCode: 410
+      statusCode: 410,
+      details: expect.objectContaining({
+        runId: "run-legacy",
+        expectedContract: "text2sql-v2-read-model",
+        requiredMarkers: {
+          version: "run.trace.v2.version === 'v2'",
+          stageOrder: "run.trace.v2.stageOrder.length > 0",
+          stageArtifacts: "run.trace.v2.stages.length > 0"
+        },
+        migrationRunbook:
+          "docs/runbooks/text2sql-v2-hardcut-read-model-migration.md"
+      })
     });
   });
 
@@ -369,6 +380,37 @@ describe("save view from run integration", () => {
       usecase.execute({
         runId: "run-orphan-session",
         name: "orphan_view",
+        actorId: "user-admin"
+      })
+    ).rejects.toMatchObject({
+      code: "RUN_NOT_FOUND",
+      statusCode: 404
+    });
+  });
+
+  it("keeps run-not-found priority before hard-cut checks for orphan legacy runs", async () => {
+    const { usecase, chatRepository } = buildUsecase();
+
+    await chatRepository.persistRun({
+      runId: "run-orphan-legacy",
+      sessionId: "session-missing",
+      question: "legacy",
+      status: "executionResult",
+      provider: "openai",
+      sql: "SELECT 1",
+      trace: {
+        runId: "run-orphan-legacy",
+        provider: "openai",
+        retryCount: 0,
+        steps: []
+      },
+      createdAt: "2026-04-23T01:00:00.000Z"
+    });
+
+    await expect(
+      usecase.execute({
+        runId: "run-orphan-legacy",
+        name: "orphan_legacy_view",
         actorId: "user-admin"
       })
     ).rejects.toMatchObject({

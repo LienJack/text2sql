@@ -1,6 +1,6 @@
 import type { ExecutionTrace } from "@text2sql/shared-types";
 import { Injectable } from "@nestjs/common";
-import { DomainError } from "../../../common/domain-error";
+import { assertSupportedV2RunReadModel } from "../../conversation/projection/read-model/run-view-support.guard";
 import {
   AuditLogRepository,
   ChatRepository
@@ -138,8 +138,12 @@ export class RagAuditReplayService {
       resolvedRunId ? this.ragReplayRepository.listByRunId(resolvedRunId) : Promise.resolve([]),
       resolvedRunId ? this.chatRepository.getRunById(resolvedRunId) : Promise.resolve(undefined)
     ]);
+    let runTrace: ExecutionTrace | undefined;
     if (run && requestedRunId) {
-      this.assertSupportedV2Run(run);
+      assertSupportedV2RunReadModel(run, {
+        unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能回放审计链路。"
+      });
+      runTrace = run.trace;
     }
 
     const fromAt = this.parseTimestamp(input.fromAt);
@@ -206,7 +210,7 @@ export class RagAuditReplayService {
     return {
       runId: resolvedRunId,
       requestId: requestedRequestId || undefined,
-      runTrace: run?.trace,
+      runTrace,
       events,
       generatedAt: new Date().toISOString()
     };
@@ -582,48 +586,4 @@ export class RagAuditReplayService {
     return true;
   }
 
-  private assertSupportedV2Run(run: {
-    runId: string;
-    trace: {
-      v2?: {
-        version?: string;
-        stageOrder?: string[];
-        stages?: Array<{ stage: string }>;
-      };
-    };
-  }): void {
-    const traceV2 = run.trace.v2;
-    const stageOrder = traceV2?.stageOrder;
-    const stages = traceV2?.stages;
-    const supported =
-      traceV2?.version === "v2" &&
-      Array.isArray(stageOrder) &&
-      stageOrder.length > 0 &&
-      Array.isArray(stages) &&
-      stages.length > 0 &&
-      stages.every(
-        (stage) =>
-          typeof stage.stage === "string" &&
-          stageOrder.includes(stage.stage)
-      );
-    if (supported) {
-      return;
-    }
-    throw new DomainError(
-      "LEGACY_RUN_UNSUPPORTED",
-      "该运行记录为历史兼容结构，需迁移后才能回放审计链路。",
-      410,
-      {
-        runId: run.runId,
-        expectedContract: "text2sql-v2-read-model",
-        requiredMarkers: {
-          version: "run.trace.v2.version === 'v2'",
-          stageOrder: "run.trace.v2.stageOrder.length > 0",
-          stageArtifacts: "run.trace.v2.stages.length > 0"
-        },
-        migrationRunbook:
-          "docs/runbooks/text2sql-v2-hardcut-read-model-migration.md"
-      }
-    );
-  }
 }

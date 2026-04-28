@@ -4,24 +4,32 @@ import {
 } from "../../scripts/collect-text2sql-v2-focused-coverage-gate";
 
 const LEGACY_CRITICAL_FILES = [
-  "apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts",
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
-  "apps/backend/src/modules/conversation/agent/v2/sql-validation.service.ts",
-  "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts",
+  "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts",
   "apps/backend/src/modules/llm/embedding-router.service.ts",
-  "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts"
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts"
 ] as const;
 
 const LANGGRAPH_CRITICAL_FILES = [
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts"
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+  "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts"
 ] as const;
 
-const LANGGRAPH_RUNNER_OWNER =
+const LAYERED_LANGGRAPH_RUNNER_OWNER = LEGACY_CRITICAL_FILES[1];
+const LAYERED_LANGGRAPH_STAGE_OWNER = LEGACY_CRITICAL_FILES[5];
+const PRE_LAYERED_LANGGRAPH_RUNNER_OWNER =
   "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
-const LANGGRAPH_STAGE_OWNER =
+const PRE_LAYERED_LANGGRAPH_STAGE_OWNER =
   "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts";
+const PRE_LAYERED_LANGGRAPH_GRAPH_OWNER =
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts";
+const PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER =
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts";
+const PRE_LAYERED_INTAKE_NODE_OWNER =
+  "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts";
 const LEGACY_RUNNER_OWNER =
   "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts";
 const LEGACY_STAGE_OWNER =
@@ -30,8 +38,11 @@ const LEGACY_STAGE_OWNER =
 const ALL_COVERAGE_FILES = [
   ...LEGACY_CRITICAL_FILES,
   ...LANGGRAPH_CRITICAL_FILES,
-  LANGGRAPH_RUNNER_OWNER,
-  LANGGRAPH_STAGE_OWNER
+  PRE_LAYERED_LANGGRAPH_RUNNER_OWNER,
+  PRE_LAYERED_LANGGRAPH_STAGE_OWNER,
+  PRE_LAYERED_LANGGRAPH_GRAPH_OWNER,
+  PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER,
+  PRE_LAYERED_INTAKE_NODE_OWNER
 ] as const;
 
 function fileCoverage(params: {
@@ -108,7 +119,10 @@ function coveredMatrix(): CloseoutFlowMatrix {
         gateRelevance: true,
         behaviorTestStatus: "covered",
         coverageOwnerStatus: "covered",
-        canonicalRuntimeOwners: [LANGGRAPH_STAGE_OWNER, LANGGRAPH_RUNNER_OWNER],
+        canonicalRuntimeOwners: [
+          LAYERED_LANGGRAPH_STAGE_OWNER,
+          LAYERED_LANGGRAPH_RUNNER_OWNER
+        ],
         canonicalOwnerStatus: "planned",
         contractAssertionMode: "behavior_contract"
       },
@@ -136,22 +150,59 @@ function coveredMatrix(): CloseoutFlowMatrix {
     ],
     criticalFileOwnerMigrations: [
       {
+        from: PRE_LAYERED_LANGGRAPH_RUNNER_OWNER,
+        to: LAYERED_LANGGRAPH_RUNNER_OWNER,
+        reason:
+          "Layered runtime migration moves the canonical LangGraph runner owner under conversation/runtime",
+        threshold: { line: 80 }
+      },
+      {
+        from: PRE_LAYERED_LANGGRAPH_STAGE_OWNER,
+        to: LAYERED_LANGGRAPH_STAGE_OWNER,
+        reason:
+          "Layered runtime migration moves the canonical workflow seam stage under conversation/runtime",
+        threshold: { line: 80 }
+      },
+      {
+        from: PRE_LAYERED_LANGGRAPH_GRAPH_OWNER,
+        to: LANGGRAPH_CRITICAL_FILES[0],
+        reason:
+          "Layered runtime migration moves the canonical graph owner under conversation/runtime",
+        threshold: { line: 80 }
+      },
+      {
+        from: PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER,
+        to: LANGGRAPH_CRITICAL_FILES[1],
+        reason:
+          "Layered runtime migration moves result mapping ownership under conversation/runtime",
+        threshold: { line: 80 }
+      },
+      {
+        from: PRE_LAYERED_INTAKE_NODE_OWNER,
+        to: LANGGRAPH_CRITICAL_FILES[2],
+        reason:
+          "Layered runtime migration moves canonical node ownership under conversation/nodes",
+        threshold: { line: 75 }
+      },
+      {
         from: LEGACY_RUNNER_OWNER,
-        to: LANGGRAPH_RUNNER_OWNER,
-        reason: "LangGraph runtime supersedes the long-form v2 runner orchestration owner",
+        to: LAYERED_LANGGRAPH_RUNNER_OWNER,
+        reason:
+          "Legacy long-form v2 runner ownership is superseded by the layered LangGraph runtime seam",
         threshold: { line: 80 }
       },
       {
         from: LEGACY_STAGE_OWNER,
-        to: LANGGRAPH_STAGE_OWNER,
-        reason: "Workflow seam coverage moves from the state-machine stage to the LangGraph stage",
+        to: LAYERED_LANGGRAPH_STAGE_OWNER,
+        reason:
+          "Legacy state-machine stage ownership is superseded by the layered LangGraph stage seam",
         threshold: { line: 80 }
       }
     ],
     runtimeCoverageRows: [
       {
         id: "langgraph-runtime.seam",
-        owners: [LANGGRAPH_STAGE_OWNER, LANGGRAPH_RUNNER_OWNER],
+        owners: [LAYERED_LANGGRAPH_STAGE_OWNER, LAYERED_LANGGRAPH_RUNNER_OWNER],
         expectedTestFiles: [
           "apps/backend/test/unit/text2sql-workflow-runner.spec.ts",
           "apps/backend/test/unit/text2sql-v2-langgraph-runtime.spec.ts"
@@ -176,21 +227,21 @@ function coveredMatrix(): CloseoutFlowMatrix {
     runtimePaths: {
       currentActivePath: [
         "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
-        LEGACY_STAGE_OWNER,
-        LEGACY_RUNNER_OWNER
+        PRE_LAYERED_LANGGRAPH_STAGE_OWNER,
+        PRE_LAYERED_LANGGRAPH_RUNNER_OWNER
       ],
       targetActivePath: [
         "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
-        LANGGRAPH_STAGE_OWNER,
-        LANGGRAPH_RUNNER_OWNER
+        LAYERED_LANGGRAPH_STAGE_OWNER,
+        LAYERED_LANGGRAPH_RUNNER_OWNER
       ],
       criticalOwners: [
-        LANGGRAPH_STAGE_OWNER,
-        LANGGRAPH_RUNNER_OWNER,
+        LAYERED_LANGGRAPH_STAGE_OWNER,
+        LAYERED_LANGGRAPH_RUNNER_OWNER,
         ...LANGGRAPH_CRITICAL_FILES
       ],
       delegationPolicy: "phase_a_delegation_zero",
-      delegationOwners: [LANGGRAPH_CRITICAL_FILES[0], LANGGRAPH_RUNNER_OWNER],
+      delegationOwners: [LANGGRAPH_CRITICAL_FILES[0], LAYERED_LANGGRAPH_RUNNER_OWNER],
       delegationForbiddenPatterns: [
         "runLegacyRuntime",
         "legacyRunner",
@@ -246,23 +297,23 @@ describe("text2sql v2 focused coverage gate", () => {
       matrix: coveredMatrix(),
       delegationZeroOverride: {
         gatePass: false,
-        scannedFiles: [LANGGRAPH_RUNNER_OWNER],
+        scannedFiles: [LAYERED_LANGGRAPH_RUNNER_OWNER],
         violations: [
           {
-            file: LANGGRAPH_RUNNER_OWNER,
+            file: LAYERED_LANGGRAPH_RUNNER_OWNER,
             label: "legacy v2 runner import",
             pattern: "Text2SqlV2RunnerService"
           }
         ],
         reasons: [
-          `${LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
+          `${LAYERED_LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
         ]
       }
     });
 
     expect(report.rollout.gatePass).toBe(false);
     expect(report.rollout.reasons).toContain(
-      `delegation_zero:${LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
+      `delegation_zero:${LAYERED_LANGGRAPH_RUNNER_OWNER}:legacy v2 runner import:Text2SqlV2RunnerService`
     );
   });
 

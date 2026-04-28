@@ -44,7 +44,7 @@ describe("settings rag rerank challenge integration", () => {
     }
   });
 
-  it("returns sample_not_ready challenge when sample candidates are insufficient", async () => {
+  it("auto-fills builtin samples when sample candidates are insufficient", async () => {
     const rerankRes = await withActor(
       request(app.getHttpServer()).put("/api/v1/settings/rag-configs/rerank"),
       "admin",
@@ -68,8 +68,9 @@ describe("settings rag rerank challenge integration", () => {
     });
     expect(healthRes.status).toBe(201);
     expect(healthRes.body.status).toBe("success");
-    expect(healthRes.body.data.reasonCode).toBe("sample_not_ready");
-    expect(healthRes.body.data.challenge.status).toBe("sample_not_ready");
+    expect(healthRes.body.data.reasonCode).toBe("ok");
+    expect(healthRes.body.data.challenge.status).toBe("comparable");
+    expect(healthRes.body.data.sample.reranked.length).toBeGreaterThanOrEqual(2);
   });
 
   it("returns comparable challenge summary when samples are present", async () => {

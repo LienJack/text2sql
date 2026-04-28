@@ -24,7 +24,7 @@ describe("settings rag config integration", () => {
     process.env.SQLITE_PATH = fixture.dbPath;
     process.env.DATABASE_URL = "";
     process.env.REDIS_URL = "";
-    process.env.LLM_MOCK_MODE = "false";
+    process.env.LLM_MOCK_MODE = "true";
     process.env.RERANK_MOCK_MODE = "false";
     process.env.EMBEDDING_MOCK_MODE = "false";
     process.env.EMBEDDING_BASE_URL = "";
@@ -58,6 +58,54 @@ describe("settings rag config integration", () => {
     expect(healthRes.body.status).toBe("success");
     expect(healthRes.body.data.status).toBe("degraded");
     expect(healthRes.body.data.configSource).toBe("missing");
+    expect(healthRes.body.data.checkedAgainst).toBe("persisted");
+    expect(healthRes.body.data.reasonCode).toBe("provider_unavailable");
+  });
+
+  it("supports dry-check against draft config for embedding", async () => {
+    const healthRes = await withActor(
+      request(app.getHttpServer()).post("/api/v1/settings/rag-configs/embedding/health"),
+      "admin",
+      "admin-rag-draft-health"
+    ).send({
+      draft: {
+        provider: "openai",
+        model: "text-embedding-3-small",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "sk-draft-embedding",
+        enabled: true,
+        dimensions: 1536,
+        vectorVersion: "v1",
+        timeoutMs: 5000
+      },
+      expectedDimensions: 1536
+    });
+
+    expect(healthRes.status).toBe(201);
+    expect(healthRes.body.status).toBe("success");
+    expect(healthRes.body.data.checkedAgainst).toBe("draft");
+    expect(healthRes.body.data.reasonCode).toBe("ok");
+  });
+
+  it("returns schema_invalid when dry-check draft is incomplete", async () => {
+    const healthRes = await withActor(
+      request(app.getHttpServer()).post("/api/v1/settings/rag-configs/embedding/health"),
+      "admin",
+      "admin-rag-draft-invalid"
+    ).send({
+      draft: {
+        provider: "openai",
+        model: "",
+        baseUrl: "https://api.openai.com/v1",
+        enabled: true
+      }
+    });
+
+    expect(healthRes.status).toBe(201);
+    expect(healthRes.body.status).toBe("success");
+    expect(healthRes.body.data.status).toBe("failed");
+    expect(healthRes.body.data.reasonCode).toBe("schema_invalid");
+    expect(healthRes.body.data.checkedAgainst).toBe("draft");
   });
 
   it("allows admin to upsert embedding/rerank configs and list task-separated records", async () => {

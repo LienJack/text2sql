@@ -46,7 +46,7 @@ describe("text2sql v2 eval gate integration", () => {
       noLegacy: {
         gatePass: true,
         reasons: [],
-        scannedCount: 7
+        scannedCount: 14
       },
       focusedCoverage: {
         gatePass: true,
@@ -100,7 +100,7 @@ describe("text2sql v2 eval gate integration", () => {
       noLegacy: {
         gatePass: true,
         reasons: [],
-        scannedCount: 7
+        scannedCount: 14
       },
       focusedCoverage: {
         gatePass: true,
@@ -143,12 +143,14 @@ describe("text2sql v2 eval gate integration", () => {
       },
       noLegacy: {
         gatePass: false,
-        reasons: ["apps/backend/src/modules/data/persistence/chat.repository.ts:1:1:prompt_template alias"],
-        scannedCount: 7
+        reasons: [
+          "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts:1:1:langgraph legacy delegation"
+        ],
+        scannedCount: 14
       },
       focusedCoverage: {
         gatePass: false,
-        reasons: ["critical:apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts:line_coverage_below_75"],
+        reasons: ["critical:apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts:line_coverage_below_75"],
         coveragePath: "/tmp/coverage-final.json",
         matrixPath: "/tmp/text2sql-v2-closeout-flow-matrix.json"
       }
@@ -159,8 +161,10 @@ describe("text2sql v2 eval gate integration", () => {
     expect(closeout.rollbackSuggested).toBe(true);
     expect(closeout.reasons).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("no_legacy:apps/backend/src/modules/data/persistence/chat.repository.ts"),
-        expect.stringContaining("focused_coverage:critical:apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts")
+        expect.stringContaining(
+          "no_legacy:apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+        ),
+        expect.stringContaining("focused_coverage:critical:apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts")
       ])
     );
   });

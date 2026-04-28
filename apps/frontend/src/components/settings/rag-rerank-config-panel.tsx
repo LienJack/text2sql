@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { RagTaskConfig } from "@text2sql/shared-types";
+import type {
+  RagTaskConfig,
+  RagTaskConfigHealthRequest
+} from "@text2sql/shared-types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { StateBlock } from "@/components/ui/state-block";
+import { RagProviderCardGrid } from "@/components/settings/rag-provider-card-grid";
 import type {
   RagTaskConfigHealthResult,
   RagTaskConfigPayload
@@ -17,7 +21,24 @@ interface RagRerankConfigPanelProps {
   config: RagTaskConfig | null;
   loading?: boolean;
   onSave: (payload: RagTaskConfigPayload) => Promise<void>;
-  onHealthCheck: () => Promise<RagTaskConfigHealthResult>;
+  onHealthCheck: (
+    payload: RagTaskConfigHealthRequest
+  ) => Promise<RagTaskConfigHealthResult>;
+}
+
+function resolveConfigVersion(config: RagTaskConfig | null): string {
+  if (!config) {
+    return "missing";
+  }
+  return [
+    config.id,
+    config.updatedAt,
+    config.provider,
+    config.model,
+    config.baseUrl ?? "",
+    config.enabled ? "1" : "0",
+    config.timeoutMs ?? ""
+  ].join(":");
 }
 
 export function RagRerankConfigPanel({
@@ -34,21 +55,50 @@ export function RagRerankConfigPanel({
   const [enabled, setEnabled] = useState(true);
   const [timeoutMs, setTimeoutMs] = useState("");
   const [note, setNote] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [lastSyncedConfigVersion, setLastSyncedConfigVersion] = useState("missing");
+  const [remoteUpdateAvailable, setRemoteUpdateAvailable] = useState(false);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [message, setMessage] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [checkStatus, setCheckStatus] = useState("");
+  const [checkError, setCheckError] = useState("");
+  const [checkedAgainst, setCheckedAgainst] = useState<"draft" | "persisted" | null>(null);
+
+  const configVersion = resolveConfigVersion(config);
+
+  const syncFromConfig = (nextConfig: RagTaskConfig | null) => {
+    setProvider(nextConfig?.provider ?? "");
+    setModel(nextConfig?.model ?? "");
+    setBaseUrl(nextConfig?.baseUrl ?? "");
+    setApiKey("");
+    setEnabled(nextConfig?.enabled ?? true);
+    setTimeoutMs(nextConfig?.timeoutMs ? String(nextConfig.timeoutMs) : "");
+    setNote(nextConfig?.note ?? "");
+  };
 
   useEffect(() => {
-    setProvider(config?.provider ?? "");
-    setModel(config?.model ?? "");
-    setBaseUrl(config?.baseUrl ?? "");
-    setApiKey("");
-    setEnabled(config?.enabled ?? true);
-    setTimeoutMs(config?.timeoutMs ? String(config.timeoutMs) : "");
-    setNote(config?.note ?? "");
-  }, [config]);
+    if (!dirty) {
+      syncFromConfig(config);
+      setLastSyncedConfigVersion(configVersion);
+      setRemoteUpdateAvailable(false);
+      return;
+    }
+    if (configVersion !== lastSyncedConfigVersion) {
+      setRemoteUpdateAvailable(true);
+    }
+  }, [config, configVersion, dirty, lastSyncedConfigVersion]);
 
   const readonly = actorRole !== "admin";
+
+  const markDirty = () => {
+    if (!dirty) {
+      setDirty(true);
+    }
+    setSaveStatus("");
+    setSaveError("");
+  };
 
   return (
     <section className="space-y-3 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
@@ -56,50 +106,93 @@ export function RagRerankConfigPanel({
         <h3 className="text-sm font-semibold text-[var(--text-primary)]">Rerank 配置</h3>
         <Badge variant="outline">{config?.configSource ?? "missing"}</Badge>
         <Badge variant="outline">{config?.healthStatus ?? "unknown"}</Badge>
+        <Badge variant={dirty ? "secondary" : "outline"}>{dirty ? "draft" : "synced"}</Badge>
+        {checkedAgainst ? (
+          <Badge variant="outline">{`checked:${checkedAgainst}`}</Badge>
+        ) : null}
       </div>
 
       {loading ? <StateBlock variant="loading">Rerank 配置加载中...</StateBlock> : null}
       {!config && !loading ? <StateBlock variant="idle">暂无 Rerank 配置</StateBlock> : null}
+      <RagProviderCardGrid
+        taskType="rerank"
+        activeProvider={provider}
+        readonly={readonly}
+        loading={loading || saving}
+        dirty={dirty}
+        onSelectProvider={(preset) => {
+          markDirty();
+          setProvider(preset.provider);
+          setModel(preset.recommendedModel);
+          setBaseUrl(preset.defaultBaseUrl);
+          if (!note.trim()) {
+            setNote(`preset=${preset.provider};mode=${preset.mode}`);
+          }
+        }}
+      />
+      {remoteUpdateAvailable ? (
+        <StateBlock variant="idle">
+          检测到后台配置更新，当前草稿已保护。可继续编辑，或点击“重置为最新配置”覆盖草稿。
+        </StateBlock>
+      ) : null}
 
       <div className="grid gap-2 md:grid-cols-2">
         <Input
           value={provider}
-          onChange={(event) => setProvider(event.target.value)}
+          onChange={(event) => {
+            markDirty();
+            setProvider(event.target.value);
+          }}
           placeholder="provider"
           aria-label="rerank-provider"
           disabled={readonly || loading || saving}
         />
         <Input
           value={model}
-          onChange={(event) => setModel(event.target.value)}
+          onChange={(event) => {
+            markDirty();
+            setModel(event.target.value);
+          }}
           placeholder="model"
           aria-label="rerank-model"
           disabled={readonly || loading || saving}
         />
         <Input
           value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
+          onChange={(event) => {
+            markDirty();
+            setBaseUrl(event.target.value);
+          }}
           placeholder="base url"
           aria-label="rerank-base-url"
           disabled={readonly || loading || saving}
         />
         <Input
           value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(event) => {
+            markDirty();
+            setApiKey(event.target.value);
+          }}
           placeholder={config?.apiKeyMasked ?? "api key"}
           aria-label="rerank-api-key"
           disabled={readonly || loading || saving}
         />
         <Input
           value={timeoutMs}
-          onChange={(event) => setTimeoutMs(event.target.value)}
+          onChange={(event) => {
+            markDirty();
+            setTimeoutMs(event.target.value);
+          }}
           placeholder="timeout ms"
           aria-label="rerank-timeout-ms"
           disabled={readonly || loading || saving}
         />
         <NativeSelect
           value={enabled ? "enabled" : "disabled"}
-          onChange={(event) => setEnabled(event.target.value === "enabled")}
+          onChange={(event) => {
+            markDirty();
+            setEnabled(event.target.value === "enabled");
+          }}
           aria-label="rerank-enabled"
           disabled={readonly || loading || saving}
         >
@@ -110,7 +203,10 @@ export function RagRerankConfigPanel({
 
       <Input
         value={note}
-        onChange={(event) => setNote(event.target.value)}
+        onChange={(event) => {
+          markDirty();
+          setNote(event.target.value);
+        }}
         placeholder="note"
         aria-label="rerank-note"
         disabled={readonly || loading || saving}
@@ -125,7 +221,8 @@ export function RagRerankConfigPanel({
             onClick={() => {
               void (async () => {
                 setSaving(true);
-                setMessage("");
+                setSaveStatus("");
+                setSaveError("");
                 try {
                   await onSave({
                     provider: provider.trim(),
@@ -137,9 +234,11 @@ export function RagRerankConfigPanel({
                     note: note.trim() || undefined
                   });
                   setApiKey("");
-                  setMessage("Rerank 配置已保存。");
+                  setDirty(false);
+                  setRemoteUpdateAvailable(false);
+                  setSaveStatus("保存成功，配置已写入。");
                 } catch (error) {
-                  setMessage(error instanceof Error ? error.message : "保存失败");
+                  setSaveError(error instanceof Error ? error.message : "保存失败");
                 } finally {
                   setSaving(false);
                 }
@@ -150,32 +249,63 @@ export function RagRerankConfigPanel({
           </Button>
           <Button
             variant="outline"
-            disabled={loading || checking}
+            disabled={loading || checking || provider.trim().length === 0 || model.trim().length === 0}
             onClick={() => {
               void (async () => {
                 setChecking(true);
-                setMessage("");
+                setCheckStatus("");
+                setCheckError("");
                 try {
-                  const result = await onHealthCheck();
-                  setMessage(
-                    `健康检查: ${result.status} · code=${result.reasonCode} · source=${result.configSource} · ${result.message}`
+                  const result = await onHealthCheck({
+                    sampleQuery: "revenue by status",
+                    draft: {
+                      provider: provider.trim(),
+                      model: model.trim(),
+                      baseUrl: baseUrl.trim() || undefined,
+                      apiKey: apiKey.trim() || undefined,
+                      enabled,
+                      timeoutMs: timeoutMs.trim() ? Number(timeoutMs) : undefined,
+                      note: note.trim() || undefined
+                    }
+                  });
+                  setCheckedAgainst(result.checkedAgainst);
+                  setCheckStatus(
+                    `检测结果: ${result.status} · code=${result.reasonCode} · source=${result.configSource} · checkedAgainst=${result.checkedAgainst}`
                   );
                 } catch (error) {
-                  setMessage(error instanceof Error ? error.message : "检测失败");
+                  setCheckError(error instanceof Error ? error.message : "检测失败");
                 } finally {
                   setChecking(false);
                 }
               })();
             }}
           >
-            {checking ? "检测中..." : "Sample Rerank"}
+            {checking ? "检测中..." : "检测草稿（不保存）"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={loading || saving || checking}
+            onClick={() => {
+              syncFromConfig(config);
+              setDirty(false);
+              setRemoteUpdateAvailable(false);
+              setLastSyncedConfigVersion(resolveConfigVersion(config));
+              setSaveStatus("");
+              setSaveError("");
+              setCheckStatus("");
+              setCheckError("");
+            }}
+          >
+            重置为最新配置
           </Button>
         </div>
       )}
 
-      {message ? (
-        <StateBlock variant={message.includes("失败") ? "error" : "success"}>{message}</StateBlock>
-      ) : null}
+      {saveStatus ? <StateBlock variant="success">{saveStatus}</StateBlock> : null}
+      {saveError ? <StateBlock variant="error">{saveError}</StateBlock> : null}
+      {checkStatus ? <StateBlock variant="success">{checkStatus}</StateBlock> : null}
+      {checkError ? <StateBlock variant="error">{checkError}</StateBlock> : null}
       {config ? (
         <p className="text-xs text-[var(--text-secondary)]">
           上次检查：{config.lastCheckedAt ?? "未检查"} · 来源说明：{config.configSourceNote ?? "无"}

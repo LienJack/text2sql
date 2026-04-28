@@ -856,6 +856,7 @@ export default function SettingsPage() {
               <RagActiveIndexProfileCard
                 foundation={foundationSnapshot}
                 embeddingConfig={embeddingConfig}
+                rerankConfig={rerankConfig}
               />
               <RagEmbeddingConfigPanel
                 actorRole={actorRole}
@@ -872,9 +873,9 @@ export default function SettingsPage() {
                     throw new Error(message);
                   }
                 }}
-                onHealthCheck={async () => {
+                onHealthCheck={async (payload) => {
                   try {
-                    const result = await checkRagTaskConfigHealth("embedding");
+                    const result = await checkRagTaskConfigHealth("embedding", payload);
                     await loadRagConfigView();
                     return result;
                   } catch (error) {
@@ -900,11 +901,9 @@ export default function SettingsPage() {
                     throw new Error(message);
                   }
                 }}
-                onHealthCheck={async () => {
+                onHealthCheck={async (payload) => {
                   try {
-                    const result = await checkRagTaskConfigHealth("rerank", {
-                      sampleQuery: "revenue by status"
-                    });
+                    const result = await checkRagTaskConfigHealth("rerank", payload);
                     await loadRagConfigView();
                     return result;
                   } catch (error) {
@@ -932,6 +931,26 @@ export default function SettingsPage() {
                   loading={ragLoading}
                   error={ragFoundationError}
                 />
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Active Provider Summary
+                </h3>
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>
+                    embedding:{" "}
+                    {embeddingConfig
+                      ? `${embeddingConfig.provider}/${embeddingConfig.model} (${embeddingConfig.configSource})`
+                      : "unknown"}
+                  </p>
+                  <p>
+                    rerank:{" "}
+                    {rerankConfig
+                      ? `${rerankConfig.provider}/${rerankConfig.model} (${rerankConfig.configSource})`
+                      : "unknown"}
+                  </p>
+                </div>
               </section>
 
               <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">

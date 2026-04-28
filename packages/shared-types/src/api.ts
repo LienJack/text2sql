@@ -32,6 +32,7 @@ export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export type RagTaskType = "embedding" | "rerank";
 export type RagConfigSource = "settings" | "env_fallback" | "missing";
 export type RagConfigHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
+export type RagHealthCheckedAgainst = "draft" | "persisted";
 
 export interface Session {
   id: string;
@@ -1007,6 +1008,55 @@ export interface RagTaskConfig {
 export interface RagTaskSettingsView {
   actor: SettingsActor;
   items: RagTaskConfig[];
+}
+
+export interface RagTaskConfigDraftInput {
+  provider?: string;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  enabled?: boolean;
+  dimensions?: number;
+  vectorVersion?: string;
+  timeoutMs?: number;
+  note?: string;
+}
+
+export interface RagTaskConfigHealthRequest {
+  sampleQuery?: string;
+  sampleCandidates?: string[];
+  expectedDimensions?: number;
+  draft?: RagTaskConfigDraftInput;
+}
+
+export interface RagTaskConfigHealthResult {
+  taskType: RagTaskType;
+  status: "healthy" | "degraded" | "failed";
+  reasonCode: string;
+  message: string;
+  checkedAt: string;
+  latencyMs: number;
+  configSource: RagConfigSource;
+  checkedAgainst: RagHealthCheckedAgainst;
+  requestId?: string;
+  traceId?: string;
+  config?: RagTaskConfig;
+  details?: Record<string, unknown>;
+  challenge?: {
+    status: "comparable" | "sample_not_ready" | "evidence_missing" | "not_comparable";
+    baselineTopScore?: number;
+    candidateTopScore?: number;
+    delta?: number;
+    topCandidateId?: string;
+    reasonCode: string;
+  };
+  sample?: {
+    reranked: Array<{
+      rank: number;
+      score: number;
+      reason: string;
+    }>;
+  };
 }
 
 export interface SettingsActor {

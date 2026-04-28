@@ -718,45 +718,109 @@
   ],
   "criticalFileOwnerMigrations": [
     {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "reason": "Layered runtime migration moves the canonical LangGraph runner owner under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+      "reason": "Layered runtime migration moves the canonical workflow seam stage under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "reason": "Layered runtime migration moves the canonical graph owner under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "reason": "Layered runtime migration moves result mapping ownership under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts",
+      "to": "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts",
+      "reason": "Layered runtime migration moves canonical node ownership under conversation/nodes",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
       "from": "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
-      "to": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
-      "reason": "LangGraph runtime supersedes the long-form v2 runner orchestration owner",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "reason": "Legacy long-form v2 runner ownership is superseded by the layered LangGraph runtime seam",
       "threshold": {
         "line": 80
       }
     },
     {
       "from": "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts",
-      "to": "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
-      "reason": "Workflow seam coverage moves from the state-machine stage to the LangGraph stage",
+      "to": "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+      "reason": "Legacy state-machine stage ownership is superseded by the layered LangGraph stage seam",
       "threshold": {
         "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts",
+      "reason": "Layered runtime migration moves SQL correction ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/sql-validation.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts",
+      "reason": "Layered runtime migration moves SQL validation ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts",
+      "reason": "Layered runtime migration moves semantic context-pack ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
       }
     }
   ],
   "runtimePaths": {
     "currentActivePath": [
-      "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
-      "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      "apps/backend/src/modules/conversation/application/workflow/text2sql-workflow-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
     ],
     "targetActivePath": [
-      "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
-      "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      "apps/backend/src/modules/conversation/application/workflow/text2sql-workflow-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
     ],
     "criticalOwners": [
-      "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts"
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts"
     ],
     "blockerPolicy": "Closeout must stay blocked if a canonical LangGraph owner is missing or if behavior tests still rely on legacy runtime-detail assertions.",
     "delegationPolicy": "phase_a_delegation_zero",
     "delegationOwners": [
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
-      "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
     ],
     "delegationForbiddenPatterns": [
       "runLegacyRuntime",
@@ -768,8 +832,8 @@
     {
       "id": "langgraph-runtime.seam",
       "owners": [
-        "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts",
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
       ],
       "expectedTestFiles": [
         "apps/backend/test/unit/text2sql-workflow-runner.spec.ts",
@@ -782,9 +846,9 @@
     {
       "id": "langgraph-runtime.topology",
       "owners": [
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts"
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+        "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts"
       ],
       "expectedTestFiles": [
         "apps/backend/test/unit/text2sql-v2-langgraph-runtime.spec.ts"
@@ -796,8 +860,8 @@
     {
       "id": "langgraph-runtime.delegation-zero",
       "owners": [
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
-        "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
       ],
       "expectedTestFiles": [
         "apps/backend/test/unit/langgraph-runtime.spec.ts",

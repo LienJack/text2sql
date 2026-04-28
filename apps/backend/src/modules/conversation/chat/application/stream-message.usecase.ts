@@ -7,7 +7,7 @@ import type {
 import {
   type ChatPolicyActorInput
 } from "./shared/chat-policy-guard.service";
-import { Text2SQLWorkflowRunner } from "../../text2sql/text2sql-workflow-runner.service";
+import { Text2SQLWorkflowRunner } from "../../application/workflow/text2sql-workflow-runner.service";
 
 export interface StreamMessageInput {
   sessionId: string;
