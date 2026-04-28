@@ -163,25 +163,25 @@ const SCOPED_THRESHOLDS = {
 };
 
 const LAYERED_RUNTIME_STAGE_OWNER =
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts";
+  "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts";
 const LAYERED_LANGGRAPH_GRAPH_OWNER =
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts";
 const LEGACY_LANGGRAPH_GRAPH_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts";
 const LAYERED_LANGGRAPH_RUNNER_OWNER =
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts";
 const LEGACY_LANGGRAPH_RUNNER_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts";
 const LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER =
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts";
 const LAYERED_INTAKE_NODE_OWNER =
-  "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts";
+  "apps/backend/src/modules/conversation/nodes/intake.node.ts";
 const LAYERED_SQL_CORRECTION_OWNER =
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts";
+  "apps/backend/src/modules/conversation/adapters/sql-correction.service.ts";
 const LAYERED_SQL_VALIDATION_OWNER =
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts";
+  "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts";
 const LAYERED_SEMANTIC_CONTEXT_PACK_OWNER =
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts";
+  "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts";
 
 const CRITICAL_FILE_THRESHOLDS: CriticalFileThreshold[] = [
   {

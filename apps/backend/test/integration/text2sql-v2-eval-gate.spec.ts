@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
   Text2SqlV2EvaluationService,
   type Text2SqlV2EvalCase
-} from "../../src/modules/conversation/agent/v2/text2sql-v2-evaluation.service";
+} from "../../src/modules/conversation/runtime/evaluation/text2sql-v2-evaluation.service";
 import {
   buildCloseoutRollout,
   summarizeCharacterization
@@ -144,13 +144,13 @@ describe("text2sql v2 eval gate integration", () => {
       noLegacy: {
         gatePass: false,
         reasons: [
-          "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts:1:1:langgraph legacy delegation"
+          "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts:1:1:langgraph legacy delegation"
         ],
         scannedCount: 14
       },
       focusedCoverage: {
         gatePass: false,
-        reasons: ["critical:apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts:line_coverage_below_75"],
+        reasons: ["critical:apps/backend/src/modules/conversation/adapters/sql-correction.service.ts:line_coverage_below_75"],
         coveragePath: "/tmp/coverage-final.json",
         matrixPath: "/tmp/text2sql-v2-closeout-flow-matrix.json"
       }
@@ -162,9 +162,9 @@ describe("text2sql v2 eval gate integration", () => {
     expect(closeout.reasons).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          "no_legacy:apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts"
+          "no_legacy:apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
         ),
-        expect.stringContaining("focused_coverage:critical:apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts")
+        expect.stringContaining("focused_coverage:critical:apps/backend/src/modules/conversation/adapters/sql-correction.service.ts")
       ])
     );
   });

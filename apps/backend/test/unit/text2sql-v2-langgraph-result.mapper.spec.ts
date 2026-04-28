@@ -3,13 +3,13 @@ import type {
   ExecutionTraceStep,
   Text2SqlV2StageArtifact
 } from "@text2sql/shared-types";
-import { Text2SqlV2ArtifactBuilder } from "../../src/modules/conversation/agent/v2/text2sql-v2-artifact-builder";
-import { Text2SqlV2LangGraphResultMapper } from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper";
+import { Text2SqlV2ArtifactBuilder } from "../../src/modules/conversation/artifacts/text2sql-v2-artifact-builder";
+import { Text2SqlV2LangGraphResultMapper } from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper";
 import {
   createText2SqlV2LangGraphInitialState,
   type Text2SqlV2LangGraphNodeName
-} from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.state";
-import type { AnswerNodeResult } from "../../src/modules/conversation/agent/v2/langgraph/nodes/answer.node";
+} from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.state";
+import type { AnswerNodeResult } from "../../src/modules/conversation/nodes/answer.node";
 
 const createPreparedRunContext = () =>
   ({

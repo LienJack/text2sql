@@ -1,6 +1,6 @@
 import { BuildSemanticQueryNode } from "../../src/modules/conversation/agent/nodes/build-semantic-query.node";
 import { DomainError } from "../../src/common/domain-error";
-import { SqlCorrectionService } from "../../src/modules/conversation/agent/v2/sql-correction.service";
+import { SqlCorrectionService } from "../../src/modules/conversation/adapters/sql-correction.service";
 
 describe("agent relationship correction loop", () => {
   const correctionService = new SqlCorrectionService();

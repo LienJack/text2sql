@@ -4,34 +4,34 @@ import {
 } from "../../scripts/collect-text2sql-v2-focused-coverage-gate";
 
 const LEGACY_CRITICAL_FILES = [
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-correction.service.ts",
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/sql-validation.service.ts",
-  "apps/backend/src/modules/conversation/adapters/text2sql-v2/semantic-context-pack.service.ts",
+  "apps/backend/src/modules/conversation/adapters/sql-correction.service.ts",
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+  "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts",
+  "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts",
   "apps/backend/src/modules/llm/embedding-router.service.ts",
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/stages/run-v2-langgraph.stage.ts"
+  "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts"
 ] as const;
 
 const LANGGRAPH_CRITICAL_FILES = [
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph.graph.ts",
-  "apps/backend/src/modules/conversation/runtime/text2sql-v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
-  "apps/backend/src/modules/conversation/nodes/text2sql-v2/intake.node.ts"
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+  "apps/backend/src/modules/conversation/nodes/intake.node.ts"
 ] as const;
 
 const LAYERED_LANGGRAPH_RUNNER_OWNER = LEGACY_CRITICAL_FILES[1];
 const LAYERED_LANGGRAPH_STAGE_OWNER = LEGACY_CRITICAL_FILES[5];
 const PRE_LAYERED_LANGGRAPH_RUNNER_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts";
 const PRE_LAYERED_LANGGRAPH_STAGE_OWNER =
   "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts";
 const PRE_LAYERED_LANGGRAPH_GRAPH_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts";
 const PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts";
 const PRE_LAYERED_INTAKE_NODE_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts";
+  "apps/backend/src/modules/conversation/nodes/intake.node.ts";
 const LEGACY_RUNNER_OWNER =
-  "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts";
+  "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts";
 const LEGACY_STAGE_OWNER =
   "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts";
 
@@ -383,7 +383,7 @@ describe("text2sql v2 focused coverage gate", () => {
       {
         id: "SC.metadata-grounding",
         implementationOwners: [
-          "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/answer.node.ts"
+          "apps/backend/src/modules/conversation/nodes/answer.node.ts"
         ],
         evidenceOwners: ["run.delivery.evidence.metadataAnswer"],
         expectedTestFiles: [],
@@ -416,7 +416,7 @@ describe("text2sql v2 focused coverage gate", () => {
 
   it("requires explicit owner migration metadata when a critical file is replaced", () => {
     const replacementFile =
-      "apps/backend/src/modules/conversation/agent/v2/sql-correction-decision.service.ts";
+      "apps/backend/src/modules/conversation/adapters/sql-correction-decision.service.ts";
     const missingOriginal = ALL_COVERAGE_FILES.slice(1);
     const matrixWithoutMigration = coveredMatrix();
     matrixWithoutMigration.criticalFileOwnerMigrations = [];

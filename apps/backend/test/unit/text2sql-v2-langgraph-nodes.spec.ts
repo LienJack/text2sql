@@ -1,18 +1,18 @@
 import { ClarifyNode } from "../../src/modules/conversation/agent/nodes/clarify.node";
 import { FormatAnswerNode } from "../../src/modules/conversation/agent/nodes/format-answer.node";
-import { IntakeNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/intake.node";
-import { AssembleContextNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/assemble-context.node";
-import { SemanticPlanNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/semantic-plan.node";
-import { GenerateSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/generate-sql.node";
-import { ValidateSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/validate-sql.node";
-import { CorrectSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/correct-sql.node";
-import { ExecuteSqlNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/execute-sql.node";
-import { AnswerNode } from "../../src/modules/conversation/agent/v2/langgraph/nodes/answer.node";
-import { SemanticContextPackService } from "../../src/modules/conversation/agent/v2/semantic-context-pack.service";
-import { SemanticPlanService } from "../../src/modules/conversation/agent/v2/semantic-plan.service";
-import { SemanticPlanValidator } from "../../src/modules/conversation/agent/v2/semantic-plan.validator";
-import { SqlValidationService } from "../../src/modules/conversation/agent/v2/sql-validation.service";
-import { SqlCorrectionService } from "../../src/modules/conversation/agent/v2/sql-correction.service";
+import { IntakeNode } from "../../src/modules/conversation/nodes/intake.node";
+import { AssembleContextNode } from "../../src/modules/conversation/nodes/assemble-context.node";
+import { SemanticPlanNode } from "../../src/modules/conversation/nodes/semantic-plan.node";
+import { GenerateSqlNode } from "../../src/modules/conversation/nodes/generate-sql.node";
+import { ValidateSqlNode } from "../../src/modules/conversation/nodes/validate-sql.node";
+import { CorrectSqlNode } from "../../src/modules/conversation/nodes/correct-sql.node";
+import { ExecuteSqlNode } from "../../src/modules/conversation/nodes/execute-sql.node";
+import { AnswerNode } from "../../src/modules/conversation/nodes/answer.node";
+import { SemanticContextPackService } from "../../src/modules/conversation/adapters/semantic-context-pack.service";
+import { SemanticPlanService } from "../../src/modules/conversation/adapters/semantic-plan.service";
+import { SemanticPlanValidator } from "../../src/modules/conversation/adapters/semantic-plan.validator";
+import { SqlValidationService } from "../../src/modules/conversation/adapters/sql-validation.service";
+import { SqlCorrectionService } from "../../src/modules/conversation/adapters/sql-correction.service";
 import type { SemanticPlanV1 } from "@text2sql/shared-types";
 
 describe("text2sql v2 langgraph nodes", () => {

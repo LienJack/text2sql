@@ -1,9 +1,9 @@
 import type { SqlRun } from "@text2sql/shared-types";
-import { createText2SqlV2LangGraph } from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph";
+import { createText2SqlV2LangGraph } from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph";
 import {
   createText2SqlV2LangGraphInitialState
-} from "../../src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.state";
-import { Text2SqlV2StateMachine } from "../../src/modules/conversation/agent/v2/text2sql-v2-state-machine";
+} from "../../src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.state";
+import { Text2SqlV2ArtifactBuilder } from "../../src/modules/conversation/artifacts/text2sql-v2-artifact-builder";
 
 const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
   runId: "run-v2-runtime",
@@ -104,7 +104,7 @@ const createBaseRun = (override: Partial<SqlRun> = {}): SqlRun => ({
 
 describe("text2sql v2 runtime artifacts", () => {
   it("maps successful trace nodes into v2 stages", () => {
-    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(createBaseRun());
+    const artifact = new Text2SqlV2ArtifactBuilder().buildRunArtifact(createBaseRun());
 
     expect(artifact.version).toBe("v2");
     expect(artifact.stageOrder).toEqual([
@@ -155,7 +155,7 @@ describe("text2sql v2 runtime artifacts", () => {
       }
     });
 
-    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    const artifact = new Text2SqlV2ArtifactBuilder().buildRunArtifact(run);
     expect(artifact.stages.find((stage) => stage.stage === "correct")?.status).toBe("success");
   });
 
@@ -201,7 +201,7 @@ describe("text2sql v2 runtime artifacts", () => {
       }
     });
 
-    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    const artifact = new Text2SqlV2ArtifactBuilder().buildRunArtifact(run);
     const correctionStage = artifact.stages.find((stage) => stage.stage === "correct");
 
     expect(correctionStage?.status).toBe("failed");
@@ -240,7 +240,7 @@ describe("text2sql v2 runtime artifacts", () => {
       }
     });
 
-    const artifact = new Text2SqlV2StateMachine().buildRunArtifact(run);
+    const artifact = new Text2SqlV2ArtifactBuilder().buildRunArtifact(run);
     expect(artifact.stages.find((stage) => stage.stage === "intake")?.status).toBe("clarification");
     expect(artifact.stages.find((stage) => stage.stage === "answer")?.status).toBe("skipped");
   });

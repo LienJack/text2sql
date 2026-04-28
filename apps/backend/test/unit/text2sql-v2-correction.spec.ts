@@ -1,6 +1,6 @@
 import type { Text2SqlV2FailureSemantic } from "@text2sql/shared-types";
 import { DomainError } from "../../src/common/domain-error";
-import { SqlCorrectionService } from "../../src/modules/conversation/agent/v2/sql-correction.service";
+import { SqlCorrectionService } from "../../src/modules/conversation/adapters/sql-correction.service";
 
 describe("text2sql v2 sql correction decision", () => {
   const service = new SqlCorrectionService();

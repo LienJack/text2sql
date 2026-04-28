@@ -12,8 +12,8 @@ import {
 import { DatasourceService } from "../../../governance/datasource/datasource.service";
 import type { AccessContext } from "../../../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../../../governance/access/policy-evaluator.service";
-import { SqlCorrectionService } from "../v2/sql-correction.service";
-import { SqlValidationService } from "../v2/sql-validation.service";
+import { SqlCorrectionService } from "../../adapters/sql-correction.service";
+import { SqlValidationService } from "../../adapters/sql-validation.service";
 
 @Injectable()
 export class ExecuteSqlNode {

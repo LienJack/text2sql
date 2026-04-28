@@ -9,7 +9,7 @@ import {
   SqlSafetyGuard,
   type SqlSafetyDecision
 } from "../sql/tools/sql-safety.guard";
-import { SqlValidationService } from "../v2/sql-validation.service";
+import { SqlValidationService } from "../../adapters/sql-validation.service";
 
 @Injectable()
 export class SafetyCheckNode {

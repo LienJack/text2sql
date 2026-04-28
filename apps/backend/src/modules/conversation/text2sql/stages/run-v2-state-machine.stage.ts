@@ -3,7 +3,7 @@ import type { SqlRun } from "@text2sql/shared-types";
 import {
   RunV2LangGraphStage,
   type Text2SqlStreamV2LangGraphOptions
-} from "../../runtime/text2sql-v2/stages/run-v2-langgraph.stage";
+} from "../../runtime/stages/run-v2-langgraph.stage";
 import type { Text2SqlPreparedRunContext } from "./prepare-run.stage";
 
 export type Text2SqlStreamV2StateMachineOptions = Text2SqlStreamV2LangGraphOptions;

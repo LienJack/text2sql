@@ -12,7 +12,7 @@ import { EnrichDeliveryStage } from "../../text2sql/stages/enrich-delivery.stage
 import { PersistRunStage } from "../../text2sql/stages/persist-run.stage";
 import { PostRunHooksStage } from "../../text2sql/stages/post-run-hooks.stage";
 import { PrepareRunStage } from "../../text2sql/stages/prepare-run.stage";
-import { RunV2LangGraphStage } from "../../runtime/text2sql-v2/stages/run-v2-langgraph.stage";
+import { RunV2LangGraphStage } from "../../runtime/stages/run-v2-langgraph.stage";
 
 export interface Text2SqlWorkflowInput {
   sessionId: string;

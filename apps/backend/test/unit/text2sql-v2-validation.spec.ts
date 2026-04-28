@@ -1,4 +1,4 @@
-import { SqlValidationService } from "../../src/modules/conversation/agent/v2/sql-validation.service";
+import { SqlValidationService } from "../../src/modules/conversation/adapters/sql-validation.service";
 
 describe("text2sql v2 sql validation", () => {
   const createService = (overrides?: {

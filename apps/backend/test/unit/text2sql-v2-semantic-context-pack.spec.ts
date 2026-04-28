@@ -1,4 +1,4 @@
-import { SemanticContextPackService } from "../../src/modules/conversation/agent/v2/semantic-context-pack.service";
+import { SemanticContextPackService } from "../../src/modules/conversation/adapters/semantic-context-pack.service";
 
 describe("text2sql v2 semantic context pack", () => {
   const service = new SemanticContextPackService();

@@ -21,9 +21,9 @@ import type {
   RagContextPack,
   RagRetrievalChunkPayload
 } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
-import { SemanticContextPackService } from "../v2/semantic-context-pack.service";
-import { SemanticPlanService } from "../v2/semantic-plan.service";
-import { SemanticPlanValidator } from "../v2/semantic-plan.validator";
+import { SemanticContextPackService } from "../../adapters/semantic-context-pack.service";
+import { SemanticPlanService } from "../../adapters/semantic-plan.service";
+import { SemanticPlanValidator } from "../../adapters/semantic-plan.validator";
 
 @Injectable()
 export class GenerateSqlNode {

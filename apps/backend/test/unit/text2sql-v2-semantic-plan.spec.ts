@@ -1,6 +1,6 @@
-import { SemanticContextPackService } from "../../src/modules/conversation/agent/v2/semantic-context-pack.service";
-import { SemanticPlanService } from "../../src/modules/conversation/agent/v2/semantic-plan.service";
-import { SemanticPlanValidator } from "../../src/modules/conversation/agent/v2/semantic-plan.validator";
+import { SemanticContextPackService } from "../../src/modules/conversation/adapters/semantic-context-pack.service";
+import { SemanticPlanService } from "../../src/modules/conversation/adapters/semantic-plan.service";
+import { SemanticPlanValidator } from "../../src/modules/conversation/adapters/semantic-plan.validator";
 
 describe("text2sql v2 semantic plan", () => {
   const contextPackService = new SemanticContextPackService();

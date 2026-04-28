@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
   Text2SqlV2EvaluationService,
   type Text2SqlV2EvalCase
-} from "../../src/modules/conversation/agent/v2/text2sql-v2-evaluation.service";
+} from "../../src/modules/conversation/runtime/evaluation/text2sql-v2-evaluation.service";
 
 interface CharacterizationSurface {
   version: string;

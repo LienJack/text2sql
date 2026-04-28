@@ -22,7 +22,7 @@ import { EnrichDeliveryStage } from "./stages/enrich-delivery.stage";
 import { PersistRunStage } from "./stages/persist-run.stage";
 import { PostRunHooksStage } from "./stages/post-run-hooks.stage";
 import { PrepareRunStage } from "./stages/prepare-run.stage";
-import { RunV2LangGraphStage } from "../runtime/text2sql-v2/stages/run-v2-langgraph.stage";
+import { RunV2LangGraphStage } from "../runtime/stages/run-v2-langgraph.stage";
 import { Text2SqlStreamEventMapper } from "./stream/text2sql-stream-event.mapper";
 
 @Module({
