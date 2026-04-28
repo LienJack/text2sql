@@ -1,12 +1,12 @@
-# Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-28)
+# Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-29)
 
 ## Corpus Check
-- 779 files · ~2,248,843 words
+- 779 files · ~2,262,451 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4287 nodes · 8429 edges · 535 communities detected
-- Extraction: 79% EXTRACTED · 21% INFERRED · 0% AMBIGUOUS · INFERRED: 1797 edges (avg confidence: 0.8)
+- 4305 nodes · 8484 edges · 535 communities detected
+- Extraction: 79% EXTRACTED · 21% INFERRED · 0% AMBIGUOUS · INFERRED: 1806 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -550,11 +550,11 @@
 1. `ok()` - 90 edges
 2. `WorkspaceModelingService` - 79 edges
 3. `RagRetrievalService` - 78 edges
-4. `DeliveryContractMapper` - 60 edges
+4. `DeliveryContractMapper` - 61 edges
 5. `AppConfigService` - 59 edges
 6. `GlossaryService` - 59 edges
 7. `isRecord()` - 55 edges
-8. `Text2SqlV2ArtifactBuilder` - 52 edges
+8. `Text2SqlV2ArtifactBuilder` - 53 edges
 9. `toAdminApiError()` - 51 edges
 10. `DatasourceService` - 45 edges
 
@@ -574,135 +574,135 @@
 
 ### Community 0 - "Community 0"
 Cohesion: 0.02
-Nodes (41): extractLatestUserText(), mapToThreadMessages(), ChartBiGroundingGuard, ChartBiResultProfiler, buildContextEnvelopeFromDraft(), parseEntityMappings(), splitByDelimiters(), trimOrUndefined() (+33 more)
+Nodes (45): extractLatestUserText(), mapToThreadMessages(), ChartBiGroundingGuard, ChartBiResultProfiler, buildContextEnvelopeFromDraft(), parseEntityMappings(), splitByDelimiters(), trimOrUndefined() (+37 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.02
-Nodes (19): ChatController, ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EvalService, ExecuteMessageUsecase (+11 more)
-
-### Community 2 - "Community 2"
 Cohesion: 0.03
 Nodes (145): addWorkspaceDatasourceBindings(), addWorkspaceMembers(), AdminApiError, commitModelingSetup(), composeApiUrl(), createGlossaryAnchor(), createGlossaryTerm(), createPromptTemplate() (+137 more)
 
+### Community 2 - "Community 2"
+Cohesion: 0.02
+Nodes (19): ChatController, ChatPolicyGuardService, ChatRepository, ChatRunPersistenceService, ChatService, DatasourceAccessPolicyService, EnrichDeliveryStage, EvalService (+11 more)
+
 ### Community 3 - "Community 3"
 Cohesion: 0.03
-Nodes (20): ok(), ChartBiValidator, DatasourceController, EvalController, GlossaryController, MemoryController, createDeliverySandboxPolicy(), isSandboxFilesystemWriteAllowed() (+12 more)
+Nodes (19): BuildRagIndexJob, asActor(), asActor(), GlossaryService, LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus() (+11 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.02
-Nodes (33): AppConfigService, DatasourceRegistryService, countTracedRuns(), main(), parseArgs(), computeLangsmithCoverage(), bootstrap(), buildGraph() (+25 more)
+Nodes (35): AppConfigService, DatasourceRegistryService, countTracedRuns(), main(), parseArgs(), computeLangsmithCoverage(), bootstrap(), buildGraph() (+27 more)
 
 ### Community 5 - "Community 5"
 Cohesion: 0.03
-Nodes (15): BuildRagIndexJob, asActor(), asActor(), GlossaryService, createRunId(), withActor(), RagDocumentRepository, RagIndexBuilderService (+7 more)
+Nodes (14): ok(), ChartBiValidator, DatasourceController, EvalController, GlossaryController, MemoryController, SettingsController, UserController (+6 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.03
-Nodes (12): shouldRetryCorrection(), AnswerNode, CorrectSqlNode, FormatAnswerNode, RagDatasourceOrchestratorService, RagDatasourceQuotaPolicy, RagEventConsumerService, SavedPriorSqlService (+4 more)
+Nodes (94): BuildSemanticQueryNode, buildConversationKnowledgeAllowlistSet(), collectFiles(), compactLine(), createLineStarts(), extractImportReferences(), findRepoRoot(), indexToLineColumn() (+86 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.04
 Nodes (9): ModelingSchemaChangeRepository, toScopeKey(), SaveViewFromRunUsecase, normalizeName(), SchemaChangeDetectorService, normalizeName(), WorkspaceModelingSchemaChangeDetectorService, normalizeTableName() (+1 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.04
-Nodes (13): setupWorkspaceScopedSession(), AuditLogRepository, ModelingGraphValidator, nonEmpty(), asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey() (+5 more)
-
-### Community 9 - "Community 9"
-Cohesion: 0.03
-Nodes (10): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, DatasourceWorkflowService, MysqlExecutorService, PostgresExecutorService (+2 more)
-
-### Community 10 - "Community 10"
-Cohesion: 0.03
-Nodes (74): BuildSemanticQueryNode, buildConversationKnowledgeAllowlistSet(), collectFiles(), compactLine(), createLineStarts(), extractImportReferences(), findRepoRoot(), indexToLineColumn() (+66 more)
-
-### Community 11 - "Community 11"
 Cohesion: 0.03
 Nodes (22): BuildPhysicalPlanNode, ChartBiIntentParser, parseSseEvents(), parseSseEvents(), GateMetricsService, parsePayload(), PlannerCacheService, RagAuditReplayService (+14 more)
 
+### Community 9 - "Community 9"
+Cohesion: 0.03
+Nodes (10): shouldRetryCorrection(), AnswerNode, CorrectSqlNode, FormatAnswerNode, RagDocumentRepository, SavedPriorSqlService, SemanticAssetReindexService, SqlCorrectionService (+2 more)
+
+### Community 10 - "Community 10"
+Cohesion: 0.04
+Nodes (7): DataBootstrapService, PlatformDataBootstrapModule, FakePgClient, DatasourceRepository, DatasourceService, DatasourceWorkflowService, PostgresExecutorService
+
+### Community 11 - "Community 11"
+Cohesion: 0.06
+Nodes (9): setupWorkspaceScopedSession(), AuditLogRepository, asNonEmptyString(), toBindingKey(), toRuleKey(), toTablePermissionKey(), toTablePermissionSetKey(), WorkspaceDatasourcePolicyRepository (+1 more)
+
 ### Community 12 - "Community 12"
 Cohesion: 0.04
-Nodes (9): LlmConfigRepository, toModelHealthStatus(), toProviderCode(), toProviderSyncStatus(), ModelRerankerAdapter, PromptTemplateService, ProviderCatalogService, ProviderRouterService (+1 more)
+Nodes (64): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+56 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.04
-Nodes (15): EmbeddingRouterService, GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl() (+7 more)
+Cohesion: 0.05
+Nodes (5): GenerateSqlNode, RagCacheKeyFactory, SqlGenerationService, SqlOutputExtractor, SqlPromptBuilder
 
 ### Community 14 - "Community 14"
-Cohesion: 0.04
-Nodes (63): handleKeyDown(), isRecord(), nextFieldId(), normalizeFunctionGroupHints(), resolveCalculatedFieldSaveError(), save(), toForm(), upsertField() (+55 more)
-
-### Community 15 - "Community 15"
 Cohesion: 0.06
 Nodes (7): LaneTimeoutError, RagRetrievalService, appendUnique(), fuseWithRrf(), laneOrder(), normalizeRankConstant(), stableSortLaneHits()
 
-### Community 16 - "Community 16"
+### Community 15 - "Community 15"
 Cohesion: 0.04
 Nodes (6): ChatPostRunHooksService, MemoryPromotionPolicy, MemoryPromotionService, RagBudgetPolicy, RagReplayRepository, RagRerankService
 
+### Community 16 - "Community 16"
+Cohesion: 0.04
+Nodes (8): HealthController, MysqlExecutorService, RagIngestionMetricsService, RagQualityController, RagQualityService, SemanticSpineShadowService, SqliteExecutorService, SqliteQueryService
+
 ### Community 17 - "Community 17"
 Cohesion: 0.05
-Nodes (5): GenerateSqlNode, RagCacheKeyFactory, SqlGenerationService, SqlOutputExtractor, SqlPromptBuilder
+Nodes (7): QueryExecutorRouterService, RelationshipPublishGateFacade, RowFilterRewriteService, SafetyCheckNode, SqlSafetyGuard, SqlTableAccessGuardService, SqlValidationService
 
 ### Community 18 - "Community 18"
 Cohesion: 0.06
 Nodes (62): createIdempotencyKey(), resolveDatasourceWorkflowApiError(), applySessionView(), dedupeSessions(), extractErrorCode(), init(), loadMessages(), mergeSessionMessages() (+54 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.05
-Nodes (7): QueryExecutorRouterService, RelationshipPublishGateFacade, RowFilterRewriteService, SafetyCheckNode, SqlSafetyGuard, SqlTableAccessGuardService, SqlValidationService
+Cohesion: 0.06
+Nodes (4): PromptTemplateService, RagTaskConfigRepository, RagTaskConfigService, SettingsService
 
 ### Community 20 - "Community 20"
 Cohesion: 0.08
 Nodes (7): normalizeValue(), WorkspaceAdminGuard, toMembershipKey(), toWorkspaceMemberRole(), toWorkspaceStatus(), WorkspaceRepository, WorkspaceService
 
 ### Community 21 - "Community 21"
-Cohesion: 0.08
+Cohesion: 0.09
 Nodes (10): toPlatformUserStatus(), UserRepository, UserService, onConfirmBatchDelete(), onConfirmDeleteOne(), onConfirmResetPassword(), onSubmitEditor(), onToggleStatus() (+2 more)
 
 ### Community 22 - "Community 22"
 Cohesion: 0.06
-Nodes (20): BuildIntentPlanNode, buildRuleReasonCodes(), ClarificationFusionPolicy, mapRuleDecisionToEvidence(), unique(), ClarifyNode, IntakeNode, buildDecision() (+12 more)
+Nodes (7): getChunkProfileConfig(), RagChunkingService, sha256(), RagDocumentFactory, sha256(), RagEventConsumerService, SemanticRegistryService
 
 ### Community 23 - "Community 23"
 Cohesion: 0.06
-Nodes (5): HealthController, RagIngestionMetricsService, RagQualityController, RagQualityService, SemanticSpineShadowService
+Nodes (20): BuildIntentPlanNode, buildRuleReasonCodes(), ClarificationFusionPolicy, mapRuleDecisionToEvidence(), unique(), ClarifyNode, IntakeNode, buildDecision() (+12 more)
 
 ### Community 24 - "Community 24"
+Cohesion: 0.06
+Nodes (13): EmbeddingRouterService, GeminiAdapter, resolveGeminiUrl(), isTimeoutAbortError(), LlmGatewayService, toErrorMessage(), LlmModelFactory, resolveProviderBaseUrl() (+5 more)
+
+### Community 25 - "Community 25"
 Cohesion: 0.12
 Nodes (1): Text2SqlV2ArtifactBuilder
 
-### Community 25 - "Community 25"
-Cohesion: 0.07
-Nodes (5): AssembleContextNode, ChartBiArtifactService, ChatDeliveryEnrichmentService, EnrichDeliveryStage, SemanticPlanNode
-
 ### Community 26 - "Community 26"
-Cohesion: 0.06
-Nodes (19): ChartBiSpecCompiler, resolveText2SqlReasoningStage(), resolveText2SqlTitle(), resolveText2SqlV2StageCatalogEntry(), Text2SqlStreamEventMapper, createNodeUpdate(), createRuntimePlanUpdate(), createStageArtifact() (+11 more)
+Cohesion: 0.1
+Nodes (6): ModelingGraphRepository, toScopeKey(), ModelingGraphValidator, nonEmpty(), normalizeId(), WorkspaceRelationshipService
 
 ### Community 27 - "Community 27"
+Cohesion: 0.06
+Nodes (7): ChartBiSpecCompiler, LangsmithTraceService, createText2SqlV2LangGraph(), Text2SqlV2LangGraphResultMapper, Text2SqlV2LangGraphRunnerService, createText2SqlV2LangGraphInitialState(), mergeRuntimePlanReducer()
+
+### Community 28 - "Community 28"
+Cohesion: 0.08
+Nodes (4): AssembleContextNode, ChartBiArtifactService, ChatDeliveryEnrichmentService, SemanticPlanNode
+
+### Community 29 - "Community 29"
+Cohesion: 0.09
+Nodes (2): SemanticSpineCompilerService, SemanticSpineRepository
+
+### Community 30 - "Community 30"
 Cohesion: 0.1
 Nodes (40): ApiClientRequestError, composeApiUrl(), createDatasource(), createSession(), DatasourceApiError, deleteSession(), getMessages(), getRun() (+32 more)
 
-### Community 28 - "Community 28"
-Cohesion: 0.09
-Nodes (6): getChunkProfileConfig(), RagChunkingService, sha256(), RagDocumentFactory, sha256(), SemanticRegistryService
-
-### Community 29 - "Community 29"
-Cohesion: 0.08
-Nodes (5): LangsmithTraceService, Text2SqlV2LangGraphResultMapper, Text2SqlV2LangGraphRunnerService, createText2SqlV2LangGraphInitialState(), mergeRuntimePlanReducer()
-
-### Community 30 - "Community 30"
-Cohesion: 0.16
-Nodes (35): appendThinkingStep(), ensureRunLoaded(), isRecord(), isTerminalStep(), mergeRunThinkingSteps(), mergeThinkingStep(), normalizeArtifact(), normalizeChartArtifact() (+27 more)
-
 ### Community 31 - "Community 31"
-Cohesion: 0.13
-Nodes (1): SemanticSpineRepository
+Cohesion: 0.08
+Nodes (17): resolveText2SqlReasoningStage(), resolveText2SqlTitle(), resolveText2SqlV2StageCatalogEntry(), Text2SqlStreamEventMapper, createNodeUpdate(), createRuntimePlanUpdate(), createStageArtifact(), createStep() (+9 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.13
-Nodes (21): applyCollectorDefaults(), collectClarificationBalanceGate(), detectMetadataBypass(), detectStrictSemanticPath(), ensureFixture(), evaluatePostClarifySemanticPass(), extractSemanticPlanStatus(), findTraceStep() (+13 more)
+Cohesion: 0.16
+Nodes (35): appendThinkingStep(), ensureRunLoaded(), isRecord(), isTerminalStep(), mergeRunThinkingSteps(), mergeThinkingStep(), normalizeArtifact(), normalizeChartArtifact() (+27 more)
 
 ### Community 33 - "Community 33"
 Cohesion: 0.12
@@ -713,12 +713,12 @@ Cohesion: 0.13
 Nodes (1): SemanticContextPackService
 
 ### Community 35 - "Community 35"
-Cohesion: 0.23
-Nodes (2): ModelingGraphRepository, toScopeKey()
+Cohesion: 0.17
+Nodes (1): SemanticPlanService
 
 ### Community 36 - "Community 36"
-Cohesion: 0.19
-Nodes (1): SemanticPlanService
+Cohesion: 0.15
+Nodes (2): ModelRerankerAdapter, ProviderRouterService
 
 ### Community 37 - "Community 37"
 Cohesion: 0.16
@@ -741,60 +741,60 @@ Cohesion: 0.26
 Nodes (10): createIdempotencyKey(), isConflictError(), isRecord(), normalizeTableNames(), readNumberCandidate(), resolveConflictPolicyVersion(), resolveConflictSummary(), setsEqual() (+2 more)
 
 ### Community 42 - "Community 42"
+Cohesion: 0.25
+Nodes (6): createDeliverySandboxPolicy(), isSandboxFilesystemWriteAllowed(), isSandboxNetworkAllowed(), isSandboxProcessSpawnAllowed(), normalizeString(), SandboxRuntimeService
+
+### Community 43 - "Community 43"
 Cohesion: 0.29
 Nodes (1): FileDatasourceExecutorService
 
-### Community 43 - "Community 43"
+### Community 44 - "Community 44"
 Cohesion: 0.27
 Nodes (4): GraphAccelerationAdapter, GraphAccelerationError, GraphAccelerationTimeoutError, GraphAccelerationUnsupportedOperatorError
 
-### Community 44 - "Community 44"
+### Community 45 - "Community 45"
 Cohesion: 0.36
 Nodes (1): SkillRegistryService
 
-### Community 45 - "Community 45"
+### Community 46 - "Community 46"
 Cohesion: 0.24
 Nodes (6): handleOpenChange(), includesFailClosedHint(), normalizeAlerts(), resolveAutoExpandedSection(), resolveFailClosedAlerts(), sectionSeverityScore()
 
-### Community 46 - "Community 46"
+### Community 47 - "Community 47"
 Cohesion: 0.28
 Nodes (3): resetToLatest(), resolveConfigVersion(), syncFromConfig()
 
-### Community 47 - "Community 47"
+### Community 48 - "Community 48"
 Cohesion: 0.42
 Nodes (1): ResolveSavedPriorSqlNode
 
-### Community 48 - "Community 48"
+### Community 49 - "Community 49"
 Cohesion: 0.25
 Nodes (0):
 
-### Community 49 - "Community 49"
+### Community 50 - "Community 50"
 Cohesion: 0.32
 Nodes (3): resetToLatest(), resolveConfigVersion(), syncFromConfig()
 
-### Community 50 - "Community 50"
+### Community 51 - "Community 51"
 Cohesion: 0.25
 Nodes (0):
 
-### Community 51 - "Community 51"
-Cohesion: 0.29
-Nodes (3): InMemorySemanticSpineRepositoryDouble, SemanticSpineContractError, validateSemanticObject()
-
 ### Community 52 - "Community 52"
 Cohesion: 0.29
-Nodes (0):
+Nodes (3): InMemorySemanticSpineRepositoryDouble, SemanticSpineContractError, validateSemanticObject()
 
 ### Community 53 - "Community 53"
 Cohesion: 0.29
 Nodes (0):
 
 ### Community 54 - "Community 54"
-Cohesion: 0.33
-Nodes (2): providerStatusLabel(), providerStatusVariant()
+Cohesion: 0.29
+Nodes (0):
 
 ### Community 55 - "Community 55"
-Cohesion: 0.38
-Nodes (4): createModelingFlowFieldHandleId(), createModelingFlowRelationshipHandleId(), ModelingFlowNode(), normalizeHandleToken()
+Cohesion: 0.33
+Nodes (2): providerStatusLabel(), providerStatusVariant()
 
 ### Community 56 - "Community 56"
 Cohesion: 0.48
@@ -3500,9 +3500,7 @@ Nodes (0):
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ok()` connect `Community 3` to `Community 1`, `Community 7`, `Community 6`, `Community 23`?**
-  _High betweenness centrality (0.023) - this node is a cross-community bridge._
-- **Why does `RagRetrievalService` connect `Community 15` to `Community 13`, `Community 37`?**
+- **Why does `ok()` connect `Community 5` to `Community 16`, `Community 2`, `Community 13`, `Community 7`?**
   _High betweenness centrality (0.020) - this node is a cross-community bridge._
 - **Are the 89 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.report()`) actually correct?**
   _`ok()` has 89 INFERRED edges - model-reasoned connections that need verification._
@@ -3511,6 +3509,8 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.02 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.03 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
+  _Cohesion score 0.02 - nodes in this community are weakly interconnected._
+- **Should `Community 3` be split into smaller, more focused modules?**
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._
