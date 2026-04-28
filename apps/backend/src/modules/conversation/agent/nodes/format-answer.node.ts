@@ -83,6 +83,16 @@ export class FormatAnswerNode {
       .join("\n");
   }
 
+  runOperationalFailure(reason: string, guidance?: string): string {
+    return [
+      "本次分析未能完成，失败发生在 SQL 生成或服务调用阶段。",
+      reason.trim(),
+      guidance?.trim() || "请稍后重试，或切换模型/缩小问题范围后再试。"
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n");
+  }
+
   private buildMetricSummary(
     rows: Array<Record<string, unknown>>,
     numericColumns: string[]

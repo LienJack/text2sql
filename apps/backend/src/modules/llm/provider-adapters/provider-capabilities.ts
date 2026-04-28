@@ -24,7 +24,19 @@ export const PROVIDER_CAPABILITIES: Record<LlmProviderCode, ProviderCapability> 
     provider: "openai",
     displayName: "OpenAI",
     supportsModelListing: true,
-    defaultBaseUrl: "https://api.openai.com/v1"
+    defaultBaseUrl: "https://api.openai.com/v1",
+    ragProfiles: {
+      embedding: {
+        endpoint: "/embeddings",
+        recommendedModel: "text-embedding-3-small",
+        mode: "native"
+      },
+      rerank: {
+        endpoint: "/responses",
+        recommendedModel: "gpt-4.1-mini",
+        mode: "native"
+      }
+    }
   },
   gemini: {
     provider: "gemini",

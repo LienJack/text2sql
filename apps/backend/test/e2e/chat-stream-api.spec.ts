@@ -129,6 +129,18 @@ describe("chat stream api (e2e)", () => {
     expect(startEvent?.data).toHaveProperty("requestId");
 
     const stateEvents = parsedEvents.filter(({ eventType }) => eventType === "state");
+    const runningGenerateIndex = parsedEvents.findIndex(({ eventType, event }) => {
+      const stateData = event.data as {
+        node?: unknown;
+        lifecycle?: unknown;
+      };
+      return (
+        eventType === "state" &&
+        stateData.node === "generate-sql" &&
+        stateData.lifecycle === "running"
+      );
+    });
+    expect(runningGenerateIndex).toBeGreaterThan(startIndex);
     for (const { event } of stateEvents) {
       const stateData = event.data as {
         node: unknown;
@@ -206,6 +218,8 @@ describe("chat stream api (e2e)", () => {
     const textDeltaEvents = parsedEvents.filter(
       ({ eventType }) => eventType === "text-delta"
     );
+    const firstTextDeltaIndex = eventTypes.indexOf("text-delta");
+    expect(runningGenerateIndex).toBeLessThan(firstTextDeltaIndex);
     expect(textDeltaEvents.length).toBeGreaterThan(0);
     expect(
       textDeltaEvents.some(({ event }) => {

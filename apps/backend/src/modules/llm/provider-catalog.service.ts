@@ -16,7 +16,11 @@ import { KimiAdapter } from "./provider-adapters/kimi.adapter";
 import { MinimaxAdapter } from "./provider-adapters/minimax.adapter";
 import { OpenAiAdapter } from "./provider-adapters/openai.adapter";
 import { OpenRouterAdapter } from "./provider-adapters/openrouter.adapter";
-import { ProviderRuntimeConfig, type ProviderAdapter } from "./provider-adapters/provider-adapter.interface";
+import {
+  ProviderRuntimeConfig,
+  type ProviderAdapter,
+  type ProviderModelDescriptor
+} from "./provider-adapters/provider-adapter.interface";
 import { PROVIDER_CAPABILITIES, SUPPORTED_PROVIDER_CODES } from "./provider-adapters/provider-capabilities";
 import { SiliconflowAdapter } from "./provider-adapters/siliconflow.adapter";
 import { TencentHunyuanAdapter } from "./provider-adapters/tencent-hunyuan.adapter";
@@ -31,6 +35,13 @@ type ProviderPayload = {
   apiKey?: string;
   enabled?: boolean;
   actor: SettingsActor;
+};
+
+type PreviewProviderModelsInput = {
+  taskType: "embedding" | "rerank";
+  provider: LlmProviderCode;
+  baseUrl?: string | null;
+  apiKey: string;
 };
 
 @Injectable()
@@ -214,6 +225,30 @@ export class ProviderCatalogService {
     return models.map((m) => ({ id: m.id, enabled: m.enabled }));
   }
 
+  async previewProviderModels(input: PreviewProviderModelsInput): Promise<{
+    provider: LlmProviderCode;
+    supportsModelListing: boolean;
+    recommendedModel?: string;
+    models: ProviderModelDescriptor[];
+  }> {
+    const adapter = this.getAdapter(input.provider);
+    const recommendedModel =
+      PROVIDER_CAPABILITIES[input.provider].ragProfiles?.[input.taskType]?.recommendedModel;
+    const listedModels = await adapter.listModels({
+      provider: input.provider,
+      baseUrl: input.baseUrl,
+      apiKey: input.apiKey.trim(),
+      timeoutMs: this.config.llmTimeoutMs
+    });
+
+    return {
+      provider: input.provider,
+      supportsModelListing: adapter.supportsModelListing,
+      recommendedModel,
+      models: this.rankPreviewModels(input.taskType, listedModels, recommendedModel)
+    };
+  }
+
   async listEnabledModels(): Promise<ModelCatalogItem[]> {
     return this.repository.listModels({ enabledOnly: true });
   }
@@ -304,5 +339,76 @@ export class ProviderCatalogService {
       return `${trimmed.slice(0, 2)}***${trimmed.slice(-1)}`;
     }
     return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`;
+  }
+
+  private rankPreviewModels(
+    taskType: "embedding" | "rerank",
+    models: ProviderModelDescriptor[],
+    recommendedModel?: string
+  ): ProviderModelDescriptor[] {
+    const withScore = models.map((model) => ({
+      model,
+      score: this.scorePreviewModel(taskType, model, recommendedModel)
+    }));
+    const hasPositiveMatches = withScore.some((item) => item.score > 0);
+    const ranked = hasPositiveMatches
+      ? withScore.filter((item) => item.score > 0)
+      : withScore;
+    return ranked
+      .sort((left, right) => {
+        if (right.score !== left.score) {
+          return right.score - left.score;
+        }
+        return left.model.displayName.localeCompare(right.model.displayName);
+      })
+      .map((item) => item.model);
+  }
+
+  private scorePreviewModel(
+    taskType: "embedding" | "rerank",
+    model: ProviderModelDescriptor,
+    recommendedModel?: string
+  ): number {
+    const haystack = `${model.model} ${model.displayName}`.toLowerCase();
+    const capabilities = (model.capabilities ?? []).map((item) => item.toLowerCase());
+    let score = 0;
+
+    if (recommendedModel && model.model === recommendedModel) {
+      score += 100;
+    }
+
+    const hasEmbeddingSignals =
+      /(embedding|embed|bge|e5|gte|multilingual)/.test(haystack) ||
+      capabilities.some((item) => /(embed)/.test(item));
+    const hasRerankSignals =
+      /(rerank|reranker)/.test(haystack) ||
+      capabilities.some((item) => /(rerank|rank)/.test(item));
+    const hasGeneralGenerationSignals =
+      /(gpt|gemini|deepseek|kimi|doubao|qwen|minimax|hunyuan)/.test(haystack) ||
+      capabilities.some((item) => /(chat|generatecontent|completion)/.test(item));
+
+    if (taskType === "embedding") {
+      if (hasEmbeddingSignals) {
+        score += 20;
+      }
+      if (hasRerankSignals) {
+        score -= 20;
+      }
+      if (!hasEmbeddingSignals && hasGeneralGenerationSignals) {
+        score -= 10;
+      }
+      return score;
+    }
+
+    if (hasRerankSignals) {
+      score += 20;
+    }
+    if (hasGeneralGenerationSignals) {
+      score += 6;
+    }
+    if (hasEmbeddingSignals && !hasRerankSignals) {
+      score -= 12;
+    }
+    return score;
   }
 }

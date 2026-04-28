@@ -1,6 +1,11 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { ContextEnvelopePinningEvidence } from "@text2sql/shared-types";
+import type {
+  ContextEnvelopePinningEvidence,
+  Datasource,
+  DatasourceType
+} from "@text2sql/shared-types";
 import { AppConfigService } from "../../../config/app-config.service";
+import { QueryExecutorRouterService } from "../../../platform/data/query/index";
 import {
   KNOWLEDGE_RAG_CONTRACT,
   type KnowledgeRagContract
@@ -51,10 +56,28 @@ interface LaneStateSummary {
   reason?: string;
 }
 
+const MAX_SCHEMA_SUPPLEMENT_TABLES = 4;
+
+const SCHEMA_RELEVANCE_HINTS: Record<string, string[]> = {
+  orders: ["订单", "下单", "单量", "gmv", "order"],
+  order_items: ["订单明细", "商品明细", "明细", "item"],
+  payments: ["支付", "付款", "支付方式", "支付渠道", "payment", "method"],
+  refunds: ["退款", "退货", "refund"],
+  customers: ["客户", "顾客", "customer"],
+  users: ["用户", "user"],
+  merchants: ["商户", "店铺", "merchant"],
+  shipments: ["物流", "发货", "配送", "shipment"],
+  products_sku: ["sku", "规格", "库存单位"],
+  products_spu: ["spu", "商品", "产品"],
+  inventory: ["库存", "inventory"],
+  categories: ["类目", "分类", "category"]
+};
+
 @Injectable()
 export class RetrieveKnowledgeNode {
   constructor(
     private readonly appConfig: AppConfigService,
+    private readonly queryExecutorRouter: QueryExecutorRouterService,
     @Inject(KNOWLEDGE_RAG_CONTRACT)
     private readonly ragContract: KnowledgeRagContract
   ) {}
@@ -62,6 +85,7 @@ export class RetrieveKnowledgeNode {
   async run(input: {
     question: string;
     datasourceId: string;
+    datasource?: Datasource;
     runId: string;
     workspaceId?: string;
     allowedTables?: string[];
@@ -82,7 +106,9 @@ export class RetrieveKnowledgeNode {
       return this.createDisabledKnowledge({
         query: question,
         datasourceId,
+        datasource: input.datasource,
         runId,
+        allowedTables: input.allowedTables,
         pinningConfig,
         degradeReason: "empty_question",
         summary: "检索输入为空，已降级到最小执行路径。"
@@ -93,7 +119,9 @@ export class RetrieveKnowledgeNode {
       return this.createDisabledKnowledge({
         query: normalized,
         datasourceId,
+        datasource: input.datasource,
         runId,
+        allowedTables: input.allowedTables,
         pinningConfig,
         degradeReason: "rag_retrieval_disabled",
         summary: "RAG 检索开关已关闭，已降级到最小执行路径。"
@@ -115,7 +143,11 @@ export class RetrieveKnowledgeNode {
       reranked.retrieval_bundle,
       pinningConfig
     );
-    const bundle = pinningResult.bundle;
+    const bundle = await this.withAllowedTableSchemaSupplement(
+      pinningResult.bundle,
+      input.datasource,
+      input.allowedTables
+    );
     const pinningSummary =
       pinningResult.pinning.enabled && pinningResult.pinning.status === "applied"
         ? `，pinning[candidates=${pinningResult.pinning.candidateFilteredCount ?? 0},selected=${pinningResult.pinning.selectedContextFilteredCount ?? 0}]`
@@ -160,20 +192,26 @@ export class RetrieveKnowledgeNode {
     };
   }
 
-  private createDisabledKnowledge(input: {
+  private async createDisabledKnowledge(input: {
     query: string;
     datasourceId: string;
+    datasource?: Datasource;
     runId: string;
+    allowedTables?: string[];
     pinningConfig: RetrievalPinningConfig;
     degradeReason: string;
     summary: string;
-  }): RetrievedKnowledge {
-    const retrievalBundle = this.buildDegradedBundle({
-      query: input.query,
-      datasourceId: input.datasourceId,
-      runId: input.runId,
-      degradeReason: input.degradeReason
-    });
+  }): Promise<RetrievedKnowledge> {
+    const retrievalBundle = await this.withAllowedTableSchemaSupplement(
+      this.buildDegradedBundle({
+        query: input.query,
+        datasourceId: input.datasourceId,
+        runId: input.runId,
+        degradeReason: input.degradeReason
+      }),
+      input.datasource,
+      input.allowedTables
+    );
     const typedSummary = this.buildTypedSummary(retrievalBundle);
     const evidenceRefs = this.collectEvidenceRefs(retrievalBundle);
     return {
@@ -305,6 +343,239 @@ export class RetrieveKnowledgeNode {
         risk_tags: ["semantic_spine_degraded", input.degradeReason]
       }
     };
+  }
+
+  private async withAllowedTableSchemaSupplement(
+    bundle: RagRetrievalBundle,
+    datasource: Datasource | undefined,
+    allowedTables: string[] | undefined
+  ): Promise<RagRetrievalBundle> {
+    const allowed = this.normalizeAllowedTables(allowedTables);
+    if (!datasource || allowed.length === 0) {
+      return bundle;
+    }
+
+    const selectedTables = this.selectSchemaSupplementTables(bundle.query, allowed);
+    if (selectedTables.length === 0) {
+      return bundle;
+    }
+
+    const chunks = (
+      await Promise.all(
+        selectedTables.map((tableName) =>
+          this.buildSchemaSupplementChunk(datasource, tableName)
+        )
+      )
+    ).filter((chunk): chunk is RagRetrievalChunkPayload => Boolean(chunk));
+
+    if (chunks.length === 0) {
+      return bundle;
+    }
+
+    const existingSelectedContext = bundle.selected_context ?? [];
+    const existingIds = new Set(existingSelectedContext.map((chunk) => chunk.chunk_id));
+    const schemaChunks = chunks.filter((chunk) => !existingIds.has(chunk.chunk_id));
+    const selectedContext = [...existingSelectedContext, ...schemaChunks];
+    const schemaEvidenceIds = schemaChunks.map((chunk) => chunk.chunk_id);
+    const existingContextPack = bundle.context_pack;
+    const existingPruningDecisions =
+      existingContextPack?.pruning_decisions ??
+      existingContextPack?.pruningDecisions ??
+      [];
+    const schemaDecision =
+      schemaEvidenceIds.length > 0
+        ? [
+            {
+              budget_source: "context_pack" as const,
+              removed_evidence_ids: [],
+              kept_evidence_ids: schemaEvidenceIds,
+              reason_codes: ["schema_supplement_from_allowed_tables"],
+              summary: `context_pack:schema_supplement=${schemaEvidenceIds.length}`
+            }
+          ]
+        : [];
+
+    return {
+      ...bundle,
+      selected_context: selectedContext,
+      context_pack: {
+        ...(existingContextPack ?? {
+          status: bundle.status,
+          semantic_lock_status: "degraded" as const,
+          semantic_bindings: {
+            model_keys: [],
+            relationship_keys: [],
+            metric_keys: [],
+            calculated_field_keys: []
+          },
+          instruction_sets: {
+            model_bindings: [],
+            relationship_bindings: [],
+            metric_bindings: [],
+            calculated_field_bindings: []
+          },
+          selected_context_summary: {
+            count: 0,
+            snippets: []
+          },
+          degrade_reasons: bundle.degrade_reasons,
+          risk_tags: bundle.risk_tags ?? []
+        }),
+        selected_context_summary: {
+          count: selectedContext.length,
+          snippets: selectedContext.map((chunk) => chunk.content.slice(0, 200))
+        },
+        selected_context_lanes: this.unique([
+          ...(existingContextPack?.selected_context_lanes ??
+            existingContextPack?.selectedContextLanes ??
+            []),
+          "schema_supplement"
+        ]),
+        pruning_decisions: [...existingPruningDecisions, ...schemaDecision],
+        pruningDecisions: [...existingPruningDecisions, ...schemaDecision]
+      }
+    };
+  }
+
+  private normalizeAllowedTables(values: string[] | undefined): string[] {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return this.unique(
+      values
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.length > 0)
+    );
+  }
+
+  private selectSchemaSupplementTables(question: string, allowedTables: string[]): string[] {
+    const normalizedQuestion = question.trim().toLowerCase();
+    const ranked = allowedTables
+      .map((tableName, index) => ({
+        tableName,
+        index,
+        score: this.scoreSchemaTableRelevance(normalizedQuestion, tableName)
+      }))
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    if (ranked.length === 0) {
+      return allowedTables.length === 1 ? allowedTables : [];
+    }
+
+    return ranked
+      .slice(0, MAX_SCHEMA_SUPPLEMENT_TABLES)
+      .map((item) => item.tableName);
+  }
+
+  private scoreSchemaTableRelevance(question: string, tableName: string): number {
+    let score = 0;
+    const tableTokens = this.identifierTokens(tableName);
+    for (const token of tableTokens) {
+      if (question.includes(token)) {
+        score += 2;
+      }
+    }
+    for (const hint of SCHEMA_RELEVANCE_HINTS[tableName] ?? []) {
+      if (question.includes(hint.toLowerCase())) {
+        score += 4;
+      }
+    }
+    return score;
+  }
+
+  private async buildSchemaSupplementChunk(
+    datasource: Datasource,
+    tableName: string
+  ): Promise<RagRetrievalChunkPayload | undefined> {
+    try {
+      const result = await this.queryExecutorRouter.execute({
+        datasource,
+        sql: this.buildColumnDiscoverySql(datasource.type, tableName),
+        limit: 200
+      });
+      const columns = this.unique(
+        result.rows
+          .map((row: Record<string, unknown>) => this.readColumnName(row))
+          .filter((column): column is string => Boolean(column))
+      );
+      if (columns.length === 0) {
+        return undefined;
+      }
+
+      const qualifiedColumns = columns.map((column) => `${tableName}.${column}`);
+      return {
+        chunk_id: `schema-supplement:${datasource.id}:${tableName}`,
+        content: `Schema supplement for allowed table ${tableName}: columns=${columns.join(", ")}`,
+        metadata: {
+          datasourceId: datasource.id,
+          indexVersionId: "schema-supplement",
+          chunkId: `schema-supplement:${datasource.id}:${tableName}`,
+          domain: "schema",
+          chunkProfile: "schema_ddl_supplement",
+          tableNames: [tableName],
+          columnNames: qualifiedColumns,
+          sourceMetadata: {
+            source: "allowed_table_schema_supplement"
+          }
+        }
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private buildColumnDiscoverySql(type: DatasourceType, tableName: string): string {
+    const escapedTableName = this.escapeSqlLiteral(tableName);
+    if (type === "mysql") {
+      return `
+SELECT column_name AS columnName, data_type AS dataType
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND table_name = '${escapedTableName}'
+ORDER BY ordinal_position
+      `.trim();
+    }
+    if (type === "postgresql") {
+      return `
+SELECT column_name AS columnName, data_type AS dataType
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = '${escapedTableName}'
+ORDER BY ordinal_position
+      `.trim();
+    }
+    return `
+SELECT name AS columnName, type AS dataType
+FROM pragma_table_info('${escapedTableName}')
+ORDER BY cid
+    `.trim();
+  }
+
+  private readColumnName(row: Record<string, unknown>): string | undefined {
+    const value = row.columnName ?? row.column_name ?? row.name ?? row.COLUMN_NAME;
+    if (typeof value !== "string") {
+      return undefined;
+    }
+    const normalized = value.trim();
+    return normalized.length > 0 ? normalized.toLowerCase() : undefined;
+  }
+
+  private identifierTokens(value: string): string[] {
+    return this.unique(
+      value
+        .split(/[^a-z0-9]+/i)
+        .map((token) => token.trim().toLowerCase())
+        .filter((token) => token.length >= 3)
+    );
+  }
+
+  private escapeSqlLiteral(value: string): string {
+    return value.replace(/'/g, "''");
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
   }
 
   private applyPinningConstraints(

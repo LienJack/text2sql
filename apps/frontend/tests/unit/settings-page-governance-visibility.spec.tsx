@@ -22,6 +22,7 @@ import {
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  previewRagProviderModels,
   fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
@@ -67,6 +68,7 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
     fetchSettingsView: vi.fn(),
     fetchSupportedProviders: vi.fn(),
     fetchRagTaskConfigs: vi.fn(),
+    previewRagProviderModels: vi.fn(),
     upsertRagTaskConfig: vi.fn(),
     checkRagTaskConfigHealth: vi.fn(),
     fetchBackendHealthSnapshot: vi.fn(),
@@ -90,6 +92,7 @@ const mockRollbackGlossaryAnchor = vi.mocked(rollbackGlossaryAnchor);
 const mockFetchSettingsView = vi.mocked(fetchSettingsView);
 const mockFetchSupportedProviders = vi.mocked(fetchSupportedProviders);
 const mockFetchRagTaskConfigs = vi.mocked(fetchRagTaskConfigs);
+const mockPreviewRagProviderModels = vi.mocked(previewRagProviderModels);
 const mockUpsertRagTaskConfig = vi.mocked(upsertRagTaskConfig);
 const mockCheckRagTaskConfigHealth = vi.mocked(checkRagTaskConfigHealth);
 const mockFetchBackendHealthSnapshot = vi.mocked(fetchBackendHealthSnapshot);
@@ -280,6 +283,12 @@ describe("SettingsPage governance visibility", () => {
     window.history.replaceState({}, "", "/settings");
     mockFetchSupportedProviders.mockResolvedValue([]);
     mockFetchRagTaskConfigs.mockResolvedValue(createRagTaskSettingsView("admin"));
+    mockPreviewRagProviderModels.mockResolvedValue({
+      provider: "openai",
+      supportsModelListing: true,
+      recommendedModel: "text-embedding-3-small",
+      models: []
+    });
     mockUpsertRagTaskConfig.mockResolvedValue(createRagTaskSettingsView("admin").items[0]!);
     mockCheckRagTaskConfigHealth.mockResolvedValue({
       taskType: "embedding",

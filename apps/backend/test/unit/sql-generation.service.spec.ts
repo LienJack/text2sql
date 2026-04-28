@@ -150,6 +150,117 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(providerRouter.generate).toHaveBeenCalledTimes(1);
   });
 
+  it("uses a semantic shortcut for grouped count proportions before calling the stream provider", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("有多少种支付方式，他们比例是如何", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "有多少种支付方式，他们比例是如何",
+        selectedTables: ["payments"],
+        selectedColumns: [
+          "payments.id",
+          "payments.method",
+          "payments.amount",
+          "payments.created_at"
+        ],
+        metrics: ["count"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:payments"],
+        confidence: 0.49
+      },
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:payments",
+          content: "payments table schema",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:payments",
+            domain: "schema",
+            tableNames: ["payments"],
+            columnNames: ["payments.id", "payments.method", "payments.amount"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.sql).toBe(
+      [
+        "SELECT method AS group_value,",
+        "  COUNT(*) AS item_count,",
+        "  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS item_percentage",
+        "FROM payments",
+        "GROUP BY method",
+        "ORDER BY item_count DESC;"
+      ].join("\n")
+    );
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
+  });
+
+  it("uses a semantic shortcut for simple counts before calling the stream provider", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("一共有多少订单", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "一共有多少订单",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.id"],
+        metrics: ["count"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:orders"],
+        confidence: 0.62
+      },
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:orders",
+          content: "orders table schema",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:orders",
+            domain: "schema",
+            tableNames: ["orders"],
+            columnNames: ["orders.id"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.model).toBe("simple-count-v1");
+    expect(draft.sql).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
+  });
+
   it("prioritizes structured semantic instructions when context pack is provided", async () => {
     const providerRouter = {
       generate: jest.fn().mockResolvedValue({

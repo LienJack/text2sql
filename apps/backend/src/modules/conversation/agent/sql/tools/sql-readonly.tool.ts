@@ -15,6 +15,9 @@ const sqlReadonlyInputSchema = z.object({
   limit: z.number().int().min(1).max(200).optional()
 });
 
+const METADATA_INTROSPECTION_SQL_REGEX =
+  /\bsqlite_master\b|\bsqlite_schema\b|\binformation_schema\b|\bpg_catalog\b|\bpragma\b|\bshow\s+tables\b|\bdescribe\b/i;
+
 @Injectable()
 export class SqlReadonlyTool {
   constructor(
@@ -27,10 +30,20 @@ export class SqlReadonlyTool {
     accessContext?: SqlTableAccessContext;
   }): LlmGatewayToolDefinition {
     return {
-      description: `Execute a read-only SQL query against datasource ${context.datasource.id} (${context.datasource.type}).`,
+      description: `Execute a read-only business-data SQL query against datasource ${context.datasource.id} (${context.datasource.type}). Do not use this tool for schema metadata introspection or system tables.`,
       inputSchema: sqlReadonlyInputSchema,
       execute: async (toolInput) => {
         const parsed = sqlReadonlyInputSchema.parse(toolInput);
+        if (METADATA_INTROSPECTION_SQL_REGEX.test(parsed.sql)) {
+          throw new DomainError(
+            "LLM_TOOL_METADATA_INTROSPECTION_FORBIDDEN",
+            "工具调用不允许查询 schema 系统表；请使用已提供的业务表结构与语义上下文生成 SQL。",
+            403,
+            {
+              datasourceId: context.datasource.id
+            }
+          );
+        }
         if (context.datasource.status !== "available") {
           throw new DomainError(
             "DATASOURCE_UNAVAILABLE",

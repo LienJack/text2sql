@@ -204,6 +204,64 @@ describe("ChatPanel", () => {
     ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
   });
 
+  it("shows live thinking steps before the model emits text", async () => {
+    let releaseStream: (() => void) | undefined;
+    const streamGate = new Promise<void>((resolve) => {
+      releaseStream = resolve;
+    });
+    mockStreamMessageEvents.mockImplementationOnce(async function* () {
+      yield {
+        type: "start",
+        runId: "run-thinking",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          requestId: null
+        }
+      };
+      yield {
+        type: "state",
+        runId: "run-thinking",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:01.000Z",
+        data: {
+          node: "generate-sql",
+          status: "success",
+          stepId: "run-thinking:generate-sql:5",
+          sequence: 5,
+          lifecycle: "running",
+          detail: "正在调用 LLM 生成 SQL，可继续等待流式进度。",
+          stage: "generation",
+          title: "生成 SQL"
+        }
+      };
+      await streamGate;
+      yield {
+        type: "finish",
+        runId: "run-thinking",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:02.000Z",
+        data: {
+          status: "failed",
+          rowCount: 0
+        }
+      };
+    });
+
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "有多少种支付方式，他们比例是如何");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const liveThinking = await screen.findByTestId("assistant-live-thinking");
+    expect(liveThinking).toHaveAttribute("data-run-id", "run-thinking");
+    expect(screen.getByText("活跃步骤：生成 SQL（进行中）")).toBeInTheDocument();
+
+    releaseStream?.();
+  });
+
   it("submits by pressing Enter in chat input", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);

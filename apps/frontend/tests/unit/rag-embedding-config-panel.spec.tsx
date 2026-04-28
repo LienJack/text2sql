@@ -28,11 +28,12 @@ const baseConfig = {
 };
 
 describe("RagEmbeddingConfigPanel", () => {
-  it("renders admin actions when actor is admin", () => {
+  it("renders admin entry actions when actor is admin", () => {
     render(
       <RagEmbeddingConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "embedding",
@@ -47,8 +48,8 @@ describe("RagEmbeddingConfigPanel", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "保存 Embedding" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "检测草稿（不保存）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑当前草稿" })).toBeInTheDocument();
+    expect(screen.getByText("Embedding Provider")).toBeInTheDocument();
   });
 
   it("renders readonly state when actor is user", () => {
@@ -56,6 +57,7 @@ describe("RagEmbeddingConfigPanel", () => {
       <RagEmbeddingConfigPanel
         actorRole="user"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "embedding",
@@ -71,15 +73,16 @@ describe("RagEmbeddingConfigPanel", () => {
     );
 
     expect(screen.getByText("当前账号只读，可查看配置摘要。")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "保存 Embedding" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存并生效" })).not.toBeInTheDocument();
   });
 
-  it("fills embedding defaults when provider card is selected", async () => {
+  it("fills embedding defaults in dialog when provider card is selected", async () => {
     const user = userEvent.setup();
     render(
       <RagEmbeddingConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "volcengine", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "embedding",
@@ -95,7 +98,8 @@ describe("RagEmbeddingConfigPanel", () => {
     );
 
     await user.click(screen.getByLabelText("embedding-preset-volcengine"));
-    expect(screen.getByLabelText("embedding-provider")).toHaveValue("volcengine");
+    expect(await screen.findByText("配置 Embedding: 火山引擎")).toBeInTheDocument();
+    expect(screen.getByText("volcengine")).toBeInTheDocument();
     expect(screen.getByLabelText("embedding-base-url")).toHaveValue(
       "https://ark.cn-beijing.volces.com/api/v3"
     );
@@ -107,6 +111,7 @@ describe("RagEmbeddingConfigPanel", () => {
       <RagEmbeddingConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "embedding",
@@ -121,9 +126,10 @@ describe("RagEmbeddingConfigPanel", () => {
       />
     );
 
-    const providerInput = screen.getByLabelText("embedding-provider");
-    await user.clear(providerInput);
-    await user.type(providerInput, "volcengine");
+    await user.click(screen.getByRole("button", { name: "编辑当前草稿" }));
+    const modelInput = await screen.findByLabelText("embedding-model");
+    await user.clear(modelInput);
+    await user.type(modelInput, "text-embedding-3-large");
 
     rerender(
       <RagEmbeddingConfigPanel
@@ -133,6 +139,7 @@ describe("RagEmbeddingConfigPanel", () => {
           provider: "openai",
           updatedAt: "2026-04-17T00:00:00.000Z"
         }}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "embedding",
@@ -147,10 +154,10 @@ describe("RagEmbeddingConfigPanel", () => {
       />
     );
 
-    expect(screen.getByLabelText("embedding-provider")).toHaveValue("volcengine");
+    expect(screen.getByLabelText("embedding-model")).toHaveValue("text-embedding-3-large");
     expect(
       screen.getByText(
-        "检测到后台配置更新，当前草稿已保护。可继续编辑，或点击“重置为最新配置”覆盖草稿。"
+        "检测到后台配置更新，当前草稿已保护。可继续编辑，或在弹窗里重置为最新配置。"
       )
     ).toBeInTheDocument();
   });
@@ -162,12 +169,15 @@ describe("RagEmbeddingConfigPanel", () => {
       <RagEmbeddingConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={checkError}
       />
     );
 
-    const apiKeyInput = screen.getByLabelText("embedding-api-key");
+    await user.click(screen.getByRole("button", { name: "编辑当前草稿" }));
+
+    const apiKeyInput = await screen.findByLabelText("embedding-api-key");
     await user.type(apiKeyInput, "sk-draft-value");
     await user.click(screen.getByRole("button", { name: "检测草稿（不保存）" }));
 

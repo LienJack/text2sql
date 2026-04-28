@@ -18,7 +18,10 @@ import {
   buildContextEnvelopeFromDraft,
   createEmptyContextEnvelopeDraft
 } from "@/components/chat/context-envelope-panel";
-import type { ThinkingStreamStep } from "@/components/chat/assistant-thinking-panel";
+import {
+  AssistantThinkingPanel,
+  type ThinkingStreamStep
+} from "@/components/chat/assistant-thinking-panel";
 import {
   AssistantMessageBubble,
   UserMessageBubble
@@ -41,6 +44,7 @@ interface AssistantThreadProps {
   streamThinkingByRunId: Record<string, ThinkingStreamStep[]>;
   runLoadingById: Record<string, boolean>;
   streamDeliveryByRunId: Record<string, DeliveryContract>;
+  streamTextStartedByRunId: Record<string, boolean>;
   runVisibilityByRunId: Record<string, RunVisibilityStatus>;
   activeStreamRunId: string | null;
   thinkingRequestPending: boolean;
@@ -78,6 +82,7 @@ export function AssistantThread({
   streamThinkingByRunId,
   runLoadingById,
   streamDeliveryByRunId,
+  streamTextStartedByRunId,
   runVisibilityByRunId,
   activeStreamRunId,
   thinkingRequestPending,
@@ -159,6 +164,16 @@ export function AssistantThread({
     callbacks,
     resolveContextEnvelope: resolveContextEnvelopeForSend
   });
+  const activeStreamSteps = activeStreamRunId
+    ? streamThinkingByRunId[activeStreamRunId] ?? []
+    : [];
+  const activeStreamTextStarted = activeStreamRunId
+    ? Boolean(streamTextStartedByRunId[activeStreamRunId])
+    : false;
+  const showStandaloneThinking =
+    Boolean(activeStreamRunId) &&
+    activeStreamSteps.length > 0 &&
+    !activeStreamTextStarted;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -231,6 +246,20 @@ export function AssistantThread({
                 return null;
               }}
             </ThreadPrimitive.Messages>
+            {showStandaloneThinking && activeStreamRunId ? (
+              <div
+                className="mt-3 rounded-2xl border border-[var(--chat-result-shell-border)] bg-[var(--chat-result-shell-bg)] p-2.5 shadow-[var(--chat-result-shell-shadow)]"
+                data-testid="assistant-live-thinking"
+                data-run-id={activeStreamRunId}
+              >
+                <AssistantThinkingPanel
+                  run={null}
+                  streamSteps={activeStreamSteps}
+                  inProgress
+                  hasRunReference
+                />
+              </div>
+            ) : null}
             {thinkingRequestPending && !activeStreamRunId ? (
               <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
                 <Loader2 className="h-3 w-3 animate-spin text-[var(--action-primary)]" />

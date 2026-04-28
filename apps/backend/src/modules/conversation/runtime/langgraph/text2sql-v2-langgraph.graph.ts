@@ -60,6 +60,12 @@ const STAGE_NODE_TO_STEP_NODE: Record<Text2SqlV2LangGraphNodeName, string> = {
   answer: "answer"
 };
 
+const STAGE_STEP_SEQUENCE = new Map<Text2SqlV2LangGraphNodeName, number>(
+  (Object.keys(STAGE_NODE_TO_STEP_NODE) as Text2SqlV2LangGraphNodeName[]).map(
+    (node, index) => [node, index + 1]
+  )
+);
+
 const toStepStatus = (
   status: Text2SqlV2StageArtifact["status"]
 ): ExecutionTraceStep["status"] => {
@@ -213,6 +219,44 @@ const createNodeUpdate = (input: {
     traceSteps: [step],
     ...(input.patch ?? {})
   };
+};
+
+const emitRunningStep = async (input: {
+  state: Text2SqlV2LangGraphState;
+  node: Text2SqlV2LangGraphNodeName;
+  detail: string;
+  evidenceIds?: string[];
+  metadata?: Record<string, unknown>;
+}): Promise<void> => {
+  if (!input.state.streamMode || !input.state.streamOptions?.onStep) {
+    return;
+  }
+
+  const stageArtifact = createStageArtifact({
+    stage: input.node,
+    status: "success",
+    evidenceIds: input.evidenceIds,
+    metadata: input.metadata
+  });
+  const sequence = STAGE_STEP_SEQUENCE.get(input.node) ?? 1;
+  const stepNode = STAGE_NODE_TO_STEP_NODE[input.node];
+  const step = createStep({
+    state: input.state,
+    node: input.node,
+    stageArtifact,
+    detail: input.detail
+  });
+
+  await input.state.streamOptions.onStep({
+    step: {
+      ...step,
+      stepId: `${input.state.runId}:${stepNode}:${sequence}`,
+      sequence,
+      lifecycle: "running",
+      endedAt: undefined,
+      durationMs: undefined
+    }
+  });
 };
 
 const resolveIntakeRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
@@ -393,6 +437,7 @@ export const createText2SqlV2LangGraph = (
         const output = await deps.retrieveContextNode.run({
           question: state.standaloneQuestion ?? state.question,
           datasourceId: state.preparedRun.datasource.id,
+          datasource: state.preparedRun.datasource,
           runId: state.runId,
           workspaceId: state.preparedRun.session.workspaceId ?? undefined,
           allowedTables: state.preparedRun.sqlAccessContext?.allowedTables,
@@ -610,6 +655,18 @@ export const createText2SqlV2LangGraph = (
                 columns: state.preparedRun.contextEnvelope?.pinnedColumns ?? []
               }
             : undefined;
+
+        await emitRunningStep({
+          state,
+          node: "generate-sql",
+          detail: "正在生成 SQL，可继续等待流式进度。",
+          evidenceIds: state.semanticPlan.evidenceRefs,
+          metadata: {
+            routeKind: "text_to_sql",
+            selectedTableCount: state.semanticPlan.selectedTables.length,
+            selectedColumnCount: state.semanticPlan.selectedColumns.length
+          }
+        });
 
         const result = await deps.generateSqlNode.run({
           question: state.standaloneQuestion ?? state.question,

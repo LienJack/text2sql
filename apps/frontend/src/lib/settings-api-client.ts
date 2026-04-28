@@ -236,6 +236,23 @@ export type RagTaskConfigPayload = {
 
 export type RagTaskConfigHealthPayload = RagTaskConfigHealthRequest;
 export type RagTaskConfigHealthResult = SharedRagTaskConfigHealthResult;
+export type RagProviderModelPreviewRequest = {
+  provider: LlmProviderCode;
+  baseUrl?: string;
+  apiKey: string;
+};
+export type RagProviderModelPreviewResult = {
+  provider: LlmProviderCode;
+  supportsModelListing: boolean;
+  recommendedModel?: string;
+  models: Array<{
+    model: string;
+    displayName: string;
+    capabilities?: string[];
+    contextWindow?: number | null;
+    metadata?: Record<string, unknown>;
+  }>;
+};
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
@@ -300,6 +317,19 @@ export async function checkRagTaskConfigHealth(
     {
       method: "POST",
       body: JSON.stringify(payload ?? {})
+    }
+  );
+}
+
+export async function previewRagProviderModels(
+  taskType: RagTaskType,
+  payload: RagProviderModelPreviewRequest
+): Promise<RagProviderModelPreviewResult> {
+  return request<RagProviderModelPreviewResult>(
+    `/api/v1/settings/rag-configs/${encodeURIComponent(taskType)}/models`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
     }
   );
 }

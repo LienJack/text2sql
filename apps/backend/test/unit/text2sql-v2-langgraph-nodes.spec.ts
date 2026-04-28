@@ -634,8 +634,28 @@ describe("text2sql v2 langgraph nodes", () => {
         })
       ).toMatchObject({
         mode: "fail_closed",
-        status: "rejected"
+          status: "rejected"
+        });
+    });
+
+    it("does not label provider generation failures as governance fail-closed", () => {
+      const result = node.run({
+        question: "有多少种支付方式，他们比例是如何",
+        failure: {
+          code: "LLM_REQUEST_FAILED",
+          message: "LLM 请求失败: The operation was aborted due to timeout",
+          category: "generation",
+          terminal: true,
+          correctable: false
+        }
       });
+
+      expect(result).toMatchObject({
+        mode: "execution_failure",
+        status: "failed"
+      });
+      expect(result.answer).toContain("SQL 生成或服务调用阶段");
+      expect(result.answer).not.toContain("安全或治理校验");
     });
 
     it("builds evidence-grounded metadata direct answers and keeps general direct answers lightweight", () => {

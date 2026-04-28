@@ -28,11 +28,12 @@ const baseConfig = {
 };
 
 describe("RagRerankConfigPanel", () => {
-  it("renders admin actions when actor is admin", () => {
+  it("renders admin entry actions when actor is admin", () => {
     render(
       <RagRerankConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "rerank",
@@ -47,8 +48,8 @@ describe("RagRerankConfigPanel", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "保存 Rerank" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "检测草稿（不保存）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "编辑当前草稿" })).toBeInTheDocument();
+    expect(screen.getByText("Rerank Provider")).toBeInTheDocument();
   });
 
   it("renders readonly state when actor is user", () => {
@@ -56,6 +57,7 @@ describe("RagRerankConfigPanel", () => {
       <RagRerankConfigPanel
         actorRole="user"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "rerank",
@@ -74,12 +76,13 @@ describe("RagRerankConfigPanel", () => {
     expect(screen.queryByRole("button", { name: "保存 Rerank" })).not.toBeInTheDocument();
   });
 
-  it("fills rerank defaults when provider card is selected", async () => {
+  it("fills rerank defaults in dialog when provider card is selected", async () => {
     const user = userEvent.setup();
     render(
       <RagRerankConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "siliconflow", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "rerank",
@@ -95,7 +98,8 @@ describe("RagRerankConfigPanel", () => {
     );
 
     await user.click(screen.getByLabelText("rerank-preset-siliconflow"));
-    expect(screen.getByLabelText("rerank-provider")).toHaveValue("siliconflow");
+    expect(await screen.findByText("配置 Rerank: 硅基流动")).toBeInTheDocument();
+    expect(screen.getByText("siliconflow")).toBeInTheDocument();
     expect(screen.getByLabelText("rerank-base-url")).toHaveValue(
       "https://api.siliconflow.cn/v1"
     );
@@ -107,6 +111,7 @@ describe("RagRerankConfigPanel", () => {
       <RagRerankConfigPanel
         actorRole="admin"
         config={baseConfig}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "rerank",
@@ -121,7 +126,9 @@ describe("RagRerankConfigPanel", () => {
       />
     );
 
-    const modelInput = screen.getByLabelText("rerank-model");
+    await user.click(screen.getByRole("button", { name: "编辑当前草稿" }));
+
+    const modelInput = await screen.findByLabelText("rerank-model");
     await user.clear(modelInput);
     await user.type(modelInput, "bge-reranker-v2-m3");
 
@@ -133,6 +140,7 @@ describe("RagRerankConfigPanel", () => {
           model: "old-model",
           updatedAt: "2026-04-17T00:00:00.000Z"
         }}
+        onFetchModels={vi.fn().mockResolvedValue({ provider: "openai", supportsModelListing: true, models: [] })}
         onSave={vi.fn().mockResolvedValue(undefined)}
         onHealthCheck={vi.fn().mockResolvedValue({
           taskType: "rerank",
@@ -150,7 +158,7 @@ describe("RagRerankConfigPanel", () => {
     expect(screen.getByLabelText("rerank-model")).toHaveValue("bge-reranker-v2-m3");
     expect(
       screen.getByText(
-        "检测到后台配置更新，当前草稿已保护。可继续编辑，或点击“重置为最新配置”覆盖草稿。"
+        "检测到后台配置更新，当前草稿已保护。可继续编辑，或在弹窗里重置为最新配置。"
       )
     ).toBeInTheDocument();
   });

@@ -165,15 +165,36 @@ export class SqlGenerationService {
       templateResolution.templateOverlay,
       semanticIntent
     );
+    const immediateShortcut =
+      this.buildGroupedCountProportionShortcut(question, selection) ??
+      this.buildSimpleCountShortcut(question, selection);
     let completion: LlmDraft;
-    try {
-      completion = await this.providerRouter.stream(prompt, selection, options);
-    } catch (error) {
-      if (!this.shouldRetryAsNonStream(error)) {
-        throw error;
+    if (immediateShortcut) {
+      completion = this.buildSemanticShortcutCompletion({
+        prompt,
+        shortcut: immediateShortcut,
+        summary: "已根据语义计划与已选证据生成保守只读 SQL。"
+      });
+    } else {
+      try {
+        completion = await this.providerRouter.stream(prompt, selection, options);
+      } catch (error) {
+        if (!this.shouldRetryAsNonStream(error)) {
+          const shortcutCompletion = this.buildRecoverableStreamFailureShortcut({
+            question,
+            selection,
+            semanticIntent,
+            prompt,
+            error
+          });
+          if (!shortcutCompletion) {
+            throw error;
+          }
+          completion = shortcutCompletion;
+        } else {
+          completion = await this.providerRouter.generate(prompt, selection);
+        }
       }
-
-      completion = await this.providerRouter.generate(prompt, selection);
     }
     return this.finalizeWithSemanticGuardrails({
       question,
@@ -233,6 +254,209 @@ export class SqlGenerationService {
       error.code === "LLM_SQL_EXTRACT_FAILED" ||
       error.code === "LLM_TOOL_CALL_EXECUTION_FAILED"
     );
+  }
+
+  private buildRecoverableStreamFailureShortcut(input: {
+    question: string;
+    selection: SqlGenerationSelection | undefined;
+    semanticIntent: SqlSemanticIntent;
+    prompt: LlmGatewayPrompt;
+    error: unknown;
+  }): LlmDraft | undefined {
+    if (
+      input.semanticIntent !== "count" ||
+      !this.isRecoverableProviderStreamFailure(input.error)
+    ) {
+      return undefined;
+    }
+
+    const shortcut = this.buildGroupedCountProportionShortcut(
+      input.question,
+      input.selection
+    ) ?? this.buildSimpleCountShortcut(input.question, input.selection);
+    if (!shortcut) {
+      return undefined;
+    }
+
+    return this.buildSemanticShortcutCompletion({
+      prompt: input.prompt,
+      shortcut,
+      summary:
+        "上游模型流式响应不可用，已根据语义计划与已选证据生成保守只读 SQL。"
+    });
+  }
+
+  private buildSemanticShortcutCompletion(input: {
+    prompt: LlmGatewayPrompt;
+    shortcut: { sql: string; model: string };
+    summary: string;
+  }): LlmDraft {
+    return {
+      provider: "semantic-shortcut",
+      model: input.shortcut.model,
+      rawText: [
+        input.summary,
+        "```sql",
+        input.shortcut.sql.replace(/;+\s*$/, ""),
+        "```"
+      ].join("\n"),
+      prompt: input.prompt
+    };
+  }
+
+  private isRecoverableProviderStreamFailure(error: unknown): boolean {
+    if (!(error instanceof DomainError) || error.code !== "LLM_REQUEST_FAILED") {
+      return false;
+    }
+    return /(流式请求失败|invalid json response|aborted due to timeout|timeout)/i.test(
+      error.message
+    );
+  }
+
+  private buildGroupedCountProportionShortcut(
+    question: string,
+    selection: SqlGenerationSelection | undefined
+  ): { sql: string; model: string } | undefined {
+    const selectedTables = this.resolveShortcutSelectedTables(selection?.semanticPlan);
+    if (!selectedTables || selectedTables.length !== 1) {
+      return undefined;
+    }
+    if (!/(比例|占比|分布|各|每|多少种|几种|方式|类型|类别|渠道|状态)/i.test(question)) {
+      return undefined;
+    }
+
+    const table = selectedTables[0];
+    const groupColumn = this.resolveGroupedCountColumn({
+      question,
+      table,
+      columns: selection?.semanticPlan?.selectedColumns ?? []
+    });
+    if (!groupColumn) {
+      return undefined;
+    }
+
+    return {
+      model: "grouped-count-proportion-v1",
+      sql: [
+        `SELECT ${groupColumn} AS group_value,`,
+        "  COUNT(*) AS item_count,",
+        "  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS item_percentage",
+        `FROM ${table}`,
+        `GROUP BY ${groupColumn}`,
+        "ORDER BY item_count DESC;"
+      ].join("\n")
+    };
+  }
+
+  private buildSimpleCountShortcut(
+    question: string,
+    selection: SqlGenerationSelection | undefined
+  ): { sql: string; model: string } | undefined {
+    const selectedTables = this.resolveShortcutSelectedTables(selection?.semanticPlan);
+    if (!selectedTables || selectedTables.length !== 1) {
+      return undefined;
+    }
+    if (/(比例|占比|分布|各|每|多少种|几种|方式|类型|类别|渠道|状态)/i.test(question)) {
+      return undefined;
+    }
+
+    return {
+      model: "simple-count-v1",
+      sql: `SELECT COUNT(*) AS total_count FROM ${selectedTables[0]};`
+    };
+  }
+
+  private resolveShortcutSelectedTables(
+    semanticPlan: SemanticPlanV1 | undefined
+  ): string[] | undefined {
+    if (!semanticPlan || this.resolveSemanticPlanRouteKind(semanticPlan) !== "text_to_sql") {
+      return undefined;
+    }
+    const selectedTables = this.unique(
+      semanticPlan.selectedTables
+        .map((item) => this.normalizeIdentifier(item))
+        .filter((item): item is string => Boolean(item))
+    );
+    if (selectedTables.some((table) => !this.isSafeSqlIdentifier(table))) {
+      return undefined;
+    }
+    return selectedTables;
+  }
+
+  private resolveGroupedCountColumn(input: {
+    question: string;
+    table: string;
+    columns: string[];
+  }): string | undefined {
+    const normalizedQuestion = input.question.toLowerCase();
+    const candidates = this.unique(
+      input.columns
+        .map((column) => this.normalizeQualifiedIdentifier(column))
+        .filter((column): column is string => Boolean(column))
+        .map((column) => {
+          const [tableName, columnName] = column.includes(".")
+            ? column.split(".")
+            : [input.table, column];
+          if (tableName !== input.table || !columnName) {
+            return undefined;
+          }
+          return columnName;
+        })
+        .filter((column): column is string => Boolean(column))
+        .filter((column) => this.isSafeSqlIdentifier(column))
+    );
+
+    const scored = candidates
+      .map((column, index) => ({
+        column,
+        index,
+        score: this.scoreGroupedCountColumn(normalizedQuestion, column)
+      }))
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    return scored[0]?.column;
+  }
+
+  private scoreGroupedCountColumn(question: string, column: string): number {
+    const normalizedColumn = column.toLowerCase();
+    let score = 0;
+    const hints: Array<{ pattern: RegExp; columns: string[]; weight: number }> = [
+      {
+        pattern: /(支付方式|支付渠道|付款方式|方式|渠道|payment|method)/i,
+        columns: ["method"],
+        weight: 8
+      },
+      { pattern: /(状态|status)/i, columns: ["status"], weight: 8 },
+      { pattern: /(类型|type)/i, columns: ["type"], weight: 8 },
+      {
+        pattern: /(分类|类目|类别|category)/i,
+        columns: ["category", "category_id"],
+        weight: 8
+      }
+    ];
+
+    for (const hint of hints) {
+      if (hint.pattern.test(question) && hint.columns.includes(normalizedColumn)) {
+        score += hint.weight;
+      }
+    }
+
+    if (/^(method|status|type|category)$/.test(normalizedColumn)) {
+      score += 3;
+    }
+    if (/(多少种|几种|分布|比例|占比)/i.test(question)) {
+      score += /(_id|id|amount|price|total|count|created_at|updated_at|paid_at)$/i.test(
+        normalizedColumn
+      )
+        ? -4
+        : 1;
+    }
+    return score;
+  }
+
+  private isSafeSqlIdentifier(value: string): boolean {
+    return /^[a-zA-Z_][\w$]*$/.test(value);
   }
 
   private buildPrompt(

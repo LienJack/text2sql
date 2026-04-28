@@ -155,6 +155,8 @@ export class LlmGatewayService implements LlmGateway {
 
     let streamedText = "";
     let toolCallSql: string | undefined;
+    let successfulToolCallSql: string | undefined;
+    const toolCallSqlById = new Map<string, string>();
     try {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
@@ -181,6 +183,7 @@ export class LlmGatewayService implements LlmGateway {
           const parsedSql = this.extractToolSql(chunk.input);
           if (parsedSql) {
             toolCallSql = parsedSql;
+            toolCallSqlById.set(chunk.toolCallId, parsedSql);
           }
           await options?.onEvent?.({
             type: "tool-call",
@@ -191,6 +194,7 @@ export class LlmGatewayService implements LlmGateway {
           continue;
         }
         if (chunk.type === "tool-result") {
+          successfulToolCallSql = toolCallSqlById.get(chunk.toolCallId) ?? toolCallSql;
           await options?.onEvent?.({
             type: "tool-result",
             toolName: chunk.toolName,
@@ -253,6 +257,23 @@ export class LlmGatewayService implements LlmGateway {
     } catch (error) {
       if (error instanceof DomainError) {
         throw error;
+      }
+
+      if (successfulToolCallSql) {
+        const recoveredText = this.formatToolSqlFallback(successfulToolCallSql);
+        const delta = this.resolveFallbackDelta(streamedText, recoveredText);
+        if (delta) {
+          await options?.onEvent?.({
+            type: "text-delta",
+            text: delta
+          });
+        }
+        return {
+          provider: runtime.provider,
+          model: runtime.model,
+          prompt,
+          rawText: recoveredText
+        };
       }
 
       if (isTimeoutAbortError(error)) {
@@ -345,6 +366,15 @@ export class LlmGatewayService implements LlmGateway {
       }
     }
     return undefined;
+  }
+
+  private formatToolSqlFallback(sql: string): string {
+    return [
+      "上游模型在工具执行后返回了无法解析的流式响应，已使用成功执行的只读 SQL 继续完成分析。",
+      "```sql",
+      sql.trim().replace(/;+\s*$/, ""),
+      "```"
+    ].join("\n");
   }
 
   private resolveFallbackDelta(existingText: string, fallbackText: string): string {

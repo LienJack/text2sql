@@ -82,6 +82,17 @@ export class AnswerNode {
     }
 
     if (input.failure?.terminal) {
+      if (!this.isFailClosedFailure(input.failure)) {
+        return {
+          mode: "execution_failure",
+          answer: this.formatAnswerNode.runOperationalFailure(input.failure.message),
+          status: "failed",
+          evidenceRefs,
+          warnings,
+          failure: input.failure
+        };
+      }
+
       return {
         mode: "fail_closed",
         answer: this.formatAnswerNode.runFailClosed(input.failure.message),
@@ -137,5 +148,23 @@ export class AnswerNode {
       return undefined;
     }
     return routeFilter.slice("route_kind:".length).trim();
+  }
+
+  private isFailClosedFailure(failure: Text2SqlV2FailureSemantic): boolean {
+    if (
+      failure.category === "governance" ||
+      failure.category === "validation" ||
+      failure.category === "planning"
+    ) {
+      return true;
+    }
+
+    return (
+      failure.code.includes("UNSAFE") ||
+      failure.code.includes("READ_ONLY") ||
+      failure.code.includes("PERMISSION") ||
+      failure.code.includes("POLICY") ||
+      failure.code.includes("FAIL_CLOSED")
+    );
   }
 }

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { SettingsActor } from "@text2sql/shared-types";
+import type { LlmProviderCode, SettingsActor } from "@text2sql/shared-types";
 import { ProviderCatalogService } from "../../llm/provider-catalog.service";
 import {
   type CheckRagTaskConfigHealthContext,
@@ -48,6 +48,22 @@ export class SettingsService {
     context?: CheckRagTaskConfigHealthContext
   ) {
     return this.ragTaskConfigService.checkConfigHealth(taskType, body, context);
+  }
+
+  async previewRagProviderModels(
+    taskType: RagTaskType,
+    body: {
+      provider: LlmProviderCode;
+      baseUrl?: string;
+      apiKey: string;
+    }
+  ) {
+    return this.providerCatalog.previewProviderModels({
+      taskType,
+      provider: body.provider,
+      baseUrl: body.baseUrl,
+      apiKey: body.apiKey
+    });
   }
 
   async createProvider(actor: SettingsActor, body: CreateProviderDto) {

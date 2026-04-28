@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { Datasource } from "@text2sql/shared-types";
 import {
   type RetrievedKnowledge,
   type RetrievedKnowledgeTypedSummary,
@@ -8,6 +9,7 @@ import {
 export interface RetrieveContextNodeInput {
   question: string;
   datasourceId: string;
+  datasource?: Datasource;
   runId: string;
   workspaceId?: string;
   allowedTables?: string[];

@@ -48,4 +48,42 @@ describe("SqlToolRegistryService", () => {
       rowCount: 1
     });
   });
+
+  it("rejects LLM tool attempts to inspect schema system tables", async () => {
+    const queryExecutorRouter = {
+      execute: jest.fn()
+    };
+    const datasourceAccessPolicyService = {
+      resolveReadableTables: jest.fn()
+    };
+    const sqlTool = new SqlReadonlyTool(
+      queryExecutorRouter as never,
+      datasourceAccessPolicyService as never
+    );
+    const registry = new SqlToolRegistryService(sqlTool);
+
+    const tools = registry.getToolsForDatasource({
+      id: "sqlite_main",
+      name: "SQLite 主数据源",
+      type: "sqlite",
+      status: "available",
+      readonly: true,
+      shared: true,
+      config: { path: "/tmp/text2sql.db" },
+      fileMeta: null,
+      unavailableAt: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    await expect(
+      tools.runReadOnlySql.execute({
+        sql: "SELECT name FROM sqlite_master WHERE type = 'table'"
+      })
+    ).rejects.toMatchObject({
+      code: "LLM_TOOL_METADATA_INTROSPECTION_FORBIDDEN"
+    });
+    expect(queryExecutorRouter.execute).not.toHaveBeenCalled();
+  });
 });

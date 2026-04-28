@@ -1,6 +1,7 @@
 "use client";
 
 import type { RagTaskConfig } from "@text2sql/shared-types";
+import { Database, Orbit, RefreshCcwDot, Sparkles } from "lucide-react";
 import type { RagFoundationSnapshot } from "@/lib/settings-api-client";
 import { Badge } from "@/components/ui/badge";
 import { StateBlock } from "@/components/ui/state-block";
@@ -85,40 +86,95 @@ export function RagActiveIndexProfileCard({
   });
 
   return (
-    <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Active Index Profile</h3>
-        <Badge variant="outline">{active.indexVersionId}</Badge>
-        <Badge variant={reindexHint.reindexRequired ? "destructive" : "outline"}>
-          {reindexHint.reindexRequired ? "reindex required" : "aligned"}
-        </Badge>
+    <section className="overflow-hidden rounded-3xl border border-[rgba(148,163,184,0.26)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.98)_55%,rgba(239,246,255,0.92)_100%)] shadow-[0_14px_32px_rgba(15,23,42,0.06)]">
+      <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-[rgba(37,99,235,0.1)] text-[var(--action-primary)]">
+              <Database className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--text-tertiary)] uppercase">
+                Active Index
+              </p>
+              <h3 className="text-base font-semibold text-[var(--text-primary)]">
+                当前检索索引画像
+              </h3>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="outline" className="bg-white/90">
+              {active.indexVersionId}
+            </Badge>
+            <Badge
+              variant={reindexHint.reindexRequired ? "destructive" : "outline"}
+              className={!reindexHint.reindexRequired ? "bg-emerald-50 text-emerald-700" : ""}
+            >
+              {reindexHint.reindexRequired ? "需要重建索引" : "配置对齐"}
+            </Badge>
+            <Badge variant="outline" className="bg-white/90">
+              datasource {active.datasourceId}
+            </Badge>
+          </div>
+          <p className="max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+            这里显示当前活跃索引的 embedding 画像，以及它与现行 RAG 配置是否一致。若 provider、
+            model 或 vector version 不一致，下面会直接提示需要 reindex。
+          </p>
+        </div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:w-[32rem]">
+          <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/86 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-[var(--text-tertiary)] uppercase">
+              <Orbit className="h-3.5 w-3.5" />
+              Embedding Index
+            </div>
+            <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+              {profile.provider ?? "unknown"}
+            </p>
+            <p className="mt-1 break-all text-sm text-[var(--text-secondary)]">
+              {profile.model ?? "unknown"}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              vectorVersion {profile.vectorVersion ?? "unknown"}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/86 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+            <div className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-[var(--text-tertiary)] uppercase">
+              <Sparkles className="h-3.5 w-3.5" />
+              Runtime Config
+            </div>
+            <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+              {embeddingConfig
+                ? `${embeddingConfig.provider} / ${embeddingConfig.model}`
+                : "unknown"}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-secondary)]">
+              rerank{" "}
+              {rerankConfig
+                ? `${rerankConfig.provider} / ${rerankConfig.model}`
+                : "unknown"}
+            </p>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              activatedAt {active.activatedAt}
+            </p>
+          </div>
+        </div>
       </div>
-      <div className="space-y-1 text-xs text-[var(--text-secondary)]">
-        <p>provider: {profile.provider ?? "unknown"}</p>
-        <p>model: {profile.model ?? "unknown"}</p>
-        <p>vectorVersion: {profile.vectorVersion ?? "unknown"}</p>
-        <p>activatedAt: {active.activatedAt}</p>
-        <p>datasourceId: {active.datasourceId}</p>
-        <p>
-          embedding(active):{" "}
-          {embeddingConfig
-            ? `${embeddingConfig.provider}/${embeddingConfig.model} (${embeddingConfig.configSource})`
-            : "unknown"}
-        </p>
-        <p>
-          rerank(active):{" "}
-          {rerankConfig
-            ? `${rerankConfig.provider}/${rerankConfig.model} (${rerankConfig.configSource})`
-            : "unknown"}
-        </p>
+      <div className="border-t border-[rgba(148,163,184,0.16)] bg-white/55 px-5 py-4">
+        {reindexHint.reindexRequired ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-rose-700">
+            <RefreshCcwDot className="h-4 w-4" />
+            <span className="font-medium">当前索引与运行配置不一致，需要重新构建索引。</span>
+            <span className="text-xs text-rose-600">
+              {reindexHint.reasonCodes.join(" / ")}
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-emerald-700">
+            <Sparkles className="h-4 w-4" />
+            <span className="font-medium">索引画像与当前 Embedding 配置一致，可直接继续运行。</span>
+          </div>
+        )}
       </div>
-      {reindexHint.reindexRequired ? (
-        <StateBlock variant="error">
-          reindexRequired=true · {reindexHint.reasonCodes.join(", ")}
-        </StateBlock>
-      ) : (
-        <StateBlock variant="success">reindexRequired=false</StateBlock>
-      )}
     </section>
   );
 }

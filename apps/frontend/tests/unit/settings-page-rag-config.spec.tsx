@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LlmSettingsView, RagTaskSettingsView } from "@text2sql/shared-types";
@@ -12,6 +12,7 @@ import {
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  previewRagProviderModels,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
   fetchRagTaskConfigs,
@@ -55,6 +56,7 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
     fetchSettingsView: vi.fn(),
     fetchSupportedProviders: vi.fn(),
     fetchRagTaskConfigs: vi.fn(),
+    previewRagProviderModels: vi.fn(),
     upsertRagTaskConfig: vi.fn(),
     checkRagTaskConfigHealth: vi.fn(),
     fetchBackendHealthSnapshot: vi.fn(),
@@ -74,6 +76,7 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
 const mockFetchSettingsView = vi.mocked(fetchSettingsView);
 const mockFetchSupportedProviders = vi.mocked(fetchSupportedProviders);
 const mockFetchRagTaskConfigs = vi.mocked(fetchRagTaskConfigs);
+const mockPreviewRagProviderModels = vi.mocked(previewRagProviderModels);
 const mockUpsertRagTaskConfig = vi.mocked(upsertRagTaskConfig);
 const mockCheckRagTaskConfigHealth = vi.mocked(checkRagTaskConfigHealth);
 const mockFetchBackendHealthSnapshot = vi.mocked(fetchBackendHealthSnapshot);
@@ -163,6 +166,21 @@ describe("SettingsPage rag config tab", () => {
     vi.clearAllMocks();
     mockFetchSupportedProviders.mockResolvedValue([]);
     mockFetchRagTaskConfigs.mockResolvedValue(createRagTaskView("admin"));
+    mockPreviewRagProviderModels.mockResolvedValue({
+      provider: "volcengine",
+      supportsModelListing: true,
+      recommendedModel: "doubao-embedding-text-240715",
+      models: [
+        {
+          model: "doubao-embedding-text-240715",
+          displayName: "doubao-embedding-text-240715"
+        },
+        {
+          model: "doubao-embedding-large",
+          displayName: "doubao-embedding-large"
+        }
+      ]
+    });
     mockUpsertRagTaskConfig.mockResolvedValue(createRagTaskView("admin").items[0]!);
     mockCheckRagTaskConfigHealth.mockResolvedValue({
       taskType: "embedding",
@@ -323,11 +341,10 @@ describe("SettingsPage rag config tab", () => {
     await screen.findByText("用户列表");
     await user.click(screen.getByRole("tab", { name: "RAG 配置" }));
 
-    expect(await screen.findByText("Embedding 配置")).toBeInTheDocument();
-    expect(screen.getByText("Rerank 配置")).toBeInTheDocument();
-    expect(screen.getByText("Active Index Profile")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存 Embedding" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "保存 Rerank" })).toBeInTheDocument();
+    expect(await screen.findByText("Embedding Provider")).toBeInTheDocument();
+    expect(screen.getByText("Rerank Provider")).toBeInTheDocument();
+    expect(screen.getByText("当前检索索引画像")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "编辑当前草稿" }).length).toBeGreaterThan(0);
   });
 
   it("shows readonly rag config state for user", async () => {
@@ -339,9 +356,9 @@ describe("SettingsPage rag config tab", () => {
     await screen.findByText("LLM 模型");
     await user.click(screen.getByRole("tab", { name: "RAG 配置" }));
 
-    expect(await screen.findByText("Embedding 配置")).toBeInTheDocument();
+    expect(await screen.findByText("Embedding Provider")).toBeInTheDocument();
     expect(screen.getAllByText("当前账号只读，可查看配置摘要。").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "保存 Embedding" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存并生效" })).not.toBeInTheDocument();
   });
 
   it("passes current draft payload when checking embedding health", async () => {
@@ -352,25 +369,15 @@ describe("SettingsPage rag config tab", () => {
     await screen.findByText("用户列表");
     await user.click(screen.getByRole("tab", { name: "RAG 配置" }));
 
-    const providerInput = screen.getByLabelText("embedding-provider");
-    const modelInput = screen.getByLabelText("embedding-model");
-    const baseUrlInput = screen.getByLabelText("embedding-base-url");
+    await user.click(screen.getByLabelText("embedding-preset-volcengine"));
+
+    const modelInput = await screen.findByLabelText("embedding-model");
     const apiKeyInput = screen.getByLabelText("embedding-api-key");
 
-    await user.clear(providerInput);
-    await user.type(providerInput, "volcengine");
     await user.clear(modelInput);
     await user.type(modelInput, "doubao-embedding-large");
-    await user.clear(baseUrlInput);
-    await user.type(baseUrlInput, "https://ark.cn-beijing.volces.com/api/v3");
     await user.type(apiKeyInput, "sk-draft-embedding");
-    const embeddingSection = screen.getByText("Embedding 配置").closest("section");
-    if (!embeddingSection) {
-      throw new Error("embedding section not found");
-    }
-    await user.click(
-      within(embeddingSection).getByRole("button", { name: "检测草稿（不保存）" })
-    );
+    await user.click(screen.getByRole("button", { name: "检测草稿（不保存）" }));
 
     expect(mockCheckRagTaskConfigHealth).toHaveBeenCalledWith(
       "embedding",
@@ -383,5 +390,26 @@ describe("SettingsPage rag config tab", () => {
         })
       })
     );
+  });
+
+  it("fetches official models after api key entry and applies the selected option", async () => {
+    const user = userEvent.setup();
+    mockFetchSettingsView.mockResolvedValue(createSettingsView("admin"));
+    render(<SettingsPage />);
+
+    await screen.findByText("用户列表");
+    await user.click(screen.getByRole("tab", { name: "RAG 配置" }));
+    await user.click(screen.getByLabelText("embedding-preset-volcengine"));
+
+    await user.type(screen.getByLabelText("embedding-api-key"), "sk-preview-embedding");
+    await user.click(screen.getByRole("button", { name: "获取模型" }));
+
+    expect(mockPreviewRagProviderModels).toHaveBeenCalledWith("embedding", {
+      provider: "volcengine",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+      apiKey: "sk-preview-embedding"
+    });
+
+    expect(await screen.findByText("从官网返回的模型中选择")).toBeInTheDocument();
   });
 });

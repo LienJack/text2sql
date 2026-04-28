@@ -55,6 +55,7 @@ import {
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  previewRagProviderModels,
   fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
@@ -848,72 +849,132 @@ export default function SettingsPage() {
               )}
             </div>
           ) : tab === "rag-config" ? (
-            <div className="space-y-4">
-              <StateBlock variant="idle">
-                RAG 配置负责运行参数（Embedding / Rerank），RAG 运行页仅负责观测与回放。
-              </StateBlock>
+            <div className="space-y-5">
+              <section className="overflow-hidden rounded-3xl border border-[rgba(148,163,184,0.24)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.96)_45%,rgba(239,246,255,0.9)_100%)] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[rgba(37,99,235,0.1)] text-[var(--action-primary)]">
+                        <Settings2 className="h-4.5 w-4.5" />
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--text-tertiary)] uppercase">
+                          Rag Configuration Studio
+                        </p>
+                        <h3 className="text-xl font-semibold text-[var(--text-primary)]">
+                          向量检索与重排配置工作台
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
+                      在这里统一维护 Embedding 与 Rerank 的运行参数、供应商接入和草稿联通测试。
+                      配置页只负责“当前要怎么跑”，RAG 运行页负责“已经跑成什么样”。
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:w-[34rem]">
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Embedding
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {embeddingConfig?.provider ?? "未配置"}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
+                        {embeddingConfig?.model ?? "等待配置模型"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Rerank
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {rerankConfig?.provider ?? "未配置"}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
+                        {rerankConfig?.model ?? "等待配置模型"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Active Index
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {foundationSnapshot?.activeIndexSummary.total ?? 0} 个活跃索引
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {foundationSnapshot?.activeIndexSummary.items[0]?.datasourceId ??
+                          "暂无索引画像"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
               {ragConfigError ? <StateBlock variant="error">{ragConfigError}</StateBlock> : null}
               <RagActiveIndexProfileCard
                 foundation={foundationSnapshot}
                 embeddingConfig={embeddingConfig}
                 rerankConfig={rerankConfig}
               />
-              <RagEmbeddingConfigPanel
-                actorRole={actorRole}
-                config={embeddingConfig}
-                loading={ragConfigLoading}
-                onSave={async (payload) => {
-                  try {
-                    await upsertRagTaskConfig("embedding", payload);
-                    await loadRagConfigView();
-                  } catch (error) {
-                    const message =
-                      error instanceof Error ? error.message : "保存 Embedding 配置失败";
-                    setRagConfigError(message);
-                    throw new Error(message);
-                  }
-                }}
-                onHealthCheck={async (payload) => {
-                  try {
-                    const result = await checkRagTaskConfigHealth("embedding", payload);
-                    await loadRagConfigView();
-                    return result;
-                  } catch (error) {
-                    const message =
-                      error instanceof Error ? error.message : "Embedding 健康检查失败";
-                    setRagConfigError(message);
-                    throw new Error(message);
-                  }
-                }}
-              />
-              <RagRerankConfigPanel
-                actorRole={actorRole}
-                config={rerankConfig}
-                loading={ragConfigLoading}
-                onSave={async (payload) => {
-                  try {
-                    await upsertRagTaskConfig("rerank", payload);
-                    await loadRagConfigView();
-                  } catch (error) {
-                    const message =
-                      error instanceof Error ? error.message : "保存 Rerank 配置失败";
-                    setRagConfigError(message);
-                    throw new Error(message);
-                  }
-                }}
-                onHealthCheck={async (payload) => {
-                  try {
-                    const result = await checkRagTaskConfigHealth("rerank", payload);
-                    await loadRagConfigView();
-                    return result;
-                  } catch (error) {
-                    const message =
-                      error instanceof Error ? error.message : "Rerank 健康检查失败";
-                    setRagConfigError(message);
-                    throw new Error(message);
-                  }
-                }}
-              />
+              <div className="grid gap-5 2xl:grid-cols-2">
+                <RagEmbeddingConfigPanel
+                  actorRole={actorRole}
+                  config={embeddingConfig}
+                  loading={ragConfigLoading}
+                  onFetchModels={(payload) => previewRagProviderModels("embedding", payload)}
+                  onSave={async (payload) => {
+                    try {
+                      await upsertRagTaskConfig("embedding", payload);
+                      await loadRagConfigView();
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "保存 Embedding 配置失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                  onHealthCheck={async (payload) => {
+                    try {
+                      const result = await checkRagTaskConfigHealth("embedding", payload);
+                      await loadRagConfigView();
+                      return result;
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "Embedding 健康检查失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                />
+                <RagRerankConfigPanel
+                  actorRole={actorRole}
+                  config={rerankConfig}
+                  loading={ragConfigLoading}
+                  onFetchModels={(payload) => previewRagProviderModels("rerank", payload)}
+                  onSave={async (payload) => {
+                    try {
+                      await upsertRagTaskConfig("rerank", payload);
+                      await loadRagConfigView();
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "保存 Rerank 配置失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                  onHealthCheck={async (payload) => {
+                    try {
+                      const result = await checkRagTaskConfigHealth("rerank", payload);
+                      await loadRagConfigView();
+                      return result;
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "Rerank 健康检查失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                />
+              </div>
             </div>
           ) : tab === "rag" ? (
             <div className="space-y-4">

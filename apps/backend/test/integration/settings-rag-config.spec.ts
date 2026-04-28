@@ -17,6 +17,7 @@ function withActor(
 describe("settings rag config integration", () => {
   let app: INestApplication;
   let cleanupFixture: (() => Promise<void>) | undefined;
+  const originalFetch = global.fetch;
 
   beforeAll(async () => {
     const fixture = await createSeededSqliteFixture("settings-rag-config");
@@ -42,6 +43,7 @@ describe("settings rag config integration", () => {
   });
 
   afterAll(async () => {
+    global.fetch = originalFetch;
     await app.close();
     if (cleanupFixture) {
       await cleanupFixture();
@@ -85,6 +87,35 @@ describe("settings rag config integration", () => {
     expect(healthRes.body.status).toBe("success");
     expect(healthRes.body.data.checkedAgainst).toBe("draft");
     expect(healthRes.body.data.reasonCode).toBe("ok");
+  });
+
+  it("lists provider models for rag draft preview without persisting provider config", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [
+          { id: "gpt-4.1-mini" },
+          { id: "text-embedding-3-small" }
+        ]
+      })
+    }) as never;
+
+    const previewRes = await withActor(
+      request(app.getHttpServer()).post("/api/v1/settings/rag-configs/embedding/models"),
+      "admin",
+      "admin-rag-preview-models"
+    ).send({
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sk-preview"
+    });
+
+    expect(previewRes.status).toBe(201);
+    expect(previewRes.body.status).toBe("success");
+    expect(previewRes.body.data.provider).toBe("openai");
+    expect(previewRes.body.data.recommendedModel).toBe("text-embedding-3-small");
+    expect(previewRes.body.data.models[0]?.model).toBe("text-embedding-3-small");
+    global.fetch = originalFetch;
   });
 
   it("returns schema_invalid when dry-check draft is incomplete", async () => {

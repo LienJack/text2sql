@@ -255,6 +255,55 @@ describe("LlmGatewayService", () => {
     expect(mockedGenerateText).toHaveBeenCalledTimes(1);
   });
 
+  it("should recover with successful tool SQL when provider stream breaks after tool result", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        yield {
+          type: "tool-call",
+          toolName: "runReadOnlySql",
+          toolCallId: "tool-4",
+          input: {
+            sql: "SELECT method, COUNT(*) AS payment_count FROM payments GROUP BY method"
+          }
+        };
+        yield {
+          type: "tool-result",
+          toolName: "runReadOnlySql",
+          toolCallId: "tool-4",
+          output: { rowCount: 3 }
+        };
+        throw new Error("Invalid JSON response");
+      })(),
+      text: Promise.resolve("")
+    } as unknown as ReturnType<typeof streamText>);
+
+    const events: string[] = [];
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计支付方式占比"
+      },
+      runtime,
+      {
+        onEvent: (event) => {
+          events.push(event.type);
+        }
+      }
+    );
+
+    expect(output.rawText).toContain("SELECT method");
+    expect(output.rawText).toContain("GROUP BY method");
+    expect(events).toEqual(["tool-call", "tool-result", "text-delta"]);
+    expect(mockedGenerateText).not.toHaveBeenCalled();
+  });
+
   it("should fail fast when tool execution returns error", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {

@@ -22,6 +22,7 @@ import { CheckRagTaskConfigHealthDto } from "./dto/check-rag-task-config-health.
 import { CreatePromptTemplateDto } from "./dto/create-prompt-template.dto";
 import { CreateProviderDto } from "./dto/create-provider.dto";
 import { ListPromptTemplatesQueryDto } from "./dto/list-prompt-templates.query.dto";
+import { PreviewRagProviderModelsDto } from "./dto/preview-rag-provider-models.dto";
 import { RefreshProviderModelsDto } from "./dto/refresh-provider-models.dto";
 import { UpsertRagTaskConfigDto } from "./dto/upsert-rag-task-config.dto";
 import { UpdatePromptTemplateDto } from "./dto/update-prompt-template.dto";
@@ -95,6 +96,22 @@ export class SettingsController {
         requestId: req.requestId,
         traceId: req.requestId
       });
+      return ok(req.requestId, data);
+    } catch (error) {
+      return this.toError(req.requestId, error);
+    }
+  }
+
+  @Post("/rag-configs/:taskType/models")
+  @UseGuards(AdminOnlyGuard)
+  async previewRagProviderModels(
+    @Param("taskType") taskTypeRaw: string,
+    @Body() body: PreviewRagProviderModelsDto,
+    @Req() req: Request
+  ): Promise<ApiResponse<unknown>> {
+    try {
+      const taskType = this.parseTaskType(taskTypeRaw);
+      const data = await this.settingsService.previewRagProviderModels(taskType, body);
       return ok(req.requestId, data);
     } catch (error) {
       return this.toError(req.requestId, error);
