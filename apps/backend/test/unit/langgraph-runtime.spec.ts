@@ -356,27 +356,30 @@ describe("text2sql v2 runtime artifacts", () => {
       })
     };
     const generateSqlNode = {
-      run: jest.fn().mockResolvedValue({
-        draft: {
-          provider: "volcengine",
-          model: "mock-model",
-          sql: "SELECT COUNT(*) AS total FROM orders",
-          explanation: "count orders",
-          rawText: "SELECT COUNT(*) AS total FROM orders",
-          prompt: {
-            systemPrompt: "system",
-            userPrompt: "user"
+      run: jest.fn().mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return {
+          draft: {
+            provider: "volcengine",
+            model: "mock-model",
+            sql: "SELECT COUNT(*) AS total FROM orders",
+            explanation: "count orders",
+            rawText: "SELECT COUNT(*) AS total FROM orders",
+            prompt: {
+              systemPrompt: "system",
+              userPrompt: "user"
+            }
+          },
+          artifact: {
+            sql: "SELECT COUNT(*) AS total FROM orders",
+            assumptions: ["count orders"],
+            usedTables: ["orders"],
+            usedColumns: ["orders.id"],
+            evidenceRefs: ["chunk-orders-1"],
+            cause: "initial",
+            dialect: "sqlite"
           }
-        },
-        artifact: {
-          sql: "SELECT COUNT(*) AS total FROM orders",
-          assumptions: ["count orders"],
-          usedTables: ["orders"],
-          usedColumns: ["orders.id"],
-          evidenceRefs: ["chunk-orders-1"],
-          cause: "initial",
-          dialect: "sqlite"
-        }
+        };
       })
     };
     const validateSqlNode = {
@@ -426,6 +429,9 @@ describe("text2sql v2 runtime artifacts", () => {
       node: string;
       lifecycle?: "running" | "completed" | "failed" | "skipped";
       outputSummary?: string;
+      startedAt?: string;
+      endedAt?: string;
+      durationMs?: number;
     }> = [];
     const finalState = await graph.invoke(
       createText2SqlV2LangGraphInitialState({
@@ -456,7 +462,10 @@ describe("text2sql v2 runtime artifacts", () => {
             streamedSteps.push({
               node: step.node,
               lifecycle: step.lifecycle,
-              outputSummary: step.outputSummary
+              outputSummary: step.outputSummary,
+              startedAt: step.startedAt,
+              endedAt: step.endedAt,
+              durationMs: step.durationMs
             });
           }
         }
@@ -512,6 +521,24 @@ describe("text2sql v2 runtime artifacts", () => {
         step.outputSummary?.includes('"status":"running"')
       )
     ).toBe(true);
+    const generateRunningStep = streamedSteps.find(
+      (step) => step.node === "generate-sql" && step.lifecycle === "running"
+    );
+    const generateCompletedStep = streamedSteps.find(
+      (step) => step.node === "generate-sql" && step.lifecycle === "completed"
+    );
+    const generateStage = finalState.stageArtifacts.find(
+      (stage) => stage.stage === "generate-sql"
+    );
+    expect(generateRunningStep?.startedAt).toBeDefined();
+    expect(generateRunningStep?.endedAt).toBeUndefined();
+    expect(generateRunningStep?.durationMs).toBeUndefined();
+    expect(generateCompletedStep?.startedAt).toBe(generateRunningStep?.startedAt);
+    expect(generateCompletedStep?.endedAt).toBeDefined();
+    expect(generateCompletedStep?.durationMs).toBeGreaterThanOrEqual(1);
+    expect(generateStage?.startedAt).toBe(generateRunningStep?.startedAt);
+    expect(generateStage?.endedAt).toBe(generateCompletedStep?.endedAt);
+    expect(generateStage?.durationMs).toBe(generateCompletedStep?.durationMs);
     const artifact = new Text2SqlV2LangGraphResultMapper(
       new Text2SqlV2ArtifactBuilder()
     ).mapRunArtifact(finalState as never);

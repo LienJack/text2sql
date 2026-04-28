@@ -107,6 +107,15 @@ const normalizeFailure = (
 
 const nowIso = (): string => new Date().toISOString();
 
+const computeDurationMs = (startedAt: string, endedAt: string): number => {
+  const started = Date.parse(startedAt);
+  const ended = Date.parse(endedAt);
+  if (Number.isNaN(started) || Number.isNaN(ended)) {
+    return 0;
+  }
+  return Math.max(0, ended - started);
+};
+
 const unique = (values: string[]): string[] => {
   return Array.from(
     new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
@@ -129,15 +138,17 @@ const createStageArtifact = (input: {
   failure?: Text2SqlV2FailureSemantic;
   metadata?: Record<string, unknown>;
   provider?: Text2SqlV2StageArtifact["provider"];
+  startedAt?: string;
 }): Text2SqlV2StageArtifact => {
-  const at = nowIso();
+  const startedAt = input.startedAt ?? nowIso();
+  const endedAt = nowIso();
   const catalog = resolveText2SqlV2StageCatalogEntry(input.stage);
   return {
     stage: input.stage,
     status: input.status,
-    startedAt: at,
-    endedAt: at,
-    durationMs: 0,
+    startedAt,
+    endedAt,
+    durationMs: computeDurationMs(startedAt, endedAt),
     warnings: unique(input.warnings ?? []),
     evidenceIds: unique(input.evidenceIds ?? []),
     ...(input.provider ? { provider: input.provider } : {}),
@@ -344,16 +355,18 @@ const emitRunningStep = async (input: {
   detail: string;
   evidenceIds?: string[];
   metadata?: Record<string, unknown>;
-}): Promise<void> => {
+}): Promise<string> => {
+  const startedAt = nowIso();
   if (!input.state.streamMode || !input.state.streamOptions?.onStep) {
-    return;
+    return startedAt;
   }
 
   const stageArtifact = createStageArtifact({
     stage: input.node,
     status: "success",
     evidenceIds: input.evidenceIds,
-    metadata: input.metadata
+    metadata: input.metadata,
+    startedAt
   });
   const runningStageArtifact = {
     ...stageArtifact,
@@ -380,6 +393,8 @@ const emitRunningStep = async (input: {
       durationMs: undefined
     }
   });
+
+  return startedAt;
 };
 
 const emitSkippedStepsBeforeAnswer = async (
@@ -571,7 +586,7 @@ export const createText2SqlV2LangGraph = (
 ) => {
   const graph = new StateGraph(Text2SqlV2LangGraphStateAnnotation)
     .addNode("intake", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "intake",
         detail: "intake running"
@@ -598,7 +613,8 @@ export const createText2SqlV2LangGraph = (
         metadata: {
           route: routeArtifact.route,
           confidence: routeArtifact.confidence
-        }
+        },
+        startedAt: stageStartedAt
       });
 
       return createNodeUpdate({
@@ -627,7 +643,7 @@ export const createText2SqlV2LangGraph = (
       });
     })
     .addNode("retrieve", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "retrieve",
         detail: "retrieve-context running"
@@ -652,7 +668,8 @@ export const createText2SqlV2LangGraph = (
           metadata: {
             retrievalStatus: output.state.status,
             selectedContextCount: output.state.selectedContextSummary.count
-          }
+          },
+          startedAt: stageStartedAt
         });
 
         return createNodeUpdate({
@@ -677,7 +694,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "retrieve",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -691,7 +709,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("assemble-context", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "assemble-context",
         detail: "assemble-context running",
@@ -712,7 +730,8 @@ export const createText2SqlV2LangGraph = (
             selectedEvidenceCount: output.typedSummary.selectedEvidenceCount,
             selectedTableCount: output.typedSummary.selectedTableCount,
             selectedColumnCount: output.typedSummary.selectedColumnCount
-          }
+          },
+          startedAt: stageStartedAt
         });
 
         return createNodeUpdate({
@@ -737,7 +756,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "assemble-context",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -751,7 +771,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("semantic-plan", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "semantic-plan",
         detail: "semantic-plan running",
@@ -810,7 +830,8 @@ export const createText2SqlV2LangGraph = (
             ledgerGateOutcome: result.validation.ledgerGateOutcome ?? "pass",
             blockedObligationCount: result.validation.blockedObligationIds?.length ?? 0,
             warningObligationCount: result.validation.warningObligationIds?.length ?? 0
-          }
+          },
+          startedAt: stageStartedAt
         });
 
         return createNodeUpdate({
@@ -842,7 +863,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "semantic-plan",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -857,7 +879,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("generate-sql", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "generate-sql",
         detail: "generate-sql running",
@@ -923,7 +945,8 @@ export const createText2SqlV2LangGraph = (
             correctionGrounding: result.artifact.correctionGrounding,
             usedTableCount: result.artifact.usedTables.length,
             usedColumnCount: result.artifact.usedColumns.length
-          }
+          },
+          startedAt: stageStartedAt
         });
         const nextSemanticPlan = enrichSemanticPlanFromSqlArtifact(
           state.semanticPlan,
@@ -955,7 +978,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "generate-sql",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -969,7 +993,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("validate", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "validate",
         detail: "validate-sql running",
@@ -1009,7 +1033,8 @@ export const createText2SqlV2LangGraph = (
             outcome: result.outcome,
             checkCount: result.artifact.checks.length,
             correctable: result.artifact.correctable
-          }
+          },
+          startedAt: stageStartedAt
         });
 
         return createNodeUpdate({
@@ -1037,7 +1062,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "validate",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -1052,7 +1078,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("correct", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "correct",
         detail: "correct-sql running",
@@ -1089,7 +1115,8 @@ export const createText2SqlV2LangGraph = (
             maxAttempts: result.budget.maxAttempts,
             exhausted: result.budget.exhausted,
             correctionGrounding: result.artifact.grounding
-          }
+          },
+          startedAt: stageStartedAt
         });
         const loopEvidence = [
           {
@@ -1143,7 +1170,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "correct",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -1158,7 +1186,7 @@ export const createText2SqlV2LangGraph = (
       }
     })
     .addNode("execute", async (state) => {
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "execute",
         detail: "execute-sql running",
@@ -1189,7 +1217,8 @@ export const createText2SqlV2LangGraph = (
           metadata: {
             rowCount: result.rowCount,
             emptyResult: result.emptyResult
-          }
+          },
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -1212,7 +1241,8 @@ export const createText2SqlV2LangGraph = (
         const stageArtifact = createStageArtifact({
           stage: "execute",
           status: "failed",
-          failure
+          failure,
+          startedAt: stageStartedAt
         });
         return createNodeUpdate({
           state,
@@ -1227,7 +1257,7 @@ export const createText2SqlV2LangGraph = (
     })
     .addNode("answer", async (state) => {
       await emitSkippedStepsBeforeAnswer(state);
-      await emitRunningStep({
+      const stageStartedAt = await emitRunningStep({
         state,
         node: "answer",
         detail: "answer running",
@@ -1272,7 +1302,8 @@ export const createText2SqlV2LangGraph = (
         metadata: {
           mode: answerResult.mode,
           status: answerResult.status
-        }
+        },
+        startedAt: stageStartedAt
       });
 
       return createNodeUpdate({
