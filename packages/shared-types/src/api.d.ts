@@ -277,6 +277,46 @@ export interface SemanticPlanV1 {
     evidenceRefs: string[];
     coverageGaps?: SemanticPlanCoverageGapV1[];
     snapshotId?: string;
+    planLedger?: SemanticPlanLedgerV1;
+}
+export type SemanticPlanLedgerObligationKindV1 = "table" | "column" | "metric" | "time_grain" | "filter" | "join_path" | "permission" | "forbidden_table" | "evidence" | (string & {});
+export type SemanticPlanLedgerObligationCriticalityV1 = "hard_blocker" | "warning";
+export type SemanticPlanLedgerObligationStatusV1 = "required" | "grounded" | "claimed" | "fulfilled" | "failed" | "warning" | "unsupported" | "skipped";
+export interface SemanticPlanLedgerObligationV1 {
+    id: string;
+    kind: SemanticPlanLedgerObligationKindV1;
+    summary: string;
+    criticality: SemanticPlanLedgerObligationCriticalityV1;
+    status: SemanticPlanLedgerObligationStatusV1;
+    evidenceRefs: string[];
+    reasonCodes: string[];
+    subject?: string;
+    expectedValue?: string;
+    actualValue?: string;
+}
+export interface SemanticPlanLedgerSummaryV1 {
+    snapshotId?: string;
+    total: number;
+    hardBlockerCount: number;
+    warningCount: number;
+    fulfilledCount?: number;
+    failedCount?: number;
+    unsupportedCount?: number;
+    failedHardBlockerIds?: string[];
+    warningIds?: string[];
+    reasonCodes?: string[];
+    selectedEvidenceRefs?: string[];
+}
+export interface SemanticPlanLedgerV1 {
+    version: "plan-ledger.v1";
+    snapshotId?: string;
+    obligations: SemanticPlanLedgerObligationV1[];
+    summary: SemanticPlanLedgerSummaryV1;
+}
+export interface SqlGenerationUnsupportedClaimV1 {
+    kind: SemanticPlanLedgerObligationKindV1;
+    value: string;
+    reasonCode: string;
 }
 export interface SqlCorrectionGroundingV1 {
     failedSqlRef: string;
@@ -295,6 +335,7 @@ export interface SqlCorrectionGroundingV1 {
     selectedColumnCount?: number;
     contextPackStatus?: SemanticContextPackStatusV1;
     contextPackEvidenceCount?: number;
+    failedObligationIds?: string[];
 }
 export interface SqlGenerationArtifactV1 {
     sql: string;
@@ -303,18 +344,28 @@ export interface SqlGenerationArtifactV1 {
     usedColumns: string[];
     evidenceRefs: string[];
     correctionGrounding?: SqlCorrectionGroundingV1;
+    claimedObligationIds?: string[];
+    unsupportedClaims?: SqlGenerationUnsupportedClaimV1[];
+    ledgerSnapshotId?: string;
 }
 export interface SqlValidationCheckV1 {
-    check: "parse" | "read-only" | "permission" | "plan-coverage" | "relationship-path" | "dialect" | "dry-run" | "dry-plan";
+    check: "parse" | "read-only" | "permission" | "plan-coverage" | "relationship-path" | "dialect" | "dry-run" | "dry-plan" | "ledger-fulfillment";
     status: "passed" | "failed" | "skipped";
     code?: string;
     message?: string;
+    obligationIds?: string[];
+    failedObligationIds?: string[];
+    reasonCodes?: string[];
 }
 export interface SqlValidationArtifactV1 {
     status: "passed" | "failed" | "skipped";
     checks: SqlValidationCheckV1[];
     correctable: boolean;
     failure?: Text2SqlV2FailureSemantic;
+    ledgerFulfillment?: SemanticPlanLedgerSummaryV1;
+    failedObligationIds?: string[];
+    terminalObligationIds?: string[];
+    correctableObligationIds?: string[];
 }
 export type Text2SqlV2RuntimePlanItemStatusV1 = "pending" | "running" | "completed" | "skipped" | "failed" | "clarification";
 export interface Text2SqlV2RuntimePlanItemV1 {
@@ -392,6 +443,7 @@ export interface Text2SqlV2RunArtifact {
     semanticPlan?: SemanticPlanV1;
     sqlGeneration?: SqlGenerationArtifactV1;
     sqlValidation?: SqlValidationArtifactV1;
+    planLedger?: SemanticPlanLedgerSummaryV1;
     runtimePlan?: Text2SqlV2RuntimePlanV1;
     artifactRefs?: Text2SqlV2ArtifactRefV1[];
     smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
@@ -570,6 +622,7 @@ export interface DeliveryEvidenceLayer {
         semanticPlan?: SemanticPlanV1;
         sqlGeneration?: SqlGenerationArtifactV1;
         sqlValidation?: SqlValidationArtifactV1;
+        planLedger?: SemanticPlanLedgerSummaryV1;
         runtimePlan?: Text2SqlV2RuntimePlanV1;
         artifactRefs?: Text2SqlV2ArtifactRefV1[];
         smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
@@ -789,15 +842,16 @@ export type ChatStreamEventData = {
     errorSummary?: string;
     v2?: {
         stageArtifact?: Text2SqlV2StageArtifact;
-        runtimePlan?: {
-            currentItemId?: string;
-            stage?: Text2SqlV2StageName;
-            status?: Text2SqlV2RuntimePlanItemStatusV1;
-            summary?: string;
-            reasonCodes?: string[];
+            runtimePlan?: {
+                currentItemId?: string;
+                stage?: Text2SqlV2StageName;
+                status?: Text2SqlV2RuntimePlanItemStatusV1;
+                summary?: string;
+                reasonCodes?: string[];
+            };
+            planLedger?: SemanticPlanLedgerSummaryV1;
         };
-    };
-} | {
+    } | {
     status: RunStatus;
     rowCount: number;
     delivery?: DeliveryContract;

@@ -214,6 +214,134 @@ const runtimeIntelligenceV2Sample: Text2SqlV2RunArtifact = {
       status: "success"
     }
   ],
+  semanticPlan: {
+    route: "answer",
+    standaloneQuestion: "统计华东区本季度净销售额",
+    selectedTables: ["orders", "refunds"],
+    selectedColumns: ["orders.amount", "refunds.amount"],
+    metrics: ["net_revenue"],
+    grain: "month",
+    filters: ["region=east_china", "quarter=2026Q1"],
+    joinPath: ["orders.customer_id = customers.id"],
+    allowedTables: ["orders", "refunds", "customers"],
+    forbiddenTables: ["internal_audit_logs"],
+    confidence: 0.86,
+    evidenceRefs: ["chunk-orders-1", "metric-net-revenue"],
+    snapshotId: "semantic-plan:snapshot:001",
+    planLedger: {
+      version: "plan-ledger.v1",
+      snapshotId: "semantic-plan:snapshot:001",
+      obligations: [
+        {
+          id: "obligation:table:orders",
+          kind: "table",
+          summary: "SQL must read from the orders table.",
+          criticality: "hard_blocker",
+          status: "fulfilled",
+          evidenceRefs: ["chunk-orders-1"],
+          reasonCodes: ["selected_table_grounded"],
+          subject: "orders"
+        },
+        {
+          id: "obligation:metric:net-revenue",
+          kind: "metric",
+          summary: "SQL must compute net revenue using the grounded metric definition.",
+          criticality: "hard_blocker",
+          status: "fulfilled",
+          evidenceRefs: ["metric-net-revenue"],
+          reasonCodes: ["metric_grounded"],
+          subject: "net_revenue"
+        },
+        {
+          id: "obligation:warning:optional-example",
+          kind: "evidence",
+          summary: "Optional example SQL was pruned from the context pack.",
+          criticality: "warning",
+          status: "warning",
+          evidenceRefs: [],
+          reasonCodes: ["optional_context_pruned"]
+        }
+      ],
+      summary: {
+        snapshotId: "semantic-plan:snapshot:001",
+        total: 3,
+        hardBlockerCount: 2,
+        warningCount: 1,
+        fulfilledCount: 2,
+        failedCount: 0,
+        warningIds: ["obligation:warning:optional-example"],
+        reasonCodes: ["selected_table_grounded", "metric_grounded", "optional_context_pruned"],
+        selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+      }
+    }
+  },
+  sqlGeneration: {
+    sql: "select date_trunc('month', paid_at) as month, sum(amount) as net_revenue from orders group by 1",
+    usedTables: ["orders"],
+    usedColumns: ["orders.paid_at", "orders.amount"],
+    evidenceRefs: ["chunk-orders-1", "metric-net-revenue"],
+    claimedObligationIds: ["obligation:table:orders", "obligation:metric:net-revenue"],
+    unsupportedClaims: [
+      {
+        kind: "column",
+        value: "orders.discount_amount",
+        reasonCode: "column_not_in_ledger"
+      }
+    ],
+    ledgerSnapshotId: "semantic-plan:snapshot:001",
+    correctionGrounding: {
+      failedSqlRef: "sql-generation:attempt:001",
+      retryReason: "missing required net revenue obligation",
+      failureCategory: "validation",
+      source: "validation",
+      attemptCount: 1,
+      maxAttempts: 2,
+      evidenceRefs: ["metric-net-revenue"],
+      semanticPlanSnapshotId: "semantic-plan:snapshot:001",
+      failedObligationIds: ["obligation:metric:net-revenue"]
+    }
+  },
+  sqlValidation: {
+    status: "failed",
+    checks: [
+      {
+        check: "ledger-fulfillment",
+        status: "failed",
+        code: "ledger_obligation_unfulfilled",
+        message: "Metric obligation was not fully satisfied.",
+        obligationIds: ["obligation:metric:net-revenue"],
+        failedObligationIds: ["obligation:metric:net-revenue"],
+        reasonCodes: ["metric_formula_mismatch"]
+      }
+    ],
+    correctable: true,
+    ledgerFulfillment: {
+      snapshotId: "semantic-plan:snapshot:001",
+      total: 3,
+      hardBlockerCount: 2,
+      warningCount: 1,
+      fulfilledCount: 1,
+      failedCount: 1,
+      failedHardBlockerIds: ["obligation:metric:net-revenue"],
+      warningIds: ["obligation:warning:optional-example"],
+      reasonCodes: ["metric_formula_mismatch"],
+      selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+    },
+    failedObligationIds: ["obligation:metric:net-revenue"],
+    correctableObligationIds: ["obligation:metric:net-revenue"]
+  },
+  planLedger: {
+    snapshotId: "semantic-plan:snapshot:001",
+    total: 3,
+    hardBlockerCount: 2,
+    warningCount: 1,
+    fulfilledCount: 1,
+    failedCount: 1,
+    failedHardBlockerIds: ["obligation:metric:net-revenue"],
+    warningIds: ["obligation:warning:optional-example"],
+    reasonCodes: ["metric_formula_mismatch"],
+    selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+  },
   runtimePlan: {
     version: "runtime-plan.v1",
     currentItemId: "plan:generate-sql",
@@ -396,6 +524,10 @@ const deliverySample: DeliveryContract = {
       version: runtimeIntelligenceV2Sample.version,
       stageOrder: runtimeIntelligenceV2Sample.stageOrder,
       stageArtifacts: runtimeIntelligenceV2Sample.stages,
+      semanticPlan: runtimeIntelligenceV2Sample.semanticPlan,
+      sqlGeneration: runtimeIntelligenceV2Sample.sqlGeneration,
+      sqlValidation: runtimeIntelligenceV2Sample.sqlValidation,
+      planLedger: runtimeIntelligenceV2Sample.planLedger,
       runtimePlan: runtimeIntelligenceV2Sample.runtimePlan,
       artifactRefs: runtimeIntelligenceV2Sample.artifactRefs,
       smartDefaults: runtimeIntelligenceV2Sample.smartDefaults
@@ -724,6 +856,36 @@ type TraceV2SmartDefaultsShape = Expect<
   IsAssignable<
     typeof runtimeIntelligenceV2Sample.smartDefaults,
     NonNullable<SqlRun["trace"]["v2"]>["smartDefaults"]
+  >
+>;
+type TraceV2SemanticPlanLedgerShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.semanticPlan,
+    NonNullable<SqlRun["trace"]["v2"]>["semanticPlan"]
+  >
+>;
+type TraceV2GenerationClaimsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.sqlGeneration,
+    NonNullable<SqlRun["trace"]["v2"]>["sqlGeneration"]
+  >
+>;
+type TraceV2ValidationLedgerShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.sqlValidation,
+    NonNullable<SqlRun["trace"]["v2"]>["sqlValidation"]
+  >
+>;
+type TraceV2PlanLedgerSummaryShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.planLedger,
+    NonNullable<SqlRun["trace"]["v2"]>["planLedger"]
+  >
+>;
+type DeliveryV2PlanLedgerSummaryShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.planLedger,
+    NonNullable<NonNullable<DeliveryContract["evidence"]>["v2"]>["planLedger"]
   >
 >;
 type OldV2WithoutRuntimeIntelligenceShape = Expect<
