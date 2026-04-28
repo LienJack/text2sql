@@ -39,7 +39,8 @@
   - `run.delivery.evidence.modelingRevision?`：与 `run.trace.modelingRevision?` 同源镜像字段，语义必须一致
   - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
   - Full Mermaid strict-completion（2026-04-27）语义：metadata 仅走 `retrieve -> assemble-context -> semantic-plan -> answer`（no-SQL）；correction 重试必须输出结构化 `correctionGrounding`
-  - `run.delivery.evidence.v2` 在 strict-completion 场景应包含 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`，并与 `run.trace.v2` 保持语义一致
+  - Runtime intelligence（2026-04-28）语义：`run.trace.v2` 是 `runtimePlan`、`artifactRefs`、`smartDefaults` 的 canonical owner；`run.delivery.evidence.v2` 只做同语义投影；`artifactRefs` 必须由 producer-backed category policy 生成，覆盖 `context_snippets` / `schema_supplement` / `prompt_input` / `provider_output_summary` / `validation_diagnostics` / `correction_grounding` / `execution_preview`
+  - `run.delivery.evidence.v2` 在 strict-completion 与 runtime-intelligence 场景应包含 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults`，并与 `run.trace.v2` 保持语义一致
   - hard-cut read-model：run read/save-view/replay 必须命中显式 v2 marker（`run.trace.v2.version === "v2"`、`run.trace.v2.stageOrder.length > 0`、`run.trace.v2.stages.length > 0`）；命中授权但不支持历史 shape 时返回 `410 LEGACY_RUN_UNSUPPORTED`
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
@@ -64,7 +65,7 @@
   - `data`
 - `data` is always a structured object, not raw string.
 - `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
-- strict-completion 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding` 与 `run.trace.v2` 的同语义镜像。
+- strict-completion/runtime-intelligence 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults` 与 `run.trace.v2` 的同语义镜像；`state` 事件只能暴露 runtime plan 的安全摘要，不得暴露 raw graph state/checkpoint。Full Mermaid stages 必须在 stream `state` 中产生安全的 `running` 与 terminal lifecycle（completed/skipped/failed/clarification）摘要。
 
 ## Tool Calling Baseline
 
@@ -109,7 +110,8 @@
   - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
   - the report must include scoped line/branch coverage, critical file thresholds, A-M flow-node blockers, eval fixture behavior-test traceability, and `delegationZero` static-scan结果。
   - Full Mermaid strict-completion 场景下，报告还必须包含 `strictCompletionRows`（metadata grounding / correction grounding / context-pack parity）并参与 gate 判定。
-- 叙事边界：`007 closeout` 表示 LangGraph topology + `delegation=0` 收口完成；`008 strict-completion` 在此基础上要求 metadata grounding / correction grounding / context-pack parity 的可观测与可门禁。
+  - Runtime intelligence 场景下，报告还必须包含 `runtimeCoverageRows`（runtime plan / artifact refs / Smart Defaults）、`runtimeArtifactProducerRows`（七类 artifact producer coverage）、`streamLifecycleRows`（全 stage running/terminal lifecycle coverage）与 eval fixture families（plain-general-no-sql / runtime-plan-consistency / artifact-ref-compaction / smart-defaults-evidence / large-context-compaction / validation-diagnostics / correction-grounding / execution-preview / all-stage-stream-lifecycle）。
+- 叙事边界：`007 closeout` 表示 LangGraph topology + `delegation=0` 收口完成；`008 strict-completion` 在此基础上要求 metadata grounding / correction grounding / context-pack parity；`009 runtime-intelligence` 额外要求 runtime plan / artifact refs / Smart Defaults 的可观测与可门禁。
 - Text2SQL v2 closeout rollout must use `collect:text2sql-v2-eval-gate` as the aggregated report entry:
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
   - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`

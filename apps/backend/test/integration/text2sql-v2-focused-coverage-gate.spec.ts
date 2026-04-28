@@ -34,6 +34,8 @@ const LEGACY_RUNNER_OWNER =
   "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts";
 const LEGACY_STAGE_OWNER =
   "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts";
+const ARTIFACT_REF_OWNER =
+  "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts";
 
 const ALL_COVERAGE_FILES = [
   ...LEGACY_CRITICAL_FILES,
@@ -42,7 +44,8 @@ const ALL_COVERAGE_FILES = [
   PRE_LAYERED_LANGGRAPH_STAGE_OWNER,
   PRE_LAYERED_LANGGRAPH_GRAPH_OWNER,
   PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER,
-  PRE_LAYERED_INTAKE_NODE_OWNER
+  PRE_LAYERED_INTAKE_NODE_OWNER,
+  ARTIFACT_REF_OWNER
 ] as const;
 
 function fileCoverage(params: {
@@ -224,6 +227,45 @@ function coveredMatrix(): CloseoutFlowMatrix {
           "Canonical graph topology and mapper coverage must exist before the runtime cutover can pass."
       }
     ],
+    runtimeArtifactProducerRows: [
+      "context_snippets",
+      "schema_supplement",
+      "prompt_input",
+      "provider_output_summary",
+      "validation_diagnostics",
+      "correction_grounding",
+      "execution_preview"
+    ].map((category) => ({
+      category,
+      producerOwners: [ARTIFACT_REF_OWNER],
+      evidenceOwners: [`run.trace.v2.artifactRefs[${category}]`],
+      expectedTestFiles: [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      behaviorTestStatus: "covered" as const,
+      coverageOwnerStatus: "covered" as const
+    })),
+    streamLifecycleRows: [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ].map((stage) => ({
+      stage,
+      lifecycles:
+        stage === "correct"
+          ? ["running", "completed", "skipped"]
+          : ["running", "completed"],
+      owners: [LANGGRAPH_CRITICAL_FILES[0]],
+      expectedTestFiles: ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      behaviorTestStatus: "covered" as const,
+      coverageOwnerStatus: "covered" as const
+    })),
     runtimePaths: {
       currentActivePath: [
         "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
@@ -269,6 +311,8 @@ describe("text2sql v2 focused coverage gate", () => {
     expect(report.delegationZero.gatePass).toBe(true);
     expect(report.flowMatrix.gatePass).toBe(true);
     expect(report.flowMatrix.incompleteRuntimeCoverageRows).toEqual([]);
+    expect(report.flowMatrix.incompleteRuntimeArtifactProducerRows).toEqual([]);
+    expect(report.flowMatrix.incompleteStreamLifecycleRows).toEqual([]);
     expect(report.rollout).toMatchObject({
       gatePass: true,
       recommendedStage: "closeout_ready",
@@ -412,6 +456,54 @@ describe("text2sql v2 focused coverage gate", () => {
         )
       ])
     );
+  });
+
+  it("fails when a required runtime artifact producer category is missing", () => {
+    const matrix = coveredMatrix();
+    matrix.runtimeArtifactProducerRows = matrix.runtimeArtifactProducerRows?.filter(
+      (row) => row.category !== "validation_diagnostics"
+    );
+
+    const report = evaluateFocusedCoverageGate({
+      coverage: coverageFor(ALL_COVERAGE_FILES),
+      matrix
+    });
+
+    expect(report.rollout.gatePass).toBe(false);
+    expect(report.flowMatrix.incompleteRuntimeArtifactProducerRows).toEqual([
+      {
+        category: "validation_diagnostics",
+        reasons: ["missing_artifact_producer_row"]
+      }
+    ]);
+    expect(report.rollout.reasons).toContain(
+      "artifact_producer:validation_diagnostics:missing_artifact_producer_row"
+    );
+  });
+
+  it("fails when a required stream lifecycle stage lacks running coverage", () => {
+    const matrix = coveredMatrix();
+    matrix.streamLifecycleRows = matrix.streamLifecycleRows?.map((row) =>
+      row.stage === "execute"
+        ? {
+            ...row,
+            lifecycles: ["completed"]
+          }
+        : row
+    );
+
+    const report = evaluateFocusedCoverageGate({
+      coverage: coverageFor(ALL_COVERAGE_FILES),
+      matrix
+    });
+
+    expect(report.rollout.gatePass).toBe(false);
+    expect(report.flowMatrix.incompleteStreamLifecycleRows).toEqual([
+      {
+        stage: "execute",
+        reasons: ["missing_running_lifecycle"]
+      }
+    ]);
   });
 
   it("requires explicit owner migration metadata when a critical file is replaced", () => {

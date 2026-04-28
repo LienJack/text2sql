@@ -89,8 +89,8 @@ describe("text2sql unified rag eval gate integration", () => {
     expect(summary.rollout.recommendedStage).toBe("direct_v2_go");
     expect(summary.rollout.rollbackSuggested).toBe(false);
     expect(summary.rollout.reasons).toEqual([]);
-    // Guard threshold edge-case: retrievalRelevance should stay around the 0.75 gate.
-    expect(summary.retrievalRelevance).toBeCloseTo(0.7509, 4);
+    // Guard threshold edge-case: retrievalRelevance should stay around the 0.75 gate after runtime intelligence fixtures.
+    expect(summary.retrievalRelevance).toBeCloseTo(0.7638, 4);
     expect(summary.rollout.thresholds.minRetrievalRelevance).toBe(0.75);
 
     expect(characterization.gatePass).toBe(true);

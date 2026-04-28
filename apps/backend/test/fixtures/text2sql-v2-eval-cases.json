@@ -81,12 +81,15 @@
     "traceability": {
       "fixtureFamilies": [
         "correction-success",
+        "validation-diagnostics",
+        "correction-grounding",
         "metrics",
         "filters"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
-        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
       ],
       "flowNodes": [
         "I.validation",
@@ -341,6 +344,76 @@
       "flowNodes": [
         "I.validation",
         "L.fail-closed-evidence"
+      ]
+    }
+  },
+  {
+    "id": "zh-plain-general-no-sql-runtime-intelligence-012",
+    "question": "什么是 GMV 口径？",
+    "retrievalRelevance": 0.78,
+    "rerankLift": 0.08,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.92,
+    "latencyMs": 760,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "plain-general-no-sql",
+        "runtime-plan-consistency",
+        "all-stage-stream-lifecycle"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/unit/langgraph-runtime.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "C.route",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  },
+  {
+    "id": "zh-artifact-ref-compaction-smart-defaults-013",
+    "question": "统计近30天订单总数并解释依据",
+    "retrievalRelevance": 0.89,
+    "rerankLift": 0.13,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.93,
+    "latencyMs": 1680,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "artifact-ref-compaction",
+        "large-context-compaction",
+        "execution-preview",
+        "smart-defaults-evidence",
+        "runtime-plan-consistency"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/sql-prompt.builder.spec.ts",
+        "apps/backend/test/unit/chat-delivery-enrichment.service.spec.ts"
+      ],
+      "flowNodes": [
+        "D.retrieve",
+        "E.assemble-context",
+        "H.structured-sql-generation",
+        "M.final-answer-replay-artifacts"
       ]
     }
   }

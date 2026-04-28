@@ -78,6 +78,24 @@ interface RuntimeCoverageRow {
   blocker?: string;
 }
 
+interface RuntimeArtifactProducerRow {
+  category: string;
+  producerOwners: string[];
+  evidenceOwners: string[];
+  expectedTestFiles: string[];
+  behaviorTestStatus: "covered" | "partial" | "missing" | "planned";
+  coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+}
+
+interface StreamLifecycleCoverageRow {
+  stage: string;
+  lifecycles: string[];
+  owners: string[];
+  expectedTestFiles: string[];
+  behaviorTestStatus: "covered" | "partial" | "missing" | "planned";
+  coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+}
+
 interface RuntimePathPlan {
   currentActivePath: string[];
   targetActivePath: string[];
@@ -95,6 +113,8 @@ export interface CloseoutFlowMatrix {
   evalFixtureFamilies: EvalFixtureFamily[];
   criticalFileOwnerMigrations?: CriticalFileOwnerMigration[];
   runtimeCoverageRows?: RuntimeCoverageRow[];
+  runtimeArtifactProducerRows?: RuntimeArtifactProducerRow[];
+  streamLifecycleRows?: StreamLifecycleCoverageRow[];
   runtimePaths?: RuntimePathPlan;
 }
 
@@ -126,6 +146,10 @@ export interface FocusedCoverageGateReport {
     incompleteStrictCompletionRows: Array<{ id: string; reasons: string[] }>;
     runtimeCoverageRowCount: number;
     incompleteRuntimeCoverageRows: Array<{ id: string; reasons: string[] }>;
+    runtimeArtifactProducerRowCount: number;
+    incompleteRuntimeArtifactProducerRows: Array<{ category: string; reasons: string[] }>;
+    streamLifecycleRowCount: number;
+    incompleteStreamLifecycleRows: Array<{ stage: string; reasons: string[] }>;
     runtimePathReasons: string[];
     gatePass: boolean;
   };
@@ -161,6 +185,28 @@ const SCOPED_THRESHOLDS = {
   line: 80,
   branch: 70
 };
+
+const REQUIRED_RUNTIME_ARTIFACT_CATEGORIES = [
+  "context_snippets",
+  "schema_supplement",
+  "prompt_input",
+  "provider_output_summary",
+  "validation_diagnostics",
+  "correction_grounding",
+  "execution_preview"
+] as const;
+
+const REQUIRED_STREAM_LIFECYCLE_STAGES = [
+  "intake",
+  "retrieve",
+  "assemble-context",
+  "semantic-plan",
+  "generate-sql",
+  "validate",
+  "correct",
+  "execute",
+  "answer"
+] as const;
 
 const LAYERED_RUNTIME_STAGE_OWNER =
   "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts";
@@ -601,6 +647,70 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     return reasons.length > 0 ? [{ id: row.id, reasons }] : [];
   });
 
+  const artifactProducerRows = matrix.runtimeArtifactProducerRows ?? [];
+  const incompleteRuntimeArtifactProducerRows = REQUIRED_RUNTIME_ARTIFACT_CATEGORIES.flatMap(
+    (category) => {
+      const row = artifactProducerRows.find((item) => item.category === category);
+      const reasons: string[] = [];
+      if (!row) {
+        reasons.push("missing_artifact_producer_row");
+        return [{ category, reasons }];
+      }
+      if (row.producerOwners.length === 0) {
+        reasons.push("missing_artifact_producer_owners");
+      }
+      if (row.evidenceOwners.length === 0) {
+        reasons.push("missing_artifact_evidence_owners");
+      }
+      if (row.expectedTestFiles.length === 0) {
+        reasons.push("missing_artifact_behavior_tests");
+      }
+      if (row.behaviorTestStatus !== "covered") {
+        reasons.push(`behavior_test_status_${row.behaviorTestStatus}`);
+      }
+      if (row.coverageOwnerStatus !== "covered") {
+        reasons.push(`coverage_owner_status_${row.coverageOwnerStatus}`);
+      }
+      return reasons.length > 0 ? [{ category, reasons }] : [];
+    }
+  );
+
+  const streamLifecycleRows = matrix.streamLifecycleRows ?? [];
+  const incompleteStreamLifecycleRows = REQUIRED_STREAM_LIFECYCLE_STAGES.flatMap(
+    (stage) => {
+      const row = streamLifecycleRows.find((item) => item.stage === stage);
+      const reasons: string[] = [];
+      if (!row) {
+        reasons.push("missing_stream_lifecycle_row");
+        return [{ stage, reasons }];
+      }
+      if (!row.lifecycles.includes("running")) {
+        reasons.push("missing_running_lifecycle");
+      }
+      if (
+        !row.lifecycles.includes("completed") &&
+        !row.lifecycles.includes("skipped") &&
+        !row.lifecycles.includes("failed") &&
+        !row.lifecycles.includes("clarification")
+      ) {
+        reasons.push("missing_terminal_lifecycle");
+      }
+      if (row.owners.length === 0) {
+        reasons.push("missing_stream_lifecycle_owners");
+      }
+      if (row.expectedTestFiles.length === 0) {
+        reasons.push("missing_stream_lifecycle_tests");
+      }
+      if (row.behaviorTestStatus !== "covered") {
+        reasons.push(`behavior_test_status_${row.behaviorTestStatus}`);
+      }
+      if (row.coverageOwnerStatus !== "covered") {
+        reasons.push(`coverage_owner_status_${row.coverageOwnerStatus}`);
+      }
+      return reasons.length > 0 ? [{ stage, reasons }] : [];
+    }
+  );
+
   const runtimePathReasons: string[] = [];
   if (!matrix.runtimePaths) {
     runtimePathReasons.push("missing_runtime_paths");
@@ -645,12 +755,18 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     incompleteStrictCompletionRows,
     runtimeCoverageRowCount: matrix.runtimeCoverageRows?.length ?? 0,
     incompleteRuntimeCoverageRows,
+    runtimeArtifactProducerRowCount: artifactProducerRows.length,
+    incompleteRuntimeArtifactProducerRows,
+    streamLifecycleRowCount: streamLifecycleRows.length,
+    incompleteStreamLifecycleRows,
     runtimePathReasons,
     gatePass:
       incompleteNodes.length === 0 &&
       incompleteEvalFixtureFamilies.length === 0 &&
       incompleteStrictCompletionRows.length === 0 &&
       incompleteRuntimeCoverageRows.length === 0 &&
+      incompleteRuntimeArtifactProducerRows.length === 0 &&
+      incompleteStreamLifecycleRows.length === 0 &&
       runtimePathReasons.length === 0
   };
 }
@@ -666,6 +782,12 @@ function scopedFilesFromMatrix(matrix: CloseoutFlowMatrix): string[] {
     ...matrix.nodes
       .filter((node) => node.gateRelevance)
       .flatMap((node) => node.implementationOwners.map(effectiveOwner)),
+    ...(matrix.runtimeArtifactProducerRows ?? []).flatMap((row) =>
+      row.producerOwners.map(effectiveOwner)
+    ),
+    ...(matrix.streamLifecycleRows ?? []).flatMap((row) =>
+      row.owners.map(effectiveOwner)
+    ),
     ...(matrix.criticalFileOwnerMigrations ?? []).map((item) => item.to)
   ]);
 }
@@ -736,6 +858,12 @@ export function evaluateFocusedCoverageGate(params: {
     ),
     ...flowMatrix.incompleteRuntimeCoverageRows.map(
       (item) => `runtime_row:${item.id}:${item.reasons.join("|")}`
+    ),
+    ...flowMatrix.incompleteRuntimeArtifactProducerRows.map(
+      (item) => `artifact_producer:${item.category}:${item.reasons.join("|")}`
+    ),
+    ...flowMatrix.incompleteStreamLifecycleRows.map(
+      (item) => `stream_lifecycle:${item.stage}:${item.reasons.join("|")}`
     ),
     ...flowMatrix.runtimePathReasons.map((reason) => `runtime_path:${reason}`)
   ];

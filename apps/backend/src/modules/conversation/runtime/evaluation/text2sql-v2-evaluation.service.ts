@@ -13,7 +13,16 @@ export const TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES = [
   "dense-unavailable",
   "rerank-unavailable",
   "correction-success",
-  "terminal-governance-failure"
+  "terminal-governance-failure",
+  "plain-general-no-sql",
+  "runtime-plan-consistency",
+  "artifact-ref-compaction",
+  "smart-defaults-evidence",
+  "large-context-compaction",
+  "validation-diagnostics",
+  "correction-grounding",
+  "execution-preview",
+  "all-stage-stream-lifecycle"
 ] as const;
 
 export type Text2SqlV2RequiredFixtureFamily =
