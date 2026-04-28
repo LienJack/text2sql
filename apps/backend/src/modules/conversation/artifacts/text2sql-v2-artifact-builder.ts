@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type {
   ExecutionTraceStep,
   SemanticContextPackV1,
+  SemanticPlanLedgerSummaryV1,
   SemanticPlanV1,
   Text2SqlV2ArtifactRefV1,
   SqlGenerationArtifactV1,
@@ -24,6 +25,7 @@ export interface BuildRunArtifactOptions {
   semanticPlan?: SemanticPlanV1;
   sqlGeneration?: SqlGenerationArtifactV1;
   sqlValidation?: SqlValidationArtifactV1;
+  planLedger?: SemanticPlanLedgerSummaryV1;
   runtimePlan?: Text2SqlV2RuntimePlanV1;
   artifactRefs?: Text2SqlV2ArtifactRefV1[];
   smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
@@ -45,6 +47,13 @@ export class Text2SqlV2ArtifactBuilder {
       semanticPlan: options?.semanticPlan ?? this.buildSemanticPlan(run),
       sqlGeneration: options?.sqlGeneration ?? this.buildSqlGenerationArtifact(run),
       sqlValidation: options?.sqlValidation ?? this.buildSqlValidationArtifact(run),
+      planLedger:
+        options?.planLedger ??
+        this.resolvePlanLedgerSummary({
+          semanticPlan: options?.semanticPlan ?? run.trace.v2?.semanticPlan,
+          sqlValidation: options?.sqlValidation ?? run.trace.v2?.sqlValidation,
+          tracePlanLedger: run.trace.v2?.planLedger
+        }),
       runtimePlan:
         options?.runtimePlan ??
         this.readRuntimePlan(run.trace.v2?.runtimePlan),
@@ -57,6 +66,18 @@ export class Text2SqlV2ArtifactBuilder {
       loopEvidence: this.readLoopEvidence(run.trace.loopEvidence),
       terminationReason: this.readTerminationReason(run.trace.terminationReason)
     };
+  }
+
+  private resolvePlanLedgerSummary(input: {
+    semanticPlan?: SemanticPlanV1;
+    sqlValidation?: SqlValidationArtifactV1;
+    tracePlanLedger?: SemanticPlanLedgerSummaryV1;
+  }): SemanticPlanLedgerSummaryV1 | undefined {
+    return (
+      input.sqlValidation?.ledgerFulfillment ??
+      input.tracePlanLedger ??
+      input.semanticPlan?.planLedger?.summary
+    );
   }
 
   private resolveStageArtifacts(

@@ -261,9 +261,13 @@ export class DeliveryContractMapper {
               stageOrder: traceV2Artifact.stageOrder,
               stageArtifacts: traceV2Artifact.stages,
               contextPack: traceV2Artifact.contextPack,
-              semanticPlan: traceV2Artifact.semanticPlan,
+              semanticPlan: this.toSafeSemanticPlan(traceV2Artifact.semanticPlan),
               sqlGeneration: traceV2Artifact.sqlGeneration,
               sqlValidation: traceV2Artifact.sqlValidation,
+              planLedger:
+                traceV2Artifact.planLedger ??
+                traceV2Artifact.sqlValidation?.ledgerFulfillment ??
+                traceV2Artifact.semanticPlan?.planLedger?.summary,
               runtimePlan: this.readRuntimePlan(traceV2Artifact.runtimePlan),
               artifactRefs: this.readArtifactRefs(traceV2Artifact.artifactRefs),
               smartDefaults: this.readSmartDefaults(traceV2Artifact.smartDefaults),
@@ -317,6 +321,16 @@ export class DeliveryContractMapper {
       rowsPreview: run.rows?.slice(0, 3),
       hasError: Boolean(run.error)
     };
+  }
+
+  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+    semanticPlan: T
+  ): T {
+    if (!semanticPlan) {
+      return semanticPlan;
+    }
+    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    return safePlan as T;
   }
 
   private toReplayLogs(records: DeliveryReplayRecordInput[] | undefined): DeliveryEvidenceReplayLog[] {

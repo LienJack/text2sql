@@ -4,6 +4,7 @@ import type {
   ChatStreamEventData,
   ChatStreamEventType,
   ExecutionTraceStep,
+  SemanticPlanLedgerSummaryV1,
   SqlRun,
   Text2SqlV2RuntimePlanV1,
   Text2SqlV2StageArtifact
@@ -119,6 +120,7 @@ export class Text2SqlStreamEventMapper {
       input.step.at ?? input.step.endedAt ?? input.step.startedAt ?? new Date().toISOString();
     const v2StageArtifact = this.extractV2StageArtifact(input.step);
     const v2RuntimePlan = this.extractV2RuntimePlanSummary(input.step);
+    const v2PlanLedger = this.extractV2PlanLedgerSummary(input.step);
     const v2CatalogEntry = v2StageArtifact
       ? resolveText2SqlV2StageCatalogEntry(v2StageArtifact.stage)
       : undefined;
@@ -144,7 +146,8 @@ export class Text2SqlStreamEventMapper {
           ? {
               v2: {
                 stageArtifact: v2StageArtifact,
-                ...(v2RuntimePlan ? { runtimePlan: v2RuntimePlan } : {})
+                ...(v2RuntimePlan ? { runtimePlan: v2RuntimePlan } : {}),
+                ...(v2PlanLedger ? { planLedger: v2PlanLedger } : {})
               }
             }
           : {})
@@ -232,6 +235,45 @@ export class Text2SqlStreamEventMapper {
         continue;
       }
       return candidate as Text2SqlV2RuntimePlanV1;
+    }
+
+    return undefined;
+  }
+
+  private extractV2PlanLedgerSummary(
+    step: ExecutionTraceStep
+  ): SemanticPlanLedgerSummaryV1 | undefined {
+    const payloads = [step.outputSummary, step.inputSummary]
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .slice(0, 2);
+
+    for (const payload of payloads) {
+      const parsed = this.safeParseJson(payload);
+      if (!parsed || typeof parsed !== "object") {
+        continue;
+      }
+      const v2 = (parsed as { v2?: unknown }).v2;
+      if (!v2 || typeof v2 !== "object") {
+        continue;
+      }
+      const candidate =
+        (v2 as { planLedger?: unknown }).planLedger ??
+        (v2 as { sqlValidation?: { ledgerFulfillment?: unknown } }).sqlValidation?.ledgerFulfillment ??
+        (v2 as { semanticPlan?: { planLedger?: { summary?: unknown } } }).semanticPlan?.planLedger?.summary;
+      if (!candidate || typeof candidate !== "object") {
+        continue;
+      }
+      const total = (candidate as { total?: unknown }).total;
+      const hardBlockerCount = (candidate as { hardBlockerCount?: unknown }).hardBlockerCount;
+      const warningCount = (candidate as { warningCount?: unknown }).warningCount;
+      if (
+        typeof total !== "number" ||
+        typeof hardBlockerCount !== "number" ||
+        typeof warningCount !== "number"
+      ) {
+        continue;
+      }
+      return candidate as SemanticPlanLedgerSummaryV1;
     }
 
     return undefined;

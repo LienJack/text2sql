@@ -614,6 +614,29 @@ export class SqlPromptBuilder {
             .join(" | ")}`
         : "";
     const snapshotId = plan.snapshotId ? `snapshotId=${plan.snapshotId}` : "";
+    const ledgerSummary = plan.planLedger?.summary
+      ? `ledgerSummary=total:${plan.planLedger.summary.total},hardBlockers:${plan.planLedger.summary.hardBlockerCount},warnings:${plan.planLedger.summary.warningCount},failed:${plan.planLedger.summary.failedCount ?? 0}`
+      : "";
+    const ledgerGate =
+      plan.planLedger?.summary.failedHardBlockerIds &&
+      plan.planLedger.summary.failedHardBlockerIds.length > 0
+        ? `ledgerGate=block(${plan.planLedger.summary.failedHardBlockerIds.slice(0, 6).join(", ")})`
+        : plan.planLedger?.summary.warningIds &&
+            plan.planLedger.summary.warningIds.length > 0
+          ? `ledgerGate=warning(${plan.planLedger.summary.warningIds.slice(0, 6).join(", ")})`
+          : plan.planLedger
+            ? "ledgerGate=pass"
+            : "";
+    const ledgerObligations =
+      plan.planLedger?.obligations && plan.planLedger.obligations.length > 0
+        ? `ledgerObligations=${plan.planLedger.obligations
+            .slice(0, 12)
+            .map(
+              (obligation) =>
+                `${obligation.id}:${obligation.kind}:${obligation.subject ?? "n/a"}:${obligation.criticality}:${obligation.status}`
+            )
+            .join(" | ")}`
+        : "";
     const routeGuardrail =
       routeKind === "metadata"
         ? "routeGuardrail=metadata_only"
@@ -641,6 +664,9 @@ export class SqlPromptBuilder {
       evidenceRefs,
       coverageGaps,
       snapshotId,
+      ledgerSummary,
+      ledgerGate,
+      ledgerObligations,
       "Execution guardrail: stay within selectedTables/selectedColumns and do not invent out-of-plan joins or columns.",
       routeGuardrail
     ]

@@ -161,9 +161,18 @@ const createStep = (input: {
   outputSummary?: Record<string, unknown>;
 }): ExecutionTraceStep => {
   const at = nowIso();
+  const outputSummaryV2 =
+    input.outputSummary?.v2 && typeof input.outputSummary.v2 === "object"
+      ? (input.outputSummary.v2 as Record<string, unknown>)
+      : {};
+  const inputSummaryV2 =
+    input.inputSummary?.v2 && typeof input.inputSummary.v2 === "object"
+      ? (input.inputSummary.v2 as Record<string, unknown>)
+      : {};
   const outputPayload: Record<string, unknown> = {
     ...(input.outputSummary ?? {}),
     v2: {
+      ...outputSummaryV2,
       stageArtifact: input.stageArtifact,
       runtimePlan: createRuntimePlanUpdate({
         stageArtifact: input.stageArtifact,
@@ -175,6 +184,7 @@ const createStep = (input: {
   const inputPayload: Record<string, unknown> = {
     ...(input.inputSummary ?? {}),
     v2: {
+      ...inputSummaryV2,
       stageArtifact: input.stageArtifact,
       runtimePlan: createRuntimePlanUpdate({
         stageArtifact: input.stageArtifact,
@@ -762,7 +772,9 @@ export const createText2SqlV2LangGraph = (
           semanticIntent: state.routeArtifact?.semanticIntent,
           allowedTables: state.preparedRun.sqlAccessContext?.allowedTables
         });
-        const reasons = unique(result.validation.reasons);
+        const ledgerSummary = result.plan.planLedger?.summary;
+        const ledgerReasons = ledgerSummary?.reasonCodes ?? [];
+        const reasons = unique([...result.validation.reasons, ...ledgerReasons]);
         let status: Text2SqlV2StageArtifact["status"] = "success";
         let failure: Text2SqlV2FailureSemantic | undefined;
         let clarification: ClarificationPrompt | undefined;
@@ -794,7 +806,10 @@ export const createText2SqlV2LangGraph = (
           metadata: {
             route: result.route,
             routeKind: result.validation.routeKind,
-            confidence: result.plan.confidence
+            confidence: result.plan.confidence,
+            ledgerGateOutcome: result.validation.ledgerGateOutcome ?? "pass",
+            blockedObligationCount: result.validation.blockedObligationIds?.length ?? 0,
+            warningObligationCount: result.validation.warningObligationIds?.length ?? 0
           }
         });
 
@@ -805,7 +820,10 @@ export const createText2SqlV2LangGraph = (
           detail: `semantic-plan route ${result.route}`,
           outputSummary: {
             route: result.route,
-            confidence: result.plan.confidence
+            confidence: result.plan.confidence,
+            v2: {
+              planLedger: ledgerSummary
+            }
           },
           patch: {
             semanticPlanResult: result,

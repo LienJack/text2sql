@@ -82,6 +82,19 @@ export class GenerateSqlNode {
         }
       );
     }
+    const blockedObligationIds =
+      input.semanticPlan.planLedger?.summary.failedHardBlockerIds ?? [];
+    if (blockedObligationIds.length > 0) {
+      throw new DomainError(
+        "SEMANTIC_PLAN_LEDGER_GATE_BLOCKED",
+        "semantic-plan ledger gate blocked SQL generation",
+        422,
+        {
+          semanticPlan: input.semanticPlan,
+          blockedObligationIds
+        }
+      );
+    }
 
     const draft = input.stream
       ? await this.sqlGenerationService.stream(

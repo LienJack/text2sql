@@ -60,6 +60,7 @@ export class CorrectSqlNode {
       ...(input.semanticPlan?.evidenceRefs ?? []),
       ...(input.contextPack?.selectedEvidenceIds ?? [])
     ]);
+    const failedObligationIds = this.collectFailedObligationIds(input.validationArtifact);
 
     const artifact: SqlCorrectionArtifact = {
       failedSql: input.failedSql,
@@ -81,7 +82,8 @@ export class CorrectSqlNode {
         maxAttempts: budget.maxAttempts,
         evidenceRefs,
         semanticPlan: input.semanticPlan,
-        contextPack: input.contextPack
+        contextPack: input.contextPack,
+        failedObligationIds
       }),
       shouldRevalidate: decision.correctable && !budget.exhausted
     };
@@ -153,6 +155,7 @@ export class CorrectSqlNode {
     evidenceRefs: string[];
     semanticPlan?: SemanticPlanV1;
     contextPack?: SemanticContextPackV1;
+    failedObligationIds: string[];
   }): SqlCorrectionGroundingV1 {
     return {
       failedSqlRef: this.buildSqlRef(input.failedSql),
@@ -172,8 +175,19 @@ export class CorrectSqlNode {
       contextPackStatus: input.contextPack?.status,
       contextPackEvidenceCount:
         input.contextPack?.selectedContextSummary?.count ??
-        input.contextPack?.selectedEvidenceIds.length
+        input.contextPack?.selectedEvidenceIds.length,
+      failedObligationIds:
+        input.failedObligationIds.length > 0 ? input.failedObligationIds : undefined
     };
+  }
+
+  private collectFailedObligationIds(
+    validationArtifact?: SqlValidationArtifactV1
+  ): string[] {
+    return this.unique([
+      ...(validationArtifact?.failedObligationIds ?? []),
+      ...(validationArtifact?.checks.flatMap((check) => check.failedObligationIds ?? []) ?? [])
+    ]);
   }
 
   private buildSqlRef(sql: string): string {

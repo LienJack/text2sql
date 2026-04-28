@@ -1,6 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import type {
   SemanticContextPackV1,
+  SemanticPlanLedgerObligationV1,
+  SemanticPlanLedgerSummaryV1,
   SemanticPlanCoverageGapV1,
   SemanticPlanV1
 } from "@text2sql/shared-types";
@@ -87,7 +89,10 @@ export class SemanticPlanService {
       clarificationPolicy,
       contextWarnings: input.contextPack.warnings
     });
-    const joinPath = this.buildJoinPath(selectedTables);
+    const joinPath = this.buildJoinPath({
+      selectedTables,
+      contextPack: input.contextPack
+    });
     const forbiddenTables = this.unique([
       ...selectedTables.filter(
         (table) => allowedTables.length > 0 && !allowedTables.includes(table)
@@ -111,6 +116,20 @@ export class SemanticPlanService {
       coverageGaps
     });
 
+    const planLedger = this.buildPlanLedger({
+      selectedTables,
+      selectedColumns,
+      metrics,
+      grain: this.extractGrain(standaloneQuestion),
+      filters,
+      joinPath,
+      forbiddenTables,
+      evidenceRefs,
+      coverageGaps,
+      snapshotId,
+      contextPack: input.contextPack
+    });
+
     const plan: SemanticPlanV1 = {
       route,
       standaloneQuestion,
@@ -127,7 +146,8 @@ export class SemanticPlanService {
       confidence,
       evidenceRefs,
       ...(coverageGaps.length > 0 ? { coverageGaps } : {}),
-      snapshotId
+      snapshotId,
+      planLedger
     };
 
     return {
@@ -321,20 +341,237 @@ export class SemanticPlanService {
     return this.unique(filters).slice(0, MAX_FILTER_COUNT);
   }
 
-  private buildJoinPath(selectedTables: string[]): string[] {
-    if (selectedTables.length < 2) {
+  private buildJoinPath(input: {
+    selectedTables: string[];
+    contextPack: SemanticContextPackV1;
+  }): string[] {
+    if (input.selectedTables.length < 2) {
+      return [];
+    }
+    const relationshipRefs = input.contextPack.lanes?.relationships?.refs ?? [];
+    if (input.contextPack.lanes?.relationships && relationshipRefs.length === 0) {
       return [];
     }
     const joins: string[] = [];
-    for (let index = 0; index < selectedTables.length - 1; index += 1) {
-      const source = selectedTables[index];
-      const target = selectedTables[index + 1];
+    for (let index = 0; index < input.selectedTables.length - 1; index += 1) {
+      const source = input.selectedTables[index];
+      const target = input.selectedTables[index + 1];
       if (!source || !target) {
         continue;
       }
       joins.push(`${source}->${target}`);
     }
     return joins;
+  }
+
+  private buildPlanLedger(input: {
+    selectedTables: string[];
+    selectedColumns: string[];
+    metrics: string[];
+    grain?: string;
+    filters: string[];
+    joinPath: string[];
+    forbiddenTables: string[];
+    evidenceRefs: string[];
+    coverageGaps: SemanticPlanCoverageGapV1[];
+    snapshotId: string;
+    contextPack: SemanticContextPackV1;
+  }): NonNullable<SemanticPlanV1["planLedger"]> {
+    const obligations: SemanticPlanLedgerObligationV1[] = [];
+    const hasEvidence = input.evidenceRefs.length > 0;
+    const warningOnlyDegraded =
+      input.contextPack.status === "degraded" &&
+      input.selectedTables.length === 0 &&
+      input.selectedColumns.length === 0 &&
+      (input.contextPack.warnings ?? []).some((warning) =>
+        /rag|dense|rerank|retrieval|unavailable|disabled/i.test(warning)
+      );
+
+    for (const table of input.selectedTables) {
+      const forbidden = input.forbiddenTables.includes(table);
+      obligations.push({
+        id: `ledger:table:${table}`,
+        kind: forbidden ? "forbidden_table" : "table",
+        summary: forbidden
+          ? `SQL must not use forbidden table ${table}.`
+          : `SQL must use grounded table ${table}.`,
+        criticality: "hard_blocker",
+        status: forbidden ? "failed" : hasEvidence ? "grounded" : "failed",
+        evidenceRefs: input.evidenceRefs,
+        reasonCodes: forbidden
+          ? ["forbidden_table_selected"]
+          : hasEvidence
+            ? ["selected_table_grounded"]
+            : ["missing_selected_evidence_refs"],
+        subject: table
+      });
+    }
+
+    for (const column of input.selectedColumns) {
+      obligations.push({
+        id: `ledger:column:${column}`,
+        kind: "column",
+        summary: `SQL must use grounded column ${column}.`,
+        criticality: "hard_blocker",
+        status: hasEvidence ? "grounded" : "failed",
+        evidenceRefs: input.evidenceRefs,
+        reasonCodes: hasEvidence
+          ? ["selected_column_grounded"]
+          : ["missing_selected_evidence_refs"],
+        subject: column
+      });
+    }
+
+    for (const metric of input.metrics) {
+      obligations.push({
+        id: `ledger:metric:${this.toLedgerIdToken(metric)}`,
+        kind: "metric",
+        summary: `SQL must satisfy metric ${metric}.`,
+        criticality: warningOnlyDegraded ? "warning" : "hard_blocker",
+        status: hasEvidence ? "grounded" : warningOnlyDegraded ? "warning" : "failed",
+        evidenceRefs: input.evidenceRefs,
+        reasonCodes: hasEvidence ? ["metric_grounded"] : ["metric_grounding_missing"],
+        subject: metric
+      });
+    }
+
+    if (input.grain || input.filters.some((filter) => filter.startsWith("time_range:"))) {
+      const subject = input.grain ?? "time_range";
+      obligations.push({
+        id: `ledger:time-grain:${this.toLedgerIdToken(subject)}`,
+        kind: "time_grain",
+        summary: `SQL must preserve requested time grain or range: ${subject}.`,
+        criticality: warningOnlyDegraded ? "warning" : "hard_blocker",
+        status: hasEvidence ? "grounded" : warningOnlyDegraded ? "warning" : "failed",
+        evidenceRefs: input.evidenceRefs,
+        reasonCodes: hasEvidence ? ["time_grain_grounded"] : ["time_grain_grounding_missing"],
+        subject
+      });
+    }
+
+    for (const filter of input.filters.filter((value) => value.startsWith("filter:"))) {
+      obligations.push({
+        id: `ledger:filter:${this.toLedgerIdToken(filter)}`,
+        kind: "filter",
+        summary: `SQL must preserve requested filter signal ${filter}.`,
+        criticality: warningOnlyDegraded ? "warning" : "hard_blocker",
+        status: hasEvidence ? "grounded" : warningOnlyDegraded ? "warning" : "failed",
+        evidenceRefs: input.evidenceRefs,
+        reasonCodes: hasEvidence ? ["filter_grounded"] : ["filter_grounding_missing"],
+        subject: filter
+      });
+    }
+
+    if (input.selectedTables.length > 1) {
+      const joinPath = input.joinPath.join(" -> ");
+      obligations.push({
+        id: `ledger:join-path:${input.selectedTables.map((table) => this.toLedgerIdToken(table)).join("-")}`,
+        kind: "join_path",
+        summary: joinPath
+          ? `SQL must preserve join path ${joinPath}.`
+          : "SQL generation is blocked until a multi-table join path is grounded.",
+        criticality: "hard_blocker",
+        status: input.joinPath.length > 0 ? "grounded" : "failed",
+        evidenceRefs: input.contextPack.lanes?.relationships?.refs ?? input.evidenceRefs,
+        reasonCodes:
+          input.joinPath.length > 0
+            ? ["join_path_grounded"]
+            : ["missing_join_path"],
+        subject: joinPath || input.selectedTables.join(",")
+      });
+    }
+
+    for (const gap of input.coverageGaps) {
+      obligations.push({
+        id: `ledger:evidence:${gap.subjectKind}:${this.toLedgerIdToken(gap.reasonCode)}`,
+        kind: "evidence",
+        summary: `Semantic plan has coverage gap ${gap.reasonCode}.`,
+        criticality:
+          gap.impactScope === "sql_generation" && !warningOnlyDegraded
+            ? "hard_blocker"
+            : "warning",
+        status:
+          gap.impactScope === "sql_generation" && !warningOnlyDegraded
+            ? "failed"
+            : "warning",
+        evidenceRefs: gap.evidenceRefs,
+        reasonCodes: [gap.reasonCode],
+        subject: gap.subjectKind
+      });
+    }
+
+    for (const warning of input.contextPack.warnings ?? []) {
+      const normalized = warning.trim().toLowerCase();
+      if (!normalized || normalized.startsWith("clarification_")) {
+        continue;
+      }
+      obligations.push({
+        id: `ledger:warning:${this.toLedgerIdToken(normalized)}`,
+        kind: "evidence",
+        summary: `Context warning: ${normalized}.`,
+        criticality: "warning",
+        status: "warning",
+        evidenceRefs: [],
+        reasonCodes: [normalized],
+        subject: normalized
+      });
+    }
+
+    return {
+      version: "plan-ledger.v1",
+      snapshotId: input.snapshotId,
+      obligations,
+      summary: this.summarizePlanLedger(input.snapshotId, obligations, input.evidenceRefs)
+    };
+  }
+
+  private summarizePlanLedger(
+    snapshotId: string,
+    obligations: SemanticPlanLedgerObligationV1[],
+    evidenceRefs: string[]
+  ): SemanticPlanLedgerSummaryV1 {
+    const failedHardBlockerIds = obligations
+      .filter(
+        (obligation) =>
+          obligation.criticality === "hard_blocker" &&
+          (obligation.status === "failed" || obligation.status === "unsupported")
+      )
+      .map((obligation) => obligation.id);
+    const warningIds = obligations
+      .filter((obligation) => obligation.criticality === "warning")
+      .map((obligation) => obligation.id);
+    return {
+      snapshotId,
+      total: obligations.length,
+      hardBlockerCount: obligations.filter(
+        (obligation) => obligation.criticality === "hard_blocker"
+      ).length,
+      warningCount: warningIds.length,
+      fulfilledCount: obligations.filter(
+        (obligation) =>
+          obligation.status === "grounded" ||
+          obligation.status === "claimed" ||
+          obligation.status === "fulfilled"
+      ).length,
+      failedCount: obligations.filter(
+        (obligation) =>
+          obligation.status === "failed" || obligation.status === "unsupported"
+      ).length,
+      failedHardBlockerIds,
+      warningIds,
+      reasonCodes: this.unique(obligations.flatMap((obligation) => obligation.reasonCodes)),
+      selectedEvidenceRefs: evidenceRefs
+    };
+  }
+
+  private toLedgerIdToken(value: string): string {
+    return (
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/gi, "-")
+        .replace(/^-+|-+$/g, "") || "unknown"
+    );
   }
 
   private buildCoverageGaps(input: {
@@ -349,7 +586,12 @@ export class SemanticPlanService {
     const hasGrounding =
       input.selectedTables.length > 0 || input.selectedColumns.length > 0;
 
-    if (input.evidenceRefs.length === 0 || !hasGrounding) {
+    if (
+      (input.routeKind === "text_to_sql" ||
+        input.routeKind === "clarify" ||
+        input.routeKind === "fail_closed") &&
+      (input.evidenceRefs.length === 0 || !hasGrounding)
+    ) {
       gaps.push({
         gapType: "evidence_gap",
         subjectKind: this.resolveEvidenceGapSubjectKind(input),

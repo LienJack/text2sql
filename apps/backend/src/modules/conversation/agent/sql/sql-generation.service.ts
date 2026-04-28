@@ -3,6 +3,7 @@ import type {
   SqlCorrectionGroundingV1,
   DatasourceType,
   PromptTemplateTraceEvidence,
+  SemanticPlanLedgerObligationV1,
   SemanticPlanV1,
   SqlGenerationArtifactV1,
   Text2SqlV2SmartDefaultsEvidenceV1,
@@ -233,6 +234,11 @@ export class SqlGenerationService {
   }): StructuredSqlGenerationArtifact {
     const references = this.extractSqlReferences(input.draft.sql);
     const evidenceRefs = this.unique(input.draft.semanticPlan?.evidenceRefs ?? []);
+    const obligationClaims = this.buildObligationClaims({
+      sql: input.draft.sql,
+      references,
+      semanticPlan: input.draft.semanticPlan
+    });
     const provider =
       input.draft.provider || input.draft.model || input.draft.modelCatalogId
         ? {
@@ -259,8 +265,132 @@ export class SqlGenerationService {
       smartDefaults: input.draft.smartDefaults,
       retryReason: input.retryReason?.trim() || undefined,
       coverage: input.draft.coverage,
-      correctionGrounding: input.correctionGrounding
+      correctionGrounding: input.correctionGrounding,
+      claimedObligationIds: obligationClaims.claimedObligationIds,
+      unsupportedClaims: obligationClaims.unsupportedClaims,
+      ledgerSnapshotId: input.draft.semanticPlan?.planLedger?.snapshotId ?? input.draft.semanticPlan?.snapshotId
     };
+  }
+
+  private buildObligationClaims(input: {
+    sql: string;
+    references: {
+      tables: Set<string>;
+      columns: Set<string>;
+      tableColumns: Set<string>;
+    };
+    semanticPlan?: SemanticPlanV1;
+  }): {
+    claimedObligationIds?: string[];
+    unsupportedClaims?: SqlGenerationArtifactV1["unsupportedClaims"];
+  } {
+    const obligations = input.semanticPlan?.planLedger?.obligations ?? [];
+    const claimedObligationIds = obligations
+      .filter((obligation) => this.isObligationClaimed(obligation, input))
+      .map((obligation) => obligation.id);
+    const unsupportedClaims = this.findUnsupportedClaims({
+      references: input.references,
+      semanticPlan: input.semanticPlan,
+      obligations
+    });
+    return {
+      claimedObligationIds:
+        claimedObligationIds.length > 0 ? this.unique(claimedObligationIds) : undefined,
+      unsupportedClaims: unsupportedClaims.length > 0 ? unsupportedClaims : undefined
+    };
+  }
+
+  private isObligationClaimed(
+    obligation: SemanticPlanLedgerObligationV1,
+    input: {
+      sql: string;
+      references: {
+        tables: Set<string>;
+        columns: Set<string>;
+        tableColumns: Set<string>;
+      };
+    }
+  ): boolean {
+    const subject = obligation.subject ? this.normalizeQualifiedIdentifier(obligation.subject) : undefined;
+    const unqualifiedSubject = obligation.subject ? this.normalizeIdentifier(obligation.subject) : undefined;
+    if (!subject && !unqualifiedSubject) {
+      return false;
+    }
+    if (obligation.kind === "table" || obligation.kind === "forbidden_table") {
+      return Boolean(unqualifiedSubject && input.references.tables.has(unqualifiedSubject));
+    }
+    if (obligation.kind === "column") {
+      return Boolean(
+        (subject && input.references.tableColumns.has(subject)) ||
+          (unqualifiedSubject && input.references.columns.has(unqualifiedSubject))
+      );
+    }
+    if (obligation.kind === "metric") {
+      return Boolean(
+        unqualifiedSubject &&
+          (new RegExp(`\\b${this.escapeRegex(unqualifiedSubject)}\\b`, "i").test(input.sql) ||
+            /\b(count|sum|avg|min|max)\s*\(/i.test(input.sql))
+      );
+    }
+    if (obligation.kind === "time_grain") {
+      return /\b(date_trunc|strftime|extract|group\s+by|where)\b/i.test(input.sql);
+    }
+    if (obligation.kind === "filter") {
+      return /\bwhere\b/i.test(input.sql);
+    }
+    if (obligation.kind === "join_path") {
+      return /\bjoin\b/i.test(input.sql);
+    }
+    return false;
+  }
+
+  private findUnsupportedClaims(input: {
+    references: {
+      tables: Set<string>;
+      columns: Set<string>;
+      tableColumns: Set<string>;
+    };
+    semanticPlan?: SemanticPlanV1;
+    obligations: SemanticPlanLedgerObligationV1[];
+  }): NonNullable<SqlGenerationArtifactV1["unsupportedClaims"]> {
+    const supportedTables = new Set([
+      ...this.normalizeList(input.semanticPlan?.selectedTables ?? []),
+      ...input.obligations
+        .filter((obligation) => obligation.kind === "table")
+        .map((obligation) => this.normalizeIdentifier(obligation.subject))
+        .filter((value): value is string => Boolean(value))
+    ]);
+    const supportedColumns = new Set([
+      ...this.normalizeList(input.semanticPlan?.selectedColumns ?? []),
+      ...input.obligations
+        .filter((obligation) => obligation.kind === "column")
+        .map((obligation) => this.normalizeQualifiedIdentifier(obligation.subject))
+        .filter((value): value is string => Boolean(value))
+    ]);
+    const unsupported: NonNullable<SqlGenerationArtifactV1["unsupportedClaims"]> = [];
+    for (const table of input.references.tables) {
+      if (supportedTables.size > 0 && !supportedTables.has(table)) {
+        unsupported.push({
+          kind: "table",
+          value: table,
+          reasonCode: "table_not_in_ledger"
+        });
+      }
+    }
+    for (const column of input.references.tableColumns) {
+      if (supportedColumns.size > 0 && !supportedColumns.has(column)) {
+        unsupported.push({
+          kind: "column",
+          value: column,
+          reasonCode: "column_not_in_ledger"
+        });
+      }
+    }
+    return unsupported;
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   private shouldRetryAsNonStream(error: unknown): boolean {
@@ -1272,6 +1402,14 @@ export class SqlGenerationService {
       return undefined;
     }
     return `${table}.${column}`;
+  }
+
+  private normalizeList(values: string[]): string[] {
+    return this.unique(
+      values
+        .map((value) => this.normalizeQualifiedIdentifier(value))
+        .filter((value): value is string => Boolean(value))
+    );
   }
 
   private hasTableColumnFallback(

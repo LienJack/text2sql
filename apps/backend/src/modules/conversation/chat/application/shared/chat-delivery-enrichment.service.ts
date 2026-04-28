@@ -458,9 +458,13 @@ export class ChatDeliveryEnrichmentService {
       stageOrder: traceV2.stageOrder,
       stageArtifacts: traceV2.stages,
       contextPack: traceV2.contextPack,
-      semanticPlan: traceV2.semanticPlan,
+      semanticPlan: this.toSafeSemanticPlan(traceV2.semanticPlan),
       sqlGeneration: traceV2.sqlGeneration,
       sqlValidation: traceV2.sqlValidation,
+      planLedger:
+        traceV2.planLedger ??
+        traceV2.sqlValidation?.ledgerFulfillment ??
+        traceV2.semanticPlan?.planLedger?.summary,
       runtimePlan: traceV2.runtimePlan,
       artifactRefs: traceV2.artifactRefs,
       smartDefaults: traceV2.smartDefaults,
@@ -473,6 +477,16 @@ export class ChatDeliveryEnrichmentService {
           .reverse()
           .find((stage) => stage.status === "failed")?.failure
     };
+  }
+
+  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+    semanticPlan: T
+  ): T {
+    if (!semanticPlan) {
+      return semanticPlan;
+    }
+    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    return safePlan as T;
   }
 
   private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {

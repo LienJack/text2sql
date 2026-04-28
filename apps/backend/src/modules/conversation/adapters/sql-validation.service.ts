@@ -2,6 +2,7 @@ import { Injectable, Optional } from "@nestjs/common";
 import type {
   DatasourceType,
   SemanticPlanV1,
+  SqlGenerationArtifactV1,
   SqlValidationArtifactV1,
   SqlValidationCheckV1
 } from "@text2sql/shared-types";
@@ -16,6 +17,7 @@ interface ValidateSqlInput {
   datasourceId?: string;
   datasourceType?: DatasourceType;
   semanticPlan?: SemanticPlanV1;
+  sqlArtifact?: SqlGenerationArtifactV1;
   accessContext?: SqlTableAccessContext;
   allowedTables?: string[];
 }
@@ -59,6 +61,12 @@ export class SqlValidationService {
     checks.push(planCoverage);
 
     checks.push(this.validateRelationshipPath(sql, input.semanticPlan));
+    const ledgerFulfillment = this.validateLedgerFulfillment({
+      sql,
+      semanticPlan: input.semanticPlan,
+      sqlArtifact: input.sqlArtifact
+    });
+    checks.push(ledgerFulfillment.check);
     checks.push(this.validateDialect(sql, input.datasourceType));
     checks.push(
       this.validateDryRun({
@@ -82,16 +90,27 @@ export class SqlValidationService {
       return {
         status: "passed",
         checks,
-        correctable: false
+        correctable: false,
+        ledgerFulfillment: ledgerFulfillment.summary
       };
     }
 
     const failure = this.selectPrimaryFailure(failedChecks);
     const correctable = this.isCorrectableFailure(failure.check, failure.code);
+    const failedObligationIds = this.unique(
+      failedChecks.flatMap((check) => check.failedObligationIds ?? [])
+    );
     return {
       status: "failed",
       checks,
       correctable,
+      ledgerFulfillment: ledgerFulfillment.summary,
+      ...(failedObligationIds.length > 0 ? { failedObligationIds } : {}),
+      ...(correctable
+        ? { correctableObligationIds: failedObligationIds }
+        : failedObligationIds.length > 0
+          ? { terminalObligationIds: failedObligationIds }
+          : {}),
       failure: {
         code: failure.code ?? "SQL_VALIDATION_FAILED",
         message: failure.message ?? "SQL validation failed",
@@ -332,6 +351,130 @@ export class SqlValidationService {
     };
   }
 
+  private validateLedgerFulfillment(input: {
+    sql: string;
+    semanticPlan?: SemanticPlanV1;
+    sqlArtifact?: SqlGenerationArtifactV1;
+  }): { check: SqlValidationCheckV1; summary?: SqlValidationArtifactV1["ledgerFulfillment"] } {
+    const ledger = input.semanticPlan?.planLedger;
+    if (!ledger) {
+      return {
+        check: {
+          check: "ledger-fulfillment",
+          status: "skipped",
+          message: "ledger fulfillment skipped: semantic plan ledger missing"
+        }
+      };
+    }
+
+    const tables = this.extractTables(input.sql);
+    const tableColumns = this.extractTableColumns(input.sql);
+    const columns = tableColumns.map((column) => column.split(".").at(-1) ?? column);
+    const failed: Array<{ id: string; reasonCode: string; terminal: boolean }> = [];
+
+    for (const obligation of ledger.obligations) {
+      if (obligation.criticality !== "hard_blocker") {
+        continue;
+      }
+      const subject = obligation.subject;
+      const normalizedSubject = this.normalizeIdentifier(subject);
+      const qualifiedSubject = this.normalizeQualifiedIdentifier(subject);
+      const fail = (reasonCode: string, terminal = false) => {
+        failed.push({ id: obligation.id, reasonCode, terminal });
+      };
+      if (obligation.kind === "forbidden_table" || obligation.kind === "permission") {
+        if (normalizedSubject && tables.includes(normalizedSubject)) {
+          fail("ledger_terminal_permission_obligation", true);
+        }
+        continue;
+      }
+      if (obligation.status === "failed" || obligation.status === "unsupported") {
+        fail(obligation.reasonCodes[0] ?? "ledger_pre_generation_obligation_failed");
+        continue;
+      }
+      if (obligation.kind === "table" && normalizedSubject && !tables.includes(normalizedSubject)) {
+        fail("ledger_table_not_used");
+      }
+      if (
+        obligation.kind === "column" &&
+        qualifiedSubject &&
+        !tableColumns.includes(qualifiedSubject) &&
+        (!normalizedSubject || !columns.includes(normalizedSubject))
+      ) {
+        fail("ledger_column_not_used");
+      }
+      if (
+        obligation.kind === "metric" &&
+        normalizedSubject &&
+        !new RegExp(`\\b${this.escapeRegex(normalizedSubject)}\\b`, "i").test(input.sql) &&
+        !/\b(count|sum|avg|min|max)\s*\(/i.test(input.sql)
+      ) {
+        fail("ledger_metric_not_claimed");
+      }
+      if (
+        obligation.kind === "time_grain" &&
+        !/\b(date_trunc|strftime|extract|group\s+by|where)\b/i.test(input.sql)
+      ) {
+        fail("ledger_time_grain_not_used");
+      }
+      if (obligation.kind === "filter" && !/\bwhere\b/i.test(input.sql)) {
+        fail("ledger_filter_not_used");
+      }
+      if (obligation.kind === "join_path" && !/\bjoin\b/i.test(input.sql)) {
+        fail("ledger_join_path_not_used");
+      }
+    }
+
+    for (const claim of input.sqlArtifact?.unsupportedClaims ?? []) {
+      failed.push({
+        id: `unsupported:${claim.kind}:${claim.value}`,
+        reasonCode: claim.reasonCode,
+        terminal: true
+      });
+    }
+
+    const failedObligationIds = this.unique(failed.map((item) => item.id));
+    const terminal = failed.some((item) => item.terminal);
+    const reasonCodes = this.unique(failed.map((item) => item.reasonCode));
+    const summary = {
+      ...ledger.summary,
+      fulfilledCount: Math.max(0, ledger.summary.total - failedObligationIds.length),
+      failedCount: failedObligationIds.length,
+      failedHardBlockerIds: failedObligationIds.filter((id) => !id.startsWith("unsupported:")),
+      unsupportedCount: failedObligationIds.filter((id) => id.startsWith("unsupported:")).length,
+      reasonCodes: reasonCodes.length > 0 ? reasonCodes : ledger.summary.reasonCodes
+    };
+
+    if (failedObligationIds.length === 0) {
+      return {
+        check: {
+          check: "ledger-fulfillment",
+          status: "passed",
+          obligationIds: ledger.obligations.map((obligation) => obligation.id),
+          reasonCodes: ["ledger_fulfilled"]
+        },
+        summary
+      };
+    }
+
+    return {
+      check: {
+        check: "ledger-fulfillment",
+        status: "failed",
+        code: terminal
+          ? "SQL_LEDGER_TERMINAL_OBLIGATION_FAILED"
+          : "SQL_LEDGER_FULFILLMENT_FAILED",
+        message: terminal
+          ? "SQL contains terminal ledger violations"
+          : "SQL does not fulfill all required ledger obligations",
+        obligationIds: ledger.obligations.map((obligation) => obligation.id),
+        failedObligationIds,
+        reasonCodes
+      },
+      summary
+    };
+  }
+
   private validateDialect(sql: string, datasourceType?: DatasourceType): SqlValidationCheckV1 {
     if (!datasourceType || datasourceType === "sqlite") {
       if (/\bshow\s+tables\b/i.test(sql)) {
@@ -535,6 +678,9 @@ export class SqlValidationService {
       if (failure.check === "relationship-path" || failure.check === "dry-plan") {
         return 55;
       }
+      if (failure.check === "ledger-fulfillment") {
+        return failure.code === "SQL_LEDGER_TERMINAL_OBLIGATION_FAILED" ? 85 : 52;
+      }
       if (failure.check === "plan-coverage") {
         return 50;
       }
@@ -556,6 +702,9 @@ export class SqlValidationService {
     }
     if (code === "SQL_DRY_PLAN_UNSUPPORTED") {
       return false;
+    }
+    if (check === "ledger-fulfillment") {
+      return code !== "SQL_LEDGER_TERMINAL_OBLIGATION_FAILED";
     }
     if (check === "parse" || check === "relationship-path" || check === "dialect") {
       return true;
@@ -639,6 +788,26 @@ export class SqlValidationService {
     return Array.from(
       new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
     );
+  }
+
+  private normalizeQualifiedIdentifier(value: string | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = value
+      .trim()
+      .replace(/^[`"'\[\]]+|[`"'\[\]]+$/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private unique(values: string[]): string[] {
+    return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   private normalizeList(values: string[]): string[] {

@@ -169,6 +169,9 @@ export class Text2SqlV2LangGraphResultMapper {
       semanticPlan: state.semanticPlan,
       sqlGeneration: state.sqlGenerationArtifact,
       sqlValidation: state.sqlValidationArtifact,
+      planLedger:
+        state.sqlValidationArtifact?.ledgerFulfillment ??
+        state.semanticPlan?.planLedger?.summary,
       runtimePlan: this.resolveRuntimePlan(state, stageArtifacts),
       smartDefaults: state.sqlGenerationArtifact?.smartDefaults
     });

@@ -10,6 +10,9 @@ export interface SemanticPlanValidationResult {
   unsupportedTables: string[];
   unsupportedColumns: string[];
   reasons: string[];
+  ledgerGateOutcome: "pass" | "warning" | "block";
+  blockedObligationIds: string[];
+  warningObligationIds: string[];
   routeKind: "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
   outcome: "ready" | "needs_clarification" | "direct_answer" | "fail_closed";
   evidenceComplete: boolean;
@@ -37,6 +40,17 @@ export class SemanticPlanValidator {
     const coverageGaps = this.readCoverageGaps(plan.coverageGaps);
     const invalidCoverageGapCount = this.countInvalidCoverageGaps(plan.coverageGaps);
     const snapshotId = this.readOptionalText((plan as { snapshotId?: unknown }).snapshotId);
+    const ledgerSummary = plan.planLedger?.summary;
+    const blockedObligationIds = this.normalizeEvidenceRefs(
+      ledgerSummary?.failedHardBlockerIds ?? []
+    );
+    const warningObligationIds = this.normalizeEvidenceRefs(ledgerSummary?.warningIds ?? []);
+    const ledgerGateOutcome =
+      blockedObligationIds.length > 0
+        ? "block"
+        : warningObligationIds.length > 0
+          ? "warning"
+          : "pass";
 
     const unsupportedTables = selectedTables.filter((table) => {
       if (forbiddenTables.has(table)) {
@@ -116,11 +130,24 @@ export class SemanticPlanValidator {
     if ("snapshotId" in plan && snapshotId === undefined) {
       reasons.push("plan_invalid_snapshot_id");
     }
+    if (ledgerGateOutcome === "block") {
+      reasons.push("plan_ledger_gate_blocked");
+    }
 
+    const terminalLedgerBlock = (plan.planLedger?.obligations ?? []).some(
+      (obligation) =>
+        blockedObligationIds.includes(obligation.id) &&
+        (obligation.kind === "forbidden_table" ||
+          obligation.kind === "permission" ||
+          obligation.reasonCodes.some((reasonCode) =>
+            /forbidden|permission|policy|unsupported/i.test(reasonCode)
+          ))
+    );
     const terminal =
       routeKind === "fail_closed" ||
       unsupportedTables.length > 0 ||
-      unsupportedColumns.length > 0;
+      unsupportedColumns.length > 0 ||
+      terminalLedgerBlock;
     const shouldDirectAnswer = routeKind === "metadata" || routeKind === "general";
     const outcome = terminal
       ? "fail_closed"
@@ -128,6 +155,8 @@ export class SemanticPlanValidator {
         ? "direct_answer"
         : routeKind === "clarify"
           ? "needs_clarification"
+          : ledgerGateOutcome === "block"
+            ? "needs_clarification"
           : "ready";
 
     return {
@@ -136,10 +165,13 @@ export class SemanticPlanValidator {
       unsupportedTables,
       unsupportedColumns,
       reasons,
+      ledgerGateOutcome,
+      blockedObligationIds,
+      warningObligationIds,
       routeKind,
       outcome,
       evidenceComplete,
-      requiresClarification: routeKind === "clarify",
+      requiresClarification: routeKind === "clarify" || outcome === "needs_clarification",
       shouldDirectAnswer,
       terminal
     };

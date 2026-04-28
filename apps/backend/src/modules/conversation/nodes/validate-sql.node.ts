@@ -35,6 +35,7 @@ export class ValidateSqlNode {
       datasourceId: input.datasourceId,
       datasourceType: input.datasourceType,
       semanticPlan: input.semanticPlan,
+      sqlArtifact: input.sqlArtifact,
       accessContext: input.accessContext,
       allowedTables: input.allowedTables
     });

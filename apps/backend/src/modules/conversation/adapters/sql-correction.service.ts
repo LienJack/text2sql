@@ -13,6 +13,7 @@ export interface SqlCorrectionDecision {
   category: "validation" | "governance" | "safety" | "provider" | "execution" | "unknown";
   source: "validation" | "execution";
   failureCode?: string;
+  failedObligationIds?: string[];
 }
 
 export interface SqlCorrectionBudget {
@@ -39,7 +40,10 @@ export class SqlCorrectionService {
   decide(error: unknown): SqlCorrectionDecision {
     const validationArtifact = this.readValidationArtifact(error);
     if (validationArtifact?.status === "failed" && validationArtifact.failure) {
-      return this.decideFromValidationFailure(validationArtifact.failure);
+      return {
+        ...this.decideFromValidationFailure(validationArtifact.failure),
+        failedObligationIds: validationArtifact.failedObligationIds
+      };
     }
 
     const validationFailure = this.readValidationFailure(error);
@@ -218,7 +222,10 @@ export class SqlCorrectionService {
       status: "failed",
       checks,
       correctable: Boolean(validationArtifact.correctable),
-      failure
+      failure,
+      failedObligationIds: this.readStringArray(validationArtifact.failedObligationIds),
+      terminalObligationIds: this.readStringArray(validationArtifact.terminalObligationIds),
+      correctableObligationIds: this.readStringArray(validationArtifact.correctableObligationIds)
     };
   }
 
@@ -267,7 +274,8 @@ export class SqlCorrectionService {
             check !== "relationship-path" &&
             check !== "dialect" &&
             check !== "dry-run" &&
-            check !== "dry-plan") ||
+            check !== "dry-plan" &&
+            check !== "ledger-fulfillment") ||
           (status !== "passed" && status !== "failed" && status !== "skipped")
         ) {
           return undefined;
@@ -278,6 +286,15 @@ export class SqlCorrectionService {
           ...(this.readString(item.code) ? { code: this.readString(item.code) } : {}),
           ...(this.readString(item.message)
             ? { message: this.readString(item.message) }
+            : {}),
+          ...(this.readStringArray(item.obligationIds).length > 0
+            ? { obligationIds: this.readStringArray(item.obligationIds) }
+            : {}),
+          ...(this.readStringArray(item.failedObligationIds).length > 0
+            ? { failedObligationIds: this.readStringArray(item.failedObligationIds) }
+            : {}),
+          ...(this.readStringArray(item.reasonCodes).length > 0
+            ? { reasonCodes: this.readStringArray(item.reasonCodes) }
             : {})
         };
       })
@@ -297,5 +314,14 @@ export class SqlCorrectionService {
     }
     const normalized = value.trim();
     return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => this.readString(item))
+      .filter((item): item is string => Boolean(item));
   }
 }
