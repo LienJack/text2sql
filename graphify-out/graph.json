@@ -160,7 +160,7 @@
       "label": "isAllowedByRule()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L561",
+      "source_location": "L562",
       "id": "check_backend_capability_boundaries_isallowedbyrule",
       "community": 8,
       "norm_label": "isallowedbyrule()"
@@ -169,7 +169,7 @@
       "label": "isForbiddenBusinessDomainDependency()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L579",
+      "source_location": "L580",
       "id": "check_backend_capability_boundaries_isforbiddenbusinessdomaindependency",
       "community": 8,
       "norm_label": "isforbiddenbusinessdomaindependency()"
@@ -178,7 +178,7 @@
       "label": "isForbiddenText2SqlLegacyChatDependency()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L592",
+      "source_location": "L593",
       "id": "check_backend_capability_boundaries_isforbiddentext2sqllegacychatdependency",
       "community": 8,
       "norm_label": "isforbiddentext2sqllegacychatdependency()"
@@ -187,7 +187,7 @@
       "label": "runCapabilityBoundaryCheck()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L602",
+      "source_location": "L603",
       "id": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "community": 8,
       "norm_label": "runcapabilityboundarycheck()"
@@ -196,7 +196,7 @@
       "label": "printViolations()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L798",
+      "source_location": "L799",
       "id": "check_backend_capability_boundaries_printviolations",
       "community": 8,
       "norm_label": "printviolations()"
@@ -205,7 +205,7 @@
       "label": "main()",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L811",
+      "source_location": "L812",
       "id": "check_backend_capability_boundaries_main",
       "community": 8,
       "norm_label": "main()"
@@ -12802,6 +12802,15 @@
       "norm_label": ".constructor()"
     },
     {
+      "label": "knowledge.ts",
+      "file_type": "code",
+      "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge.ts",
+      "source_location": "L1",
+      "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_ts",
+      "community": 507,
+      "norm_label": "knowledge.ts"
+    },
+    {
       "label": "request-id.middleware.ts",
       "file_type": "code",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/middleware/request-id.middleware.ts",
@@ -13257,7 +13266,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/llm/embedding-gateway.interface.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_llm_embedding_gateway_interface_ts",
-      "community": 507,
+      "community": 508,
       "norm_label": "embedding-gateway.interface.ts"
     },
     {
@@ -13572,7 +13581,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/llm/llm-gateway.interface.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_llm_llm_gateway_interface_ts",
-      "community": 508,
+      "community": 509,
       "norm_label": "llm-gateway.interface.ts"
     },
     {
@@ -13941,7 +13950,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/llm/provider-adapters/provider-capabilities.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_llm_provider_adapters_provider_capabilities_ts",
-      "community": 509,
+      "community": 510,
       "norm_label": "provider-capabilities.ts"
     },
     {
@@ -14139,7 +14148,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/llm/provider-adapters/provider-adapter.interface.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_llm_provider_adapters_provider_adapter_interface_ts",
-      "community": 510,
+      "community": 511,
       "norm_label": "provider-adapter.interface.ts"
     },
     {
@@ -15561,7 +15570,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/platform/data/cache/index.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_platform_data_cache_index_ts",
-      "community": 511,
+      "community": 512,
       "norm_label": "index.ts"
     },
     {
@@ -15930,7 +15939,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/platform/data/persistence/index.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_platform_data_persistence_index_ts",
-      "community": 512,
+      "community": 513,
       "norm_label": "index.ts"
     },
     {
@@ -15939,7 +15948,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/platform/data/persistence/modeling-graph.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_platform_data_persistence_modeling_graph_types_ts",
-      "community": 513,
+      "community": 514,
       "norm_label": "modeling-graph.types.ts"
     },
     {
@@ -15993,7 +16002,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/platform/data/query/index.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_platform_data_query_index_ts",
-      "community": 514,
+      "community": 515,
       "norm_label": "index.ts"
     },
     {
@@ -16389,7 +16398,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/observability/langsmith.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_observability_langsmith_types_ts",
-      "community": 515,
+      "community": 516,
       "norm_label": "langsmith.types.ts"
     },
     {
@@ -17271,7 +17280,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/rag/retrieval/rag-retrieval.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_rag_retrieval_rag_retrieval_types_ts",
-      "community": 516,
+      "community": 517,
       "norm_label": "rag-retrieval.types.ts"
     },
     {
@@ -19737,7 +19746,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/contracts/knowledge-rag.contract.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_contracts_knowledge_rag_contract_ts",
-      "community": 517,
+      "community": 518,
       "norm_label": "knowledge-rag.contract.ts"
     },
     {
@@ -19746,7 +19755,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/contracts/knowledge-memory.contract.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_contracts_knowledge_memory_contract_ts",
-      "community": 518,
+      "community": 519,
       "norm_label": "knowledge-memory.contract.ts"
     },
     {
@@ -19755,7 +19764,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_contracts_knowledge_facade_contract_ts",
-      "community": 519,
+      "community": 520,
       "norm_label": "knowledge-facade.contract.ts"
     },
     {
@@ -19764,7 +19773,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/contracts/knowledge-semantic-registry.contract.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_contracts_knowledge_semantic_registry_contract_ts",
-      "community": 520,
+      "community": 521,
       "norm_label": "knowledge-semantic-registry.contract.ts"
     },
     {
@@ -19773,7 +19782,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/contracts/knowledge-glossary.contract.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_contracts_knowledge_glossary_contract_ts",
-      "community": 521,
+      "community": 522,
       "norm_label": "knowledge-glossary.contract.ts"
     },
     {
@@ -20196,7 +20205,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_rag_retrieval_rag_retrieval_types_ts",
-      "community": 522,
+      "community": 523,
       "norm_label": "rag-retrieval.types.ts"
     },
     {
@@ -20367,7 +20376,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/modeling/modeling-graph.validator.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_modeling_modeling_graph_validator_ts",
-      "community": 523,
+      "community": 524,
       "norm_label": "modeling-graph.validator.ts"
     },
     {
@@ -20376,7 +20385,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/modeling/modeling-graph.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_modeling_modeling_graph_types_ts",
-      "community": 524,
+      "community": 525,
       "norm_label": "modeling-graph.types.ts"
     },
     {
@@ -20610,7 +20619,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/knowledge/semantic-spine/semantic-spine.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_knowledge_semantic_spine_semantic_spine_types_ts",
-      "community": 525,
+      "community": 526,
       "norm_label": "semantic-spine.types.ts"
     },
     {
@@ -21600,7 +21609,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/governance/dto/index.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_governance_dto_index_ts",
-      "community": 526,
+      "community": 527,
       "norm_label": "index.ts"
     },
     {
@@ -30393,7 +30402,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/data/query/query-executor.interface.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_data_query_query_executor_interface_ts",
-      "community": 527,
+      "community": 528,
       "norm_label": "query-executor.interface.ts"
     },
     {
@@ -33255,7 +33264,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/contracts/text2sql-v2.types.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_contracts_text2sql_v2_types_ts",
-      "community": 528,
+      "community": 529,
       "norm_label": "text2sql-v2.types.ts"
     },
     {
@@ -33822,7 +33831,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.bundle.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_runtime_smart_defaults_text2sql_smart_defaults_bundle_ts",
-      "community": 529,
+      "community": 530,
       "norm_label": "text2sql-smart-defaults.bundle.ts"
     },
     {
@@ -33948,7 +33957,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_text2sql_workflow_runner_service_ts",
-      "community": 530,
+      "community": 531,
       "norm_label": "text2sql-workflow-runner.service.ts"
     },
     {
@@ -34146,7 +34155,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_stages_run_v2_langgraph_stage_ts",
-      "community": 531,
+      "community": 532,
       "norm_label": "run-v2-langgraph.stage.ts"
     },
     {
@@ -34191,7 +34200,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/contracts/text2sql-stage-name.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_contracts_text2sql_stage_name_ts",
-      "community": 532,
+      "community": 533,
       "norm_label": "text2sql-stage-name.ts"
     },
     {
@@ -34200,7 +34209,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/contracts/text2sql-stage.interface.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_contracts_text2sql_stage_interface_ts",
-      "community": 533,
+      "community": 534,
       "norm_label": "text2sql-stage.interface.ts"
     },
     {
@@ -34209,7 +34218,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/contracts/text2sql-stage-result.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_contracts_text2sql_stage_result_ts",
-      "community": 534,
+      "community": 535,
       "norm_label": "text2sql-stage-result.ts"
     },
     {
@@ -34218,7 +34227,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/text2sql/contracts/text2sql-run-context.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_text2sql_contracts_text2sql_run_context_ts",
-      "community": 535,
+      "community": 536,
       "norm_label": "text2sql-run-context.ts"
     },
     {
@@ -38817,7 +38826,7 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/conversation/projection/read-model/run-view-support.guard.ts",
       "source_location": "L1",
       "id": "users_lienli_documents_github_text2sql_apps_backend_src_modules_conversation_projection_read_model_run_view_support_guard_ts",
-      "community": 536,
+      "community": 537,
       "norm_label": "run-view-support.guard.ts"
     }
   ],
@@ -39018,7 +39027,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L561",
+      "source_location": "L562",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_isallowedbyrule",
@@ -39030,7 +39039,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L579",
+      "source_location": "L580",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_isforbiddenbusinessdomaindependency",
@@ -39042,7 +39051,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L592",
+      "source_location": "L593",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_isforbiddentext2sqllegacychatdependency",
@@ -39054,7 +39063,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L602",
+      "source_location": "L603",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_runcapabilityboundarycheck",
@@ -39066,7 +39075,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L798",
+      "source_location": "L799",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_printviolations",
@@ -39078,7 +39087,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L811",
+      "source_location": "L812",
       "weight": 1.0,
       "_src": "users_lienli_documents_github_text2sql_scripts_check_backend_capability_boundaries_ts",
       "_tgt": "check_backend_capability_boundaries_main",
@@ -39138,7 +39147,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L813",
+      "source_location": "L814",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_parsecsvenv",
@@ -39162,7 +39171,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L814",
+      "source_location": "L815",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_parseintegerenv",
@@ -39174,7 +39183,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L817",
+      "source_location": "L818",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_parseconversationknowledgeallowlistenv",
@@ -39186,7 +39195,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L812",
+      "source_location": "L813",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_findreporoot",
@@ -39222,7 +39231,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L621",
+      "source_location": "L622",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_collectfiles",
@@ -39246,7 +39255,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L644",
+      "source_location": "L645",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_createlinestarts",
@@ -39258,7 +39267,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L673",
+      "source_location": "L674",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_indextolinecolumn",
@@ -39270,7 +39279,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L683",
+      "source_location": "L684",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_compactline",
@@ -39282,7 +39291,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L668",
+      "source_location": "L669",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_toimportpairkey",
@@ -39294,7 +39303,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L611",
+      "source_location": "L612",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_buildconversationknowledgeallowlistset",
@@ -39318,7 +39327,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L614",
+      "source_location": "L615",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_normalizenonnegativeinteger",
@@ -39330,7 +39339,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L646",
+      "source_location": "L647",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_extractimportreferences",
@@ -39354,7 +39363,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L648",
+      "source_location": "L649",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_resolveimporttomodulefile",
@@ -39378,7 +39387,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L632",
+      "source_location": "L633",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_resolvedomain",
@@ -39390,7 +39399,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L716",
+      "source_location": "L717",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_isallowedbyrule",
@@ -39402,7 +39411,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L710",
+      "source_location": "L711",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_isforbiddenbusinessdomaindependency",
@@ -39414,7 +39423,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L689",
+      "source_location": "L690",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_runcapabilityboundarycheck",
       "_tgt": "check_backend_capability_boundaries_isforbiddentext2sqllegacychatdependency",
@@ -39426,7 +39435,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L832",
+      "source_location": "L833",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_runcapabilityboundarycheck",
@@ -39438,7 +39447,7 @@
       "relation": "calls",
       "confidence": "EXTRACTED",
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/scripts/check-backend-capability-boundaries.ts",
-      "source_location": "L856",
+      "source_location": "L857",
       "weight": 1.0,
       "_src": "check_backend_capability_boundaries_main",
       "_tgt": "check_backend_capability_boundaries_printviolations",
@@ -84417,8 +84426,8 @@
       "source_file": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/src/modules/data/persistence/rag-task-config.repository.ts",
       "source_location": "L140",
       "weight": 1.0,
-      "_src": "rag_task_config_repository_ragtaskconfigrepository_upsertconfig",
-      "_tgt": "rag_query_cache_service_ragquerycacheservice_get",
+      "_src": "rag_query_cache_service_ragquerycacheservice_get",
+      "_tgt": "rag_task_config_repository_ragtaskconfigrepository_upsertconfig",
       "source": "rag_query_cache_service_ragquerycacheservice_get",
       "target": "rag_task_config_repository_ragtaskconfigrepository_upsertconfig"
     },

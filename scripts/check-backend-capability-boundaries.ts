@@ -551,7 +551,8 @@ function resolveDomain(repoRoot: string, absolutePath: string): {
   }
   const pathAfterModules = relativePath.slice(`${MODULES_ROOT}/`.length);
   const rootSegment = pathAfterModules.split("/")[0];
-  const domain = MODULE_DOMAIN_MAP[rootSegment];
+  const rootSegmentWithoutExtension = rootSegment.replace(/\.[^.]+$/, "");
+  const domain = MODULE_DOMAIN_MAP[rootSegment] ?? MODULE_DOMAIN_MAP[rootSegmentWithoutExtension];
   if (!domain) {
     return null;
   }

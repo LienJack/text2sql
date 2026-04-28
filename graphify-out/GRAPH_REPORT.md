@@ -1,11 +1,11 @@
 # Graph Report - /Users/lienli/Documents/GitHub/text2sql  (2026-04-29)
 
 ## Corpus Check
-- 780 files · ~2,266,274 words
+- 781 files · ~2,266,621 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 4313 nodes · 8504 edges · 537 communities detected
+- 4314 nodes · 8504 edges · 538 communities detected
 - Extraction: 79% EXTRACTED · 21% INFERRED · 0% AMBIGUOUS · INFERRED: 1809 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -547,6 +547,7 @@
 - [[_COMMUNITY_Community 534|Community 534]]
 - [[_COMMUNITY_Community 535|Community 535]]
 - [[_COMMUNITY_Community 536|Community 536]]
+- [[_COMMUNITY_Community 537|Community 537]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `ok()` - 90 edges
@@ -2722,6 +2723,10 @@ Nodes (0):
 Cohesion: 1.0
 Nodes (0): 
 
+### Community 537 - "Community 537"
+Cohesion: 1.0
+Nodes (0): 
+
 ## Knowledge Gaps
 - **93 isolated node(s):** `ELK`, `ElkLayoutTimeoutError`, `AppModule`, `LlmModule`, `ApplyMemoryFeedbackDto` (+88 more)
   These have ≤1 connection - possible missing edges or undocumented components.
@@ -3448,72 +3453,76 @@ Nodes (0):
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 506`** (1 nodes): `express.d.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 507`** (1 nodes): `embedding-gateway.interface.ts`
+- **Thin community `Community 507`** (1 nodes): `knowledge.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 508`** (1 nodes): `llm-gateway.interface.ts`
+- **Thin community `Community 508`** (1 nodes): `embedding-gateway.interface.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 509`** (1 nodes): `provider-capabilities.ts`
+- **Thin community `Community 509`** (1 nodes): `llm-gateway.interface.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 510`** (1 nodes): `provider-adapter.interface.ts`
+- **Thin community `Community 510`** (1 nodes): `provider-capabilities.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 511`** (1 nodes): `index.ts`
+- **Thin community `Community 511`** (1 nodes): `provider-adapter.interface.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 512`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 513`** (1 nodes): `modeling-graph.types.ts`
+- **Thin community `Community 513`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 514`** (1 nodes): `index.ts`
+- **Thin community `Community 514`** (1 nodes): `modeling-graph.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 515`** (1 nodes): `langsmith.types.ts`
+- **Thin community `Community 515`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 516`** (1 nodes): `rag-retrieval.types.ts`
+- **Thin community `Community 516`** (1 nodes): `langsmith.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 517`** (1 nodes): `knowledge-rag.contract.ts`
+- **Thin community `Community 517`** (1 nodes): `rag-retrieval.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 518`** (1 nodes): `knowledge-memory.contract.ts`
+- **Thin community `Community 518`** (1 nodes): `knowledge-rag.contract.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 519`** (1 nodes): `knowledge-facade.contract.ts`
+- **Thin community `Community 519`** (1 nodes): `knowledge-memory.contract.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 520`** (1 nodes): `knowledge-semantic-registry.contract.ts`
+- **Thin community `Community 520`** (1 nodes): `knowledge-facade.contract.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 521`** (1 nodes): `knowledge-glossary.contract.ts`
+- **Thin community `Community 521`** (1 nodes): `knowledge-semantic-registry.contract.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 522`** (1 nodes): `rag-retrieval.types.ts`
+- **Thin community `Community 522`** (1 nodes): `knowledge-glossary.contract.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 523`** (1 nodes): `modeling-graph.validator.ts`
+- **Thin community `Community 523`** (1 nodes): `rag-retrieval.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 524`** (1 nodes): `modeling-graph.types.ts`
+- **Thin community `Community 524`** (1 nodes): `modeling-graph.validator.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 525`** (1 nodes): `semantic-spine.types.ts`
+- **Thin community `Community 525`** (1 nodes): `modeling-graph.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 526`** (1 nodes): `index.ts`
+- **Thin community `Community 526`** (1 nodes): `semantic-spine.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 527`** (1 nodes): `query-executor.interface.ts`
+- **Thin community `Community 527`** (1 nodes): `index.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 528`** (1 nodes): `text2sql-v2.types.ts`
+- **Thin community `Community 528`** (1 nodes): `query-executor.interface.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 529`** (1 nodes): `text2sql-smart-defaults.bundle.ts`
+- **Thin community `Community 529`** (1 nodes): `text2sql-v2.types.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 530`** (1 nodes): `text2sql-workflow-runner.service.ts`
+- **Thin community `Community 530`** (1 nodes): `text2sql-smart-defaults.bundle.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 531`** (1 nodes): `run-v2-langgraph.stage.ts`
+- **Thin community `Community 531`** (1 nodes): `text2sql-workflow-runner.service.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 532`** (1 nodes): `text2sql-stage-name.ts`
+- **Thin community `Community 532`** (1 nodes): `run-v2-langgraph.stage.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 533`** (1 nodes): `text2sql-stage.interface.ts`
+- **Thin community `Community 533`** (1 nodes): `text2sql-stage-name.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 534`** (1 nodes): `text2sql-stage-result.ts`
+- **Thin community `Community 534`** (1 nodes): `text2sql-stage.interface.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 535`** (1 nodes): `text2sql-run-context.ts`
+- **Thin community `Community 535`** (1 nodes): `text2sql-stage-result.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 536`** (1 nodes): `run-view-support.guard.ts`
+- **Thin community `Community 536`** (1 nodes): `text2sql-run-context.ts`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 537`** (1 nodes): `run-view-support.guard.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `ok()` connect `Community 5` to `Community 24`, `Community 1`, `Community 6`, `Community 15`?**
-  _High betweenness centrality (0.032) - this node is a cross-community bridge._
+  _High betweenness centrality (0.028) - this node is a cross-community bridge._
+- **Why does `collectClarificationBalanceGate()` connect `Community 34` to `Community 1`, `Community 2`, `Community 4`, `Community 8`, `Community 26`?**
+  _High betweenness centrality (0.013) - this node is a cross-community bridge._
 - **Are the 89 inferred relationships involving `ok()` (e.g. with `.applyFeedback()` and `.report()`) actually correct?**
   _`ok()` has 89 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `ELK`, `ElkLayoutTimeoutError`, `AppModule` to the rest of the system?**
@@ -3524,5 +3533,3 @@ _Questions this graph is uniquely positioned to answer:_
   _Cohesion score 0.02 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.03 - nodes in this community are weakly interconnected._
-- **Should `Community 3` be split into smaller, more focused modules?**
-  _Cohesion score 0.02 - nodes in this community are weakly interconnected._

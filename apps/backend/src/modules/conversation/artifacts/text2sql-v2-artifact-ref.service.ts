@@ -8,7 +8,7 @@ import type {
 import {
   KNOWLEDGE_FACADE_CONTRACT,
   type KnowledgeFacadeContract
-} from "../../knowledge/contracts/knowledge-facade.contract";
+} from "../../knowledge";
 
 const CONTEXT_EVIDENCE_REF_THRESHOLD = 24;
 const EXECUTION_PREVIEW_ROW_THRESHOLD = 3;

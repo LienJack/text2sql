@@ -190,6 +190,33 @@ export class RetrieveKnowledgeNode {
     });
   });
 
+  it("allows conversation -> knowledge stable entry imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts",
+      `import { KNOWLEDGE_FACADE_CONTRACT } from "../../knowledge";
+export class Text2SqlV2ArtifactRefService {
+  constructor(private readonly contract = KNOWLEDGE_FACADE_CONTRACT) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge.ts",
+      `export const KNOWLEDGE_FACADE_CONTRACT = Symbol("KNOWLEDGE_FACADE_CONTRACT");`
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+    expect((report as unknown as Record<string, unknown>).conversationKnowledgeSubpath).toMatchObject({
+      currentCount: 0,
+      baselineCount: 15,
+      remainingFromBaseline: 15,
+      overBaselineCount: 0,
+      exceedsBaseline: false
+    });
+  });
+
   it("reports conversation/text2sql -> legacy modules/chat imports as violations", async () => {
     await writeRepoFile(
       repoRoot,
