@@ -22,7 +22,16 @@ export const TEXT2SQL_V2_REQUIRED_FIXTURE_FAMILIES = [
   "validation-diagnostics",
   "correction-grounding",
   "execution-preview",
-  "all-stage-stream-lifecycle"
+  "all-stage-stream-lifecycle",
+  "ledger-single-table-fulfillment",
+  "ledger-multi-table-join-fulfillment",
+  "ledger-missing-table-evidence",
+  "ledger-missing-required-column",
+  "ledger-missing-join-path",
+  "ledger-warning-only-degraded-context",
+  "ledger-correctable-sql-coverage-miss",
+  "ledger-terminal-governance-safety-miss",
+  "ledger-metric-time-grain-ambiguity"
 ] as const;
 
 export type Text2SqlV2RequiredFixtureFamily =
@@ -49,6 +58,12 @@ export interface Text2SqlV2EvalCase {
   latencyMs: number;
   denseUnavailable: boolean;
   rerankUnavailable: boolean;
+  ledgerObligationsCreated?: boolean;
+  ledgerGenerationClaimsPresent?: boolean;
+  ledgerValidationFulfilled?: boolean;
+  ledgerTerminalClassificationCorrect?: boolean;
+  ledgerClarificationTriggered?: boolean;
+  ledgerHardBlockerFalsePass?: boolean;
   traceability?: Text2SqlV2EvalCaseTraceability;
 }
 
@@ -65,6 +80,11 @@ export interface Text2SqlV2EvalRolloutThresholds {
   maxDenseUnavailableRate: number;
   maxRerankUnavailableRate: number;
   maxLatencyP95Ms: number;
+  minLedgerObligationCreationRate: number;
+  minLedgerGenerationClaimRate: number;
+  minLedgerValidationFulfillmentRate: number;
+  minLedgerTerminalClassificationRate: number;
+  maxLedgerHardBlockerFalsePassRate: number;
 }
 
 export interface Text2SqlV2EvalRolloutRecommendation {
@@ -106,6 +126,12 @@ export interface Text2SqlV2EvalSummary {
   latencyP95Ms: number;
   denseUnavailableRate: number;
   rerankUnavailableRate: number;
+  ledgerObligationCreationRate: number;
+  ledgerGenerationClaimRate: number;
+  ledgerValidationFulfillmentRate: number;
+  ledgerTerminalClassificationRate: number;
+  ledgerClarificationTriggeredRate: number;
+  ledgerHardBlockerFalsePassRate: number;
   traceability: Text2SqlV2EvalTraceabilitySummary;
   rollout: Text2SqlV2EvalRolloutRecommendation;
 }
@@ -124,7 +150,12 @@ const DEFAULT_ROLLOUT_THRESHOLDS: Text2SqlV2EvalRolloutThresholds = {
   maxClarificationRate: 0.35,
   maxDenseUnavailableRate: 0.35,
   maxRerankUnavailableRate: 0.3,
-  maxLatencyP95Ms: 2600
+  maxLatencyP95Ms: 2600,
+  minLedgerObligationCreationRate: 0.75,
+  minLedgerGenerationClaimRate: 0.7,
+  minLedgerValidationFulfillmentRate: 0.7,
+  minLedgerTerminalClassificationRate: 0.9,
+  maxLedgerHardBlockerFalsePassRate: 0
 };
 
 // Small tolerance avoids false holds from fixture rounding/noise near thresholds.
@@ -152,7 +183,13 @@ export class Text2SqlV2EvaluationService {
         latencyP50Ms: 0,
         latencyP95Ms: 0,
         denseUnavailableRate: 0,
-        rerankUnavailableRate: 0
+        rerankUnavailableRate: 0,
+        ledgerObligationCreationRate: 0,
+        ledgerGenerationClaimRate: 0,
+        ledgerValidationFulfillmentRate: 0,
+        ledgerTerminalClassificationRate: 0,
+        ledgerClarificationTriggeredRate: 0,
+        ledgerHardBlockerFalsePassRate: 0
       };
       const rollout = this.evaluateRollout(metricSummary, thresholds);
       return {
@@ -199,6 +236,35 @@ export class Text2SqlV2EvaluationService {
       cases.filter((item) => item.denseUnavailable).length / totalCases;
     const rerankUnavailableRate =
       cases.filter((item) => item.rerankUnavailable).length / totalCases;
+    const ledgerObligationCreationRate =
+      cases.filter((item) => item.ledgerObligationsCreated ?? item.planCoveragePassed).length /
+      totalCases;
+    const ledgerGenerationClaimRate =
+      cases.filter((item) => item.ledgerGenerationClaimsPresent ?? item.validationPassed).length /
+      totalCases;
+    const ledgerValidationFulfillmentRate =
+      cases.filter((item) => item.ledgerValidationFulfilled ?? item.validationPassed).length /
+      totalCases;
+    const terminalLedgerCases = cases.filter(
+      (item) =>
+        item.traceability?.fixtureFamilies.some((family) =>
+          family.includes("terminal-governance") ||
+          family.includes("unsafe-write") ||
+          family.includes("ledger-terminal")
+        ) || item.ledgerTerminalClassificationCorrect !== undefined
+    );
+    const ledgerTerminalClassificationRate =
+      terminalLedgerCases.length === 0
+        ? 1
+        : terminalLedgerCases.filter(
+            (item) => item.ledgerTerminalClassificationCorrect ?? !item.correctionAttempted
+          ).length / terminalLedgerCases.length;
+    const ledgerClarificationTriggeredRate =
+      cases.filter((item) => item.ledgerClarificationTriggered ?? false).length /
+      totalCases;
+    const ledgerHardBlockerFalsePassRate =
+      cases.filter((item) => item.ledgerHardBlockerFalsePass ?? false).length /
+      totalCases;
 
     const metricSummary: Text2SqlV2EvalMetricSummary = {
       totalCases,
@@ -213,7 +279,13 @@ export class Text2SqlV2EvaluationService {
       latencyP50Ms: this.percentile(latencies, 0.5),
       latencyP95Ms: this.percentile(latencies, 0.95),
       denseUnavailableRate: Number(denseUnavailableRate.toFixed(4)),
-      rerankUnavailableRate: Number(rerankUnavailableRate.toFixed(4))
+      rerankUnavailableRate: Number(rerankUnavailableRate.toFixed(4)),
+      ledgerObligationCreationRate: Number(ledgerObligationCreationRate.toFixed(4)),
+      ledgerGenerationClaimRate: Number(ledgerGenerationClaimRate.toFixed(4)),
+      ledgerValidationFulfillmentRate: Number(ledgerValidationFulfillmentRate.toFixed(4)),
+      ledgerTerminalClassificationRate: Number(ledgerTerminalClassificationRate.toFixed(4)),
+      ledgerClarificationTriggeredRate: Number(ledgerClarificationTriggeredRate.toFixed(4)),
+      ledgerHardBlockerFalsePassRate: Number(ledgerHardBlockerFalsePassRate.toFixed(4))
     };
 
     return {
@@ -366,12 +438,45 @@ export class Text2SqlV2EvaluationService {
     if (summary.latencyP95Ms > thresholds.maxLatencyP95Ms + GATE_COMPARISON_TOLERANCE) {
       reasons.push("latency_p95_exceeded");
     }
+    if (
+      summary.ledgerObligationCreationRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minLedgerObligationCreationRate
+    ) {
+      reasons.push("ledger_obligation_creation_rate_below_threshold");
+    }
+    if (
+      summary.ledgerGenerationClaimRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minLedgerGenerationClaimRate
+    ) {
+      reasons.push("ledger_generation_claim_rate_below_threshold");
+    }
+    if (
+      summary.ledgerValidationFulfillmentRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minLedgerValidationFulfillmentRate
+    ) {
+      reasons.push("ledger_validation_fulfillment_rate_below_threshold");
+    }
+    if (
+      summary.ledgerTerminalClassificationRate + GATE_COMPARISON_TOLERANCE <
+      thresholds.minLedgerTerminalClassificationRate
+    ) {
+      reasons.push("ledger_terminal_classification_rate_below_threshold");
+    }
+    if (
+      summary.ledgerHardBlockerFalsePassRate >
+      thresholds.maxLedgerHardBlockerFalsePassRate + GATE_COMPARISON_TOLERANCE
+    ) {
+      reasons.push("ledger_hard_blocker_false_pass_rate_exceeded");
+    }
 
     const rollbackSuggested = reasons.some((item) =>
       [
         "execution_success_rate_below_threshold",
         "validation_pass_rate_below_threshold",
-        "user_visible_failure_quality_below_threshold"
+        "user_visible_failure_quality_below_threshold",
+        "ledger_validation_fulfillment_rate_below_threshold",
+        "ledger_terminal_classification_rate_below_threshold",
+        "ledger_hard_blocker_false_pass_rate_exceeded"
       ].includes(item)
     );
     const gatePass = reasons.length === 0;

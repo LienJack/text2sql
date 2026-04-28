@@ -183,6 +183,55 @@ describe("text2sql v2 sql validation", () => {
     expect(result.correctable).toBe(true);
   });
 
+  it("reports failed ledger obligation ids as correctable fulfillment misses", async () => {
+    const result = await service.validate({
+      sql: "SELECT COUNT(*) FROM orders",
+      semanticPlan: plan({
+        selectedTables: ["orders", "customers"],
+        selectedColumns: [],
+        allowedTables: ["orders", "customers"],
+        joinPath: ["orders.customer_id=customers.id"],
+        snapshotId: "semantic-plan-v1",
+        planLedger: {
+          version: "plan-ledger.v1",
+          snapshotId: "semantic-plan-v1",
+          obligations: [
+            {
+              id: "ledger:join-path:orders-customers",
+              kind: "join_path",
+              summary: "orders join customers",
+              criticality: "hard_blocker",
+              status: "grounded",
+              evidenceRefs: ["relationship-orders-customers"],
+              reasonCodes: ["join_path_grounded"],
+              subject: "orders->customers"
+            }
+          ],
+          summary: {
+            snapshotId: "semantic-plan-v1",
+            total: 1,
+            hardBlockerCount: 1,
+            warningCount: 0,
+            failedHardBlockerIds: []
+          }
+        }
+      })
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.correctable).toBe(true);
+    expect(result.failedObligationIds).toEqual(["ledger:join-path:orders-customers"]);
+    expect(result.checks.find((check) => check.check === "ledger-fulfillment")).toMatchObject({
+      status: "failed",
+      code: "SQL_LEDGER_FULFILLMENT_FAILED",
+      failedObligationIds: ["ledger:join-path:orders-customers"],
+      reasonCodes: ["ledger_join_path_not_used"]
+    });
+    expect(result.ledgerFulfillment?.failedHardBlockerIds).toEqual([
+      "ledger:join-path:orders-customers"
+    ]);
+  });
+
   it.each([
     ["sqlite", "SELECT show tables FROM orders", "SQLite 不支持 SHOW TABLES 语法"],
     ["mysql", "SELECT * FROM pragma", "MySQL 不支持 PRAGMA 语法"],

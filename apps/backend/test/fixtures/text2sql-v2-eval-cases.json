@@ -19,7 +19,8 @@
         "chinese-question",
         "alias",
         "metrics",
-        "filters"
+        "filters",
+        "ledger-single-table-fulfillment"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
@@ -51,7 +52,9 @@
     "traceability": {
       "fixtureFamilies": [
         "chinese-question",
-        "ambiguous-business-term"
+        "ambiguous-business-term",
+        "ledger-missing-table-evidence",
+        "ledger-metric-time-grain-ambiguity"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
@@ -84,7 +87,9 @@
         "validation-diagnostics",
         "correction-grounding",
         "metrics",
-        "filters"
+        "filters",
+        "ledger-missing-required-column",
+        "ledger-correctable-sql-coverage-miss"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
@@ -117,7 +122,8 @@
       "fixtureFamilies": [
         "dense-unavailable",
         "metrics",
-        "filters"
+        "filters",
+        "ledger-warning-only-degraded-context"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
@@ -210,7 +216,9 @@
         "chinese-question",
         "multi-table-join",
         "metrics",
-        "filters"
+        "filters",
+        "ledger-multi-table-join-fulfillment",
+        "ledger-missing-join-path"
       ],
       "behaviorTests": [
         "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts",
@@ -305,7 +313,8 @@
       "fixtureFamilies": [
         "terminal-governance-failure",
         "metrics",
-        "filters"
+        "filters",
+        "ledger-terminal-governance-safety-miss"
       ],
       "behaviorTests": [
         "apps/backend/test/unit/text2sql-v2-validation.spec.ts",

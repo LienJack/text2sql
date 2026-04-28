@@ -527,6 +527,92 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(prompt.systemPrompt).toContain("forbiddenTables=refunds");
   });
 
+  it("records ledger obligation claims and unsupported SQL facts in structured artifact", () => {
+    const service = createService({
+      generate: jest.fn(),
+      stream: jest.fn()
+    });
+
+    const artifact = service.buildStructuredArtifact({
+      cause: "initial",
+      datasourceType: "sqlite",
+      draft: {
+        provider: "mock-provider",
+        model: "mock-model",
+        sql: "SELECT orders.amount, invoices.total FROM orders JOIN invoices ON invoices.order_id = orders.id",
+        explanation: "uses orders and invoices",
+        rawText: "",
+        prompt: {
+          systemPrompt: "",
+          userPrompt: ""
+        },
+        semanticPlan: {
+          route: "answer",
+          standaloneQuestion: "查询订单金额",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.amount"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"],
+          filters: ["route_kind:text_to_sql"],
+          snapshotId: "semantic-plan-v1",
+          planLedger: {
+            version: "plan-ledger.v1",
+            snapshotId: "semantic-plan-v1",
+            obligations: [
+              {
+                id: "ledger:table:orders",
+                kind: "table",
+                summary: "orders table",
+                criticality: "hard_blocker",
+                status: "grounded",
+                evidenceRefs: ["chunk-orders-1"],
+                reasonCodes: ["selected_table_grounded"],
+                subject: "orders"
+              },
+              {
+                id: "ledger:column:orders.amount",
+                kind: "column",
+                summary: "orders amount",
+                criticality: "hard_blocker",
+                status: "grounded",
+                evidenceRefs: ["chunk-orders-1"],
+                reasonCodes: ["selected_column_grounded"],
+                subject: "orders.amount"
+              }
+            ],
+            summary: {
+              snapshotId: "semantic-plan-v1",
+              total: 2,
+              hardBlockerCount: 2,
+              warningCount: 0,
+              failedHardBlockerIds: []
+            }
+          }
+        }
+      }
+    });
+
+    expect(artifact.claimedObligationIds).toEqual([
+      "ledger:table:orders",
+      "ledger:column:orders.amount"
+    ]);
+    expect(artifact.unsupportedClaims).toEqual(
+      expect.arrayContaining([
+        {
+          kind: "table",
+          value: "invoices",
+          reasonCode: "table_not_in_ledger"
+        },
+        {
+          kind: "column",
+          value: "invoices.total",
+          reasonCode: "column_not_in_ledger"
+        }
+      ])
+    );
+    expect(artifact.ledgerSnapshotId).toBe("semantic-plan-v1");
+  });
+
   it("injects structured correction grounding into retry prompt", async () => {
     const providerRouter = {
       generate: jest.fn().mockResolvedValue({

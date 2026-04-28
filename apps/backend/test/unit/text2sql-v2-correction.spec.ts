@@ -1,6 +1,7 @@
 import type { Text2SqlV2FailureSemantic } from "@text2sql/shared-types";
 import { DomainError } from "../../src/common/domain-error";
 import { SqlCorrectionService } from "../../src/modules/conversation/adapters/sql-correction.service";
+import { CorrectSqlNode } from "../../src/modules/conversation/nodes/correct-sql.node";
 
 describe("text2sql v2 sql correction decision", () => {
   const service = new SqlCorrectionService();
@@ -162,5 +163,50 @@ describe("text2sql v2 sql correction decision", () => {
         attemptCount: 2
       }).exhausted
     ).toBe(true);
+  });
+
+  it("carries failed ledger obligation ids into correction grounding", () => {
+    const node = new CorrectSqlNode(service);
+    const result = node.run({
+      failedSql: "SELECT COUNT(*) FROM orders",
+      attemptCount: 0,
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "统计客户订单",
+        selectedTables: ["orders", "customers"],
+        selectedColumns: [],
+        confidence: 0.8,
+        evidenceRefs: ["relationship-orders-customers"],
+        filters: ["route_kind:text_to_sql"],
+        snapshotId: "semantic-plan-v1"
+      },
+      validationArtifact: {
+        status: "failed",
+        correctable: true,
+        failedObligationIds: ["ledger:join-path:orders-customers"],
+        checks: [
+          {
+            check: "ledger-fulfillment",
+            status: "failed",
+            code: "SQL_LEDGER_FULFILLMENT_FAILED",
+            message: "SQL does not fulfill all required ledger obligations",
+            failedObligationIds: ["ledger:join-path:orders-customers"],
+            reasonCodes: ["ledger_join_path_not_used"]
+          }
+        ],
+        failure: {
+          code: "SQL_LEDGER_FULFILLMENT_FAILED",
+          message: "SQL does not fulfill all required ledger obligations",
+          category: "validation",
+          terminal: false,
+          correctable: true
+        }
+      }
+    });
+
+    expect(result.outcome).toBe("retry_generation");
+    expect(result.artifact.grounding.failedObligationIds).toEqual([
+      "ledger:join-path:orders-customers"
+    ]);
   });
 });

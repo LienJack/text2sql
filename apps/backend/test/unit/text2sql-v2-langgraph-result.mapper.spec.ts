@@ -91,7 +91,33 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
         selectedColumns: ["orders.id"],
         confidence: 0.9,
         evidenceRefs: ["chunk-orders-1"],
-        filters: ["route_kind:text_to_sql"]
+        filters: ["route_kind:text_to_sql"],
+        snapshotId: "semantic-plan-v1",
+        planLedger: {
+          version: "plan-ledger.v1",
+          snapshotId: "semantic-plan-v1",
+          obligations: [
+            {
+              id: "ledger:table:orders",
+              kind: "table",
+              summary: "orders table",
+              criticality: "hard_blocker",
+              status: "fulfilled",
+              evidenceRefs: ["chunk-orders-1"],
+              reasonCodes: ["selected_table_grounded"],
+              subject: "orders"
+            }
+          ],
+          summary: {
+            snapshotId: "semantic-plan-v1",
+            total: 1,
+            hardBlockerCount: 1,
+            warningCount: 0,
+            fulfilledCount: 1,
+            failedCount: 0,
+            failedHardBlockerIds: []
+          }
+        }
       },
       sqlGenerationArtifact: {
         sql: "SELECT COUNT(*) AS total FROM orders",
@@ -105,7 +131,16 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
       sqlValidationArtifact: {
         status: "passed",
         checks: [],
-        correctable: false
+        correctable: false,
+        ledgerFulfillment: {
+          snapshotId: "semantic-plan-v1",
+          total: 1,
+          hardBlockerCount: 1,
+          warningCount: 0,
+          fulfilledCount: 1,
+          failedCount: 0,
+          failedHardBlockerIds: []
+        }
       },
       executionResult: {
         rows: [{ total: 10 }],
@@ -155,6 +190,14 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
       stage: "correct",
       status: "skipped",
       reasonCodes: ["validation_passed"]
+    });
+    expect(mapped.trace.v2?.planLedger).toMatchObject({
+      snapshotId: "semantic-plan-v1",
+      total: 1,
+      hardBlockerCount: 1,
+      warningCount: 0,
+      fulfilledCount: 1,
+      failedCount: 0
     });
   });
 

@@ -48,6 +48,14 @@ describe("Text2SqlStreamEventMapper", () => {
                   reasonCodes: ["sql_generated"]
                 }
               ]
+            },
+            planLedger: {
+              snapshotId: "semantic-plan-v1",
+              total: 2,
+              hardBlockerCount: 1,
+              warningCount: 1,
+              failedHardBlockerIds: [],
+              warningIds: ["ledger:warning:degraded"]
             }
           }
         })
@@ -72,6 +80,12 @@ describe("Text2SqlStreamEventMapper", () => {
           summary?: string;
           reasonCodes?: string[];
         };
+        planLedger?: {
+          total?: number;
+          hardBlockerCount?: number;
+          warningCount?: number;
+          warningIds?: string[];
+        };
       };
     };
     expect(data.node).toBe("generate-sql");
@@ -87,6 +101,12 @@ describe("Text2SqlStreamEventMapper", () => {
       status: "completed",
       summary: "generate-sql completed",
       reasonCodes: ["sql_generated"]
+    });
+    expect(data.v2?.planLedger).toMatchObject({
+      total: 2,
+      hardBlockerCount: 1,
+      warningCount: 1,
+      warningIds: ["ledger:warning:degraded"]
     });
   });
 

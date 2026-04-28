@@ -843,6 +843,76 @@
       "flowNodes": [
         "M.final-answer-replay-artifacts"
       ]
+    },
+    {
+      "family": "ledger-single-table-fulfillment",
+      "evalCases": ["zh-alias-gmv-001"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "H.structured-sql-generation", "I.validation"]
+    },
+    {
+      "family": "ledger-multi-table-join-fulfillment",
+      "evalCases": ["zh-join-multi-table-003"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "I.validation"]
+    },
+    {
+      "family": "ledger-missing-table-evidence",
+      "evalCases": ["zh-ambiguous-term-clarify-002"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
+    },
+    {
+      "family": "ledger-missing-required-column",
+      "evalCases": ["zh-correction-success-010"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "flowNodes": ["I.validation", "K.diagnosis-bounded-correction"]
+    },
+    {
+      "family": "ledger-missing-join-path",
+      "evalCases": ["zh-join-multi-table-003"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
+    },
+    {
+      "family": "ledger-warning-only-degraded-context",
+      "evalCases": ["zh-dense-unavailable-008"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "M.final-answer-replay-artifacts"]
+    },
+    {
+      "family": "ledger-correctable-sql-coverage-miss",
+      "evalCases": ["zh-correction-success-010"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "flowNodes": ["I.validation", "K.diagnosis-bounded-correction"]
+    },
+    {
+      "family": "ledger-terminal-governance-safety-miss",
+      "evalCases": ["zh-terminal-governance-failure-011", "zh-unsafe-write-007"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-validation.spec.ts"],
+      "flowNodes": ["I.validation", "L.fail-closed-evidence"]
+    },
+    {
+      "family": "ledger-metric-time-grain-ambiguity",
+      "evalCases": ["zh-ambiguous-term-clarify-002"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
     }
   ],
   "criticalFileOwnerMigrations": [
@@ -1046,6 +1116,53 @@
       "coverageOwnerStatus": "covered",
       "critical": true,
       "blocker": "Smart Defaults must have structured id/version evidence and cannot be erased by template overlays."
+    },
+    {
+      "id": "plan-ledger.obligation-contract",
+      "owners": [
+        "packages/shared-types/src/api.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.validator.ts"
+      ],
+      "expectedTestFiles": [
+        "packages/shared-types/src/api.contract.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Plan Ledger must create grounded obligations and block hard evidence gaps before SQL generation."
+    },
+    {
+      "id": "plan-ledger.generation-validation",
+      "owners": [
+        "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+        "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts",
+        "apps/backend/src/modules/conversation/nodes/correct-sql.node.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "SQL generation must claim ledger obligations and validation must report failed obligation ids before execution/correction."
+    },
+    {
+      "id": "plan-ledger.delivery-stream-projection",
+      "owners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-builder.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
+        "apps/backend/src/modules/conversation/text2sql/stream/text2sql-stream-event.mapper.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-result.mapper.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Trace, delivery, replay, and stream surfaces must expose compact ledger summaries without leaking full obligation payloads."
     }
   ],
   "runtimeArtifactProducerRows": [

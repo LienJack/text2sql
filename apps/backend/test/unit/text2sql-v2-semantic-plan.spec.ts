@@ -41,6 +41,23 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.plan.evidenceRefs).toEqual(["chunk-orders-1"]);
     expect(result.plan.snapshotId).toBe("semantic-plan:text-to-sql:ready:t1:c3:e1:g0:orders");
     expect(result.plan.coverageGaps).toBeUndefined();
+    expect(result.plan.planLedger?.summary.failedHardBlockerIds).toEqual([]);
+    expect(result.plan.planLedger?.obligations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "ledger:table:orders",
+          kind: "table",
+          criticality: "hard_blocker",
+          status: "grounded"
+        }),
+        expect.objectContaining({
+          id: "ledger:column:amount",
+          kind: "column",
+          criticality: "hard_blocker",
+          status: "grounded"
+        })
+      ])
+    );
     expect(result.validation.valid).toBe(true);
   });
 
@@ -60,6 +77,11 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.validation.unsupportedTables).toEqual(["refunds"]);
     expect(result.validation.reasons).toEqual(
       expect.arrayContaining(["plan_contains_unsupported_tables"])
+    );
+    expect(result.validation.ledgerGateOutcome).toBe("block");
+    expect(result.validation.outcome).toBe("fail_closed");
+    expect(result.plan.planLedger?.summary.failedHardBlockerIds).toEqual(
+      expect.arrayContaining(["ledger:table:refunds"])
     );
   });
 
@@ -162,7 +184,48 @@ describe("text2sql v2 semantic plan", () => {
       })
     ]);
     expect(result.validation.reasons).toEqual(
-      expect.arrayContaining(["plan_missing_selected_tables", "plan_missing_grounding_evidence"])
+      expect.arrayContaining([
+        "plan_missing_selected_tables",
+        "plan_missing_grounding_evidence"
+      ])
+    );
+    expect(result.plan.planLedger?.summary.failedHardBlockerIds).toEqual([]);
+    expect(result.plan.planLedger?.summary.warningIds).toEqual(
+      expect.arrayContaining([
+        "ledger:metric:gmv",
+        "ledger:evidence:time:missing_selected_evidence_refs"
+      ])
+    );
+  });
+
+  it("blocks multi-table SQL generation when relationship evidence is missing", () => {
+    const result = planService.build({
+      question: "统计客户订单数",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: ["chunk-orders", "chunk-customers"],
+        selectedTables: ["orders", "customers"],
+        selectedColumns: ["orders.customer_id", "customers.id"],
+        lanes: {
+          relationships: {
+            refs: [],
+            count: 0
+          }
+        }
+      },
+      allowedTables: ["orders", "customers"]
+    });
+
+    expect(result.validation.outcome).toBe("needs_clarification");
+    expect(result.validation.ledgerGateOutcome).toBe("block");
+    expect(result.plan.planLedger?.obligations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "join_path",
+          status: "failed",
+          reasonCodes: ["missing_join_path"]
+        })
+      ])
     );
   });
 

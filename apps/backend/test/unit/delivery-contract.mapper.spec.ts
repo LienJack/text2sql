@@ -217,7 +217,38 @@ describe("DeliveryContractMapper", () => {
             selectedColumns: ["orders.id", "orders.amount"],
             confidence: 0.87,
             evidenceRefs: ["schema-orders", "metric-gmv"],
-            filters: ["route_kind:metadata"]
+            filters: ["route_kind:metadata"],
+            planLedger: {
+              version: "plan-ledger.v1",
+              snapshotId: "semantic-plan-v1",
+              obligations: [
+                {
+                  id: "ledger:warning:degraded",
+                  kind: "evidence",
+                  summary: "degraded optional context",
+                  criticality: "warning",
+                  status: "warning",
+                  evidenceRefs: [],
+                  reasonCodes: ["dense_unavailable"]
+                }
+              ],
+              summary: {
+                snapshotId: "semantic-plan-v1",
+                total: 1,
+                hardBlockerCount: 0,
+                warningCount: 1,
+                warningIds: ["ledger:warning:degraded"],
+                reasonCodes: ["dense_unavailable"]
+              }
+            }
+          },
+          planLedger: {
+            snapshotId: "semantic-plan-v1",
+            total: 1,
+            hardBlockerCount: 0,
+            warningCount: 1,
+            warningIds: ["ledger:warning:degraded"],
+            reasonCodes: ["dense_unavailable"]
           }
         }
       } as SqlRun["trace"]
@@ -249,6 +280,15 @@ describe("DeliveryContractMapper", () => {
       pruningApplied: true,
       degradationReasons: ["dense_unavailable:provider_missing"]
     });
+    expect(delivery.evidence?.v2?.planLedger).toEqual({
+      snapshotId: "semantic-plan-v1",
+      total: 1,
+      hardBlockerCount: 0,
+      warningCount: 1,
+      warningIds: ["ledger:warning:degraded"],
+      reasonCodes: ["dense_unavailable"]
+    });
+    expect(delivery.evidence?.v2?.semanticPlan?.planLedger).toBeUndefined();
   });
 
   it("projects general no-sql answer evidence without pretending SQL or schema execution", () => {
