@@ -61,6 +61,52 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.validation.valid).toBe(true);
   });
 
+  it("only promotes question-required schema columns to hard ledger obligations", () => {
+    const contextPack = contextPackService.build({
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:payments",
+          content: "payments table",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:payments",
+            domain: "schema",
+            tableNames: ["payments"],
+            columnNames: [
+              "payments.id",
+              "payments.payment_no",
+              "payments.order_id",
+              "payments.method",
+              "payments.status",
+              "payments.amount",
+              "payments.created_at",
+              "payments.paid_at"
+            ],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    const result = planService.build({
+      question: "有多少种支付方式，他们比例是如何",
+      contextPack,
+      semanticIntent: "count",
+      allowedTables: ["payments"]
+    });
+
+    const columnObligations =
+      result.plan.planLedger?.obligations.filter((item) => item.kind === "column") ?? [];
+    expect(columnObligations).toEqual([
+      expect.objectContaining({
+        id: "ledger:column:payments.method",
+        criticality: "hard_blocker",
+        status: "grounded"
+      })
+    ]);
+  });
+
   it("flags unsupported table selections when allowed tables are constrained", () => {
     const result = planService.build({
       question: "查询退款单",

@@ -232,6 +232,97 @@ describe("text2sql v2 sql validation", () => {
     ]);
   });
 
+  it("passes grouped count proportion SQL when only the required schema column is used", async () => {
+    const result = await service.validate({
+      sql: [
+        "SELECT method AS group_value,",
+        "  COUNT(*) AS item_count,",
+        "  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS item_percentage",
+        "FROM payments",
+        "GROUP BY method",
+        "ORDER BY item_count DESC;"
+      ].join("\n"),
+      semanticPlan: plan({
+        standaloneQuestion: "有多少种支付方式，他们比例是如何",
+        selectedTables: ["payments"],
+        selectedColumns: [
+          "payments.id",
+          "payments.payment_no",
+          "payments.order_id",
+          "payments.method",
+          "payments.status",
+          "payments.amount",
+          "payments.created_at",
+          "payments.paid_at"
+        ],
+        allowedTables: ["payments"],
+        metrics: ["count"],
+        snapshotId: "semantic-plan-payments",
+        planLedger: {
+          version: "plan-ledger.v1",
+          snapshotId: "semantic-plan-payments",
+          obligations: [
+            {
+              id: "ledger:table:payments",
+              kind: "table",
+              summary: "payments table",
+              criticality: "hard_blocker",
+              status: "grounded",
+              evidenceRefs: ["schema-supplement:payments"],
+              reasonCodes: ["selected_table_grounded"],
+              subject: "payments"
+            },
+            {
+              id: "ledger:column:payments.method",
+              kind: "column",
+              summary: "payments method",
+              criticality: "hard_blocker",
+              status: "grounded",
+              evidenceRefs: ["schema-supplement:payments"],
+              reasonCodes: ["selected_column_grounded"],
+              subject: "payments.method"
+            },
+            {
+              id: "ledger:metric:count",
+              kind: "metric",
+              summary: "count metric",
+              criticality: "hard_blocker",
+              status: "grounded",
+              evidenceRefs: ["schema-supplement:payments"],
+              reasonCodes: ["metric_grounded"],
+              subject: "count"
+            }
+          ],
+          summary: {
+            snapshotId: "semantic-plan-payments",
+            total: 3,
+            hardBlockerCount: 3,
+            warningCount: 0,
+            failedHardBlockerIds: []
+          }
+        }
+      }),
+      sqlArtifact: {
+        sql: "SELECT method AS group_value, COUNT(*) AS item_count FROM payments GROUP BY method",
+        usedTables: ["payments"],
+        usedColumns: ["method"],
+        cause: "initial",
+        dialect: "sqlite",
+        claimedObligationIds: [
+          "ledger:table:payments",
+          "ledger:column:payments.method",
+          "ledger:metric:count"
+        ]
+      } as never
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.checks.find((check) => check.check === "ledger-fulfillment")).toMatchObject({
+      status: "passed",
+      reasonCodes: ["ledger_fulfilled"]
+    });
+  });
+
   it.each([
     ["sqlite", "SELECT show tables FROM orders", "SQLite 不支持 SHOW TABLES 语法"],
     ["mysql", "SELECT * FROM pragma", "MySQL 不支持 PRAGMA 语法"],

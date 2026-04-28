@@ -575,7 +575,15 @@ describe("text2sql v2 langgraph nodes", () => {
 
       await expect(
         node.run({
-          sql: "SELECT COUNT(*) AS total FROM orders",
+          sqlArtifact: {
+            sql: "SELECT COUNT(*) AS total FROM orders",
+            usedTables: ["orders"],
+            usedColumns: ["total"],
+            evidenceRefs: ["chunk-orders-1"],
+            cause: "initial",
+            dialect: "sqlite",
+            claimedObligationIds: ["ledger:table:orders"]
+          },
           validationArtifact: {
             status: "passed",
             checks: [],
@@ -590,7 +598,14 @@ describe("text2sql v2 langgraph nodes", () => {
         emptyResult: false,
         columns: ["total"]
       });
-      expect(legacyNode.run).toHaveBeenCalled();
+      expect(legacyNode.run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sql: "SELECT COUNT(*) AS total FROM orders",
+          sqlArtifact: expect.objectContaining({
+            claimedObligationIds: ["ledger:table:orders"]
+          })
+        })
+      );
     });
   });
 

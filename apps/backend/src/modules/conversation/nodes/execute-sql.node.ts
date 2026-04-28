@@ -51,6 +51,7 @@ export class ExecuteSqlNode {
 
     const result = await this.executeSqlNode.run({
       sql,
+      sqlArtifact: input.sqlArtifact,
       datasourceId: input.datasourceId,
       sessionId: input.sessionId,
       requestId: input.requestId,

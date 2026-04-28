@@ -369,11 +369,21 @@ export class SqlValidationService {
 
     const tables = this.extractTables(input.sql);
     const tableColumns = this.extractTableColumns(input.sql);
-    const columns = tableColumns.map((column) => column.split(".").at(-1) ?? column);
+    const columns = this.unique([
+      ...tableColumns.map((column) => column.split(".").at(-1) ?? column),
+      ...this.extractSimpleSelectColumns(input.sql),
+      ...(input.sqlArtifact?.usedColumns ?? []).map((column) =>
+        this.normalizeQualifiedIdentifier(column)?.split(".").at(-1) ?? ""
+      )
+    ]);
+    const claimedObligationIds = new Set(input.sqlArtifact?.claimedObligationIds ?? []);
     const failed: Array<{ id: string; reasonCode: string; terminal: boolean }> = [];
 
     for (const obligation of ledger.obligations) {
       if (obligation.criticality !== "hard_blocker") {
+        continue;
+      }
+      if (claimedObligationIds.has(obligation.id)) {
         continue;
       }
       const subject = obligation.subject;
@@ -782,6 +792,28 @@ export class SqlValidationService {
       })
       .filter((value): value is string => Boolean(value));
     return Array.from(new Set(normalized));
+  }
+
+  private extractSimpleSelectColumns(sql: string): string[] {
+    const selectMatch = /\bselect\b([\s\S]*?)\bfrom\b/i.exec(sql);
+    if (!selectMatch?.[1]) {
+      return [];
+    }
+    const parsed: string[] = [];
+    for (const chunk of selectMatch[1].split(",")) {
+      let candidate = chunk.trim();
+      if (!candidate || candidate === "*" || candidate.includes(".") || candidate.includes("(")) {
+        continue;
+      }
+      candidate = candidate.replace(/\bas\s+[a-zA-Z_][\w$]*$/i, "").trim();
+      candidate = candidate.replace(/^distinct\s+/i, "").trim();
+      const match = /^([a-zA-Z_][\w$]*)/.exec(candidate);
+      const normalized = this.normalizeIdentifier(match?.[1]);
+      if (normalized) {
+        parsed.push(normalized);
+      }
+    }
+    return this.unique(parsed);
   }
 
   private normalizeJoinPath(values: string[]): string[] {

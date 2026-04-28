@@ -14,6 +14,7 @@ import type { AccessContext } from "../../../governance/access/datasource-access
 import { PolicyEvaluatorService } from "../../../governance/access/policy-evaluator.service";
 import { SqlCorrectionService } from "../../adapters/sql-correction.service";
 import { SqlValidationService } from "../../adapters/sql-validation.service";
+import type { StructuredSqlGenerationArtifact } from "../sql/sql-generation.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -30,6 +31,7 @@ export class ExecuteSqlNode {
 
   async run(input: {
     sql: string;
+    sqlArtifact?: StructuredSqlGenerationArtifact;
     datasourceId: string;
     sessionId: string;
     requestId?: string;
@@ -80,6 +82,7 @@ export class ExecuteSqlNode {
         datasourceId: input.datasourceId,
         datasourceType: datasource.type,
         semanticPlan: input.semanticPlan,
+        sqlArtifact: input.sqlArtifact,
         accessContext: effectiveAccessContext,
         allowedTables: policyResult?.readableTables
       });

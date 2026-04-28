@@ -117,6 +117,7 @@ export class SemanticPlanService {
     });
 
     const planLedger = this.buildPlanLedger({
+      question: standaloneQuestion,
       selectedTables,
       selectedColumns,
       metrics,
@@ -365,6 +366,7 @@ export class SemanticPlanService {
   }
 
   private buildPlanLedger(input: {
+    question: string;
     selectedTables: string[];
     selectedColumns: string[];
     metrics: string[];
@@ -379,6 +381,10 @@ export class SemanticPlanService {
   }): NonNullable<SemanticPlanV1["planLedger"]> {
     const obligations: SemanticPlanLedgerObligationV1[] = [];
     const hasEvidence = input.evidenceRefs.length > 0;
+    const requiredColumns = this.resolveRequiredColumns({
+      question: input.question,
+      selectedColumns: input.selectedColumns
+    });
     const warningOnlyDegraded =
       input.contextPack.status === "degraded" &&
       input.selectedTables.length === 0 &&
@@ -408,6 +414,10 @@ export class SemanticPlanService {
     }
 
     for (const column of input.selectedColumns) {
+      const normalizedColumn = this.normalizeQualifiedIdentifier(column);
+      if (!normalizedColumn || !requiredColumns.has(normalizedColumn)) {
+        continue;
+      }
       obligations.push({
         id: `ledger:column:${column}`,
         kind: "column",
@@ -562,6 +572,65 @@ export class SemanticPlanService {
       reasonCodes: this.unique(obligations.flatMap((obligation) => obligation.reasonCodes)),
       selectedEvidenceRefs: evidenceRefs
     };
+  }
+
+  private resolveRequiredColumns(input: {
+    question: string;
+    selectedColumns: string[];
+  }): Set<string> {
+    const normalizedQuestion = input.question.toLowerCase();
+    const candidates = input.selectedColumns
+      .map((column) => this.normalizeQualifiedIdentifier(column))
+      .filter((column): column is string => Boolean(column));
+    const required = new Set<string>();
+
+    if (candidates.length === 1 && candidates[0]) {
+      required.add(candidates[0]);
+      return required;
+    }
+
+    const hints: Array<{ pattern: RegExp; columns: RegExp }> = [
+      {
+        pattern: /(支付方式|支付渠道|付款方式|方式|渠道|payment|method)/i,
+        columns: /(^|\.)method$/
+      },
+      { pattern: /(状态|status)/i, columns: /(^|\.)status$/ },
+      { pattern: /(类型|type)/i, columns: /(^|\.)type$/ },
+      {
+        pattern: /(分类|类目|类别|category)/i,
+        columns: /(^|\.)(category|category_id)$/
+      },
+      {
+        pattern: /(城市|地区|区域|省份|city|region|province)/i,
+        columns: /(^|\.)(city|region|province|area)$/
+      },
+      {
+        pattern: /(金额|交易额|销售额|净销售额|gmv|amount|total|sales)/i,
+        columns: /(^|\.)(amount|total_amount|gmv|sales|net_sales)$/
+      },
+      {
+        pattern: /(时间|日期|近\d+\s*(天|周|月|年)|按天|按周|按月|date|time)/i,
+        columns: /(^|\.)(created_at|updated_at|paid_at|date|day|month|year)$/
+      }
+    ];
+
+    for (const column of candidates) {
+      for (const hint of hints) {
+        if (hint.pattern.test(normalizedQuestion) && hint.columns.test(column)) {
+          required.add(column);
+        }
+      }
+      const leaf = column.includes(".") ? column.split(".").at(-1) : column;
+      if (leaf && new RegExp(`\\b${this.escapeRegex(leaf)}\\b`, "i").test(input.question)) {
+        required.add(column);
+      }
+    }
+
+    return required;
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
   private toLedgerIdToken(value: string): string {
@@ -752,5 +821,20 @@ export class SemanticPlanService {
       .replace(/\s+/g, "")
       .toLowerCase();
     return normalized.length > 0 ? normalized : undefined;
+  }
+
+  private normalizeQualifiedIdentifier(value: string | undefined): string | undefined {
+    const normalized = this.normalizeIdentifier(value);
+    if (!normalized) {
+      return undefined;
+    }
+    if (!normalized.includes(".")) {
+      return normalized;
+    }
+    const [table, column] = normalized.split(".");
+    if (!table || !column) {
+      return undefined;
+    }
+    return `${table}.${column}`;
   }
 }
