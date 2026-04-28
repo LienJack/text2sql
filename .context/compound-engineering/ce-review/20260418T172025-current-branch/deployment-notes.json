@@ -1,0 +1,68 @@
+{
+  "reviewer": "deployment-verification-agent",
+  "generatedAt": "2026-04-18T17:20:25+09:00",
+  "branch": "codex/rag-v1-3-team-exec-tracking",
+  "artifact": ".context/compound-engineering/ce-review/20260418T172025-current-branch/deployment-notes.json",
+  "decision": "NO-GO until all blocking checks pass",
+  "preDeployChecks": [
+    {
+      "check": "Prisma client + empty DB replay",
+      "command": "pnpm --filter @text2sql/backend run prisma:generate && pnpm --filter @text2sql/backend run prisma:verify-empty-db"
+    },
+    {
+      "check": "Backend regression slice for glossary, prompt templates, semantic registry, and RAG refresh",
+      "command": "pnpm --filter @text2sql/backend run test -- test/integration/glossary-release-rollback.spec.ts test/integration/glossary-selected-context-gate.spec.ts test/integration/settings-prompts-api.spec.ts test/integration/semantic-registry.spec.ts test/integration/rag-incremental-refresh.spec.ts test/integration/agent-sql-prompt-template-runtime.spec.ts --runInBand"
+    },
+    {
+      "check": "Frontend quality gate",
+      "command": "pnpm --filter @text2sql/frontend run lint && pnpm --filter @text2sql/frontend run test && pnpm --filter @text2sql/frontend run build"
+    },
+    {
+      "check": "Health and quality endpoints respond",
+      "command": "curl -fsS http://localhost:3002/health && curl -fsS http://localhost:3002/api/v1/rag/quality/report && curl -fsS http://localhost:3002/api/v1/rag/quality/report/glossary-selected-context"
+    }
+  ],
+  "sqlVerificationQueries": [
+    {
+      "phase": "post-deploy",
+      "name": "New schema objects exist",
+      "sql": "SELECT to_regclass('public.glossary_anchors') AS glossary_anchors, to_regclass('public.glossary_terms') AS glossary_terms, to_regclass('public.prompt_templates') AS prompt_templates, to_regclass('public.semantic_registry_versions') AS semantic_registry_versions, to_regclass('public.semantic_registry_terms') AS semantic_registry_terms;",
+      "expected": "all relations are non-null"
+    },
+    {
+      "phase": "post-deploy",
+      "name": "No duplicate active semantic registry versions",
+      "sql": "SELECT domain, COUNT(*) AS active_versions FROM semantic_registry_versions WHERE status = 'active' GROUP BY domain HAVING COUNT(*) > 1;",
+      "expected": "0 rows"
+    },
+    {
+      "phase": "post-deploy",
+      "name": "No duplicate prompt templates per unique key",
+      "sql": "SELECT scene, scope, scopeKey, name, COUNT(*) AS n FROM prompt_templates WHERE deletedAt IS NULL GROUP BY scene, scope, scopeKey, name HAVING COUNT(*) > 1;",
+      "expected": "0 rows"
+    },
+    {
+      "phase": "post-deploy",
+      "name": "Glossary anchors and terms stay linked",
+      "sql": "SELECT COUNT(*) AS orphan_terms FROM glossary_terms t LEFT JOIN glossary_anchors a ON a.id = t.versionAnchorId WHERE t.versionAnchorId IS NOT NULL AND a.id IS NULL;",
+      "expected": "0"
+    },
+    {
+      "phase": "post-deploy",
+      "name": "Replay/index activity looks sane",
+      "sql": "SELECT datasourceId, status, COUNT(*) AS n FROM rag_index_versions GROUP BY datasourceId, status; SELECT stage, COUNT(*) AS n FROM rag_run_replays GROUP BY stage ORDER BY n DESC;",
+      "expected": "one active index version per datasource; recent smoke run stages are present"
+    }
+  ],
+  "rollbackCaveats": [
+    "This branch adds tables and indexes only; reverting code will not remove rows already written to glossary, prompt template, semantic registry, or replay tables.",
+    "There is no down-migration in this note. If rollback must remove newly written data, take a DB snapshot or export first.",
+    "Do not use Prisma reset on a shared environment to unwind this rollout."
+  ],
+  "monitoringFocus": [
+    "Watch `/api/v1/rag/quality/report` and `/api/v1/rag/quality/report/glossary-selected-context` for `gatePass`, `sampleReady`, and `status` regressions.",
+    "Watch RAG thresholds: `retrievalRerankP95Ms <= 700`, `cacheEligibleHitRate >= 0.55`, `budgetDegradeRate <= 0.08`, and `datasourceIsolationViolationCount == 0`.",
+    "Watch SQL-generation traces for `template_not_found` and `template_service_error` fallback spikes.",
+    "Watch glossary rollback and semantic-release audit events, plus `rag_run_replays` lag or DLQ growth, for stuck incremental refreshes."
+  ]
+}

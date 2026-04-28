@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import { DomainError } from "../../src/common/domain-error";
-import { WorkspaceModule } from "../../src/modules/workspace/workspace.module";
-import { WorkspaceService } from "../../src/modules/workspace/workspace.service";
+import { WorkspaceModule } from "../../src/modules/governance/workspace/workspace.module";
+import { WorkspaceService } from "../../src/modules/governance/workspace/workspace.service";
 
 describe("workspace service", () => {
   const adminActor = {

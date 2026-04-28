@@ -1,0 +1,429 @@
+[
+  {
+    "id": "zh-alias-gmv-001",
+    "question": "统计华东区近30天GMV",
+    "retrievalRelevance": 0.92,
+    "rerankLift": 0.18,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.95,
+    "latencyMs": 1420,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "chinese-question",
+        "alias",
+        "metrics",
+        "filters",
+        "ledger-single-table-fulfillment"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "F.semantic-plan",
+        "H.structured-sql-generation"
+      ]
+    }
+  },
+  {
+    "id": "zh-ambiguous-term-clarify-002",
+    "question": "统计活跃用户",
+    "retrievalRelevance": 0.66,
+    "rerankLift": 0.07,
+    "planCoveragePassed": false,
+    "validationPassed": false,
+    "correctionAttempted": true,
+    "correctionSucceeded": false,
+    "clarified": true,
+    "executionSucceeded": false,
+    "userVisibleFailureQuality": 0.78,
+    "latencyMs": 2470,
+    "denseUnavailable": true,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "chinese-question",
+        "ambiguous-business-term",
+        "ledger-missing-table-evidence",
+        "ledger-metric-time-grain-ambiguity"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C1.targeted-clarification",
+        "G.plan-confidence"
+      ]
+    }
+  },
+  {
+    "id": "zh-correction-success-010",
+    "question": "统计近7天订单金额并按城市分组",
+    "retrievalRelevance": 0.83,
+    "rerankLift": 0.11,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": true,
+    "correctionSucceeded": true,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.9,
+    "latencyMs": 2210,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "correction-success",
+        "validation-diagnostics",
+        "correction-grounding",
+        "metrics",
+        "filters",
+        "ledger-missing-required-column",
+        "ledger-correctable-sql-coverage-miss"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "K.diagnosis-bounded-correction",
+        "SC.correction-grounding"
+      ]
+    }
+  },
+  {
+    "id": "zh-dense-unavailable-008",
+    "question": "按品牌统计净销售额趋势",
+    "retrievalRelevance": 0.69,
+    "rerankLift": 0.08,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.85,
+    "latencyMs": 2120,
+    "denseUnavailable": true,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "dense-unavailable",
+        "metrics",
+        "filters",
+        "ledger-warning-only-degraded-context"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "L.fail-closed-evidence"
+      ]
+    }
+  },
+  {
+    "id": "zh-follow-up-004",
+    "question": "再看上个月同口径",
+    "retrievalRelevance": 0.81,
+    "rerankLift": 0.1,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.91,
+    "latencyMs": 1260,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "follow-up",
+        "metrics",
+        "filters"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "flowNodes": [
+        "A.context-envelope",
+        "B.intake"
+      ]
+    }
+  },
+  {
+    "id": "zh-general-route-006",
+    "question": "什么是 GMV 口径？",
+    "retrievalRelevance": 0.74,
+    "rerankLift": 0.09,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.89,
+    "latencyMs": 910,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "metadata-general"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C.route",
+        "C2.general-metadata-answer",
+        "SC.metadata-grounding"
+      ]
+    }
+  },
+  {
+    "id": "zh-join-multi-table-003",
+    "question": "按渠道统计已支付订单金额与退款金额",
+    "retrievalRelevance": 0.87,
+    "rerankLift": 0.14,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": true,
+    "correctionSucceeded": true,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.9,
+    "latencyMs": 1980,
+    "denseUnavailable": false,
+    "rerankUnavailable": true,
+    "traceability": {
+      "fixtureFamilies": [
+        "chinese-question",
+        "multi-table-join",
+        "metrics",
+        "filters",
+        "ledger-multi-table-join-fulfillment",
+        "ledger-missing-join-path"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": [
+        "F.semantic-plan",
+        "I.validation",
+        "K.diagnosis-bounded-correction"
+      ]
+    }
+  },
+  {
+    "id": "zh-metadata-route-005",
+    "question": "这个数据源有哪些表？",
+    "retrievalRelevance": 0.76,
+    "rerankLift": 0.08,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.88,
+    "latencyMs": 980,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "metadata-general"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C.route",
+        "C2.general-metadata-answer",
+        "SC.metadata-grounding",
+        "SC.context-pack-parity"
+      ]
+    }
+  },
+  {
+    "id": "zh-rerank-unavailable-009",
+    "question": "查询上周各渠道退款率",
+    "retrievalRelevance": 0.78,
+    "rerankLift": 0.03,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.86,
+    "latencyMs": 1760,
+    "denseUnavailable": false,
+    "rerankUnavailable": true,
+    "traceability": {
+      "fixtureFamilies": [
+        "rerank-unavailable",
+        "metrics",
+        "filters"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/rerank-router.service.spec.ts",
+        "apps/backend/test/unit/rag-rerank.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  },
+  {
+    "id": "zh-terminal-governance-failure-011",
+    "question": "统计敏感订单金额并给出明细",
+    "retrievalRelevance": 0.77,
+    "rerankLift": 0.1,
+    "planCoveragePassed": true,
+    "validationPassed": false,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": false,
+    "userVisibleFailureQuality": 0.9,
+    "latencyMs": 1350,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "terminal-governance-failure",
+        "metrics",
+        "filters",
+        "ledger-terminal-governance-safety-miss"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    }
+  },
+  {
+    "id": "zh-unsafe-write-007",
+    "question": "删除所有测试订单",
+    "retrievalRelevance": 0.43,
+    "rerankLift": 0.04,
+    "planCoveragePassed": true,
+    "validationPassed": false,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": false,
+    "userVisibleFailureQuality": 0.82,
+    "latencyMs": 870,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "unsafe-write"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    }
+  },
+  {
+    "id": "zh-plain-general-no-sql-runtime-intelligence-012",
+    "question": "什么是 GMV 口径？",
+    "retrievalRelevance": 0.78,
+    "rerankLift": 0.08,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.92,
+    "latencyMs": 760,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "plain-general-no-sql",
+        "runtime-plan-consistency",
+        "all-stage-stream-lifecycle"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/unit/langgraph-runtime.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "C.route",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  },
+  {
+    "id": "zh-artifact-ref-compaction-smart-defaults-013",
+    "question": "统计近30天订单总数并解释依据",
+    "retrievalRelevance": 0.89,
+    "rerankLift": 0.13,
+    "planCoveragePassed": true,
+    "validationPassed": true,
+    "correctionAttempted": false,
+    "correctionSucceeded": false,
+    "clarified": false,
+    "executionSucceeded": true,
+    "userVisibleFailureQuality": 0.93,
+    "latencyMs": 1680,
+    "denseUnavailable": false,
+    "rerankUnavailable": false,
+    "traceability": {
+      "fixtureFamilies": [
+        "artifact-ref-compaction",
+        "large-context-compaction",
+        "execution-preview",
+        "smart-defaults-evidence",
+        "runtime-plan-consistency"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/sql-prompt.builder.spec.ts",
+        "apps/backend/test/unit/chat-delivery-enrichment.service.spec.ts"
+      ],
+      "flowNodes": [
+        "D.retrieve",
+        "E.assemble-context",
+        "H.structured-sql-generation",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  }
+]

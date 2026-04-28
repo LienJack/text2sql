@@ -1,4 +1,4 @@
-import { SqlSafetyGuard } from "../../src/modules/agent/sql/tools/sql-safety.guard";
+import { SqlSafetyGuard } from "../../src/modules/conversation/agent/sql/tools/sql-safety.guard";
 
 describe("SqlSafetyGuard", () => {
   const guard = new SqlSafetyGuard({

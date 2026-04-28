@@ -30,15 +30,20 @@ export class AppConfigService {
 
   get sqlitePath(): string {
     const raw = this.config.get<string>("SQLITE_PATH", "data/sqlite/text2sql.db");
-    if (isAbsolute(raw)) {
-      return raw;
-    }
-    const direct = resolve(process.cwd(), raw);
-    if (existsSync(direct)) {
-      return direct;
-    }
-    const fallback = resolve(process.cwd(), "../../", raw);
-    return fallback;
+    return this.resolveConfiguredPath(raw);
+  }
+
+  get sqliteAllowedDirs(): string[] {
+    const raw = this.config.get<string>(
+      "SQLITE_ALLOWED_DIRS",
+      "data/sqlite,data/uploads/datasources"
+    );
+    const parsed = raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => this.resolveConfiguredPath(item));
+    return Array.from(new Set(parsed));
   }
 
   get redisUrl(): string {
@@ -50,14 +55,7 @@ export class AppConfigService {
       "DATASOURCE_UPLOAD_DIR",
       "data/uploads/datasources"
     );
-    if (isAbsolute(raw)) {
-      return raw;
-    }
-    const direct = resolve(process.cwd(), raw);
-    if (existsSync(direct)) {
-      return direct;
-    }
-    return resolve(process.cwd(), "../../", raw);
+    return this.resolveConfiguredPath(raw);
   }
 
   get datasourceUploadMaxBytes(): number {
@@ -125,12 +123,140 @@ export class AppConfigService {
     return Number(this.config.get<string>("LLM_TIMEOUT_MS", "30000"));
   }
 
+  get llmStreamTimeoutMs(): number {
+    const fallback = this.llmTimeoutMs;
+    const raw = this.config.get<string>("LLM_STREAM_TIMEOUT_MS", String(fallback));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `LLM_STREAM_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${fallback}。`
+    );
+    return fallback;
+  }
+
   get llmMockMode(): boolean {
     return this.config.get<string>("LLM_MOCK_MODE", "false") === "true";
   }
 
+  get embeddingProvider(): string {
+    return this.config.get<string>("EMBEDDING_PROVIDER", this.llmProvider);
+  }
+
+  get embeddingApiKey(): string {
+    return this.config.get<string>("EMBEDDING_API_KEY", this.llmApiKey);
+  }
+
+  get embeddingBaseUrl(): string {
+    return this.config.get<string>("EMBEDDING_BASE_URL", this.llmBaseUrl);
+  }
+
+  get embeddingModel(): string {
+    return this.config.get<string>("EMBEDDING_MODEL", "text-embedding-3-small");
+  }
+
+  get embeddingTimeoutMs(): number {
+    const raw = this.config.get<string>("EMBEDDING_TIMEOUT_MS", String(this.llmTimeoutMs));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `EMBEDDING_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${this.llmTimeoutMs}。`
+    );
+    return this.llmTimeoutMs;
+  }
+
+  get embeddingDimensions(): number | undefined {
+    const raw = this.config.get<string>("EMBEDDING_DIMENSIONS", "").trim();
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `EMBEDDING_DIMENSIONS 配置无效（${raw}），将忽略并使用 provider 默认维度。`
+    );
+    return undefined;
+  }
+
+  get embeddingVectorVersion(): string {
+    return this.config.get<string>("EMBEDDING_VECTOR_VERSION", "v1");
+  }
+
+  get embeddingMockMode(): boolean {
+    return this.config.get<string>("EMBEDDING_MOCK_MODE", "false") === "true";
+  }
+
+  get rerankProvider(): string {
+    return this.config.get<string>("RERANK_PROVIDER", this.llmProvider);
+  }
+
+  get rerankApiKey(): string {
+    return this.config.get<string>("RERANK_API_KEY", this.llmApiKey);
+  }
+
+  get rerankBaseUrl(): string {
+    return this.config.get<string>("RERANK_BASE_URL", this.llmBaseUrl);
+  }
+
+  get rerankModel(): string {
+    return this.config.get<string>("RERANK_MODEL", this.llmModel);
+  }
+
+  get rerankTimeoutMs(): number {
+    const raw = this.config.get<string>("RERANK_TIMEOUT_MS", String(this.llmTimeoutMs));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `RERANK_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${this.llmTimeoutMs}。`
+    );
+    return this.llmTimeoutMs;
+  }
+
+  get rerankMockMode(): boolean {
+    return this.config.get<string>("RERANK_MOCK_MODE", "false") === "true";
+  }
+
   get agentPlanningScaffoldEnabled(): boolean {
     return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
+  }
+
+  get agentRagRetrievalEnabled(): boolean {
+    return this.config.get<string>("AGENT_RAG_RETRIEVAL_ENABLED", "true") === "true";
+  }
+
+  get clarificationHybridEnabled(): boolean {
+    return this.config.get<string>("CLARIFICATION_HYBRID_ENABLED", "true") === "true";
+  }
+
+  get clarificationRulesOnlyKillSwitch(): boolean {
+    return (
+      this.config.get<string>(
+        "CLARIFICATION_HYBRID_KILL_SWITCH_RULES_ONLY",
+        this.config.get<string>("CLARIFICATION_RULES_ONLY_KILL_SWITCH", "false")
+      ) === "true"
+    );
+  }
+
+  get clarificationSemanticTimeoutMs(): number {
+    const raw = this.config.get<string>(
+      "CLARIFICATION_HYBRID_TIMEOUT_MS",
+      this.config.get<string>("CLARIFICATION_SEMANTIC_TIMEOUT_MS", "1200")
+    );
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `CLARIFICATION_HYBRID_TIMEOUT_MS 配置无效（${raw}），已回退默认值 1200。`
+    );
+    return 1200;
   }
 
   get sqlSafetySoftWarnMaxLength(): number {
@@ -246,5 +372,18 @@ export class AppConfigService {
     }
     this.logger.warn(`${key} 配置无效（${raw}），已回退默认值 ${defaultValue}。`);
     return defaultValue;
+  }
+
+  private resolveConfiguredPath(raw: string): string {
+    if (isAbsolute(raw)) {
+      return resolve(raw);
+    }
+
+    const direct = resolve(process.cwd(), raw);
+    const fallback = resolve(process.cwd(), "../../", raw);
+    if (existsSync(direct) || !existsSync(fallback)) {
+      return direct;
+    }
+    return fallback;
   }
 }

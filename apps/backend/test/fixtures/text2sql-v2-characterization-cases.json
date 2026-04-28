@@ -1,0 +1,322 @@
+[
+  {
+    "id": "char-main-happy-001",
+    "scenario": "text_to_sql success path parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "A.context-envelope",
+        "M.final-answer-replay-artifacts",
+        "SC.context-pack-parity"
+      ]
+    }
+  },
+  {
+    "id": "char-clarification-002",
+    "scenario": "clarification terminal parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": false
+      }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "C1.targeted-clarification",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  },
+  {
+    "id": "char-validation-terminal-003",
+    "scenario": "validation terminal failure parity",
+    "expectedStageOrder": [
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ],
+    "surfaces": {
+      "sync": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "stream": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "replay": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "runView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      },
+      "saveView": {
+        "version": "v2",
+        "stageOrder": [
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ],
+        "stageArtifactCount": 9,
+        "hasSemanticPlan": true
+      }
+    },
+    "traceability": {
+      "behaviorTests": [
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence",
+        "M.final-answer-replay-artifacts"
+      ]
+    }
+  }
+]

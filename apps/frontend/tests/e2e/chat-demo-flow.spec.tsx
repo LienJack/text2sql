@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -143,6 +143,109 @@ describe("chat demo flow", () => {
   it("completes send and preview flow", async () => {
     const user = userEvent.setup();
     const emittedEventTypes: string[] = [];
+    const phaseBRun = createMockRun({
+      trace: {
+        runId: "run-1",
+        provider: "mock",
+        retryCount: 0,
+        steps: [
+          {
+            node: "retrieve_knowledge",
+            status: "success",
+            stepId: "run-1:retrieve_knowledge:1",
+            sequence: 1,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:00.000Z"
+          },
+          {
+            node: "build_intent_plan",
+            status: "success",
+            stepId: "run-1:build_intent_plan:2",
+            sequence: 2,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:01.000Z"
+          },
+          {
+            node: "build_semantic_query",
+            status: "success",
+            stepId: "run-1:build_semantic_query:3",
+            sequence: 3,
+            lifecycle: "completed",
+            at: "2026-04-10T00:00:02.000Z"
+          }
+        ]
+      },
+      delivery: {
+        answer: {
+          text: "已为你生成 SQL，并展示结果。",
+          status: "executionResult",
+          provider: "mock"
+        },
+        evidence: {
+          runId: "run-1",
+          retrievalStatus: "degraded",
+          degradeReasons: ["retrieval_timeout"],
+          selectedContext: {
+            count: 2,
+            snippets: ["用户显式：时间范围: 近30天", "系统推断：schema.orders"]
+          },
+          riskTags: [
+            "semantic_registry_degraded",
+            "context:user-explicit",
+            "context:system-inferred"
+          ]
+        },
+        artifact: {
+          sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
+          rowCount: 1,
+          hasError: false,
+          summary: {
+            headline: "支付方式分布",
+            text: "近 30 天订单主要由 card 支付。"
+          },
+          table: {
+            columns: ["payment_method", "cnt"],
+            rowCount: 1,
+            rowsPreview: [{ payment_method: "card", cnt: 12 }],
+            previewRowCount: 1
+          },
+          chart: {
+            type: "bar",
+            mappings: {
+              x: "payment_method",
+              y: "cnt"
+            },
+            meta: {
+              title: "支付方式分布"
+            }
+          },
+          display: "bar",
+          validation: {
+            status: "valid"
+          }
+        }
+      }
+    });
+    mockGetMessages.mockResolvedValue({
+      session: {
+        id: "session-1",
+        datasource: "sqlite_main",
+        datasourceName: "SQLite 主数据源",
+        datasourceType: "sqlite",
+        datasourceStatus: "available",
+        title: "新会话",
+        modelCatalogId: "model-1",
+        modelProvider: "openai",
+        modelName: "gpt-4o-mini",
+        debugEnabled: false,
+        syncStatus: "healthy" as const,
+        createdAt: "2026-04-10T00:00:00.000Z"
+      },
+      messages: createMockMessages(),
+      latestRun: phaseBRun
+    });
+    mockGetRun.mockResolvedValue(phaseBRun);
+
     let releaseFirstEvent: (() => void) | undefined;
     const firstEventGate = new Promise<void>((resolve) => {
       releaseFirstEvent = resolve;
@@ -166,14 +269,45 @@ describe("chat demo flow", () => {
         sessionId: "session-1",
         at: "2026-04-10T00:00:00.000Z",
         data: {
-          node: "generate_sql",
+          node: "retrieve_knowledge",
           status: "success",
-          detail: "生成 SQL",
-          stepId: "run-1:generate_sql:1",
+          detail: "检索知识",
+          stepId: "run-1:retrieve_knowledge:1",
           sequence: 1,
           lifecycle: "completed",
-          stage: "generation",
-          title: "生成 SQL"
+          stage: "analysis"
+        }
+      };
+      emittedEventTypes.push("state");
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "build_intent_plan",
+          status: "success",
+          detail: "构建意图计划",
+          stepId: "run-1:build_intent_plan:2",
+          sequence: 2,
+          lifecycle: "completed",
+          stage: "analysis"
+        }
+      };
+      emittedEventTypes.push("state");
+      yield {
+        type: "state",
+        runId: "run-1",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          node: "build_semantic_query",
+          status: "success",
+          detail: "构建语义检索",
+          stepId: "run-1:build_semantic_query:3",
+          sequence: 3,
+          lifecycle: "completed",
+          stage: "analysis"
         }
       };
       emittedEventTypes.push("text-delta");
@@ -194,12 +328,58 @@ describe("chat demo flow", () => {
         at: "2026-04-10T00:00:00.000Z",
         data: {
           status: "executionResult",
-          rowCount: 1
+          rowCount: 1,
+          delivery: {
+            answer: {
+              text: "已为你生成 SQL，并展示结果。",
+              status: "executionResult",
+              provider: "mock"
+            },
+            evidence: {
+              runId: "run-1",
+              retrievalStatus: "degraded",
+              degradeReasons: ["retrieval_timeout"],
+              selectedContext: {
+                count: 2,
+                snippets: ["用户显式：时间范围: 近30天", "系统推断：schema.orders"]
+              },
+              riskTags: [
+                "semantic_registry_degraded",
+                "context:user-explicit",
+                "context:system-inferred"
+              ]
+            },
+            artifact: {
+              sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
+              rowCount: 1,
+              hasError: false,
+              summary: {
+                text: "近 30 天订单主要由 card 支付。"
+              },
+              table: {
+                columns: ["payment_method", "cnt"],
+                rowCount: 1,
+                rowsPreview: [{ payment_method: "card", cnt: 12 }],
+                previewRowCount: 1
+              },
+              chart: {
+                type: "bar",
+                mappings: {
+                  x: "payment_method",
+                  y: "cnt"
+                }
+              },
+              display: "bar",
+              validation: {
+                status: "valid"
+              }
+            }
+          }
         }
       };
     });
 
-    render(<ChatPage />);
+    const { unmount } = render(<ChatPage />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     const initialGetMessagesCalls = mockGetMessages.mock.calls.length;
@@ -219,10 +399,51 @@ describe("chat demo flow", () => {
         initialGetMessagesCalls
       );
     });
-    expect(emittedEventTypes).toEqual(["start", "state", "text-delta", "finish"]);
+    expect(emittedEventTypes).toEqual([
+      "start",
+      "state",
+      "state",
+      "state",
+      "text-delta",
+      "finish"
+    ]);
 
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
-    expect(screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    expect(screen.getByText("知识检索")).toBeInTheDocument();
+    expect(screen.getByText("意图规划")).toBeInTheDocument();
+    expect(screen.getByText("语义检索构建")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
+
+    const resultPanel = await screen.findByTestId("chatbi-result-panel");
+    const resultQueries = within(resultPanel);
+    const answerTab = resultQueries.getByRole("tab", { name: /answer/i });
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
+    expect(resultQueries.getByText("近 30 天订单主要由 card 支付。")).toBeInTheDocument();
+    expect(resultQueries.getByRole("columnheader", { name: "payment_method" })).toBeInTheDocument();
+
+    await user.click(resultQueries.getByRole("tab", { name: /chart/i }));
+    expect(resultQueries.getByTestId("chatbi-bar-chart")).toBeInTheDocument();
+
+    await user.click(resultQueries.getByRole("tab", { name: /view sql/i }));
+    await user.click(resultQueries.getByRole("button", { name: "打开运行详情" }));
+    expect(screen.getByText("运行详情")).toBeInTheDocument();
+    expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
+    expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
+    expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
+    expect(screen.getByText("context:user-explicit")).toBeInTheDocument();
+    expect(screen.getByText("context:system-inferred")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+    expect(
+      screen.getAllByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method").length
+    ).toBeGreaterThan(0);
+
+    unmount();
+    render(<ChatPage />);
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    const replayShell = await screen.findByTestId("assistant-result-shell");
+    expect(replayShell).toHaveAttribute("data-run-id", "run-1");
+    expect(screen.getByRole("tab", { name: /answer/i })).toHaveAttribute("aria-selected", "true");
   });
 });

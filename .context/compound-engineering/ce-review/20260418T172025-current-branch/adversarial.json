@@ -1,0 +1,182 @@
+{
+  "reviewer": "adversarial",
+  "timestamp": "2026-04-18T08:41:02Z",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "tracked_files_only": true,
+    "diff_source": ".context/compound-engineering/ce-review/20260418T172025-current-branch/diff.patch"
+  },
+  "focus": [
+    "auth and privilege boundaries",
+    "data mutation durability and rollback integrity",
+    "external model interaction failure modes",
+    "RAG retrieval/runtime boundary correctness under adversarial inputs"
+  ],
+  "summary": {
+    "critical": 1,
+    "high": 5,
+    "medium": 3,
+    "low": 0
+  },
+  "findings": [
+    {
+      "title": "Header-spoofable admin trust boundary is amplified by newly added admin mutation surfaces",
+      "severity": "critical",
+      "file": "apps/backend/src/modules/settings/settings.controller.ts",
+      "line": 65,
+      "confidence": "high",
+      "autofix_class": "auth_boundary_fix",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": true,
+      "worst_case": "Remote caller self-asserts admin via headers, then mutates prompt templates/provider settings/memory feedback to alter SQL behavior and governance decisions.",
+      "suggested_fix": "Stop deriving actor/admin from client-controlled headers; bind actor from verified auth claims only, and make `AdminOnlyGuard` trust only `req.actor` set by auth middleware (not raw headers)."
+    },
+    {
+      "title": "Prompt template listing endpoint is unguarded and exposes runtime prompt content",
+      "severity": "high",
+      "file": "apps/backend/src/modules/settings/settings.controller.ts",
+      "line": 52,
+      "confidence": "high",
+      "autofix_class": "access_control",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Attacker enumerates active SQL prompt templates and scope keys, then tailors prompt-injection payloads and model bypass probes.",
+      "suggested_fix": "Protect `GET /api/v1/settings/prompts` with admin/workspace ACL, and provide a redacted listing mode that omits `content` by default."
+    },
+    {
+      "title": "RAG quality endpoints are unauthenticated, allowing quality-metric tampering and replay probing",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.controller.ts",
+      "line": 25,
+      "confidence": "high",
+      "autofix_class": "access_control",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Unauthenticated actor writes forged quality reports and probes run replay completeness by runId, distorting release-gate signal and exposing operational internals.",
+      "suggested_fix": "Require admin/internal auth for all `/api/v1/rag/quality/*` routes and validate `runId` shape with strict DTOs/pipes."
+    },
+    {
+      "title": "R6 gate uses hardcoded values for critical metrics, enabling false confidence under adversarial or sparse telemetry",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 701,
+      "confidence": "high",
+      "autofix_class": "gate_correctness",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Gate decisions can appear healthier than reality because `staleCacheReadRate=0`, `graphFallbackActivationRate=0`, and `securityGatePass=true` are synthetic constants, not observed telemetry.",
+      "suggested_fix": "Source all R6 metrics from measured telemetry/replay facts; when unavailable, mark as `insufficient_samples` instead of static pass values."
+    },
+    {
+      "title": "Semantic promotion publishes one semantic version per term winner, causing active semantic snapshot truncation",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts",
+      "line": 282,
+      "confidence": "high",
+      "autofix_class": "data_model_consistency",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "A single `semantic_promoted` event containing multiple terms can end with only the last term set in the active semantic version, degrading semantic resolution and downstream SQL correctness.",
+      "suggested_fix": "Publish exactly one semantic registry version per scope/domain per event using the complete resolved term set, not per-term loop publishes."
+    },
+    {
+      "title": "New RAG persistence layers fail open to in-memory writes on Prisma errors",
+      "severity": "high",
+      "file": "apps/backend/src/modules/rag/observability/rag-replay.repository.ts",
+      "line": 338,
+      "confidence": "high",
+      "autofix_class": "durability_guard",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "During DB partial outage, writes are acknowledged but silently non-durable; restart drops replay/index/semantic state and invalidates audit/reproducibility guarantees.",
+      "suggested_fix": "On primary persistence failure, return explicit degraded/error status and queue durable retries; avoid silent success paths that only persist in process memory."
+    },
+    {
+      "title": "Required-domain coverage can be skipped when top-N is already full",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 590,
+      "confidence": "high",
+      "autofix_class": "selection_logic_fix",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Retrieval context lacks required schema/semantic domains despite policy intent, increasing hallucinated SQL and brittle planning behavior on hard queries.",
+      "suggested_fix": "When required domains are missing and limit is reached, replace lowest-ranked non-required candidates so required-domain constraints are actually enforced."
+    },
+    {
+      "title": "Model rerank parser fails open to mock ranking on malformed output",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/llm/provider-router.service.ts",
+      "line": 127,
+      "confidence": "high",
+      "autofix_class": "external_dependency_hardening",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Provider instability or adversarial model output can force deterministic mock reranking, silently changing ranking quality and masking upstream failures.",
+      "suggested_fix": "On parse failure, mark rerank degraded and preserve primary ranking (or explicit error path) rather than silently substituting mock ranking."
+    },
+    {
+      "title": "Prompt builder labels retrieved/template text as trusted and high-priority guidance",
+      "severity": "medium",
+      "file": "apps/backend/src/modules/agent/sql/sql-prompt.builder.ts",
+      "line": 56,
+      "confidence": "high",
+      "autofix_class": "prompt_injection_guard",
+      "owner": "backend",
+      "requires_verification": true,
+      "pre_existing": false,
+      "worst_case": "Injected corpus/template text is treated as authoritative instruction, increasing risk of SQL-generation steering and policy evasion attempts.",
+      "suggested_fix": "Mark retrieval/template blocks explicitly as untrusted data, bound length aggressively, and wrap in delimiters with instruction-hierarchy warnings."
+    }
+  ],
+  "residual_risks": [
+    "Even after endpoint guards are added, role derivation from unsigned headers remains a single-point compromise unless auth trust boundaries are redesigned.",
+    "Current quality/replay APIs expose rich operational detail by runId; without tenancy scoping and rate limits, enumeration and telemetry abuse remain plausible.",
+    "In-memory fallback patterns across new RAG modules can still create state divergence unless a strict durability policy is enforced."
+  ],
+  "testing_gaps": [
+    "No adversarial integration test proving header spoofing cannot escalate privileges on settings/memory/quality routes.",
+    "No test asserting required-domain coverage replacement behavior when candidate limit is saturated.",
+    "No test that multi-term `semantic_promoted` events preserve all winners in the final active semantic version.",
+    "No negative-path test ensuring malformed rerank model output does not silently switch to mock ranking in production mode."
+  ],
+  "fresh_verification": {
+    "verified_at_utc": "2026-04-18T08:42:54Z",
+    "head_commit": "105684cf7a23ec4b6e6f3ee7a08c1a73ef100fa2",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "line_rechecks": [
+      "apps/backend/src/modules/settings/settings.controller.ts:52",
+      "apps/backend/src/modules/auth/request-actor.middleware.ts:70",
+      "apps/backend/src/modules/auth/admin-only.guard.ts:17",
+      "apps/backend/src/modules/rag/quality/rag-quality.controller.ts:25",
+      "apps/backend/src/modules/rag/quality/rag-quality.service.ts:701",
+      "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts:590",
+      "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts:282",
+      "apps/backend/src/modules/llm/provider-router.service.ts:127",
+      "apps/backend/src/modules/agent/sql/sql-prompt.builder.ts:56"
+    ],
+    "targeted_tests": [
+      {
+        "command": "pnpm --filter @text2sql/backend test -- test/integration/memory-feedback-api.spec.ts --runInBand",
+        "result": "pass",
+        "tests_passed": "4/4"
+      },
+      {
+        "command": "pnpm --filter @text2sql/backend test -- test/integration/rag-quality.spec.ts --runInBand",
+        "result": "pass",
+        "tests_passed": "3/3"
+      }
+    ],
+    "note": "Passing tests do not cover header-spoof privilege escalation or required-domain replacement behavior under saturated candidate limits."
+  },
+  "recommendation": "REQUEST_CHANGES"
+}

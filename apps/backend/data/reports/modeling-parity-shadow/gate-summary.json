@@ -1,0 +1,98 @@
+{
+  "generatedAt": "2026-04-26T12:28:00.057Z",
+  "inputs": {
+    "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/samples.json",
+    "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/samples.json",
+    "modelingWorkspace": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/modeling-parity-shadow/samples.json"
+  },
+  "outputs": {
+    "relationshipPlatform": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/relationship-platform-shadow/gate-summary.json",
+    "semanticSpine": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/semantic-spine-shadow/gate-summary.json",
+    "modelingWorkspace": "/Users/lienli/Documents/GitHub/text2sql/apps/backend/data/reports/modeling-parity-shadow/gate-summary.json"
+  },
+  "strictMode": false,
+  "gatePass": false,
+  "reasons": [
+    "relationship_platform:sample_not_ready",
+    "semantic_spine:sample_not_ready",
+    "modeling_workspace:sample_not_ready"
+  ],
+  "rollout": {
+    "recommendedStage": "shadow_only",
+    "canaryEligible": false,
+    "rollbackSuggested": false,
+    "rollbackRiskReasons": [],
+    "runbook": {
+      "rollout": "README.md#modeling-parity-shadow-gate-rollout-runbook",
+      "rollback": "README.md#modeling-parity-shadow-gate-rollout-runbook"
+    }
+  },
+  "relationshipPlatform": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "multiTableSuccessRate": 0,
+      "relationshipPublishSuccessRate": 0,
+      "publishBlockRate": 0,
+      "rollbackRate": 0,
+      "crossDbRelationshipCoverageRate": 0,
+      "correctionSuccessRate": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "minMultiTableSuccessRate": 0.85,
+      "minRelationshipPublishSuccessRate": 0.95,
+      "maxPublishBlockRate": 0.35,
+      "maxRollbackRate": 0.1,
+      "minCrossDbCoverageRate": 0.2,
+      "minCorrectionSuccessRate": 0.5
+    }
+  },
+  "semanticSpine": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "accuracyLiftAvg": 0,
+      "semanticConsistencyLiftAvg": 0,
+      "latencyP95OverheadMs": 0,
+      "degradeRateAvg": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "minAccuracyLift": 0.12,
+      "minSemanticConsistencyLift": 0.12,
+      "maxLatencyOverheadMsP95": 180,
+      "maxDegradeRate": 0.1
+    }
+  },
+  "modelingWorkspace": {
+    "gatePass": false,
+    "sampleSize": 0,
+    "sampleReady": false,
+    "metrics": {
+      "deployBlockRate": 0,
+      "rollbackRate": 0,
+      "schemaBacklogAvg": 0,
+      "saveAsViewSuccessRate": 0,
+      "runtimeRevisionMissingRate": 0
+    },
+    "signalCoverage": {
+      "deployBlockRate": 0,
+      "rollbackRate": 0,
+      "schemaBacklog": 0,
+      "saveAsViewSuccessRate": 0,
+      "runtimeRevisionMissingRate": 0
+    },
+    "thresholds": {
+      "minSamples": 30,
+      "maxDeployBlockRate": 0.4,
+      "maxRollbackRate": 0.15,
+      "maxSchemaBacklogAvg": 2,
+      "minSaveAsViewSuccessRate": 0.8,
+      "maxRuntimeRevisionMissingRate": 0.1,
+      "minSignalCoverageRate": 0.7
+    }
+  }
+}

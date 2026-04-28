@@ -157,5 +157,18 @@ describe("workspace datasource api (e2e)", () => {
         tableNames: ["orders"]
       });
     expect(retiredRouteRes.status).toBe(404);
+
+    const legacyPayloadRes = await request(app.getHttpServer())
+      .put(
+        `/api/v1/system/workspaces/${workspaceId}/datasources/ds-workspace-permission-1/table-permissions`
+      )
+      .set("x-user-id", "admin-workspace-permission")
+      .set("x-user-role", "admin")
+      .set("x-idempotency-key", "ws-perm-replace-legacy-payload")
+      .send({
+        version: 1,
+        tables: ["orders"]
+      });
+    expect(legacyPayloadRes.status).toBe(400);
   });
 });

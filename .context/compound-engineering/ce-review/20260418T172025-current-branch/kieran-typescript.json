@@ -1,0 +1,129 @@
+{
+  "reviewer": "kieran-typescript",
+  "mode": "ce:review",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "trackedFilesOnly": true,
+    "tsFilesReviewed": 143
+  },
+  "stage1_spec_compliance": {
+    "status": "issues_found",
+    "summary": "Core delivery/memory contracts are wired end-to-end, but RAG quality contract typing is inconsistent across backend/shared-types/frontend, causing typed contract drift.",
+    "checks": [
+      {
+        "name": "Delivery contract sync/stream/run surfaces",
+        "status": "pass"
+      },
+      {
+        "name": "RAG quality report contract parity (backend/frontend/shared-types)",
+        "status": "fail"
+      }
+    ]
+  },
+  "stage2_code_quality": {
+    "diagnostics": {
+      "lsp_diagnostics": {
+        "status": "unavailable",
+        "details": "omx_code_intel transport closed for lsp_diagnostics_directory/lsp_servers in this session"
+      },
+      "fallback_typecheck": [
+        {
+          "command": "pnpm --filter @text2sql/shared-types run build",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/backend run build",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/frontend run build",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/shared-types run lint",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/backend run lint",
+          "status": "pass"
+        },
+        {
+          "command": "pnpm --filter @text2sql/frontend run lint",
+          "status": "pass"
+        }
+      ]
+    },
+    "pattern_scans": {
+      "ast_grep_status": "unavailable",
+      "fallback_rg_scans": [
+        "unsafe casts and non-null assertions scan",
+        "console.log / empty catch / hardcoded apiKey scan"
+      ]
+    }
+  },
+  "fresh_verification_evidence": {
+    "backend_tests": [
+      {
+        "command": "pnpm --filter @text2sql/backend run test -- test/integration/rag-quality.spec.ts",
+        "status": "pass",
+        "summary": "3/3 tests passed, including /health quality gate exposure."
+      }
+    ],
+    "frontend_tests": [
+      {
+        "command": "pnpm --filter @text2sql/frontend run test -- tests/unit/settings-page-governance-visibility.spec.tsx",
+        "status": "pass",
+        "summary": "Target test passes; vitest run executes broader frontend suite (87 tests passed)."
+      },
+      {
+        "command": "pnpm --filter @text2sql/frontend run test -- tests/unit/run-visibility-mapper.spec.ts",
+        "status": "pass",
+        "summary": "Target test passes; vitest run executes broader frontend suite (87 tests passed)."
+      }
+    ],
+    "notes": [
+      "Frontend test runs emit existing React ref warnings in unrelated dialog/sheet components; not introduced by the reviewed contract changes."
+    ]
+  },
+  "issues": [
+    {
+      "id": "KT-001",
+      "severity": "MEDIUM",
+      "title": "RagQualityGateReport contract drift across backend/shared-types leads to unsafe frontend casts",
+      "category": "contract-drift",
+      "evidence": [
+        {
+          "file": "packages/shared-types/src/api.ts",
+          "line": 189,
+          "detail": "Shared RagQualityGateReport omits backend fields (glossarySelectedContext, datasourceOrchestration, cacheBudget, r6)."
+        },
+        {
+          "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+          "line": 104,
+          "detail": "Backend RagQualityGateReport includes additional fields beyond shared type."
+        },
+        {
+          "file": "apps/backend/src/modules/rag/quality/rag-quality.controller.ts",
+          "line": 15,
+          "detail": "Controller returns ApiResponse<unknown>, preventing compile-time contract checks against shared types."
+        },
+        {
+          "file": "apps/frontend/src/lib/settings-api-client.ts",
+          "line": 99,
+          "detail": "Frontend uses `report as unknown as JsonRecord` and snake_case probing (`latest_run`) to compensate for schema variance."
+        }
+      ],
+      "impact": "Type safety for a cross-service API is weakened; backend schema changes can ship without compile-time breakage, and frontend must rely on unsafe casts/compat parsing.",
+      "fix": "Unify on a single shared RagQualityGateReport contract: (1) extend packages/shared-types RagQualityGateReport to include the backend fields actually returned, (2) type RagQualityController responses as ApiResponse<RagQualityGateReport> (and glossary endpoint with its explicit shared subtype), (3) remove `as unknown as` parsing paths in settings-api-client once the unified schema is in place."
+    }
+  ],
+  "severity_counts": {
+    "CRITICAL": 0,
+    "HIGH": 0,
+    "MEDIUM": 1,
+    "LOW": 0
+  },
+  "recommendation": "REQUEST_CHANGES",
+  "final_verdict_basis": "Contract parity does not currently satisfy strict TypeScript API safety expectations for backend/frontend/shared-types integration."
+}

@@ -1,9 +1,14 @@
+import type { ModelingCalculatedFieldExpressionErrorDetails } from "./modeling";
+
 export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
 export type SessionSyncStatus = "healthy" | "pending" | "degraded";
 export type StreamStatus = "in_progress" | "completed" | "failed";
 export type DatasourceType = "sqlite" | "mysql" | "postgresql" | "excel" | "csv";
 export type DatasourceStatus = "available" | "unavailable" | "deleted";
+export type PromptTemplateScene = "sql" | "analysis";
+export type PromptTemplateScope = "global" | "workspace" | "datasource";
+export type PromptTemplateStatus = "draft" | "active" | "archived";
 export type ReasoningStage =
   | "analysis"
   | "generation"
@@ -24,6 +29,10 @@ export type LlmProviderCode =
   | "tongyi";
 export type ProviderSyncStatus = "idle" | "syncing" | "healthy" | "degraded" | "failed";
 export type ModelHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
+export type RagTaskType = "embedding" | "rerank";
+export type RagConfigSource = "settings" | "env_fallback" | "missing";
+export type RagConfigHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
+export type RagHealthCheckedAgainst = "draft" | "persisted";
 
 export interface Session {
   id: string;
@@ -70,10 +79,559 @@ export interface ChatMessage {
   metadata?: Record<string, unknown>;
 }
 
-export interface ClarificationPrompt {
+export type ClarificationDecision = "continue" | "clarify";
+export type ClarificationTriggerPath = "rule" | "semantic" | "hybrid";
+export type ClarificationConfidenceLevel = "high" | "medium" | "low";
+export type ClarificationDecisionSource =
+  | "rule"
+  | "metadata-intent"
+  | "sql-write-intent"
+  | "short-input-fallback"
+  | "exception-fallback"
+  | (string & {});
+export type ClarificationSlotKey =
+  | "subject"
+  | "metric"
+  | "time"
+  | "dimension"
+  | "filter"
+  | (string & {});
+
+export interface ClarificationDecisionEvidence {
+  decision?: ClarificationDecision;
+  triggerPath?: ClarificationTriggerPath;
+  decisionSource?: ClarificationDecisionSource;
+  bypassed?: boolean;
+  bypassReasonCode?: string;
+  confidenceLevel?: ClarificationConfidenceLevel;
+  missingCriticalSlots?: ClarificationSlotKey[];
+  conflictDetected?: boolean;
+  reasonCodes?: string[];
+  question?: string;
+  reason?: string;
+}
+
+export interface ClarificationPrompt extends ClarificationDecisionEvidence {
   question: string;
   reason: string;
 }
+
+export interface ContextEnvelopeTimeRange {
+  from?: string;
+  to?: string;
+  timezone?: string;
+}
+
+export interface ContextEnvelopeEntityMapping {
+  entity: string;
+  mappedTo: string;
+}
+
+export interface ContextEnvelope {
+  metricDefinition?: string;
+  timeRange?: ContextEnvelopeTimeRange;
+  entityMappings?: ContextEnvelopeEntityMapping[];
+  mustIncludeTables?: string[];
+  mustExcludeTables?: string[];
+  pinnedTables?: string[];
+  pinnedColumns?: string[];
+  businessConstraints?: string[];
+}
+
+export interface ContextEnvelopePinningEvidence {
+  enabled: boolean;
+  status: "applied" | "inactive";
+  candidateFilteredCount?: number;
+  selectedContextFilteredCount?: number;
+}
+
+export interface SendMessageRequest {
+  message: string;
+  contextEnvelope?: ContextEnvelope;
+}
+
+export interface PromptTemplateTraceEvidence {
+  templateId?: string;
+  scene?: PromptTemplateScene;
+  scope?: PromptTemplateScope;
+  version?: number;
+  fallbackReason?: string;
+}
+
+export interface PromptTemplateTraceEvidenceCompat
+  extends PromptTemplateTraceEvidence {
+  template_id?: string;
+  scene_name?: string;
+  template_scene?: string;
+  scope_type?: PromptTemplateScope;
+  template_scope?: PromptTemplateScope;
+  template_version?: number;
+  fallback_reason?: string;
+}
+
+export type Text2SqlV2StageName =
+  | "intake"
+  | "retrieve"
+  | "assemble-context"
+  | "semantic-plan"
+  | "generate-sql"
+  | "validate"
+  | "correct"
+  | "execute"
+  | "answer";
+
+export interface Text2SqlV2ProviderMetadata {
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
+  timeoutMs?: number;
+  inputCount?: number;
+  outputCount?: number;
+  fallbackReason?: string;
+  unavailableReason?: string;
+}
+
+export interface Text2SqlV2FailureSemantic {
+  code: string;
+  message: string;
+  category?:
+    | "intake"
+    | "retrieval"
+    | "planning"
+    | "generation"
+    | "validation"
+    | "governance"
+    | "execution"
+    | "unknown";
+  terminal?: boolean;
+  correctable?: boolean;
+}
+
+export interface Text2SqlV2StageArtifact {
+  stage: Text2SqlV2StageName;
+  status: "success" | "skipped" | "degraded" | "failed" | "clarification";
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  warnings?: string[];
+  evidenceIds?: string[];
+  provider?: Text2SqlV2ProviderMetadata;
+  failure?: Text2SqlV2FailureSemantic;
+  metadata?: Record<string, unknown>;
+}
+
+export type SemanticContextPackStatusV1 = "ready" | "degraded";
+export type SemanticContextPackCapabilityV1 =
+  | "structured_lanes"
+  | "structured_degradation"
+  | "structured_pruning"
+  | "structured_permission_filtering"
+  | "selected_context_summary"
+  | "semantic_binding_refs"
+  | (string & {});
+export type SemanticContextPackLaneStateV1Status =
+  | "ready"
+  | "degraded"
+  | "unavailable"
+  | "skipped"
+  | (string & {});
+export type SemanticContextPackPermissionFilteringStatusV1 =
+  | "applied"
+  | "skipped"
+  | (string & {});
+
+export interface SemanticContextPackIdentifierLaneV1 {
+  ids: string[];
+  count: number;
+  reasonCodes?: string[];
+}
+
+export interface SemanticContextPackReferenceLaneV1 {
+  refs: string[];
+  count: number;
+  reasonCodes?: string[];
+}
+
+export interface SemanticContextPackSemanticBindingsV1 {
+  modelKeys?: string[];
+  relationshipKeys?: string[];
+  metricKeys?: string[];
+  calculatedFieldKeys?: string[];
+}
+
+export interface SemanticContextPackStructuredLanesV1 {
+  tables?: SemanticContextPackIdentifierLaneV1;
+  columns?: SemanticContextPackIdentifierLaneV1;
+  aliases?: SemanticContextPackIdentifierLaneV1;
+  relationships?: SemanticContextPackReferenceLaneV1;
+  metrics?: SemanticContextPackReferenceLaneV1;
+  calculatedFields?: SemanticContextPackReferenceLaneV1;
+  examples?: SemanticContextPackReferenceLaneV1;
+  instructions?: SemanticContextPackReferenceLaneV1;
+  priorSql?: SemanticContextPackReferenceLaneV1;
+  schemaSupplementRefs?: SemanticContextPackReferenceLaneV1;
+  dialectFunctions?: SemanticContextPackReferenceLaneV1;
+  semanticBindings?: SemanticContextPackSemanticBindingsV1;
+}
+
+export interface SemanticContextPackSelectedContextSummaryV1 {
+  count: number;
+  evidenceIds: string[];
+  laneNames?: string[];
+}
+
+export interface SemanticContextPackLaneStateV1 {
+  lane: string;
+  state: SemanticContextPackLaneStateV1Status;
+  refs?: string[];
+  reasonCodes?: string[];
+  unavailableReason?: string;
+  fallbackReason?: string;
+  inputCount?: number;
+  outputCount?: number;
+  selectedCount?: number;
+}
+
+export interface SemanticContextPackDegradationV1 {
+  status: SemanticContextPackStatusV1;
+  reasons: string[];
+  riskTags?: string[];
+  denseUnavailableReason?: string;
+  rerankUnavailableReason?: string;
+  laneIssues?: SemanticContextPackLaneStateV1[];
+}
+
+export interface SemanticContextPackPruningDecisionV1 {
+  budgetSource?: string;
+  keptEvidenceIds?: string[];
+  removedEvidenceIds?: string[];
+  keptCount?: number;
+  removedCount?: number;
+  reasonCodes?: string[];
+  summary?: string;
+}
+
+export interface SemanticContextPackPruningV1 {
+  applied: boolean;
+  decisions: SemanticContextPackPruningDecisionV1[];
+}
+
+export interface SemanticContextPackPermissionFilteringV1 {
+  status: SemanticContextPackPermissionFilteringStatusV1;
+  deniedEvidenceIds?: string[];
+  deniedEvidenceCount?: number;
+  deniedTables?: string[];
+  deniedColumns?: string[];
+  reasonCodes?: string[];
+}
+
+export interface SemanticContextPackV1 {
+  status: SemanticContextPackStatusV1;
+  selectedEvidenceIds: string[];
+  selectedTables: string[];
+  selectedColumns: string[];
+  warnings?: string[];
+  version?: string;
+  capabilities?: SemanticContextPackCapabilityV1[];
+  semanticVersion?: number;
+  modelingRevision?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  selectedContextSummary?: SemanticContextPackSelectedContextSummaryV1;
+  lanes?: SemanticContextPackStructuredLanesV1;
+  laneStates?: SemanticContextPackLaneStateV1[];
+  degradation?: SemanticContextPackDegradationV1;
+  pruning?: SemanticContextPackPruningV1;
+  permissionFiltering?: SemanticContextPackPermissionFilteringV1;
+}
+
+export interface SemanticPlanV1 {
+  route: "answer" | "clarify" | "reject";
+  standaloneQuestion: string;
+  selectedTables: string[];
+  selectedColumns: string[];
+  metrics?: string[];
+  grain?: string;
+  filters?: string[];
+  joinPath?: string[];
+  allowedTables?: string[];
+  forbiddenTables?: string[];
+  confidence: number;
+  evidenceRefs: string[];
+  coverageGaps?: SemanticPlanCoverageGapV1[];
+  snapshotId?: string;
+  planLedger?: SemanticPlanLedgerV1;
+}
+
+export interface SemanticPlanCoverageGapV1 {
+  gapType: "evidence_gap" | "user_decision_gap" | (string & {});
+  subjectKind:
+    | "metric"
+    | "dimension"
+    | "filter"
+    | "time"
+    | "table"
+    | "column"
+    | "join_path"
+    | "general"
+    | (string & {});
+  reasonCode: string;
+  evidenceRefs: string[];
+  impactScope:
+    | "semantic_plan"
+    | "sql_generation"
+    | "answer"
+    | "execution"
+    | "clarification"
+    | (string & {});
+}
+
+export type SemanticPlanLedgerObligationKindV1 =
+  | "table"
+  | "column"
+  | "metric"
+  | "time_grain"
+  | "filter"
+  | "join_path"
+  | "permission"
+  | "forbidden_table"
+  | "evidence"
+  | (string & {});
+
+export type SemanticPlanLedgerObligationCriticalityV1 =
+  | "hard_blocker"
+  | "warning";
+
+export type SemanticPlanLedgerObligationStatusV1 =
+  | "required"
+  | "grounded"
+  | "claimed"
+  | "fulfilled"
+  | "failed"
+  | "warning"
+  | "unsupported"
+  | "skipped";
+
+export interface SemanticPlanLedgerObligationV1 {
+  id: string;
+  kind: SemanticPlanLedgerObligationKindV1;
+  summary: string;
+  criticality: SemanticPlanLedgerObligationCriticalityV1;
+  status: SemanticPlanLedgerObligationStatusV1;
+  evidenceRefs: string[];
+  reasonCodes: string[];
+  subject?: string;
+  expectedValue?: string;
+  actualValue?: string;
+}
+
+export interface SemanticPlanLedgerSummaryV1 {
+  snapshotId?: string;
+  total: number;
+  hardBlockerCount: number;
+  warningCount: number;
+  fulfilledCount?: number;
+  failedCount?: number;
+  unsupportedCount?: number;
+  failedHardBlockerIds?: string[];
+  warningIds?: string[];
+  reasonCodes?: string[];
+  selectedEvidenceRefs?: string[];
+}
+
+export interface SemanticPlanLedgerV1 {
+  version: "plan-ledger.v1";
+  snapshotId?: string;
+  obligations: SemanticPlanLedgerObligationV1[];
+  summary: SemanticPlanLedgerSummaryV1;
+}
+
+export interface SqlGenerationUnsupportedClaimV1 {
+  kind: SemanticPlanLedgerObligationKindV1;
+  value: string;
+  reasonCode: string;
+}
+
+export interface SqlCorrectionGroundingV1 {
+  failedSqlRef: string;
+  failedSqlPreview?: string;
+  retryReason: string;
+  failureCode?: string;
+  failureCategory?:
+    | "validation"
+    | "governance"
+    | "safety"
+    | "provider"
+    | "execution"
+    | "unknown";
+  source?: "validation" | "execution";
+  attemptCount: number;
+  maxAttempts: number;
+  evidenceRefs: string[];
+  semanticPlanSnapshotId?: string;
+  semanticPlanRoute?: SemanticPlanV1["route"];
+  semanticPlanRouteKind?: "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed";
+  selectedTableCount?: number;
+  selectedColumnCount?: number;
+  contextPackStatus?: SemanticContextPackStatusV1;
+  contextPackEvidenceCount?: number;
+  failedObligationIds?: string[];
+}
+
+export interface SqlGenerationArtifactV1 {
+  sql: string;
+  assumptions?: string[];
+  usedTables: string[];
+  usedColumns: string[];
+  evidenceRefs: string[];
+  correctionGrounding?: SqlCorrectionGroundingV1;
+  claimedObligationIds?: string[];
+  unsupportedClaims?: SqlGenerationUnsupportedClaimV1[];
+  ledgerSnapshotId?: string;
+}
+
+export interface SqlValidationCheckV1 {
+  check:
+    | "parse"
+    | "read-only"
+    | "permission"
+    | "plan-coverage"
+    | "relationship-path"
+    | "dialect"
+    | "dry-run"
+    | "dry-plan"
+    | "ledger-fulfillment";
+  status: "passed" | "failed" | "skipped";
+  code?: string;
+  message?: string;
+  obligationIds?: string[];
+  failedObligationIds?: string[];
+  reasonCodes?: string[];
+}
+
+export interface SqlValidationArtifactV1 {
+  status: "passed" | "failed" | "skipped";
+  checks: SqlValidationCheckV1[];
+  correctable: boolean;
+  failure?: Text2SqlV2FailureSemantic;
+  ledgerFulfillment?: SemanticPlanLedgerSummaryV1;
+  failedObligationIds?: string[];
+  terminalObligationIds?: string[];
+  correctableObligationIds?: string[];
+}
+
+export type Text2SqlV2RuntimePlanItemStatusV1 =
+  | "pending"
+  | "running"
+  | "completed"
+  | "skipped"
+  | "failed"
+  | "clarification";
+
+export interface Text2SqlV2RuntimePlanItemV1 {
+  id: string;
+  stage: Text2SqlV2StageName;
+  goal: string;
+  status: Text2SqlV2RuntimePlanItemStatusV1;
+  reasonCodes?: string[];
+  evidenceRefs?: string[];
+  correctionIntent?: {
+    failedStage?: Text2SqlV2StageName;
+    failureCode?: string;
+    retryReason: string;
+    targetStage?: Text2SqlV2StageName;
+  };
+  startedAt?: string;
+  endedAt?: string;
+  summary?: string;
+}
+
+export interface Text2SqlV2RuntimePlanV1 {
+  version: "runtime-plan.v1";
+  items: Text2SqlV2RuntimePlanItemV1[];
+  currentItemId?: string;
+  summary?: string;
+}
+
+export type Text2SqlV2ArtifactRefCategoryV1 =
+  | "context_snippets"
+  | "schema_supplement"
+  | "prompt_input"
+  | "provider_output_summary"
+  | "validation_diagnostics"
+  | "correction_grounding"
+  | "execution_preview"
+  | (string & {});
+
+export interface Text2SqlV2ArtifactRefV1 {
+  id: string;
+  category: Text2SqlV2ArtifactRefCategoryV1;
+  summary: string;
+  hash: string;
+  version?: string;
+  sizeBytes?: number;
+  replayKeyHint?: string;
+  visibility: "user" | "internal" | "redacted";
+  sensitivity?: "none" | "permission_filtered" | "provider_raw" | "sensitive";
+  reasonCodes?: string[];
+  evidenceRefs?: string[];
+}
+
+export interface Text2SqlV2SmartDefaultsEvidenceV1 {
+  bundleId: string;
+  version: string;
+  coveredStages: Text2SqlV2StageName[];
+  ruleIds: string[];
+  status: "applied" | "fallback";
+  fallbackReason?: string;
+  templateOverlay?: {
+    applied: boolean;
+    templateId?: string;
+    version?: number;
+  };
+}
+
+export interface Text2SqlV2RunArtifact {
+  version: "v2";
+  stageOrder: Text2SqlV2StageName[];
+  stages: Text2SqlV2StageArtifact[];
+  contextPack?: SemanticContextPackV1;
+  semanticPlan?: SemanticPlanV1;
+  sqlGeneration?: SqlGenerationArtifactV1;
+  sqlValidation?: SqlValidationArtifactV1;
+  planLedger?: SemanticPlanLedgerSummaryV1;
+  runtimePlan?: Text2SqlV2RuntimePlanV1;
+  artifactRefs?: Text2SqlV2ArtifactRefV1[];
+  smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
+  loopEvidence?: Text2SqlV2LoopEvidence[];
+  terminationReason?: Text2SqlV2TerminationReason;
+}
+
+export interface Text2SqlV2LoopEvidence {
+  loopIndex: number;
+  triggerReason: string;
+  actionType: "clarify" | "fail_closed" | "continue" | "replan" | (string & {});
+  planDelta?: {
+    route?: {
+      from?: SemanticPlanV1["route"];
+      to?: SemanticPlanV1["route"];
+    };
+    snapshotId?: string;
+    addedCoverageGapTypes?: Array<SemanticPlanCoverageGapV1["gapType"]>;
+    reasonCodes?: string[];
+  };
+  terminationReason?: Text2SqlV2TerminationReason;
+  convergencePath?: string[];
+}
+
+export type Text2SqlV2TerminationReason =
+  | "clarification_requested"
+  | "semantic_plan_requires_clarification"
+  | "semantic_plan_fail_closed"
+  | (string & {});
 
 export interface ExecutionTraceStep {
   node: string;
@@ -104,6 +662,35 @@ export interface ExecutionTrace {
     detail?: string;
     at: string;
   }>;
+  promptTemplate?: PromptTemplateTraceEvidence;
+  modelingRevision?: number;
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      pinnedTableCount?: number;
+      pinnedColumnCount?: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+      pinning?: ContextEnvelopePinningEvidence;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
+  };
+  clarificationDecision?: ClarificationDecisionEvidence;
+  loopEvidence?: Text2SqlV2LoopEvidence[];
+  terminationReason?: Text2SqlV2TerminationReason;
+  v2?: Text2SqlV2RunArtifact;
 }
 
 export interface LlmRawOutput {
@@ -111,6 +698,301 @@ export interface LlmRawOutput {
   model: string;
   rawText: string;
   createdAt: string;
+}
+
+export interface DeliveryAnswerLayer {
+  text: string;
+  status: RunStatus;
+  provider: string;
+  model?: string;
+}
+
+export interface DeliveryEvidenceReplayLog {
+  replayKey: string;
+  stage: string;
+  indexVersionId?: string;
+  createdAt: string;
+}
+
+export interface DeliverySavedPriorSqlEvidence {
+  status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";
+  shortcutUsed: boolean;
+  reasonCodes?: string[];
+  selectedChunkId?: string;
+  selectedViewId?: string;
+  selectedViewName?: string;
+  selectedSourceRunId?: string;
+  safetyResult?: "passed" | "rejected" | "fallback_generated";
+}
+
+export interface DeliveryContextPackSummaryV1 {
+  status: SemanticContextPackStatusV1;
+  selectedEvidenceCount: number;
+  selectedTableCount: number;
+  selectedColumnCount: number;
+  pruningApplied: boolean;
+  prunedEvidenceCount?: number;
+  degradedLaneCount?: number;
+  permissionFilteringApplied: boolean;
+  permissionDeniedEvidenceCount?: number;
+  degradationReasons?: string[];
+}
+
+export interface DeliveryMetadataAnswerSummaryV1 {
+  groundedByContextPack: boolean;
+  routeKind?: "metadata" | "general";
+  evidenceQuality: "ready" | "degraded";
+  selectedEvidenceCount: number;
+  permissionFilteringApplied: boolean;
+  pruningApplied: boolean;
+  degradationReasons?: string[];
+}
+
+export interface DeliveryEvidenceLayer {
+  runId: string;
+  retrievalStatus?: "ready" | "degraded";
+  degradeReasons?: string[];
+  promptTemplate?: PromptTemplateTraceEvidence;
+  selectedContext?: {
+    count: number;
+    snippets?: string[];
+  };
+  retrievalLogs?: DeliveryEvidenceReplayLog[];
+  riskTags?: string[];
+  semanticVersion?: number;
+  modelingRevision?: number;
+  semanticSpineVersion?: number;
+  semanticLockStatus?: "locked" | "fallback" | "degraded";
+  contextPackStatus?: "ready" | "degraded";
+  semanticInstructionSummary?: {
+    modelBindingCount: number;
+    relationshipBindingCount: number;
+    metricBindingCount: number;
+    calculatedFieldBindingCount: number;
+  };
+  semanticDegradeReason?: string;
+  skillContextSummary?: {
+    skillCount: number;
+    contextCount: number;
+    degradeReason?: string;
+  };
+  effectiveContextSummary?: {
+    sourcePriority: "user_explicit_over_system";
+    userEnvelope: {
+      metricDefinitionProvided: boolean;
+      timeRangeProvided: boolean;
+      entityMappingCount: number;
+      includeTableCount: number;
+      excludeTableCount: number;
+      pinnedTableCount?: number;
+      pinnedColumnCount?: number;
+      businessConstraintCount: number;
+    };
+    retrievalContext?: {
+      status?: "ready" | "degraded";
+      selectedContextCount?: number;
+      pinning?: ContextEnvelopePinningEvidence;
+    };
+  };
+  conflictHint?: {
+    hasConflict: boolean;
+    preferredSource: "user_explicit";
+    reasonCodes?: string[];
+  };
+  clarificationDecision?: ClarificationDecisionEvidence;
+  savedPriorSql?: DeliverySavedPriorSqlEvidence;
+  contextPackSummary?: DeliveryContextPackSummaryV1;
+  metadataAnswer?: DeliveryMetadataAnswerSummaryV1;
+  correctionGrounding?: SqlCorrectionGroundingV1;
+  evidenceStale?: boolean;
+  v2?: {
+    version?: "v2";
+    stageOrder?: Text2SqlV2StageName[];
+    stageArtifacts?: Text2SqlV2StageArtifact[];
+    contextPack?: SemanticContextPackV1;
+    semanticPlan?: SemanticPlanV1;
+    sqlGeneration?: SqlGenerationArtifactV1;
+    sqlValidation?: SqlValidationArtifactV1;
+    planLedger?: SemanticPlanLedgerSummaryV1;
+    runtimePlan?: Text2SqlV2RuntimePlanV1;
+    artifactRefs?: Text2SqlV2ArtifactRefV1[];
+    smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
+    loopEvidence?: Text2SqlV2LoopEvidence[];
+    terminationReason?: Text2SqlV2TerminationReason;
+    failure?: Text2SqlV2FailureSemantic;
+  };
+}
+
+export type DeliveryArtifactChartType =
+  | "table"
+  | "metric"
+  | "bar"
+  | "line"
+  | "pie";
+export type DeliveryArtifactDisplayType =
+  | "summary"
+  | "chart"
+  | "table"
+  | "sql"
+  | DeliveryArtifactChartType;
+export type DeliveryArtifactValidationStatus =
+  | "valid"
+  | "repaired"
+  | "fallback"
+  | "invalid";
+export type DeliveryArtifactVisualIntentSource = "deterministic" | "model" | "hybrid";
+
+export interface DeliveryArtifactSummaryMetric {
+  key: string;
+  label: string;
+  value: string | number;
+  unit?: string;
+  trend?: "up" | "down" | "flat";
+}
+
+export interface DeliveryArtifactSummary {
+  text: string;
+  headline?: string;
+  metrics?: DeliveryArtifactSummaryMetric[];
+  dimensions?: string[];
+}
+
+export interface DeliveryArtifactTable {
+  columns?: string[];
+  rowCount: number;
+  rowsPreview?: Array<Record<string, unknown>>;
+  previewRowCount?: number;
+}
+
+export interface DeliveryArtifactChartMappings {
+  dimension?: string;
+  time?: string;
+  x?: string;
+  y?: string;
+  measure?: string;
+  value?: string;
+  label?: string;
+  series?: string;
+}
+
+export interface DeliveryArtifactChartSeries {
+  key: string;
+  label?: string;
+  aggregation?: "sum" | "avg" | "min" | "max" | "count" | (string & {});
+}
+
+export interface DeliveryArtifactChartMeta {
+  title?: string;
+  subtitle?: string;
+  unit?: string;
+  xLabel?: string;
+  yLabel?: string;
+}
+
+export interface DeliveryArtifactChart {
+  type: DeliveryArtifactChartType;
+  mappings?: DeliveryArtifactChartMappings;
+  series?: DeliveryArtifactChartSeries[];
+  meta?: DeliveryArtifactChartMeta;
+}
+
+export interface DeliveryArtifactValidation {
+  status: DeliveryArtifactValidationStatus;
+  reasonCodes?: string[];
+  message?: string;
+}
+
+export interface DeliveryArtifactFallback {
+  display: "table";
+  reason: string;
+  reasonCode?: string;
+  fromType?: string;
+}
+
+export interface DeliveryArtifactVisualIntent {
+  source: DeliveryArtifactVisualIntentSource;
+  type?: DeliveryArtifactChartType;
+  title?: string;
+  summaryHint?: string;
+  insight?: string;
+  mappings?: Partial<DeliveryArtifactChartMappings>;
+  rawSyntax?: string;
+  normalizedIntent?: Record<string, unknown>;
+}
+
+export interface DeliveryArtifactLayer {
+  summary?: DeliveryArtifactSummary;
+  table?: DeliveryArtifactTable;
+  chart?: DeliveryArtifactChart;
+  display?: DeliveryArtifactDisplayType;
+  validation?: DeliveryArtifactValidation;
+  fallback?: DeliveryArtifactFallback;
+  visualIntent?: DeliveryArtifactVisualIntent;
+  // Legacy mirror fields retained for old run replay compatibility.
+  sql?: string;
+  columns?: string[];
+  rowCount: number;
+  rowsPreview?: Array<Record<string, unknown>>;
+  hasError: boolean;
+}
+
+export interface DeliveryContract {
+  answer: DeliveryAnswerLayer;
+  evidence?: DeliveryEvidenceLayer;
+  artifact?: DeliveryArtifactLayer;
+}
+
+export interface RagQualityGateReport {
+  thresholds: {
+    recallAt20Min: number;
+    mrrAt10Min: number;
+    retrievalRerankP95MsMax: number;
+    degradeRateMax: number;
+    minSamples: number;
+  };
+  sampleSize: number;
+  sampleReady: boolean;
+  latest?: {
+    runId: string;
+    datasourceId: string;
+    recordedAt: string;
+    metrics: {
+      recallAt20: number;
+      mrrAt10: number;
+      retrievalRerankP95Ms: number;
+      degradeRate: number;
+    };
+  };
+  gatePass: boolean;
+  reasons: string[];
+  generatedAt: string;
+}
+
+export interface RagReplayCompletenessReport {
+  runId: string;
+  requiredStages: string[];
+  observedStages: string[];
+  missingStages: string[];
+  completeness: number;
+  ready: boolean;
+}
+
+export type RagMemoryStatus = "candidate" | "verified" | "production";
+
+export interface RagMemoryFeedbackRequest {
+  runId: string;
+  targetStatus: RagMemoryStatus;
+  note?: string;
+}
+
+export interface RagMemoryFeedbackResponse {
+  runId: string;
+  candidateId: string;
+  beforeStatus: RagMemoryStatus;
+  afterStatus: RagMemoryStatus;
+  applied: boolean;
+  note?: string;
+  updatedAt: string;
 }
 
 export interface SqlRun {
@@ -129,6 +1011,7 @@ export interface SqlRun {
   clarification?: ClarificationPrompt;
   trace: ExecutionTrace;
   llmRaw?: LlmRawOutput | null;
+  delivery?: DeliveryContract;
   createdAt: string;
 }
 
@@ -142,6 +1025,7 @@ export interface AgentRunResponse {
   kind: "agent-run";
   outcome: RunStatus;
   run: SqlRun;
+  delivery?: DeliveryContract;
   agent: {
     provider: string;
     model?: string;
@@ -199,10 +1083,22 @@ export type ChatStreamEventData =
       inputSummary?: string;
       outputSummary?: string;
       errorSummary?: string;
+      v2?: {
+        stageArtifact?: Text2SqlV2StageArtifact;
+        runtimePlan?: {
+          currentItemId?: string;
+          stage?: Text2SqlV2StageName;
+          status?: Text2SqlV2RuntimePlanItemStatusV1;
+          summary?: string;
+          reasonCodes?: string[];
+        };
+        planLedger?: SemanticPlanLedgerSummaryV1;
+      };
     }
   | {
       status: RunStatus;
       rowCount: number;
+      delivery?: DeliveryContract;
     }
   | {
       code?: string;
@@ -249,6 +1145,84 @@ export interface ModelCatalogItem {
   metadata?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RagTaskConfig {
+  id: string;
+  taskType: RagTaskType;
+  provider: string;
+  model: string;
+  baseUrl?: string | null;
+  enabled: boolean;
+  hasApiKey: boolean;
+  apiKeyMasked?: string | null;
+  dimensions?: number | null;
+  vectorVersion?: string | null;
+  timeoutMs?: number | null;
+  note?: string | null;
+  healthStatus: RagConfigHealthStatus;
+  lastCheckedAt?: string | null;
+  lastHealthLatencyMs?: number | null;
+  lastHealthMessage?: string | null;
+  lastError?: string | null;
+  configSource: RagConfigSource;
+  configSourceNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RagTaskSettingsView {
+  actor: SettingsActor;
+  items: RagTaskConfig[];
+}
+
+export interface RagTaskConfigDraftInput {
+  provider?: string;
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  enabled?: boolean;
+  dimensions?: number;
+  vectorVersion?: string;
+  timeoutMs?: number;
+  note?: string;
+}
+
+export interface RagTaskConfigHealthRequest {
+  sampleQuery?: string;
+  sampleCandidates?: string[];
+  expectedDimensions?: number;
+  draft?: RagTaskConfigDraftInput;
+}
+
+export interface RagTaskConfigHealthResult {
+  taskType: RagTaskType;
+  status: "healthy" | "degraded" | "failed";
+  reasonCode: string;
+  message: string;
+  checkedAt: string;
+  latencyMs: number;
+  configSource: RagConfigSource;
+  checkedAgainst: RagHealthCheckedAgainst;
+  requestId?: string;
+  traceId?: string;
+  config?: RagTaskConfig;
+  details?: Record<string, unknown>;
+  challenge?: {
+    status: "comparable" | "sample_not_ready" | "evidence_missing" | "not_comparable";
+    baselineTopScore?: number;
+    candidateTopScore?: number;
+    delta?: number;
+    topCandidateId?: string;
+    reasonCode: string;
+  };
+  sample?: {
+    reranked: Array<{
+      rank: number;
+      score: number;
+      reason: string;
+    }>;
+  };
 }
 
 export interface SettingsActor {
@@ -470,6 +1444,176 @@ export interface ListWorkspaceDatasourceBindingsRequest extends PaginationReques
 export type ListWorkspaceDatasourceBindingsResponse =
   PaginatedResponse<WorkspaceDatasourceBindingListItem>;
 
+export interface PromptTemplateScopeRef {
+  scope: PromptTemplateScope;
+  scopeKey: string;
+}
+
+export interface PromptTemplate extends PromptTemplateScopeRef {
+  id: string;
+  name: string;
+  scene: PromptTemplateScene;
+  content: string;
+  status: PromptTemplateStatus;
+  version: number;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
+  deletedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListPromptTemplatesRequest extends PaginationRequest {
+  scene?: PromptTemplateScene;
+  scope?: PromptTemplateScope;
+  scopeKey?: string;
+  status?: PromptTemplateStatus;
+  query?: string;
+  includeDeleted?: boolean;
+}
+
+export type ListPromptTemplatesResponse = PaginatedResponse<PromptTemplate>;
+
+export interface CreatePromptTemplateRequest extends PromptTemplateScopeRef {
+  name: string;
+  scene: PromptTemplateScene;
+  content: string;
+  status?: PromptTemplateStatus;
+}
+
+export interface UpdatePromptTemplateRequest {
+  name?: string;
+  content?: string;
+  status?: PromptTemplateStatus;
+}
+
+export type CreatePromptTemplateResponse = PromptTemplate;
+export type UpdatePromptTemplateResponse = PromptTemplate;
+
+export interface DeletePromptTemplateResponse {
+  id: string;
+  deletedAt: string;
+}
+
+export type GlossaryScope = "global" | "datasource";
+export type GlossaryTermStatus = "active" | "inactive";
+export type GlossaryConflictResolution = "priority_then_updated_at";
+export type GlossaryAnchorType = "release" | "rollback";
+export type GlossaryAnchorStatus = "active" | "superseded" | "rolled_back";
+export type GlossaryLinkageStatus = "success" | "empty" | "error" | "degraded";
+
+export interface GlossaryScopeRef {
+  scope: GlossaryScope;
+  scopeKey: string;
+  datasourceId?: string | null;
+}
+
+export interface GlossaryConflictDecision {
+  resolution: GlossaryConflictResolution;
+  winnerTermId: string;
+  loserTermIds: string[];
+  winnerPriority: number;
+  winnerUpdatedAt: string;
+}
+
+export interface GlossaryTerm extends GlossaryScopeRef {
+  id: string;
+  term: string;
+  normalizedTerm: string;
+  definition: string;
+  synonyms: string[];
+  priority: number;
+  conflictResolution: GlossaryConflictResolution;
+  status: GlossaryTermStatus;
+  version: number;
+  versionAnchorId?: string | null;
+  rollbackAnchorId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GlossaryAnchor extends GlossaryScopeRef {
+  id: string;
+  version: number;
+  anchorType: GlossaryAnchorType;
+  status: GlossaryAnchorStatus;
+  summary?: string | null;
+  rollbackFromAnchorId?: string | null;
+  rollbackReason?: string | null;
+  createdByRunId?: string | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListGlossaryTermsRequest extends PaginationRequest {
+  scope?: GlossaryScope;
+  datasourceId?: string;
+  status?: GlossaryTermStatus;
+  query?: string;
+  version?: number;
+}
+
+export type ListGlossaryTermsResponse = PaginatedResponse<GlossaryTerm>;
+
+export interface CreateGlossaryTermRequest {
+  term: string;
+  definition: string;
+  synonyms?: string[];
+  scope: GlossaryScope;
+  datasourceId?: string;
+  priority?: number;
+  conflictResolution?: GlossaryConflictResolution;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpdateGlossaryTermRequest {
+  definition?: string;
+  synonyms?: string[];
+  priority?: number;
+  status?: GlossaryTermStatus;
+  conflictResolution?: GlossaryConflictResolution;
+  metadata?: Record<string, unknown>;
+}
+
+export interface UpsertGlossaryTermResponse {
+  term: GlossaryTerm;
+  linkageStatus: GlossaryLinkageStatus;
+  conflictDecision?: GlossaryConflictDecision | null;
+  activeAnchor?: GlossaryAnchor | null;
+}
+
+export interface ListGlossaryAnchorsRequest extends PaginationRequest {
+  scope?: GlossaryScope;
+  datasourceId?: string;
+  anchorType?: GlossaryAnchorType;
+}
+
+export type ListGlossaryAnchorsResponse = PaginatedResponse<GlossaryAnchor>;
+
+export interface CreateGlossaryAnchorRequest {
+  scope: GlossaryScope;
+  datasourceId?: string;
+  version: number;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface RollbackGlossaryAnchorRequest {
+  scope: GlossaryScope;
+  datasourceId?: string;
+  targetAnchorId: string;
+  rollbackReason?: string;
+}
+
+export interface RollbackGlossaryAnchorResponse {
+  activeAnchor: GlossaryAnchor;
+  previousAnchorId?: string | null;
+  replayed: boolean;
+  idempotencyKey: string;
+}
+
 export interface PaginationRequest {
   page?: number;
   pageSize?: number;
@@ -543,8 +1687,11 @@ export interface ApiFailure {
   error: {
     code: string;
     message: string;
-    details?: Record<string, unknown>;
+    details?: Record<string, unknown> | ModelingCalculatedFieldExpressionErrorDetails;
   };
 }
 
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
+
+export type * from "./modeling";
+export type * from "./semantic-spine";

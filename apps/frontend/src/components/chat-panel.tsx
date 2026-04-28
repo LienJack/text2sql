@@ -5,6 +5,7 @@ import type {
   ChatSessionView,
   ChatMessage,
   ChatStreamEvent,
+  DeliveryContract,
   ExecutionTraceStep,
   ModelCatalogItem,
   ReasoningStage,
@@ -13,6 +14,15 @@ import type {
 } from "@text2sql/shared-types";
 import { Menu } from "lucide-react";
 import { AssistantThread } from "@/components/chat/assistant-thread";
+import { SaveAsViewDialog } from "@/components/chat/save-as-view-dialog";
+import {
+  mergeRunThinkingSteps,
+  normalizeDeliveryContract,
+  normalizeRunForVisibility,
+  toRunVisibilityStatusFromRunStatus,
+  transitionRunVisibilityStatus,
+  type RunVisibilityStatus
+} from "@/components/chat/run-visibility-mapper";
 import { ModelSelector } from "@/components/chat/model-selector";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
 import { Button } from "@/components/ui/button";
@@ -31,6 +41,7 @@ import {
 } from "@/lib/api-client";
 import {
   readActiveDatasourceId,
+  readActiveWorkspaceId,
   readChatRouteContext,
   replaceChatRouteContext,
   writeActiveDatasourceId
@@ -107,6 +118,58 @@ function moveSessionToFront(
 }
 
 function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
+  if (event.type === "tool-call") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; input?: unknown }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "success",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "running",
+      detail: summarizeToolPayload(payload?.input),
+      at: event.at,
+      startedAt: event.at,
+      stage: "generation",
+      title: `调用工具：${toolName}`
+    };
+  }
+  if (event.type === "tool-result") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; output?: unknown }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "success",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "completed",
+      detail: summarizeToolPayload(payload?.output),
+      at: event.at,
+      endedAt: event.at,
+      stage: "generation",
+      title: `工具返回：${toolName}`
+    };
+  }
+  if (event.type === "tool-error") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; message?: string }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "failed",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "failed",
+      detail: payload?.message ?? "工具调用失败",
+      errorSummary: payload?.message,
+      at: event.at,
+      endedAt: event.at,
+      stage: "generation",
+      title: `工具失败：${toolName}`
+    };
+  }
   if (event.type !== "state") {
     return null;
   }
@@ -130,42 +193,37 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
   };
 }
 
+function summarizeToolPayload(payload: unknown): string {
+  if (payload === undefined || payload === null) {
+    return "";
+  }
+  if (typeof payload === "string") {
+    return payload.slice(0, 180);
+  }
+  if (typeof payload !== "object") {
+    return String(payload).slice(0, 180);
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.sql === "string") {
+    return record.sql.slice(0, 180);
+  }
+  if (typeof record.rowCount === "number") {
+    return `返回 ${record.rowCount} 行`;
+  }
+  try {
+    return JSON.stringify(payload).slice(0, 180);
+  } catch {
+    return "";
+  }
+}
+
 function appendThinkingStep(
   previous: Record<string, ThinkingStep[]>,
   runId: string,
   incoming: ThinkingStep
 ): Record<string, ThinkingStep[]> {
   const current = previous[runId] ?? [];
-  const stepKey =
-    incoming.stepId ??
-    `${incoming.node}:${incoming.sequence ?? "na"}:${incoming.at ?? "na"}`;
-  const existingIndex = current.findIndex((step) => {
-    const existingKey =
-      step.stepId ??
-      `${step.node}:${step.sequence ?? "na"}:${step.at ?? "na"}`;
-    return existingKey === stepKey;
-  });
-
-  const nextForRun = [...current];
-  if (existingIndex >= 0) {
-    nextForRun[existingIndex] = {
-      ...nextForRun[existingIndex],
-      ...incoming
-    };
-  } else {
-    nextForRun.push(incoming);
-  }
-
-  nextForRun.sort((left, right) => {
-    const leftSequence = left.sequence ?? 0;
-    const rightSequence = right.sequence ?? 0;
-    if (leftSequence !== rightSequence) {
-      return leftSequence - rightSequence;
-    }
-    const leftTime = left.at ?? left.startedAt ?? "";
-    const rightTime = right.at ?? right.startedAt ?? "";
-    return leftTime.localeCompare(rightTime);
-  });
+  const nextForRun = mergeRunThinkingSteps(undefined, [...current, incoming]) as ThinkingStep[];
 
   return {
     ...previous,
@@ -210,15 +268,35 @@ export function ChatPanel() {
   const [runLoadingById, setRunLoadingById] = useState<Record<string, boolean>>(
     {}
   );
+  const [streamDeliveryByRunId, setStreamDeliveryByRunId] = useState<
+    Record<string, DeliveryContract>
+  >({});
+  const [streamTextStartedByRunId, setStreamTextStartedByRunId] = useState<
+    Record<string, boolean>
+  >({});
+  const [runVisibilityByRunId, setRunVisibilityByRunId] = useState<
+    Record<string, RunVisibilityStatus>
+  >({});
   const [activeStreamRunId, setActiveStreamRunId] = useState<string | null>(null);
   const [thinkingRequestPending, setThinkingRequestPending] = useState(false);
   const [availableModels, setAvailableModels] = useState<ModelCatalogItem[]>([]);
   const [sessionError, setSessionError] = useState("");
+  const [saveNotice, setSaveNotice] = useState("");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [saveTargetRunId, setSaveTargetRunId] = useState("");
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [threadVersion, setThreadVersion] = useState(0);
 
   const allSessions = dedupeSessions([...writableSessions, ...readonlySessions]);
   const activeSession = allSessions.find((session) => session.id === sessionId);
+  const latestSqlRun = Object.values(runsById)
+    .filter((item) => Boolean(item.sql?.trim()))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const saveWorkspaceId =
+    activeSession?.workspaceId?.trim() || readActiveWorkspaceId();
+  const canSaveAsView = Boolean(
+    latestSqlRun?.runId && datasourceId.trim() && saveWorkspaceId.trim()
+  );
 
   const refreshSessionBuckets = async (
     targetDatasourceId = datasourceId
@@ -267,8 +345,12 @@ export function ChatPanel() {
     setRunsById({});
     setStreamThinkingByRunId({});
     setRunLoadingById({});
+    setStreamDeliveryByRunId({});
+    setStreamTextStartedByRunId({});
+    setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
+    setSaveNotice("");
     setThreadVersion((previous) => previous + 1);
   };
 
@@ -280,7 +362,7 @@ export function ChatPanel() {
       mergeSessionMessages(previous, sessionView.messages, sessionView.session.id)
     );
     if (sessionView.latestRun) {
-      const latestRun = sessionView.latestRun;
+      const latestRun = normalizeRunForVisibility(sessionView.latestRun);
       setRunsById((previous) => ({
         ...previous,
         [latestRun.runId]: latestRun
@@ -288,6 +370,22 @@ export function ChatPanel() {
     }
     setStreamThinkingByRunId({});
     setRunLoadingById({});
+    setStreamDeliveryByRunId({});
+    setStreamTextStartedByRunId({});
+    setRunVisibilityByRunId((previous) => {
+      if (!sessionView.latestRun) {
+        return {};
+      }
+      const runId = sessionView.latestRun.runId;
+      const runStatus = toRunVisibilityStatusFromRunStatus(sessionView.latestRun.status);
+      if (!runStatus) {
+        return {};
+      }
+      const previousStatus = previous[runId];
+      return {
+        [runId]: transitionRunVisibilityStatus(previousStatus, runStatus) ?? runStatus
+      };
+    });
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
     setThreadVersion((previous) => previous + 1);
@@ -531,17 +629,44 @@ export function ChatPanel() {
     if (!runId || runsById[runId] || runLoadingById[runId]) {
       return;
     }
+    setRunVisibilityByRunId((previous) => ({
+      ...previous,
+      [runId]:
+        transitionRunVisibilityStatus(previous[runId], "loading") ?? "loading"
+    }));
     setRunLoadingById((previous) => ({
       ...previous,
       [runId]: true
     }));
     try {
-      const run = await getRun(runId);
+      const run = normalizeRunForVisibility(await getRun(runId));
       setRunsById((previous) => ({
         ...previous,
         [runId]: run
       }));
+      const resolvedStatus = toRunVisibilityStatusFromRunStatus(run.status);
+      if (resolvedStatus) {
+        setRunVisibilityByRunId((previous) => ({
+          ...previous,
+          [runId]:
+            transitionRunVisibilityStatus(previous[runId], resolvedStatus) ??
+            resolvedStatus
+        }));
+      }
+      setStreamDeliveryByRunId((previous) => {
+        if (!previous[runId]) {
+          return previous;
+        }
+        const next = { ...previous };
+        delete next[runId];
+        return next;
+      });
     } catch (error) {
+      setRunVisibilityByRunId((previous) => ({
+        ...previous,
+        [runId]:
+          transitionRunVisibilityStatus(previous[runId], "error") ?? "error"
+      }));
       setSessionError(error instanceof Error ? error.message : "加载运行轨迹失败");
     } finally {
       setRunLoadingById((previous) => {
@@ -613,6 +738,21 @@ export function ChatPanel() {
                 type="button"
                 variant="outline"
                 size="sm"
+                disabled={!canSaveAsView}
+                onClick={() => {
+                  if (!latestSqlRun?.runId) {
+                    return;
+                  }
+                  setSaveTargetRunId(latestSqlRun.runId);
+                  setSaveDialogOpen(true);
+                }}
+              >
+                Save as View
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 className="md:hidden"
                 onClick={() => setMobileSessionsOpen(true)}
               >
@@ -641,6 +781,7 @@ export function ChatPanel() {
               当前会话绑定的数据源不可用，历史消息可读，但请先返回数据源页重新选择后再发送。
             </StateBlock>
           ) : null}
+          {saveNotice ? <StateBlock variant="success">{saveNotice}</StateBlock> : null}
         </header>
 
         <AssistantThread
@@ -650,6 +791,9 @@ export function ChatPanel() {
           runsById={runsById}
           streamThinkingByRunId={streamThinkingByRunId}
           runLoadingById={runLoadingById}
+          streamDeliveryByRunId={streamDeliveryByRunId}
+          streamTextStartedByRunId={streamTextStartedByRunId}
+          runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
           debugEnabled={Boolean(activeSession?.debugEnabled)}
@@ -666,17 +810,77 @@ export function ChatPanel() {
           }}
           onStreamEvent={(event) => {
             if (event.type === "start") {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [event.runId]:
+                  transitionRunVisibilityStatus(previous[event.runId], "loading") ??
+                  "loading"
+              }));
               setActiveStreamRunId(event.runId);
               setStreamThinkingByRunId((previous) => ({
                 ...previous,
                 [event.runId]: []
               }));
+              setStreamDeliveryByRunId((previous) => {
+                const next = { ...previous };
+                delete next[event.runId];
+                return next;
+              });
+              setStreamTextStartedByRunId((previous) => {
+                const next = { ...previous };
+                delete next[event.runId];
+                return next;
+              });
               setThinkingRequestPending(true);
               return;
+            }
+            if (event.type === "text-delta") {
+              const text = (event.data as { text?: unknown } | undefined)?.text;
+              if (typeof text === "string" && text.length > 0) {
+                setStreamTextStartedByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]: true
+                }));
+              }
+            }
+            if (event.type === "finish") {
+              const finishData = event.data as
+                | { delivery?: unknown; status?: unknown }
+                | undefined;
+              const finishDelivery = normalizeDeliveryContract(finishData?.delivery);
+              if (finishDelivery) {
+                setStreamDeliveryByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]: finishDelivery
+                }));
+              }
+              const finishStatus = toRunVisibilityStatusFromRunStatus(
+                typeof finishData?.status === "string"
+                  ? (finishData.status as SqlRun["status"])
+                  : "executionResult"
+              );
+              if (finishStatus) {
+                setRunVisibilityByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]:
+                    transitionRunVisibilityStatus(
+                      previous[event.runId],
+                      finishStatus
+                    ) ?? finishStatus
+                }));
+              }
             }
             const step = toThinkingStep(event);
             if (!step) {
               if (event.type === "finish" || event.type === "error") {
+                if (event.type === "error") {
+                  setRunVisibilityByRunId((previous) => ({
+                    ...previous,
+                    [event.runId]:
+                      transitionRunVisibilityStatus(previous[event.runId], "error") ??
+                      "error"
+                  }));
+                }
                 setActiveStreamRunId((current) =>
                   current === event.runId ? null : current
                 );
@@ -700,12 +904,27 @@ export function ChatPanel() {
             }
             await refreshSessionBuckets();
           }}
-          onRunError={async () => {
+          onRunError={async (error) => {
             setActiveStreamRunId(null);
             setThinkingRequestPending(false);
+            setSessionError(error.message || "消息发送失败，请稍后重试。");
             if (sessionId) {
               await loadMessages(sessionId, datasourceId).catch(() => undefined);
             }
+          }}
+        />
+        <SaveAsViewDialog
+          open={saveDialogOpen}
+          onOpenChange={setSaveDialogOpen}
+          workspaceId={saveWorkspaceId}
+          datasourceId={datasourceId}
+          runId={saveTargetRunId}
+          onSaved={(result) => {
+            setSaveNotice(
+              result.replayed
+                ? `View 已存在（${result.view.name}），可直接前往 Modeling。`
+                : `已保存 View：${result.view.name}（draft revision=${result.draftRevision}）`
+            );
           }}
         />
       </section>

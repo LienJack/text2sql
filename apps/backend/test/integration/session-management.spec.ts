@@ -1,7 +1,8 @@
 import { resolve } from "node:path";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { ChatService } from "../../src/modules/chat/chat.service";
+import { SessionLifecycleUsecase } from "../../src/modules/conversation/chat/application/session-lifecycle.usecase";
+import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 
 describe("session management", () => {
   beforeAll(() => {
@@ -41,5 +42,29 @@ describe("session management", () => {
 
     const sessionsAfterDelete = await chatService.listSessions();
     expect(sessionsAfterDelete.some((item) => item.id === created.id)).toBe(false);
+  });
+
+  it("should delegate session lifecycle calls through SessionLifecycleUsecase", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const chatService = moduleRef.get(ChatService);
+    const sessionLifecycleUsecase = moduleRef.get(SessionLifecycleUsecase);
+
+    const createSpy = jest.spyOn(sessionLifecycleUsecase, "createSession");
+    const listSpy = jest.spyOn(sessionLifecycleUsecase, "listSessions");
+    const probeSpy = jest.spyOn(sessionLifecycleUsecase, "probeModelConnectivity");
+
+    const session = await chatService.createSession("sqlite_main");
+    expect(session.id).toBeTruthy();
+    expect(createSpy).toHaveBeenCalledWith("sqlite_main", undefined, undefined);
+
+    await chatService.listSessions();
+    expect(listSpy).toHaveBeenCalled();
+
+    await expect(chatService.probeModelConnectivity("")).rejects.toMatchObject({
+      code: "VALIDATION_ERROR"
+    });
+    expect(probeSpy).toHaveBeenCalledWith("");
   });
 });

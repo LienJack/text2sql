@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
-import { WorkspaceModule } from "../../src/modules/workspace/workspace.module";
+import { WorkspaceModule } from "../../src/modules/governance/workspace/workspace.module";
 
 describe("workspace api (e2e)", () => {
   let app: INestApplication;

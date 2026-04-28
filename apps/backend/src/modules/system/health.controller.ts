@@ -6,9 +6,13 @@ import { AppConfigService } from "../config/app-config.service";
 import { RedisBufferService } from "../data/cache/redis-buffer.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { SqliteQueryService } from "../data/sqlite/sqlite-query.service";
-import { DatasourceService } from "../datasource/datasource.service";
-import { DatasourceRegistryService } from "../datasource/datasource-registry.service";
+import { DatasourceService } from "../governance/datasource/datasource.service";
+import { DatasourceRegistryService } from "../governance/datasource/datasource-registry.service";
 import { GateMetricsService } from "../observability/gate-metrics.service";
+import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
+import { RagQualityService } from "../rag/quality/rag-quality.service";
+import { SemanticSpineShadowGateService } from "../observability/semantic-spine-shadow-gate.service";
+import { RagTaskConfigService } from "../llm/rag-task-config.service";
 
 @Controller()
 export class HealthController {
@@ -19,11 +23,14 @@ export class HealthController {
     private readonly repository: ChatRepository,
     private readonly datasourceService: DatasourceService,
     private readonly datasourceRegistry: DatasourceRegistryService,
-    private readonly gateMetrics: GateMetricsService
+    private readonly gateMetrics: GateMetricsService,
+    private readonly ragIngestionMetrics: RagIngestionMetricsService,
+    private readonly ragQuality: RagQualityService,
+    private readonly semanticSpineShadow: SemanticSpineShadowGateService,
+    private readonly ragTaskConfigService: RagTaskConfigService
   ) {}
 
-  @Get("/health")
-  async health(@Req() req: Request): Promise<ApiResponse<unknown>> {
+  private async buildHealthResponse(req: Request): Promise<ApiResponse<unknown>> {
     const sqliteReady = await this.sqlite.healthCheck();
     const redisReady = await this.redis.healthCheck();
     const sessionSyncStats = await this.repository.getSessionSyncStats();
@@ -31,6 +38,16 @@ export class HealthController {
       includeUnavailable: true
     });
     const postgresEnabled = Boolean(this.config.databaseUrl);
+    const ragQualityGate = this.ragQuality.snapshot();
+    const semanticSpineShadowGate = this.semanticSpineShadow.snapshot();
+    const ragConfigView = await this.ragTaskConfigService.listSettingsView({
+      id: "system-health",
+      role: "admin"
+    });
+    const embeddingConfig =
+      ragConfigView.items.find((item) => item.taskType === "embedding") ?? null;
+    const rerankConfig =
+      ragConfigView.items.find((item) => item.taskType === "rerank") ?? null;
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
       runtime: {
@@ -75,6 +92,34 @@ export class HealthController {
         },
         gateMetrics: {
           acceptance: this.gateMetrics.snapshot()
+        },
+        ragIngestionMetrics: {
+          foundation: this.ragIngestionMetrics.snapshot()
+        },
+        ragQuality: {
+          gate: ragQualityGate,
+          r6: ragQualityGate.r6
+        },
+        ragConfig: {
+          embedding: embeddingConfig
+            ? {
+                provider: embeddingConfig.provider,
+                model: embeddingConfig.model,
+                configSource: embeddingConfig.configSource,
+                healthStatus: embeddingConfig.healthStatus
+              }
+            : null,
+          rerank: rerankConfig
+            ? {
+                provider: rerankConfig.provider,
+                model: rerankConfig.model,
+                configSource: rerankConfig.configSource,
+                healthStatus: rerankConfig.healthStatus
+              }
+            : null
+        },
+        semanticSpineShadow: {
+          gate: semanticSpineShadowGate
         }
       },
       cors: {
@@ -82,5 +127,15 @@ export class HealthController {
       },
       datasources
     });
+  }
+
+  @Get("/health")
+  async health(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    return this.buildHealthResponse(req);
+  }
+
+  @Get("/api/health")
+  async healthApi(@Req() req: Request): Promise<ApiResponse<unknown>> {
+    return this.buildHealthResponse(req);
   }
 }

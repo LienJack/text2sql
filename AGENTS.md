@@ -11,6 +11,7 @@
 - `AGENTS.md`：入口导航 + 硬边界 + 执行门禁。
 - `README.md`：项目全貌、联调背景、接口与运行说明。
 - `docs/standards/*.md`：专项规范细则（权威来源）。
+- `docs/solutions/`：历史问题解决与流程经验库（按类别组织，frontmatter 包含 `module`/`tags`/`problem_type`），在相关模块实现或排障时可检索参考。
 
 ## 1) Monorepo 边界
 
@@ -38,7 +39,7 @@
 
 常用后端 DB 命令：
 - 生成 Prisma Client：`pnpm --filter @text2sql/backend run prisma:generate`
-- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 - 空库回放校验：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 
 ## 3) 质量门禁
@@ -66,9 +67,19 @@ CI 参考：
 ## 4) 联调最小检查
 
 - 统一入口：`http://localhost:3000` 可访问，`/data-sources -> 创建会话 -> 发送消息` 主链路可用。
+- `/settings` 入口可访问，至少包含 `LLM 模型`、`RAG 配置`、`RAG 运行` 三个 tab；其中配置变更仅在 `RAG 配置` 下操作。
+- `RAG 配置` 健康检查需同时覆盖 `dry-check`（草稿）与 `persisted-check`（已保存），并校验返回 `checkedAgainst=draft|persisted`、`reasonCode` 可解释，且检测失败不应清空草稿输入。
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
-- 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
+- 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查），且 `dependencies.ragConfig.embedding/rerank` 应可见当前激活 provider+model+configSource 摘要。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
+- 若本次改动涉及 Text2SQL v2 read-model/delivery hard-cut：执行
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - （发布阻断）`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+  - `pnpm run text2sql:no-legacy-compat:check`
+  - 并核对 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
+- 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
+- 若本次改动需要发布门禁（go/no-go）：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`，并检查 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 
 ## 5) Standards 摘要（摘要 + 链接）
 
@@ -98,8 +109,10 @@ CI 参考：
 
 关键 MUST：
 - React 函数组件 + shadcn-ui 体系。
+- 业务代码禁止直接使用原生 HTML UI 交互控件（表单/交互类）；必须优先复用 shadcn 组件（含业务封装）。`input/select/button/textarea` 仅为示例，不限于此。
 - Tailwind CSS v4，不回退 v3 模式。
 - 保持核心演示链路可用（创建会话/发送消息/SQL 预览）。
+- 涉及 RAG 可见化改造时，必须覆盖 runId（sync/stream）一致性、`selected_context` 四态矩阵、terminal 不回退 loading、375px 与键盘可达性（`Enter/Space` + `aria-expanded`）验收。
 
 必跑门禁：
 - `pnpm --filter @text2sql/frontend run lint`
@@ -116,9 +129,55 @@ CI 参考：
 - 同步接口保持 `AgentRunResponse` 合同。
 - 流式事件字段必须完整（`type/runId/sessionId/at/data`）。
 - 工具调用走 allowlist，失败可追踪。
+- Text2SQL v2 active runtime seam 固定为 `conversation/application/workflow/Text2SQLWorkflowRunner -> conversation/runtime/stages/RunV2LangGraphStage -> conversation/runtime/langgraph/Text2SqlV2LangGraphRunnerService`。
+- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致。
+- hard-cut 生效后，run read/save-view/replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）；历史 shape 必须返回 `410 LEGACY_RUN_UNSUPPORTED`（见 runbook）。
+- 叙事边界必须明确：`007 closeout` 仅覆盖 LangGraph topology + `delegation=0`，`008 strict-completion` 额外覆盖 metadata grounding / correction grounding / context-pack parity（含 `strictCompletionRows` 门禁），`009 runtime-intelligence` 额外覆盖 `runtimePlan` / `artifactRefs` / `smartDefaults`（含 runtime coverage rows 与 eval fixture families）。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
+- `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 closeout 五门禁（`evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage`）及 `rollout.recommendedStage/rollbackSuggested/reasons`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate` 输出需包含 scoped coverage、关键文件门槛、A-M flow blockers 与 eval fixture 行为测试追溯。
+- strict-completion 语义补齐后，focused coverage 输出还需包含 `strictCompletionRows` 评估结果（metadata grounding / correction grounding / context-pack parity）。
+- runtime-intelligence 生效后，focused/eval 输出还需覆盖 `runtime-plan-consistency`、`artifact-ref-compaction`、`smart-defaults-evidence`、`plain-general-no-sql`、`large-context-compaction`、`validation-diagnostics`、`correction-grounding`、`execution-preview`、`all-stage-stream-lifecycle`；focused coverage 还需包含 `runtimeArtifactProducerRows` 与 `streamLifecycleRows`。
+- `pnpm run text2sql:no-legacy-compat:check` 必须通过。
+
+### D. Governance 术语硬切规范
+来源：`docs/standards/governance-terminology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/governance/**`
+- `apps/frontend/src/lib/admin-api-client.ts`
+- `docs/standards/**`
+- `README.md`
+
+关键 MUST：
+- 治理主链路仅使用 `workspace datasource binding`、`table-permissions`、`policyVersion`。
+- 不得在治理主链路继续接受 legacy 路由/字段（`table-acl`、`acl`、`rule-group`）。
+- 历史术语只允许出现在明确迁移上下文（带迁移注记），不得作为 active narrative。
+
+必跑检查：
+- `pnpm run governance:terminology:check`
+
+### E. 后端业务能力拓扑规范
+来源：`docs/standards/backend-business-capability-topology-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/**`
+- `apps/backend/src/app.module.ts`
+- `scripts/check-backend-capability-boundaries.ts`
+
+关键 MUST：
+- 后端一级能力域固定为 `conversation/governance/knowledge/platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- `platform` 禁止反向依赖业务域；跨域调用仅允许稳定入口（facade/public entry）。
+- 禁止新增“宽导出中枢”形态依赖。
+- 业务域及其兼容根模块（`chat/agent/memory/glossary/rag`）禁止直接 import `modules/data/**` 实现路径。
+- 业务域及其兼容根模块禁止依赖 `platform/data/data.module.ts`（`PlatformDataModule` 聚合入口）。
+
+必跑检查：
+- `pnpm run backend:capability-boundary:check`（落地后）
 
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。
@@ -129,7 +188,7 @@ CI 参考：
 
 1. 修改 `apps/backend/prisma/schema.prisma`
 2. 生成迁移：
-   - `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+   - `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 3. 生成 Client（必跑）：
    - `pnpm --filter @text2sql/backend run prisma:generate`
 
@@ -165,3 +224,37 @@ CI 参考：
 
 例外：
 - 若用户明确指定其他设计方向或流程，以用户指令为最高优先级。
+
+## 9) Text2SQL + RAG 全流程理解文档入口
+
+当需求涉及“理解 Text2SQL 全链路（含 RAG）”时，优先阅读以下 canonical 文档，再进入实现/排障：
+
+- `docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`（主白皮书）
+- `docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`（runId 回放）
+- `docs/rag-understanding/text2sql-rag-local-learning-lab.md`（本地实验）
+
+维护护栏：
+
+- 文档合同检查：`node scripts/check-docs-rag-understanding.mjs`
+- smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
+## 10) Modeling 画布排障优先参考
+
+当需求涉及 modeling 画布的以下问题时，优先阅读并复用该 playbook：
+
+- 拖拽卡片闪烁（drag flicker）
+- relationship 连线挂错行/错 handle（edge binding）
+- auto layout 后节点重叠（layout overlap）
+
+参考文档：
+
+- `docs/solutions/workflow-issues/frontend-modeling-reactflow-flicker-edge-binding-layout-playbook-2026-04-24.md`
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

@@ -46,6 +46,10 @@ export class LlmGatewayService implements LlmGateway {
       const isWriteIntent = /\b(delete|update|insert|drop|alter|truncate)\b/i.test(
         prompt.userPrompt
       );
+      const isMetadataIntent =
+        /(有哪些表|哪些表|表结构|schema|字段|列名|describe|show\s+tables|sqlite_master|sqlite_schema|information_schema|pg_catalog|pragma|元数据|数据库结构)/i.test(
+          prompt.userPrompt
+        );
       return {
         provider: runtime.provider,
         model: runtime.model,
@@ -58,6 +62,14 @@ export class LlmGatewayService implements LlmGateway {
               "```",
               "该语句用于演示写操作意图。"
             ].join("\n")
+          : isMetadataIntent
+            ? [
+                "下面是元数据查询结果。",
+                "```sql",
+                "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+                "```",
+                "该查询用于枚举当前数据源中的表。"
+              ].join("\n")
           : [
               "下面是查询结果说明。",
               "```sql",
@@ -143,15 +155,18 @@ export class LlmGatewayService implements LlmGateway {
 
     let streamedText = "";
     let toolCallSql: string | undefined;
+    let successfulToolCallSql: string | undefined;
+    const toolCallSqlById = new Map<string, string>();
     try {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
+      const streamTimeoutMs = runtime.streamTimeoutMs ?? runtime.timeoutMs;
       const result = streamText({
         model,
         system: prompt.systemPrompt,
         prompt: prompt.userPrompt,
         temperature: 0.2,
-        abortSignal: AbortSignal.timeout(runtime.timeoutMs),
+        abortSignal: AbortSignal.timeout(streamTimeoutMs),
         tools: normalizedTools
       });
 
@@ -168,6 +183,7 @@ export class LlmGatewayService implements LlmGateway {
           const parsedSql = this.extractToolSql(chunk.input);
           if (parsedSql) {
             toolCallSql = parsedSql;
+            toolCallSqlById.set(chunk.toolCallId, parsedSql);
           }
           await options?.onEvent?.({
             type: "tool-call",
@@ -178,6 +194,7 @@ export class LlmGatewayService implements LlmGateway {
           continue;
         }
         if (chunk.type === "tool-result") {
+          successfulToolCallSql = toolCallSqlById.get(chunk.toolCallId) ?? toolCallSql;
           await options?.onEvent?.({
             type: "tool-result",
             toolName: chunk.toolName,
@@ -187,20 +204,40 @@ export class LlmGatewayService implements LlmGateway {
           continue;
         }
         if (chunk.type === "tool-error") {
+          const toolMessage = toErrorMessage(chunk.error);
           await options?.onEvent?.({
             type: "tool-error",
             toolName: chunk.toolName,
             toolCallId: chunk.toolCallId,
-            message: toErrorMessage(chunk.error)
+            message: toolMessage
           });
+          throw new DomainError(
+            "LLM_TOOL_CALL_EXECUTION_FAILED",
+            `LLM 工具调用失败: ${toolMessage}`,
+            502,
+            {
+              provider: runtime.provider,
+              toolName: chunk.toolName,
+              toolCallId: chunk.toolCallId,
+              toolSql: toolCallSql?.slice(0, 500)
+            }
+          );
         }
       }
 
-      const fullText =
-        (await result.text).trim() ||
-        streamedText.trim() ||
-        this.buildToolFallbackText(toolCallSql);
+      const fullText = (await result.text).trim() || streamedText.trim();
       if (!fullText) {
+        if (toolCallSql) {
+          throw new DomainError(
+            "LLM_TOOL_CALL_ONLY_RESPONSE",
+            "LLM 仅返回工具调用中间结果，未生成最终 SQL。",
+            502,
+            {
+              provider: runtime.provider,
+              toolSql: toolCallSql.slice(0, 500)
+            }
+          );
+        }
         throw new DomainError(
           "LLM_EMPTY_RESPONSE",
           "LLM 返回为空，无法生成 SQL。",
@@ -222,9 +259,9 @@ export class LlmGatewayService implements LlmGateway {
         throw error;
       }
 
-      const toolFallbackText = this.buildToolFallbackText(toolCallSql);
-      if (toolFallbackText) {
-        const delta = this.resolveFallbackDelta(streamedText, toolFallbackText);
+      if (successfulToolCallSql) {
+        const recoveredText = this.formatToolSqlFallback(successfulToolCallSql);
+        const delta = this.resolveFallbackDelta(streamedText, recoveredText);
         if (delta) {
           await options?.onEvent?.({
             type: "text-delta",
@@ -235,7 +272,7 @@ export class LlmGatewayService implements LlmGateway {
           provider: runtime.provider,
           model: runtime.model,
           prompt,
-          rawText: toolFallbackText
+          rawText: recoveredText
         };
       }
 
@@ -331,11 +368,13 @@ export class LlmGatewayService implements LlmGateway {
     return undefined;
   }
 
-  private buildToolFallbackText(sql?: string): string {
-    if (!sql) {
-      return "";
-    }
-    return ["下面是工具调用生成的 SQL。", "```sql", sql, "```"].join("\n");
+  private formatToolSqlFallback(sql: string): string {
+    return [
+      "上游模型在工具执行后返回了无法解析的流式响应，已使用成功执行的只读 SQL 继续完成分析。",
+      "```sql",
+      sql.trim().replace(/;+\s*$/, ""),
+      "```"
+    ].join("\n");
   }
 
   private resolveFallbackDelta(existingText: string, fallbackText: string): string {

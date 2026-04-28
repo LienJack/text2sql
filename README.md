@@ -4,7 +4,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 
 ## 技术栈
 - 后端：NestJS + TypeScript + Prisma
-- Agent：LangGraph `StateGraph` 运行时编排（澄清 -> 生成SQL -> 安全检查 -> 执行 -> 格式化）
+- Agent：Text2SQL v2 LangGraph runtime（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`，Phase A `delegation=0`），由 `conversation/text2sql` 统一入口驱动
 - 前端：Next.js + React + Tailwind CSS v4 + shadcn-ui
 - 查询数据：SQLite / MySQL / PostgreSQL / CSV / Excel（会话绑定数据源路由）
 - 功能数据：Redis 缓冲 + PostgreSQL 持久化
@@ -14,11 +14,26 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 - 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
 - R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
 - LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
+- 治理术语硬切规范：`docs/standards/governance-terminology-spec.md`
+- 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
 - 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
+
+## Text2SQL + RAG 全流程理解文档（2026-04-21 基线）
+- 主白皮书（请求到交付）：`docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`
+- runId 回放手册（trace/replay/delivery）：`docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`
+- 本地实验剧本（学习闭环）：`docs/rag-understanding/text2sql-rag-local-learning-lab.md`
+- 文档合同检查脚本：`node scripts/check-docs-rag-understanding.mjs`
+- 文档合同 smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+
+## 后端能力域拓扑（迁移中）
+- 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
+- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
+- 迁移阶段允许兼容入口（re-export/wrapper）短期存在，但禁止引入新的跨域实现细节直连。
+- 详细规则见：`docs/standards/backend-business-capability-topology-spec.md`。
 
 ### 数据库结构改动铁律（必须遵守）
 - 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。
-- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>` 生成迁移。
+- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>` 生成迁移。
 - 每次结构变更必须执行 `pnpm --filter @text2sql/backend run prisma:generate`。
 
 ## 目录结构
@@ -67,6 +82,21 @@ cp apps/frontend/.env.example apps/frontend/.env
 - `LLM_API_KEY=<api-key>`
 - `LLM_MODEL=<model-name>`
 - `LLM_MOCK_MODE=false`（联调真实模型时保持 false）
+- `EMBEDDING_PROVIDER=<provider>`（Text2SQL v2 dense retrieval 的 embedding provider）
+- `EMBEDDING_BASE_URL=<openai-compatible-base-url>`
+- `EMBEDDING_API_KEY=<api-key>`
+- `EMBEDDING_MODEL=text-embedding-3-small`
+- `EMBEDDING_DIMENSIONS=<optional>`
+- `EMBEDDING_VECTOR_VERSION=v1`
+- `RERANK_PROVIDER=<provider>`（可选，默认回退到 `LLM_PROVIDER`）
+- `RERANK_BASE_URL=<openai-compatible-base-url>`（可选，默认回退到 `LLM_BASE_URL`）
+- `RERANK_API_KEY=<api-key>`（可选，默认回退到 `LLM_API_KEY`）
+- `RERANK_MODEL=<model-name>`（可选，默认回退到 `LLM_MODEL`）
+- `RERANK_TIMEOUT_MS=<timeout-ms>`（可选，默认回退到 `LLM_TIMEOUT_MS`）
+- `/settings` 页面职责：
+  - `LLM 模型`：provider/model 目录治理
+  - `RAG 配置`：Embedding / Rerank 运行配置（settings first, env fallback），支持 `检测草稿（dry-check）` 与 `已保存配置检测（persisted-check）`
+  - `RAG 运行`：运行态观测与回放证据
 - `LANGSMITH_TRACING=true|false`（是否启用 LangSmith 追踪）
 - `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
 - `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
@@ -127,6 +157,8 @@ pnpm dev
 - 如开启 LangSmith，`GET http://localhost:3002/health` 中 `dependencies.langsmith.ready` 为 `true`。
 - `GET http://localhost:3002/health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
 - `GET http://localhost:3002/health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
+- `GET http://localhost:3002/api/v1/rag/quality/report` 中 `glossarySelectedContext` 可查看术语 selected_context 门禁（sampleVersion/relativeLift/status）。
+- `GET http://localhost:3002/health` 中 `dependencies.ragConfig.embedding/rerank` 可查看当前生效 provider + model + configSource 摘要。
 - 前端能经 `http://localhost:3000` 成功创建会话并发送消息，无跨域报错。
 - 前端从 `/data-sources` 选择任一可用数据源后，可自动创建绑定会话并跳转 `/chat`。
 - `GET /api/v1/sessions?datasource=<id>` 返回的会话均属于指定数据源。
@@ -154,6 +186,21 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `POST /api/v1/sessions/:sessionId/messages/stream`（SSE 流式）
 - `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
 - `GET /api/v1/runs/:runId`
+- `POST /api/v1/runs/:runId/save-as-view`
+- `GET /api/v1/glossary/terms`
+- `POST /api/v1/glossary/terms`（管理员）
+- `PATCH /api/v1/glossary/terms/:termId`（管理员）
+- `POST /api/v1/glossary/terms/:termId/toggle`（管理员）
+- `GET /api/v1/glossary/anchors`
+- `POST /api/v1/glossary/anchors`（管理员）
+- `POST /api/v1/glossary/anchors/rollback`（管理员）
+- `GET /api/v1/settings/prompts`
+- `POST /api/v1/settings/prompts`（管理员）
+- `PATCH /api/v1/settings/prompts/:templateId`（管理员）
+- `DELETE /api/v1/settings/prompts/:templateId`（管理员，软删除）
+- `GET /api/v1/settings/rag-configs`
+- `PUT /api/v1/settings/rag-configs/:taskType`（管理员，`taskType=embedding|rerank`）
+- `POST /api/v1/settings/rag-configs/:taskType/health`（管理员，支持可选 `draft` payload；返回 `checkedAgainst=draft|persisted` 与结构化 `reasonCode`）
 - `GET /api/v1/datasources`
 - `POST /api/v1/datasources`
 - `POST /api/v1/datasources/upload`
@@ -179,6 +226,13 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/tables`
 - `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
 - `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
+- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
+- `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/detect`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/resolve`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/precheck`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy`
+- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
 - `POST /api/v1/evaluations/run`
 - `GET /api/v1/evaluations/:jobId`
 - `GET /health`
@@ -197,10 +251,34 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
   - `kind`：固定为 `agent-run`
   - `outcome`：`clarification | executionResult | rejected | failed`
   - `run`：完整运行结果（含 `trace` 与可选 `llmRaw`）
+  - 请求体支持可选 `contextEnvelope`（`metricDefinition/timeRange/entityMappings/mustIncludeTables/mustExcludeTables/businessConstraints`）
   - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
 - SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
 - SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
+- SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
+- 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
+- Text2SQL v2 artifact 通过 `run.trace.v2`、`run.delivery.evidence.v2`、SSE `state` 事件 `data.v2.stageArtifact` 暴露；不会破坏既有 `type/runId/sessionId/at/data` 合同。
+- Full Mermaid strict-completion（2026-04-27）语义补齐：
+  - metadata 路径走 `retrieve -> assemble-context -> semantic-plan -> answer`，不进入 `generate/validate/execute`。
+  - correction 重试携带结构化 `correctionGrounding`（失败 SQL 引用、失败码、重试原因、证据引用、attempt）。
+  - delivery 增补 `contextPackSummary / metadataAnswer / correctionGrounding`，用于 sync/stream/run-view/replay 一致诊断。
+  - 叙事分层：`007 closeout` 证明 LangGraph 拓扑与 `delegation=0`；`008 strict-completion` 额外要求 metadata grounding / correction grounding / context-pack parity 语义闭环。
+- hard-cut read-model policy：`/api/v1/runs/:runId`、`/api/v1/runs/:runId/save-as-view`、RAG audit replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）。授权后若命中历史 shape，会返回 `410 LEGACY_RUN_UNSUPPORTED`（含迁移 runbook 提示）。
+
+## Text2SQL v2 评估门禁（新增）
+- 评估脚本：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- 评估脚本（发布阻断模式）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+- focused coverage gate：先运行后端 Jest coverage，再执行 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`；发布阻断模式使用 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
+- focused flow matrix：`apps/backend/test/fixtures/text2sql-v2-closeout-flow-matrix.json`
+- fixture：`apps/backend/test/fixtures/text2sql-v2-eval-cases.json`
+- characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
+- 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
+- rollout 输出：`summary.rollout`（eval 指标门禁）+ `rollout`（closeout 聚合门禁，含 `recommendedStage/rollbackSuggested/reasons`）
+- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`（含 `delegationZero`；Full Mermaid strict-completion 场景还必须包含 `strictCompletionRows`：metadata grounding / correction grounding / context-pack parity）
+- anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
+- 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
+- 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。
 
 ## 测试
 ```bash
@@ -213,7 +291,20 @@ pnpm test:frontend
 - 依赖与生成：`pnpm --filter @text2sql/backend run prisma:generate`
 - 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
 - R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
+- 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
+- clarification hybrid balance gate：
+  - 观测模式：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate`
+  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
+  - 样本定义：`apps/backend/test/fixtures/clarification-balance-cases.json`
+- modeling parity shadow gate：
+  - 观测模式：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
+  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
+  - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
 - 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
+- Text2SQL v2 评估：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+- Text2SQL v2 评估（严格）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+- Text2SQL v2 focused coverage：`pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+- Text2SQL hard-cut anti-regression：`pnpm run text2sql:no-legacy-compat:check`
 - 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
   - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
   - 后端健康检查：`GET http://localhost:3002/health`
@@ -221,6 +312,58 @@ pnpm test:frontend
   - `POST /api/v1/sessions/:sessionId/messages`
   - `GET /api/v1/settings/models`（管理员上下文）
 - CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+
+## Clarification Hybrid Balanced Rollout Runbook
+
+1. 混合门控质量信号采集（观测）：
+```bash
+pnpm --filter @text2sql/backend run collect:clarification-balance-gate
+```
+2. 发布门禁（严格）：
+```bash
+pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict
+```
+3. 一键回退（rules-only）：
+  - 设置 `CLARIFICATION_HYBRID_KILL_SWITCH_RULES_ONLY=true`
+  - 重启后端
+4. 回退后验证：
+  - `node tests/smoke/nginx-dev-gateway-smoke.mjs`
+  - `pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
+5. 详细步骤与阈值说明：`docs/runbooks/clarification-hybrid-balanced-rollout.md`
+
+## Modeling Parity Shadow Gate Rollout Runbook
+
+1. 采集并生成报告（观测模式）：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
+```
+2. 发布门禁（CI 或人工 go/no-go）使用严格模式：
+```bash
+pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict
+```
+3. 解读核心字段（`data/reports/modeling-parity-shadow/gate-summary.json`）：
+  - `gatePass`：三维聚合总门禁（relationshipPlatform + semanticSpine + modelingWorkspace）。
+  - `modelingWorkspace.metrics.deployBlockRate`、`rollbackRate`、`schemaBacklogAvg`：核心风险指标。
+  - `modelingWorkspace.signalCoverage.*`：指标信号覆盖率，避免“样本缺字段导致误判”。
+  - `rollout.recommendedStage`：
+    - `shadow_only`：样本不足，仅允许 shadow 观测。
+    - `canary_ready`：可进入灰度。
+    - `hold`：维持当前发布面，先修复指标。
+    - `rollback_or_hold`：建议优先回滚或冻结发布。
+4. 触发回滚条件（任一命中即执行）：
+  - `rollout.rollbackSuggested=true`
+  - `rollout.recommendedStage=rollback_or_hold`
+5. 回滚入口（管理员）：
+  - `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
+  - 回滚后需重跑 shadow gate，确认 `rollout.recommendedStage` 不再为 `rollback_or_hold`。
+
+## 前端术语联动（Wave A/B）验收边界
+- Wave A：术语写入后可影响 `selected_context` 命中，链路异常时前端可见降级但不阻断主回答。
+- Wave B：在保持“改动即生效”前提下补齐锚点创建/回滚治理能力，并在 `/settings` 提供最小可见入口。
+- 发布证据最小集：
+  - `pnpm -C apps/backend test -- glossary-release-rollback.spec.ts --runInBand`
+  - `pnpm -C apps/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
+  - `pnpm -C apps/frontend exec vitest run tests/unit/settings-page-governance-visibility.spec.tsx`
 
 ## 前端质量门禁
 ```bash

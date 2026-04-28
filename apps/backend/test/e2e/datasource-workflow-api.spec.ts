@@ -6,9 +6,9 @@ import { AppModule } from "../../src/app.module";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { AuditLogRepository } from "../../src/modules/data/persistence/audit-log.repository";
 import { DatasourceRepository } from "../../src/modules/data/persistence/datasource.repository";
-import { DatasourceService } from "../../src/modules/datasource/datasource.service";
+import { DatasourceService } from "../../src/modules/governance/datasource/datasource.service";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
-import { WorkspaceDatasourceService } from "../../src/modules/workspace/workspace-datasource.service";
+import { WorkspaceDatasourceService } from "../../src/modules/governance/workspace/workspace-datasource.service";
 
 describe("datasource workflow api (e2e)", () => {
   let app: INestApplication;

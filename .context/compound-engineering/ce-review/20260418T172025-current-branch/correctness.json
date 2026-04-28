@@ -1,0 +1,62 @@
+{
+  "reviewer": "correctness",
+  "findings": [
+    {
+      "title": "Semantic promotion publishes a new active semantic version per term, so earlier terms in the same event are deprecated",
+      "severity": "P1",
+      "file": "apps/backend/src/modules/rag/events/rag-event-consumer.service.ts",
+      "line": 297,
+      "confidence": 0.95,
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Batch winners by canonical domain and publish exactly one semantic registry version per domain per event (containing the full promoted term set). Keep per-term chunk creation, but move publishSemanticRegistryFromGlossary outside the per-term loop."
+    },
+    {
+      "title": "Domain coverage enforcement is skipped when initial top-N already reaches limit",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "line": 590,
+      "confidence": 0.9,
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "When required domains are missing and selected.length===limit, replace the lowest-ranked non-required candidates (or reserve slots) so schema/sql_example/semantic_term coverage is guaranteed instead of silently skipped."
+    },
+    {
+      "title": "Planner cache hit can reuse direct_sql strategy even when current semantic lock is degraded/fallback",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/agent/nodes/build-physical-plan.node.ts",
+      "line": 45,
+      "confidence": 0.82,
+      "autofix_class": "manual",
+      "owner": "review-fixer",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "On cache hit, recompute strategy from current semanticPlan status/lockStatus (or bypass cache for non-locked states). Never return cached direct_sql when semanticPlan is degraded/fallback."
+    },
+    {
+      "title": "R6 gate uses hardcoded pass values for stale cache read rate, graph fallback activation, and security gate",
+      "severity": "P2",
+      "file": "apps/backend/src/modules/rag/quality/rag-quality.service.ts",
+      "line": 701,
+      "confidence": 0.78,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Source these metrics from recorded telemetry/replay signals; if unavailable, mark them insufficient_samples instead of fixed 0/true to avoid false green gate decisions."
+    }
+  ],
+  "residual_risks": [
+    "Incremental semantic_promoted events with multiple distinct terms can appear healthy in replay while semantic registry active version silently drops earlier terms.",
+    "RAG quality gate readiness may over-report safety because several R6 metrics are synthetic constants rather than observed runtime measurements."
+  ],
+  "testing_gaps": [
+    "No integration test asserts multi-term semantic_promoted events keep all promoted terms in the final active semantic registry version.",
+    "No test covers applyDomainCoverage behavior when candidate count exceeds finalCandidateLimit and required domains are initially missing.",
+    "No planner-cache test covers cached strategy behavior when semanticPlan transitions from locked/ready to fallback/degraded for the same semanticVersion and question."
+  ]
+}

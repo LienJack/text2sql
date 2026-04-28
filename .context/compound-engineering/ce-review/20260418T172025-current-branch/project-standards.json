@@ -1,0 +1,113 @@
+{
+  "reviewer": "project-standards",
+  "scope": {
+    "base": "d34d48ff786160c3fc30ec09ba1135803eb9e0e1",
+    "branch": "codex/rag-v1-3-team-exec-tracking",
+    "untrackedExcluded": true,
+    "filesChanged": 171
+  },
+  "stage1_spec_compliance": {
+    "passed": false,
+    "summary": "Found contract and standards compliance regressions against AGENTS.md + docs/standards hard requirements.",
+    "checks": [
+      {
+        "name": "Prisma migration flow (AGENTS hard rule)",
+        "status": "failed",
+        "evidence": [
+          "Schema adds PromptTemplate/Glossary definitions (apps/backend/prisma/schema.prisma:216-316)",
+          "Schema diff confirms new enums/models were introduced (+PromptTemplateScene/+PromptTemplateScope/+PromptTemplateStatus/+PromptTemplate/+GlossaryAnchor/+GlossaryTerm)",
+          "Scoped tracked migration SQL files contain no prompt_templates/glossary_* DDL matches (apps/backend/prisma/migrations/20260417223016_r2_rag_foundation/migration.sql:1, apps/backend/prisma/migrations/20260417154612_r3_semantic_registry/migration.sql:1)",
+          "AGENTS hard rule requires schema change -> generated migration -> prisma:generate (AGENTS.md:129-141)"
+        ]
+      },
+      {
+        "name": "LLM stream/tool contract consistency for prompt template evidence",
+        "status": "failed",
+        "evidence": [
+          "Contract requires run.trace.promptTemplate and delivery.evidence.promptTemplate semantic consistency (AGENTS.md:121, docs/standards/llm-stream-tool-migration-spec.md:25-27,49)",
+          "Frontend normalizer reconstructs DeliveryEvidenceLayer but omits promptTemplate while normalizing evidence (apps/frontend/src/components/chat/run-visibility-mapper.ts:120-205)",
+          "RAG delivery UI consumes delivery.evidence.promptTemplate and renders template status/summary (apps/frontend/src/components/chat/rag-delivery-panel.tsx:108-143,326-335)",
+          "Fresh grep check shows promptTemplate references in panel but none in run-visibility mapper parse path"
+        ]
+      }
+    ]
+  },
+  "stage2_code_quality": {
+    "diagnostics": {
+      "lsp_diagnostics": {
+        "status": "unavailable",
+        "detail": "mcp__omx_code_intel__.lsp_diagnostics_directory returned 'Transport closed' for backend/frontend/shared-types"
+      },
+      "fallback_typecheck_build": [
+        {
+          "command": "pnpm --filter @text2sql/shared-types run build",
+          "status": "passed"
+        },
+        {
+          "command": "pnpm --filter @text2sql/backend run build",
+          "status": "passed"
+        },
+        {
+          "command": "pnpm --filter @text2sql/frontend run build",
+          "status": "passed"
+        }
+      ],
+      "additional_verification": [
+        {
+          "command": "pnpm --filter @text2sql/frontend exec vitest run tests/unit/chat-rag-sync-stream-consistency.spec.tsx tests/unit/settings-page-governance-visibility.spec.tsx",
+          "status": "passed"
+        },
+        {
+          "command": "pnpm --filter @text2sql/backend run prisma:verify-empty-db",
+          "status": "blocked",
+          "detail": "Failed due to missing DATABASE_URL in local environment; command did not execute migration replay."
+        }
+      ]
+    },
+    "pattern_scans": {
+      "console_log": {
+        "pattern": "console.log($$$ARGS)",
+        "status": "no_matches"
+      },
+      "empty_catch": {
+        "pattern": "catch ($E) { }",
+        "status": "no_matches"
+      },
+      "hardcoded_api_key": {
+        "pattern": "apiKey = \"$VALUE\"",
+        "status": "no_matches"
+      }
+    }
+  },
+  "issues": [
+    {
+      "severity": "HIGH",
+      "title": "Prompt-template evidence is dropped by frontend normalization, breaking documented sync/stream contract parity",
+      "file": "apps/frontend/src/components/chat/run-visibility-mapper.ts",
+      "line": 120,
+      "issue": "normalizeEvidence rebuilds DeliveryEvidenceLayer from an allowlist of fields and omits promptTemplate, so normalizeDeliveryContract strips promptTemplate from both run and stream payloads.",
+      "why_it_matters": "Repo standards require prompt-template evidence to be available and semantically consistent across run.trace and delivery.evidence for replay visibility; UI expects it and currently degrades to 'missing'.",
+      "fix": "Extend normalizeEvidence to parse/preserve promptTemplate (and compat aliases), include it in normalized payload, and add assertions in run-visibility-mapper.spec.ts for prompt-template evidence propagation."
+    },
+    {
+      "severity": "HIGH",
+      "title": "Schema introduces new PromptTemplate/Glossary DB objects without corresponding tracked migration SQL in scoped diff",
+      "file": "apps/backend/prisma/schema.prisma",
+      "line": 216,
+      "issue": "PromptTemplate, GlossaryAnchor, and GlossaryTerm are added in schema, but scoped tracked migration SQL files only contain RAG/Semantic registry DDL and no prompt/glossary table creation.",
+      "why_it_matters": "AGENTS hard rule mandates schema changes be accompanied by Prisma-generated migration SQL and prisma:generate; missing tracked migration artifacts risks migration replay drift and policy non-compliance.",
+      "fix": "Generate and include Prisma migration(s) for the new schema objects via Prisma CLI (no manual SQL edits) and re-run prisma:generate; then validate with prisma:verify-empty-db in an environment with DATABASE_URL configured."
+    }
+  ],
+  "summary": {
+    "files_reviewed": 171,
+    "total_issues": 2,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 2,
+      "MEDIUM": 0,
+      "LOW": 0
+    }
+  },
+  "recommendation": "REQUEST_CHANGES"
+}

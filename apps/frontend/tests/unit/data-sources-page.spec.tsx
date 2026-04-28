@@ -9,7 +9,13 @@ import {
   listDatasources,
   submitDatasourceWorkflow
 } from "@/lib/api-client";
-import { createWorkspace, listWorkspaces } from "@/lib/admin-api-client";
+import {
+  commitModelingSetup,
+  listModelingSetupTables,
+  listWorkspaces,
+  recommendModelingSetupRelationships,
+  saveModelingSetupSelectedTables
+} from "@/lib/admin-api-client";
 
 const mockPush = vi.fn();
 
@@ -37,7 +43,11 @@ vi.mock("@/lib/admin-api-client", async (importOriginal) => {
   return {
     ...actual,
     listWorkspaces: vi.fn(),
-    createWorkspace: vi.fn()
+    createWorkspace: vi.fn(),
+    listModelingSetupTables: vi.fn(),
+    saveModelingSetupSelectedTables: vi.fn(),
+    recommendModelingSetupRelationships: vi.fn(),
+    commitModelingSetup: vi.fn()
   };
 });
 
@@ -45,7 +55,12 @@ const mockListDatasources = vi.mocked(listDatasources);
 const mockSubmitDatasourceWorkflow = vi.mocked(submitDatasourceWorkflow);
 const mockCreateSession = vi.mocked(createSession);
 const mockListWorkspaces = vi.mocked(listWorkspaces);
-const mockCreateWorkspace = vi.mocked(createWorkspace);
+const mockListModelingSetupTables = vi.mocked(listModelingSetupTables);
+const mockSaveModelingSetupSelectedTables = vi.mocked(saveModelingSetupSelectedTables);
+const mockRecommendModelingSetupRelationships = vi.mocked(
+  recommendModelingSetupRelationships
+);
+const mockCommitModelingSetup = vi.mocked(commitModelingSetup);
 
 const MYSQL_DS: Datasource = {
   id: "mysql_main",
@@ -67,7 +82,7 @@ const MYSQL_DS: Datasource = {
   updatedAt: "2026-04-10T00:00:00.000Z"
 };
 
-async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+async function openCreateToStep2(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole("button", { name: "新增" }));
   await user.click(screen.getByRole("button", { name: /MySQL/i }));
   await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -80,26 +95,52 @@ async function openCreateToStep3(user: ReturnType<typeof userEvent.setup>): Prom
   await user.clear(screen.getByPlaceholderText("Username"));
   await user.type(screen.getByPlaceholderText("Username"), "root");
   await user.type(screen.getByPlaceholderText("Password"), "secret");
+}
 
+async function openCreateSqliteToStep2(
+  user: ReturnType<typeof userEvent.setup>
+): Promise<void> {
+  await user.click(screen.getByRole("button", { name: "新增" }));
+  await user.click(screen.getByRole("button", { name: /SQLite 数据库连接/i }));
   await user.click(screen.getByRole("button", { name: "下一步" }));
-  expect(screen.getByText("绑定治理作用域")).toBeInTheDocument();
+  await user.type(screen.getByPlaceholderText("数据源名称"), "测试 SQLite");
+  await user.type(
+    screen.getByPlaceholderText("例如 /Users/alice/data/sqlite/chinook.db"),
+    "/tmp/chinook.db"
+  );
 }
 
 describe("DataSourcesPage workflow closure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+    window.sessionStorage.setItem("text2sql.activeWorkspaceId", "ws-new");
     mockListDatasources.mockResolvedValue([MYSQL_DS]);
     mockListWorkspaces.mockResolvedValue({
-      items: [],
-      total: 0,
+      items: [
+        {
+          id: "ws-new",
+          name: "增长分析",
+          isDefault: true
+        }
+      ],
+      total: 1,
       page: 1,
       pageSize: 200
     });
-    mockCreateWorkspace.mockResolvedValue({
-      id: "ws-new",
-      name: "增长分析",
-      isDefault: false,
-      createdAt: "2026-04-15T00:00:00.000Z"
+    mockListModelingSetupTables.mockResolvedValue([
+      { id: "orders", tableName: "orders" },
+      { id: "customers", tableName: "customers" }
+    ]);
+    mockSaveModelingSetupSelectedTables.mockResolvedValue({
+      workspaceId: "ws-new",
+      datasourceId: "ds-created",
+      selectedTableNames: ["orders", "customers"]
+    });
+    mockRecommendModelingSetupRelationships.mockResolvedValue([]);
+    mockCommitModelingSetup.mockResolvedValue({
+      workspaceId: "ws-new",
+      datasourceId: "ds-created"
     });
     mockSubmitDatasourceWorkflow.mockResolvedValue({
       mode: "create",
@@ -130,24 +171,13 @@ describe("DataSourcesPage workflow closure", () => {
   });
 
   it(
-    "completes create workflow with inline workspace creation and workspace binding",
+    "completes create workflow with active workspace binding",
     async () => {
     const user = userEvent.setup();
     render(<DataSourcesPage />);
 
     await screen.findByText("MySQL 主数据源");
-    await openCreateToStep3(user);
-
-    await user.click(screen.getByRole("button", { name: "完成创建" }));
-    expect(await screen.findByText("请选择工作空间后再提交")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "新建工作空间" }));
-    await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
-    await user.click(screen.getByRole("button", { name: "创建" }));
-
-    await waitFor(() => {
-      expect(mockCreateWorkspace).toHaveBeenCalledWith({ name: "增长分析" });
-    });
+    await openCreateToStep2(user);
 
     await user.click(screen.getByRole("button", { name: "完成创建" }));
 
@@ -194,11 +224,7 @@ describe("DataSourcesPage workflow closure", () => {
 
     render(<DataSourcesPage />);
     await screen.findByText("MySQL 主数据源");
-    await openCreateToStep3(user);
-
-    await user.click(screen.getByRole("button", { name: "新建工作空间" }));
-    await user.type(screen.getByLabelText("工作空间名称"), "增长分析");
-    await user.click(screen.getByRole("button", { name: "创建" }));
+    await openCreateToStep2(user);
 
     await user.click(screen.getByRole("button", { name: "完成创建" }));
     expect(await screen.findByText("绑定失败")).toBeInTheDocument();
@@ -213,6 +239,62 @@ describe("DataSourcesPage workflow closure", () => {
     const secondKey = mockSubmitDatasourceWorkflow.mock.calls[1]?.[1]?.idempotencyKey;
     expect(firstKey).toBeTruthy();
     expect(secondKey).toBe(firstKey);
+    },
+    15000
+  );
+
+  it(
+    "supports creating sqlite datasource from wizard",
+    async () => {
+      const user = userEvent.setup();
+      render(<DataSourcesPage />);
+
+      await screen.findByText("MySQL 主数据源");
+      await openCreateSqliteToStep2(user);
+      await user.click(screen.getByRole("button", { name: "完成创建" }));
+
+      await waitFor(() => {
+        expect(mockSubmitDatasourceWorkflow).toHaveBeenCalledTimes(1);
+      });
+
+      const workflowPayload = mockSubmitDatasourceWorkflow.mock.calls[0]?.[0];
+      expect(workflowPayload).toMatchObject({
+        mode: "create",
+        workspaceId: "ws-new",
+        datasource: {
+          name: "测试 SQLite",
+          type: "sqlite",
+          shared: true,
+          filePath: "/tmp/chinook.db"
+        }
+      });
+    },
+    15000
+  );
+
+  it(
+    "blocks sqlite create when file path is not absolute",
+    async () => {
+      const user = userEvent.setup();
+      render(<DataSourcesPage />);
+
+      await screen.findByText("MySQL 主数据源");
+      await user.click(screen.getByRole("button", { name: "新增" }));
+      await user.click(screen.getByRole("button", { name: /SQLite 数据库连接/i }));
+      await user.click(screen.getByRole("button", { name: "下一步" }));
+      await user.type(screen.getByPlaceholderText("数据源名称"), "测试 SQLite");
+      await user.type(
+        screen.getByPlaceholderText("例如 /Users/alice/data/sqlite/chinook.db"),
+        "relative/chinook.db"
+      );
+      await user.click(screen.getByRole("button", { name: "完成创建" }));
+
+      expect(
+        await screen.findByText(
+          "SQLite 路径必须是绝对路径（例如 /Users/name/data/demo.db）。"
+        )
+      ).toBeInTheDocument();
+      expect(mockSubmitDatasourceWorkflow).not.toHaveBeenCalled();
     },
     15000
   );

@@ -51,9 +51,71 @@ describe("chat api (e2e)", () => {
     expect(runRes.body.data.run.runId).toBeDefined();
     expect(runRes.body.data.run.sql).toMatch(/select/i);
     expect(runRes.body.data.run.explanation).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw.provider).toBe("volcengine");
-    expect(runRes.body.data.run.llmRaw.model).toBeTruthy();
+    expect(runRes.body.data.run.llmRaw).toBeNull();
+    expect(runRes.body.data.delivery).toBeTruthy();
+    expect(runRes.body.data.run.delivery).toEqual(runRes.body.data.delivery);
+    expect(runRes.body.data.run.answer).toBe(runRes.body.data.delivery.answer.text);
+    expect(runRes.body.data.delivery.evidence.runId).toBe(runRes.body.data.run.runId);
+    const syncArtifact = runRes.body.data.delivery.artifact as
+      | {
+          rowCount?: number;
+          summary?: { text?: string };
+          table?: { rowCount?: number };
+          display?: string;
+          validation?: { status?: string };
+        }
+      | undefined;
+    expect(syncArtifact).toBeTruthy();
+    expect(syncArtifact?.summary?.text).toBeTruthy();
+    expect(syncArtifact?.table?.rowCount).toBe(syncArtifact?.rowCount);
+    expect(syncArtifact?.display).toBeTruthy();
+    expect(syncArtifact?.validation?.status).toBeTruthy();
+    const contextPackStatus = runRes.body.data.delivery?.evidence?.contextPackStatus;
+    if (contextPackStatus !== undefined) {
+      expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
+    const contextPackSummary = runRes.body.data.delivery?.evidence?.contextPackSummary as
+      | {
+          selectedEvidenceCount?: number;
+          status?: string;
+        }
+      | undefined;
+    if (contextPackSummary) {
+      expect(typeof contextPackSummary.selectedEvidenceCount).toBe("number");
+      expect(["ready", "degraded"]).toContain(contextPackSummary.status);
+    }
+    const traceV2 = runRes.body.data.run.trace?.v2 as
+      | {
+          version?: string;
+          stageOrder?: string[];
+          stages?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (traceV2 !== undefined) {
+      expect(traceV2.version).toBe("v2");
+      expect(traceV2.stageOrder).toEqual([
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ]);
+      expect(traceV2.stages?.map((item) => item.stage)).toEqual(traceV2.stageOrder);
+    }
+    const deliveryV2 = runRes.body.data.delivery?.evidence?.v2 as
+      | {
+          stageArtifacts?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (deliveryV2 !== undefined) {
+      expect(deliveryV2.stageArtifacts?.map((item) => item.stage)).toEqual(
+        traceV2?.stageOrder
+      );
+    }
 
     const messageViewRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)
@@ -63,6 +125,89 @@ describe("chat api (e2e)", () => {
     expect(messageViewRes.body.data.session.id).toBe(sessionId);
     expect(Array.isArray(messageViewRes.body.data.messages)).toBe(true);
     expect(messageViewRes.body.data.latestRun.runId).toBe(runRes.body.data.run.runId);
+    expect(messageViewRes.body.data.latestRun.answer).toBe(
+      messageViewRes.body.data.latestRun.delivery.answer.text
+    );
+    expect(messageViewRes.body.data.latestRun.delivery.evidence.runId).toBe(
+      messageViewRes.body.data.latestRun.runId
+    );
+    if (contextPackSummary) {
+      expect(
+        messageViewRes.body.data.latestRun.delivery.evidence.contextPackSummary
+      ).toEqual(contextPackSummary);
+    }
+    expect(messageViewRes.body.data.latestRun.delivery.artifact.summary.text).toBeTruthy();
+    const latestTraceV2 = messageViewRes.body.data.latestRun.trace?.v2 as
+      | {
+          version?: string;
+        }
+      | undefined;
+    if (latestTraceV2 !== undefined) {
+      expect(latestTraceV2.version).toBe("v2");
+    }
+  });
+
+  it("should accept optional contextEnvelope on sync message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    expect(sessionRes.status).toBe(201);
+    const sessionId = sessionRes.body.data.id as string;
+
+    const runRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages`)
+      .send({
+        message: "统计华东区已支付订单净销售额",
+        contextEnvelope: {
+          metricDefinition: "净销售额=订单金额-退款金额",
+          timeRange: {
+            from: "2026-01-01",
+            to: "2026-03-31",
+            timezone: "Asia/Shanghai"
+          },
+          entityMappings: [
+            {
+              entity: "华东区",
+              mappedTo: "region=east_china"
+            }
+          ],
+          mustIncludeTables: ["orders", "refunds"],
+          mustExcludeTables: ["internal_audit_logs"],
+          businessConstraints: ["仅统计已支付订单"]
+        }
+      });
+
+    expect(runRes.status).toBe(201);
+    expect(runRes.body.status).toBe("success");
+    expect(runRes.body.data.kind).toBe("agent-run");
+    expect(runRes.body.data.run.runId).toBeDefined();
+  });
+
+  it("should reject invalid contextEnvelope boundary on sync message endpoint", async () => {
+    const sessionRes = await request(app.getHttpServer())
+      .post("/api/v1/sessions")
+      .send({ datasource: "sqlite_main" });
+    expect(sessionRes.status).toBe(201);
+    const sessionId = sessionRes.body.data.id as string;
+
+    const invalidRes = await request(app.getHttpServer())
+      .post(`/api/v1/sessions/${sessionId}/messages`)
+      .send({
+        message: "统计订单",
+        contextEnvelope: {
+          metricDefinition: "x".repeat(301)
+        }
+      });
+
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.body.statusCode).toBe(400);
+    expect(invalidRes.body.error).toBe("Bad Request");
+    expect(Array.isArray(invalidRes.body.message)).toBe(true);
+    expect(
+      (invalidRes.body.message as string[]).some((item) =>
+        item.includes("contextEnvelope.metricDefinition")
+      )
+    ).toBe(true);
   });
 
   it("should list, rename and soft-delete sessions", async () => {
@@ -367,5 +512,12 @@ describe("chat api (e2e)", () => {
         gatePass: expect.any(Boolean)
       })
     );
+
+    const apiHealthRes = await request(app.getHttpServer())
+      .get("/api/health")
+      .send();
+    expect(apiHealthRes.status).toBe(200);
+    expect(apiHealthRes.body.status).toBe("success");
+    expect(apiHealthRes.body.data.status).toBe(res.body.data.status);
   });
 });

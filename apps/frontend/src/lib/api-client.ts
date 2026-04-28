@@ -1,14 +1,18 @@
 import type {
   AgentRunResponse,
   ApiResponse,
+  ContextEnvelope,
+  DeliveryEvidenceLayer,
   ChatStreamEvent,
   ChatSessionView,
   Datasource,
   PreviewDatasourceTablesRequest,
   PreviewDatasourceTablesResponse,
+  PromptTemplateTraceEvidenceCompat,
   DatasourceUpsertPayload,
   LlmSettingsView,
   ModelCatalogItem,
+  SendMessageRequest,
   Session,
   UpsertDatasourceWorkflowRequest,
   UpsertDatasourceWorkflowResponse
@@ -33,16 +37,16 @@ function composeApiUrl(path: string): string {
 
 function resolveWorkspaceIdHeader(): string | undefined {
   if (typeof window !== "undefined") {
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = params.get("workspaceId")?.trim();
-    if (fromQuery) {
-      return fromQuery;
-    }
     const fromStorage = window.sessionStorage
       .getItem("text2sql.activeWorkspaceId")
       ?.trim();
     if (fromStorage) {
       return fromStorage;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get("workspaceId")?.trim();
+    if (fromQuery) {
+      return fromQuery;
     }
   }
   const fromEnv = process.env.NEXT_PUBLIC_WORKSPACE_ID?.trim();
@@ -85,6 +89,370 @@ class ApiClientRequestError extends Error {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+type DeliveryDisplayType = "table" | "metric" | "bar" | "line" | "pie";
+type DeliveryArtifactCompat = NonNullable<
+  NonNullable<AgentRunResponse["run"]["delivery"]>["artifact"]
+> &
+  Record<string, unknown>;
+
+const DISPLAY_TYPE_ALLOWLIST: ReadonlySet<DeliveryDisplayType> = new Set([
+  "table",
+  "metric",
+  "bar",
+  "line",
+  "pie"
+]);
+const CHART_TYPE_ALLOWLIST: ReadonlySet<Exclude<DeliveryDisplayType, "table">> = new Set([
+  "metric",
+  "bar",
+  "line",
+  "pie"
+]);
+
+function normalizeDisplayType(value: unknown): DeliveryDisplayType | undefined {
+  const normalized = readString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  return DISPLAY_TYPE_ALLOWLIST.has(normalized as DeliveryDisplayType)
+    ? (normalized as DeliveryDisplayType)
+    : undefined;
+}
+
+function normalizeChartMappings(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const normalized = Object.entries(value).reduce<Record<string, string>>(
+    (acc, [key, mapping]) => {
+      const next = readString(mapping);
+      if (next) {
+        acc[key] = next;
+      }
+      return acc;
+    },
+    {}
+  );
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function normalizeDeliveryArtifactCompatibility(
+  value: unknown
+): DeliveryArtifactCompat | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const normalizedRecord: Record<string, unknown> = {
+    ...(value as Record<string, unknown>)
+  };
+
+  if (
+    normalizedRecord.summary !== undefined &&
+    typeof normalizedRecord.summary !== "string" &&
+    !isRecord(normalizedRecord.summary)
+  ) {
+    delete normalizedRecord.summary;
+  }
+  if (normalizedRecord.table !== undefined && !isRecord(normalizedRecord.table)) {
+    delete normalizedRecord.table;
+  }
+  if (
+    normalizedRecord.display !== undefined &&
+    typeof normalizedRecord.display !== "string" &&
+    !isRecord(normalizedRecord.display)
+  ) {
+    delete normalizedRecord.display;
+  }
+  if (
+    normalizedRecord.validation !== undefined &&
+    typeof normalizedRecord.validation !== "string" &&
+    !isRecord(normalizedRecord.validation)
+  ) {
+    delete normalizedRecord.validation;
+  }
+  if (
+    normalizedRecord.fallback !== undefined &&
+    typeof normalizedRecord.fallback !== "string" &&
+    !isRecord(normalizedRecord.fallback)
+  ) {
+    delete normalizedRecord.fallback;
+  }
+  if (normalizedRecord.visualIntent !== undefined && !isRecord(normalizedRecord.visualIntent)) {
+    delete normalizedRecord.visualIntent;
+  }
+
+  const chart = isRecord(normalizedRecord.chart) ? normalizedRecord.chart : undefined;
+  const chartType = chart
+    ? normalizeDisplayType(chart.type ?? chart.chartType ?? chart.chart_type)
+    : undefined;
+  const chartMappings = chart
+    ? normalizeChartMappings(chart.mappings ?? chart.mapping ?? chart.fields)
+    : undefined;
+  const chartInvalidReason = chart
+    ? !chartType || !CHART_TYPE_ALLOWLIST.has(chartType as Exclude<DeliveryDisplayType, "table">)
+      ? "invalid_chart_type"
+      : !chartMappings
+        ? "missing_chart_mappings"
+        : undefined
+    : undefined;
+
+  if (chartInvalidReason) {
+    delete normalizedRecord.chart;
+
+    const displayRecord: Record<string, unknown> =
+      typeof normalizedRecord.display === "string"
+        ? { type: normalizeDisplayType(normalizedRecord.display) ?? "table" }
+        : isRecord(normalizedRecord.display)
+          ? { ...normalizedRecord.display }
+          : {};
+    displayRecord.type = "table";
+    normalizedRecord.display = displayRecord;
+
+    const fallbackRecord: Record<string, unknown> =
+      typeof normalizedRecord.fallback === "string"
+        ? { reason: normalizedRecord.fallback }
+        : isRecord(normalizedRecord.fallback)
+          ? { ...normalizedRecord.fallback }
+          : {};
+    if (!readString(fallbackRecord.reason)) {
+      fallbackRecord.reason = chartInvalidReason;
+    }
+    const fallbackTarget = normalizeDisplayType(
+      fallbackRecord.target ?? fallbackRecord.displayType ?? fallbackRecord.to
+    );
+    if (!fallbackTarget) {
+      fallbackRecord.target = "table";
+    }
+    normalizedRecord.fallback = fallbackRecord;
+  } else if (chart && chartType && chartMappings) {
+    normalizedRecord.chart = {
+      ...chart,
+      type: chartType,
+      mappings: chartMappings
+    };
+  }
+
+  const hasErrorRaw =
+    readBoolean(normalizedRecord.hasError) ?? readBoolean(normalizedRecord.has_error);
+  if (hasErrorRaw !== undefined) {
+    normalizedRecord.hasError = hasErrorRaw;
+  }
+
+  const rowCountRaw =
+    readNumber(normalizedRecord.rowCount) ?? readNumber(normalizedRecord.row_count);
+  if (rowCountRaw !== undefined) {
+    normalizedRecord.rowCount = Math.max(0, Math.floor(rowCountRaw));
+  }
+
+  if (
+    typeof normalizedRecord.rowCount !== "number" ||
+    typeof normalizedRecord.hasError !== "boolean"
+  ) {
+    return undefined;
+  }
+
+  return normalizedRecord as unknown as DeliveryArtifactCompat;
+}
+
+function normalizeSkillContextSummary(
+  value: unknown
+): DeliveryEvidenceLayer["skillContextSummary"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const skills = Array.isArray(value.skills) ? value.skills.length : undefined;
+  const contexts = Array.isArray(value.context) ? value.context.length : undefined;
+  const skillCount = readNumber(value.skillCount) ?? readNumber(value.skill_count) ?? skills;
+  const contextCount =
+    readNumber(value.contextCount) ?? readNumber(value.context_count) ?? contexts;
+  const degradeReason = readString(value.degradeReason) ?? readString(value.degrade_reason);
+
+  if (skillCount === undefined && contextCount === undefined && !degradeReason) {
+    return undefined;
+  }
+
+  return {
+    skillCount: Math.max(0, Math.floor(skillCount ?? 0)),
+    contextCount: Math.max(0, Math.floor(contextCount ?? 0)),
+    ...(degradeReason ? { degradeReason } : {})
+  };
+}
+
+function normalizeRunSemanticEvidenceCompatibility(
+  run: AgentRunResponse["run"]
+): AgentRunResponse["run"] {
+  const rawTrace = run.trace as AgentRunResponse["run"]["trace"] & Record<string, unknown>;
+  const tracePromptTemplate = normalizePromptTemplateTraceEvidenceCompatibility(
+    rawTrace.promptTemplate ??
+      rawTrace.prompt_template ??
+      rawTrace.prompt_template_evidence ??
+      rawTrace.templateEvidence
+  );
+  const delivery = run.delivery;
+  const rawEvidence = delivery?.evidence as
+    | (DeliveryEvidenceLayer & Record<string, unknown>)
+    | undefined;
+  const semanticVersionRaw =
+    readNumber(rawEvidence?.semanticVersion) ?? readNumber(rawEvidence?.semantic_version);
+  const semanticVersion =
+    semanticVersionRaw !== undefined && semanticVersionRaw > 0
+      ? Math.floor(semanticVersionRaw)
+      : undefined;
+  const semanticLockStatusRaw =
+    readString(rawEvidence?.semanticLockStatus) ??
+    readString(rawEvidence?.semantic_lock_status);
+  const semanticLockStatus: DeliveryEvidenceLayer["semanticLockStatus"] =
+    semanticLockStatusRaw === "locked" ||
+    semanticLockStatusRaw === "fallback" ||
+    semanticLockStatusRaw === "degraded"
+      ? semanticLockStatusRaw
+      : undefined;
+  const semanticDegradeReason =
+    readString(rawEvidence?.semanticDegradeReason) ??
+    readString(rawEvidence?.semantic_degrade_reason);
+  const skillContextSummary = normalizeSkillContextSummary(
+    rawEvidence?.skillContextSummary ??
+      rawEvidence?.skill_context_summary ??
+      rawEvidence?.skill_context
+  );
+  const evidencePromptTemplate = normalizePromptTemplateTraceEvidenceCompatibility(
+    rawEvidence?.promptTemplate ??
+      rawEvidence?.prompt_template ??
+      rawEvidence?.prompt_template_evidence ??
+      rawEvidence?.templateEvidence
+  );
+  const resolvedPromptTemplate = evidencePromptTemplate ?? tracePromptTemplate;
+  const nextTrace = resolvedPromptTemplate
+    ? {
+        ...run.trace,
+        promptTemplate: resolvedPromptTemplate
+      }
+    : run.trace;
+  const normalizedArtifact = normalizeDeliveryArtifactCompatibility(delivery?.artifact);
+
+  if (!delivery) {
+    return nextTrace === run.trace ? run : { ...run, trace: nextTrace };
+  }
+
+  const nextEvidence: DeliveryEvidenceLayer | undefined =
+    delivery.evidence || resolvedPromptTemplate
+      ? {
+          runId: delivery.evidence?.runId ?? run.runId,
+          ...delivery.evidence,
+          ...(semanticVersion !== undefined ? { semanticVersion } : {}),
+          ...(semanticLockStatus ? { semanticLockStatus } : {}),
+          ...(semanticDegradeReason ? { semanticDegradeReason } : {}),
+          ...(skillContextSummary ? { skillContextSummary } : {}),
+          ...(resolvedPromptTemplate ? { promptTemplate: resolvedPromptTemplate } : {})
+        }
+      : delivery.evidence;
+
+  return {
+    ...run,
+    trace: nextTrace,
+    delivery: {
+      ...delivery,
+      ...(nextEvidence ? { evidence: nextEvidence } : {}),
+      ...(normalizedArtifact ? { artifact: normalizedArtifact } : {})
+    }
+  };
+}
+
+function normalizePromptTemplateTraceEvidenceCompatibility(
+  value: unknown
+): DeliveryEvidenceLayer["promptTemplate"] | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const candidate = value as PromptTemplateTraceEvidenceCompat & Record<string, unknown>;
+  const templateId = readString(candidate.templateId ?? candidate.template_id);
+  const scope = normalizePromptTemplateScope(
+    candidate.scope ??
+      candidate.scope_type ??
+      candidate.template_scope ??
+      candidate.scopeType
+  );
+  const version = readPositiveInteger(
+    candidate.version ?? candidate.template_version ?? candidate.templateVersion
+  );
+  const fallbackReason = readString(
+    candidate.fallbackReason ??
+      candidate.fallback_reason ??
+      candidate.fallback_reason_code
+  );
+  const scene = normalizePromptTemplateScene(
+    candidate.scene ?? candidate.scene_name ?? candidate.template_scene
+  );
+
+  if (!templateId && !scope && version === undefined && !fallbackReason && !scene) {
+    return undefined;
+  }
+
+  return {
+    ...(templateId ? { templateId } : {}),
+    ...(scene ? { scene } : {}),
+    ...(scope ? { scope } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(fallbackReason ? { fallbackReason } : {})
+  };
+}
+
+function normalizePromptTemplateScope(
+  value: unknown
+): "global" | "workspace" | "datasource" | undefined {
+  const normalized = readString(value)?.toLowerCase();
+  if (
+    normalized === "global" ||
+    normalized === "workspace" ||
+    normalized === "datasource"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function normalizePromptTemplateScene(value: unknown): "sql" | "analysis" | undefined {
+  const normalized = readString(value)?.toLowerCase();
+  if (normalized === "sql" || normalized === "analysis") {
+    return normalized;
+  }
+  if (normalized === "sql_generation") {
+    return "sql";
+  }
+  return undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const parsed = readNumber(value);
+  if (parsed === undefined || parsed <= 0) {
+    return undefined;
+  }
+  return Math.floor(parsed);
 }
 
 function resolveWorkflowStage(details: unknown): string | undefined {
@@ -457,15 +825,26 @@ export async function deleteSession(
 
 export async function sendMessage(
   sessionId: string,
-  message: string
+  message: string,
+  contextEnvelope?: ContextEnvelope
 ): Promise<AgentRunResponse> {
-  return request<AgentRunResponse>(
+  const payload: SendMessageRequest = {
+    message,
+    ...(contextEnvelope ? { contextEnvelope } : {})
+  };
+  const response = await request<AgentRunResponse>(
     `/api/v1/sessions/${sessionId}/messages`,
     {
       method: "POST",
-      body: JSON.stringify({ message })
+      body: JSON.stringify(payload)
     }
   );
+  const normalizedRun = normalizeRunSemanticEvidenceCompatibility(response.run);
+  return {
+    ...response,
+    run: normalizedRun,
+    ...(normalizedRun.delivery ? { delivery: normalizedRun.delivery } : {})
+  };
 }
 
 export async function sendMessageStream(
@@ -474,12 +853,14 @@ export async function sendMessageStream(
   handlers?: {
     onEvent?: (event: ChatStreamEvent) => void;
     abortSignal?: AbortSignal;
+    contextEnvelope?: ContextEnvelope;
   }
 ): Promise<void> {
   for await (const event of streamMessageEvents(
     sessionId,
     message,
-    handlers?.abortSignal
+    handlers?.abortSignal,
+    handlers?.contextEnvelope
   )) {
     handlers?.onEvent?.(event);
     if (event.type === "error") {
@@ -493,7 +874,8 @@ export async function sendMessageStream(
 export async function* streamMessageEvents(
   sessionId: string,
   message: string,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  contextEnvelope?: ContextEnvelope
 ): AsyncGenerator<ChatStreamEvent, void, void> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
@@ -510,8 +892,9 @@ export async function* streamMessageEvents(
       },
       signal: abortSignal,
       body: JSON.stringify({
-        message
-      })
+        message,
+        ...(contextEnvelope ? { contextEnvelope } : {})
+      } satisfies SendMessageRequest)
     }
   );
   if (!response.ok) {
@@ -563,7 +946,8 @@ export async function getMessages(sessionId: string): Promise<ChatSessionView> {
 }
 
 export async function getRun(runId: string): Promise<AgentRunResponse["run"]> {
-  return request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
+  const run = await request<AgentRunResponse["run"]>(`/api/v1/runs/${runId}`);
+  return normalizeRunSemanticEvidenceCompatibility(run);
 }
 
 export async function getSettingsModelsView(): Promise<LlmSettingsView> {

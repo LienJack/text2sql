@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
-import type { ChatMessage, ChatStreamEvent } from "@text2sql/shared-types";
+import type {
+  ChatMessage,
+  ChatStreamEvent,
+  ContextEnvelope
+} from "@text2sql/shared-types";
 import type { ChatModelAdapter, ThreadMessageLike } from "@assistant-ui/react";
 import { useLocalRuntime } from "@assistant-ui/react";
 import { streamMessageEvents } from "@/lib/api-client";
@@ -18,6 +22,7 @@ interface UseChatAssistantRuntimeInput {
   sessionId: string;
   messages: ChatMessage[];
   callbacks?: AssistantRuntimeCallbacks;
+  resolveContextEnvelope?: () => ContextEnvelope | undefined;
 }
 
 function mapToThreadMessages(messages: ChatMessage[]): ThreadMessageLike[] {
@@ -53,7 +58,10 @@ function extractLatestUserText(messages: readonly ThreadMessageLike[]): string {
 
 function createChatModelAdapter(
   sessionId: string,
-  callbacksRef: MutableRefObject<AssistantRuntimeCallbacks | undefined>
+  callbacksRef: MutableRefObject<AssistantRuntimeCallbacks | undefined>,
+  resolveContextEnvelopeRef: MutableRefObject<
+    (() => ContextEnvelope | undefined) | undefined
+  >
 ): ChatModelAdapter {
   return {
     async *run({ messages, abortSignal }) {
@@ -61,17 +69,20 @@ function createChatModelAdapter(
       if (!sessionId || !userText) {
         return;
       }
+      const contextEnvelope = resolveContextEnvelopeRef.current?.();
 
       callbacksRef.current?.onStart?.();
 
       let aggregatedText = "";
       let runId: string | undefined;
+      let streamError: Error | null = null;
 
       try {
         for await (const event of streamMessageEvents(
           sessionId,
           userText,
-          abortSignal
+          abortSignal,
+          contextEnvelope
         )) {
           runId = event.runId || runId;
           callbacksRef.current?.onEvent?.(event);
@@ -101,8 +112,14 @@ function createChatModelAdapter(
           if (event.type === "error") {
             const message =
               (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
-            throw new Error(message);
+            streamError = new Error(message);
+            break;
           }
+        }
+
+        if (streamError) {
+          await callbacksRef.current?.onError?.(streamError);
+          return;
         }
 
         await callbacksRef.current?.onFinish?.(runId);
@@ -112,7 +129,7 @@ function createChatModelAdapter(
             ? runtimeError
             : new Error("流式请求失败");
         await callbacksRef.current?.onError?.(normalizedError);
-        throw normalizedError;
+        return;
       } finally {
         callbacksRef.current?.onFinally?.();
       }
@@ -123,18 +140,30 @@ function createChatModelAdapter(
 export function useChatAssistantRuntime({
   sessionId,
   messages,
-  callbacks
+  callbacks,
+  resolveContextEnvelope
 }: UseChatAssistantRuntimeInput) {
   const callbacksRef = useRef<AssistantRuntimeCallbacks | undefined>(callbacks);
+  const resolveContextEnvelopeRef = useRef<
+    (() => ContextEnvelope | undefined) | undefined
+  >(resolveContextEnvelope);
 
   useEffect(() => {
     callbacksRef.current = callbacks;
   }, [callbacks]);
+  useEffect(() => {
+    resolveContextEnvelopeRef.current = resolveContextEnvelope;
+  }, [resolveContextEnvelope]);
 
   const initialMessages = useMemo(() => mapToThreadMessages(messages), [messages]);
 
   const chatModel = useMemo(
-    () => createChatModelAdapter(sessionId, callbacksRef),
+    () =>
+      createChatModelAdapter(
+        sessionId,
+        callbacksRef,
+        resolveContextEnvelopeRef
+      ),
     [sessionId]
   );
 

@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type {
   ExecutionTraceStep,
   ReasoningStage,
   SqlRun
 } from "@text2sql/shared-types";
 import { BrainCircuit, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { mergeRunThinkingSteps } from "@/components/chat/run-visibility-mapper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StateBlock } from "@/components/ui/state-block";
@@ -39,7 +40,13 @@ const nodeTitleMap: Record<string, string> = {
   "generate-sql": "生成 SQL",
   "safety-check": "安全校验",
   "execute-sql": "执行查询",
-  "format-answer": "整理回答"
+  "format-answer": "整理回答",
+  retrieve_knowledge: "知识检索",
+  "retrieve-knowledge": "知识检索",
+  build_intent_plan: "意图规划",
+  "build-intent-plan": "意图规划",
+  build_semantic_query: "语义检索构建",
+  "build-semantic-query": "语义检索构建"
 };
 
 function resolveStepTitle(step: ThinkingStreamStep): string {
@@ -93,20 +100,18 @@ export function AssistantThinkingPanel({
   runLoading = false,
   onRequestRun
 }: AssistantThinkingPanelProps) {
+  const panelContentId = useId();
   const [open, setOpen] = useState(false);
   const [requested, setRequested] = useState(false);
 
   const steps = useMemo<ThinkingStreamStep[]>(() => {
-    if (run?.trace.steps?.length) {
-      return [...run.trace.steps].sort(
-        (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
-      );
-    }
-    return [...streamSteps].sort(
-      (left, right) => (left.sequence ?? 0) - (right.sequence ?? 0)
-    );
+    return mergeRunThinkingSteps(run?.trace.steps, streamSteps);
   }, [run, streamSteps]);
   const latestStep = steps.at(-1);
+  const activeStep = useMemo(() => {
+    const runningStep = [...steps].reverse().find((step) => step.lifecycle === "running");
+    return runningStep ?? (inProgress ? latestStep : undefined);
+  }, [inProgress, latestStep, steps]);
   const completedCount = steps.filter(
     (step) =>
       step.lifecycle === "completed" ||
@@ -116,12 +121,6 @@ export function AssistantThinkingPanel({
     (step) => step.lifecycle === "failed" || step.status === "failed"
   );
   const latestStageLabel = latestStep?.stage ? stageLabels[latestStep.stage] : undefined;
-
-  useEffect(() => {
-    if (inProgress) {
-      setOpen(false);
-    }
-  }, [inProgress]);
 
   useEffect(() => {
     if (!open || run) {
@@ -158,7 +157,7 @@ export function AssistantThinkingPanel({
   }
 
   return (
-    <section className="mt-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-subtle)]">
+    <section className="rounded-xl border border-[var(--chat-result-panel-border)] bg-[var(--chat-result-panel-bg)]">
       <div className="flex items-center justify-between gap-3 px-3 py-2">
         <div className="min-w-0 space-y-1">
           <p className="inline-flex min-w-0 items-center gap-2 text-xs font-semibold text-[var(--text-secondary)]">
@@ -172,12 +171,19 @@ export function AssistantThinkingPanel({
             ) : null}
           </p>
           {steps.length > 0 ? (
-            <p className="truncate text-[11px] text-[var(--text-tertiary)]">
-              {latestStageLabel ? `当前阶段：${latestStageLabel} · ` : null}
-              已记录 {steps.length} 步
-              {inProgress ? `，已完成 ${completedCount} 步` : null}
-              {hasFailedStep ? "（含失败步骤）" : null}
-            </p>
+            <div className="space-y-0.5 text-[11px] text-[var(--text-tertiary)]">
+              {inProgress && activeStep ? (
+                <p className="truncate">
+                  活跃步骤：{resolveStepTitle(activeStep)}（{statusLabel(activeStep)}）
+                </p>
+              ) : null}
+              <p className="truncate">
+                {latestStageLabel ? `当前阶段：${latestStageLabel} · ` : null}
+                已记录 {steps.length} 步
+                {inProgress ? `，已完成 ${completedCount}/${steps.length} 步` : null}
+                {hasFailedStep ? "（含失败步骤）" : null}
+              </p>
+            </div>
           ) : hasRunReference ? (
             <p className="truncate text-[11px] text-[var(--text-tertiary)]">
               可展开查看该轮结构化思考摘要
@@ -189,8 +195,9 @@ export function AssistantThinkingPanel({
           variant="ghost"
           size="sm"
           aria-expanded={open}
+          aria-controls={panelContentId}
           aria-label={open ? "收起思考过程" : "展开思考过程"}
-          className="h-7 text-xs text-[var(--text-secondary)]"
+          className="h-8 min-w-16 px-2 text-xs text-[var(--text-secondary)]"
           onClick={() => setOpen((previous) => !previous)}
         >
           {open ? (
@@ -208,8 +215,11 @@ export function AssistantThinkingPanel({
       </div>
 
       {open ? (
-        <div className="space-y-2 border-t border-[var(--border-default)] px-3 py-3">
-          {runLoading ? (
+        <div
+          id={panelContentId}
+          className="space-y-2 border-t border-[var(--border-default)] px-3 py-3"
+        >
+          {steps.length === 0 && runLoading ? (
             <StateBlock variant="idle">正在加载该轮思考轨迹...</StateBlock>
           ) : steps.length === 0 ? (
             <StateBlock variant="idle">

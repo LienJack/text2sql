@@ -1,5 +1,5 @@
-import { SqlReadonlyTool } from "../../src/modules/agent/sql/tools/sql-readonly.tool";
-import { SqlToolRegistryService } from "../../src/modules/agent/sql/tools/sql-tool-registry.service";
+import { SqlReadonlyTool } from "../../src/modules/conversation/agent/sql/tools/sql-readonly.tool";
+import { SqlToolRegistryService } from "../../src/modules/conversation/agent/sql/tools/sql-tool-registry.service";
 
 describe("SqlToolRegistryService", () => {
   it("should expose read-only sql tool", async () => {
@@ -47,5 +47,43 @@ describe("SqlToolRegistryService", () => {
     expect(result).toMatchObject({
       rowCount: 1
     });
+  });
+
+  it("rejects LLM tool attempts to inspect schema system tables", async () => {
+    const queryExecutorRouter = {
+      execute: jest.fn()
+    };
+    const datasourceAccessPolicyService = {
+      resolveReadableTables: jest.fn()
+    };
+    const sqlTool = new SqlReadonlyTool(
+      queryExecutorRouter as never,
+      datasourceAccessPolicyService as never
+    );
+    const registry = new SqlToolRegistryService(sqlTool);
+
+    const tools = registry.getToolsForDatasource({
+      id: "sqlite_main",
+      name: "SQLite 主数据源",
+      type: "sqlite",
+      status: "available",
+      readonly: true,
+      shared: true,
+      config: { path: "/tmp/text2sql.db" },
+      fileMeta: null,
+      unavailableAt: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    await expect(
+      tools.runReadOnlySql.execute({
+        sql: "SELECT name FROM sqlite_master WHERE type = 'table'"
+      })
+    ).rejects.toMatchObject({
+      code: "LLM_TOOL_METADATA_INTROSPECTION_FORBIDDEN"
+    });
+    expect(queryExecutorRouter.execute).not.toHaveBeenCalled();
   });
 });

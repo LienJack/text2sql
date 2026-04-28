@@ -6,6 +6,8 @@ on:
       - "apps/backend/**"
       - "packages/shared-types/**"
       - "pnpm-lock.yaml"
+      - "package.json"
+      - "scripts/check-backend-capability-boundaries.ts"
       - ".github/workflows/backend-prisma-quality.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "apps/backend/**"
       - "packages/shared-types/**"
       - "pnpm-lock.yaml"
+      - "package.json"
+      - "scripts/check-backend-capability-boundaries.ts"
       - ".github/workflows/backend-prisma-quality.yml"
 
 jobs:
@@ -65,11 +69,49 @@ jobs:
       - name: Backend lint
         run: pnpm --filter @text2sql/backend run lint
 
+      - name: Backend capability boundary check
+        run: pnpm run backend:capability-boundary:check
+
       - name: Backend build
         run: pnpm --filter @text2sql/backend run build
 
       - name: Backend test
         run: pnpm --filter @text2sql/backend run test
+
+      - name: Text2SQL v2 focused coverage report
+        run: |
+          pnpm --filter @text2sql/backend exec jest \
+            --coverage \
+            --runInBand \
+            text2sql-v2-focused-coverage-gate.spec.ts
+          pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate
+
+      - name: R6 scenario package tests
+        env:
+          R6_REPORT_DIR: /tmp/r6-evidence
+          RELEASE_CANDIDATE: r6-${{ github.sha }}
+        run: |
+          pnpm --filter @text2sql/backend run test -- \
+            test/perf/rag-r6-mixed-load.spec.ts \
+            test/integration/r6-evidence-pipeline.spec.ts
+          pnpm --filter @text2sql/backend exec jest --config ./test/jest-e2e.json --testRegex "e2e/r6-release-rollback-rehearsal\\.e2e-spec\\.ts$"
+
+      - name: Collect R6 release evidence (fail-fast)
+        env:
+          R6_REPORT_DIR: /tmp/r6-evidence
+          R6_EVIDENCE_ARCHIVE_DIR: /tmp/r6-evidence-archive
+          RELEASE_CANDIDATE: r6-${{ github.sha }}
+        run: pnpm --filter @text2sql/backend exec node scripts/collect-r6-evidence.mjs
+
+      - name: Upload R6 release evidence archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r6-release-evidence-${{ github.run_id }}
+          path: |
+            /tmp/r6-evidence
+            /tmp/r6-evidence-archive
+          if-no-files-found: warn
 
       - name: Stage1 gate report
         run: pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand

@@ -1,0 +1,52 @@
+{
+  "version": "2026-04-25-clarification-hybrid-balance-v1",
+  "generatedAt": "2026-04-25T08:00:00.000Z",
+  "cases": [
+    {
+      "id": "clarify-to-aggregate",
+      "scenario": "clarify_to_aggregate",
+      "initialQuestion": "帮我看下订单",
+      "followUpQuestion": "近30天订单总数按支付方式分组",
+      "expected": {
+        "shouldClarify": true,
+        "metadataBypass": false,
+        "strictSemanticPath": true,
+        "maxClarificationRounds": 1
+      }
+    },
+    {
+      "id": "clarify-to-compare",
+      "scenario": "clarify_to_compare",
+      "initialQuestion": "帮我比较一下订单",
+      "followUpQuestion": "近30天订单总数和退款金额对比",
+      "expected": {
+        "shouldClarify": true,
+        "metadataBypass": false,
+        "strictSemanticPath": true,
+        "maxClarificationRounds": 1
+      }
+    },
+    {
+      "id": "skip-but-strict",
+      "scenario": "skip_but_strict",
+      "initialQuestion": "近30天订单总数按支付方式分组",
+      "expected": {
+        "shouldClarify": false,
+        "metadataBypass": false,
+        "strictSemanticPath": true,
+        "maxClarificationRounds": 0
+      }
+    },
+    {
+      "id": "metadata-bypass",
+      "scenario": "metadata_bypass",
+      "initialQuestion": "show tables",
+      "expected": {
+        "shouldClarify": false,
+        "metadataBypass": true,
+        "strictSemanticPath": true,
+        "maxClarificationRounds": 0
+      }
+    }
+  ]
+}

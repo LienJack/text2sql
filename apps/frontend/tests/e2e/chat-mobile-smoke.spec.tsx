@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Session } from "@text2sql/shared-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPage from "@/app/chat/page";
@@ -45,6 +46,49 @@ const mockGetMessages = vi.mocked(getMessages);
 const mockGetRun = vi.mocked(getRun);
 
 describe("chat mobile smoke", () => {
+  const run = createMockRun({
+    delivery: {
+      answer: {
+        text: "已为你生成 SQL，并展示结果。",
+        status: "executionResult",
+        provider: "mock-provider"
+      },
+      evidence: {
+        runId: "run-1",
+        retrievalStatus: "ready",
+        selectedContext: {
+          count: 1,
+          snippets: ["schema.orders"]
+        }
+      },
+      artifact: {
+        sql: "SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method",
+        rowCount: 1,
+        hasError: false,
+        summary: {
+          text: "移动端默认展示 Summary，支持快速切换到 SQL。"
+        },
+        table: {
+          columns: ["payment_method", "cnt"],
+          rowCount: 1,
+          rowsPreview: [{ payment_method: "card", cnt: 12 }],
+          previewRowCount: 1
+        },
+        chart: {
+          type: "bar",
+          mappings: {
+            x: "payment_method",
+            y: "cnt"
+          }
+        },
+        display: "bar",
+        validation: {
+          status: "valid"
+        }
+      }
+    }
+  });
+
   beforeEach(() => {
     window.sessionStorage.setItem("text2sql.activeDatasourceId", "sqlite_main");
     Object.defineProperty(window, "innerWidth", {
@@ -124,9 +168,9 @@ describe("chat mobile smoke", () => {
     mockGetMessages.mockResolvedValue({
       session,
       messages: createMockMessages(),
-      latestRun: createMockRun()
+      latestRun: run
     });
-    mockGetRun.mockResolvedValue(createMockRun());
+    mockGetRun.mockResolvedValue(run);
   });
 
   afterEach(() => {
@@ -134,12 +178,68 @@ describe("chat mobile smoke", () => {
     vi.clearAllMocks();
   });
 
-  it("renders mobile-usable chat controls and sql preview", async () => {
+  it(
+    "renders mobile-usable chat controls and progressive delivery toggles",
+    async () => {
+    const user = userEvent.setup();
     render(<ChatPage />);
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
 
     expect(screen.getByLabelText("聊天输入")).toBeEnabled();
     expect(screen.getByRole("button", { name: "结果详情" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
-  });
+
+    await user.click(screen.getByRole("button", { name: "结果详情" }));
+    const answerTrigger = await screen.findByRole("button", {
+      name: "切换 Answer 区块"
+    });
+    const evidenceTrigger = screen.getByRole("button", {
+      name: "切换 Evidence 区块"
+    });
+    expect(answerTrigger).toBeInTheDocument();
+    expect(evidenceTrigger).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "切换 Artifact 区块" })).toBeInTheDocument();
+
+    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(evidenceTrigger).toHaveAttribute("aria-controls");
+    evidenceTrigger.focus();
+    await user.keyboard("{Enter}");
+    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
+    evidenceTrigger.focus();
+    await user.keyboard(" ");
+    await waitFor(() => {
+      expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
+    });
+
+    await user.type(screen.getByLabelText("聊天输入"), "移动端发送链路回归");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+    await waitFor(() => {
+      expect(mockStreamMessageEvents).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
+
+    const answerTab = screen.getByRole("tab", { name: /answer/i });
+    const chartTab = screen.getByRole("tab", { name: /chart/i });
+    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
+    const tabList = screen.getByTestId("chatbi-result-tablist");
+    expect(answerTab).toHaveAttribute("aria-selected", "true");
+    expect(chartTab).toHaveAttribute("aria-controls");
+    expect(sqlTab).toHaveAttribute("aria-controls");
+    expect(tabList).toHaveClass("overflow-x-auto");
+
+    chartTab.focus();
+    await user.keyboard("{Enter}");
+    expect(chartTab).toHaveAttribute("aria-selected", "true");
+
+    sqlTab.focus();
+    await user.keyboard("[Space]");
+    expect(sqlTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "打开运行详情" })).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+    },
+    15000
+  );
 });

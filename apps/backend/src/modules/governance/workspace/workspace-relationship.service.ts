@@ -1,0 +1,795 @@
+import { createHash } from "node:crypto";
+import { Injectable, Optional } from "@nestjs/common";
+import { DomainError } from "../../../common/domain-error";
+import type { ModelingGraphPayload } from "../../platform/data/persistence/modeling-graph.types";
+import {
+  AuditLogRepository,
+  DatasourceRepository,
+  ModelingGraphRepository,
+  ModelingGraphValidator,
+  WorkspaceDatasourcePolicyRepository,
+  WorkspaceRepository
+} from "../../platform/data/persistence";
+import { RelationshipPublishGateFacade } from "../../platform/data/query";
+import type { PublishWorkspaceRelationshipGraphDto } from "./dto/publish-workspace-relationship-graph.dto";
+import type { ReplaceWorkspaceRelationshipGraphDto } from "./dto/replace-workspace-relationship-graph.dto";
+
+type Actor = {
+  id: string;
+  role: "admin" | "user";
+  workspaceRoles?: Record<string, "admin" | "member">;
+  isSystemAdmin?: boolean;
+};
+
+type RelationshipEdgeRecord = {
+  id: string;
+  name?: string;
+  bridge: {
+    left: {
+      dataset: string;
+      table: string;
+      column: string;
+    };
+    right: {
+      dataset: string;
+      table: string;
+      column: string;
+    };
+    operator: "eq";
+    confidence: number;
+  };
+};
+
+type RelationshipDraftRecord = {
+  workspaceId: string;
+  datasourceId: string;
+  policyVersion: number;
+  revision: number;
+  graphHash: string;
+  edges: RelationshipEdgeRecord[];
+  updatedAt: string;
+  updatedByActorId: string;
+};
+
+type RelationshipScopeState = {
+  drafts: RelationshipDraftRecord[];
+  activeRevision?: number;
+};
+
+type ReplaceDraftInput = ReplaceWorkspaceRelationshipGraphDto & {
+  modelingGraphPayload?: ModelingGraphPayload;
+};
+
+const normalizeId = (value: string, field: string): string => {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new DomainError("VALIDATION_ERROR", `${field} 不能为空。`, 400, {
+      field
+    });
+  }
+  return normalized;
+};
+
+@Injectable()
+export class WorkspaceRelationshipService {
+  private readonly state = new Map<string, RelationshipScopeState>();
+
+  constructor(
+    private readonly workspaceRepository: WorkspaceRepository,
+    private readonly datasourceRepository: DatasourceRepository,
+    private readonly policyRepository: WorkspaceDatasourcePolicyRepository,
+    private readonly auditLogRepository: AuditLogRepository,
+    private readonly publishGateFacade: RelationshipPublishGateFacade,
+    @Optional() private readonly modelingGraphRepository?: ModelingGraphRepository,
+    @Optional() private readonly modelingGraphValidator?: ModelingGraphValidator
+  ) {}
+
+  async getDraft(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    draft: RelationshipDraftRecord | null;
+    activeRevision?: number;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "getDraft"
+    });
+    await this.assertDatasourceExists(datasourceId);
+
+    const scopeState = await this.ensureScopeState(workspaceId, datasourceId);
+    return {
+      workspaceId,
+      datasourceId,
+      draft: scopeState?.drafts.at(-1) ? this.cloneDraft(scopeState.drafts.at(-1)!) : null,
+      activeRevision: scopeState?.activeRevision
+    };
+  }
+
+  async getDraftRevision(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    revisionRaw: number
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    draft: RelationshipDraftRecord | null;
+    activeRevision?: number;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    if (!Number.isInteger(revisionRaw) || revisionRaw < 1) {
+      throw new DomainError("VALIDATION_ERROR", "revision 必须是大于 0 的整数。", 400, {
+        field: "revision"
+      });
+    }
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "getDraftRevision"
+    });
+    await this.assertDatasourceExists(datasourceId);
+
+    const scopeState = await this.ensureScopeState(workspaceId, datasourceId);
+    const draft = scopeState?.drafts.find((item) => item.revision === revisionRaw) ?? null;
+    return {
+      workspaceId,
+      datasourceId,
+      draft: draft ? this.cloneDraft(draft) : null,
+      activeRevision: scopeState?.activeRevision
+    };
+  }
+
+  async replaceDraft(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: ReplaceDraftInput
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    draft: RelationshipDraftRecord;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "replaceDraft"
+    });
+    await this.assertDatasourceExists(datasourceId);
+
+    const tablePermissionSet = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId,
+      datasourceId
+    });
+    if (tablePermissionSet.policyVersion !== body.policyVersion) {
+      throw new DomainError(
+        "WORKSPACE_DATASOURCE_POLICY_VERSION_CONFLICT",
+        "policyVersion 已过期，请刷新后重试。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          expectedPolicyVersion: tablePermissionSet.policyVersion,
+          providedPolicyVersion: body.policyVersion
+        }
+      );
+    }
+
+    const normalizedEdges = this.normalizeEdges(body.edges);
+    this.assertEdgeTablesAllowed(normalizedEdges, tablePermissionSet.tableNames);
+
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
+    const now = new Date().toISOString();
+    const payload = this.buildModelingGraphPayload(normalizedEdges, body.modelingGraphPayload);
+    const validatedPayload = this.modelingGraphValidator
+      ? this.modelingGraphValidator.validate(payload)
+      : payload;
+    const graphHash = this.computeGraphHash(validatedPayload);
+    const persistedDraft = this.modelingGraphRepository
+      ? await this.modelingGraphRepository.appendDraftRevision({
+          workspaceId,
+          datasourceId,
+          graphHash,
+          graphPayload: validatedPayload,
+          actorId: actor.id
+        })
+      : null;
+    const revision = persistedDraft?.revision ?? (state.drafts.at(-1)?.revision ?? 0) + 1;
+    const draft: RelationshipDraftRecord = {
+      workspaceId,
+      datasourceId,
+      policyVersion: body.policyVersion,
+      revision,
+      graphHash,
+      edges: normalizedEdges,
+      updatedAt: persistedDraft?.updatedAt ?? now,
+      updatedByActorId: actor.id
+    };
+    this.upsertScopeDraft(state, draft);
+
+    await this.auditLogRepository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.relationship.draft.updated",
+      eventCode: "WORKSPACE_RELATIONSHIP_DRAFT_REPLACED",
+      severity: "info",
+      message: "工作空间关系图 draft 已更新",
+      metadata: {
+        workspaceId,
+        datasourceId,
+        revision,
+        edgeCount: normalizedEdges.length,
+        actorId: actor.id
+      }
+    });
+
+    return {
+      workspaceId,
+      datasourceId,
+      draft: this.cloneDraft(draft)
+    };
+  }
+
+  async publishPrecheck(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: PublishWorkspaceRelationshipGraphDto
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    draftRevision: number;
+    publish_precheck_passed: boolean;
+    blockingReasons: string[];
+    policyVersion: number;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "publishPrecheck"
+    });
+    await this.assertDatasourceExists(datasourceId);
+
+    const tablePermissionSet = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId,
+      datasourceId
+    });
+
+    const blockingReasons: string[] = [];
+    if (tablePermissionSet.policyVersion !== body.policyVersion) {
+      blockingReasons.push("policy_version_conflict");
+    }
+
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
+    const draft = state?.drafts.find((item) => item.revision === body.draftRevision);
+    if (!draft) {
+      blockingReasons.push("draft_revision_not_found");
+    } else {
+      const tableViolations = this.findTableViolations(draft.edges, tablePermissionSet.tableNames);
+      if (tableViolations.length > 0) {
+        blockingReasons.push("table_permissions_mismatch");
+      }
+    }
+
+    return {
+      workspaceId,
+      datasourceId,
+      draftRevision: body.draftRevision,
+      publish_precheck_passed: blockingReasons.length === 0,
+      blockingReasons,
+      policyVersion: tablePermissionSet.policyVersion
+    };
+  }
+
+  async publishDraft(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: PublishWorkspaceRelationshipGraphDto
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    activeRevision: number;
+    graphHash: string;
+    publishGatePass: boolean;
+    blockingReasons: string[];
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    const precheck = await this.publishPrecheck(actor, workspaceId, datasourceId, body);
+    if (!precheck.publish_precheck_passed) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_PUBLISH_PRECHECK_FAILED",
+        "发布预检失败。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          blockingReasons: precheck.blockingReasons
+        }
+      );
+    }
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
+    const draft = state.drafts.find((item) => item.revision === body.draftRevision);
+    if (!draft) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_DRAFT_NOT_FOUND",
+        "未找到待发布 revision。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          draftRevision: body.draftRevision
+        }
+      );
+    }
+    if (state.activeRevision === draft.revision) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_PUBLISH_ALREADY_ACTIVE",
+        "目标 revision 已经处于 active 状态。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          draftRevision: draft.revision,
+          activeRevision: state.activeRevision,
+          blockingReasons: ["revision_already_active"]
+        }
+      );
+    }
+
+    const tablePermissionSet = await this.policyRepository.getWorkspaceDatasourceTablePermissionSet({
+      workspaceId,
+      datasourceId
+    });
+    const gateResult = await this.publishGateFacade.evaluate({
+      datasourceId,
+      edges: draft.edges,
+      representativeSqlSamples: body.representativeSqlSamples ?? [],
+      allowedTables: tablePermissionSet.tableNames,
+      accessContext: {
+        actorId: actor.id,
+        workspaceId,
+        roleSet: actor.role === "admin" || actor.isSystemAdmin ? ["admin"] : ["member"]
+      }
+    });
+    if (!gateResult.pass) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_PUBLISH_GATE_FAILED",
+        "relationship 发布门禁阻断。",
+        409,
+        {
+          workspaceId,
+          datasourceId,
+          draftRevision: body.draftRevision,
+          blockingReasons: gateResult.blockingReasons
+        }
+      );
+    }
+
+    state.activeRevision = draft.revision;
+    if (this.modelingGraphRepository) {
+      await this.modelingGraphRepository.markActiveRevision({
+        workspaceId,
+        datasourceId,
+        revision: draft.revision,
+        actorId: actor.id
+      });
+    }
+    await this.auditLogRepository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.relationship.published",
+      eventCode: "WORKSPACE_RELATIONSHIP_PUBLISHED",
+      severity: "info",
+      message: "工作空间关系图发布成功",
+      metadata: {
+        workspaceId,
+        datasourceId,
+        activeRevision: state.activeRevision,
+        graphHash: draft.graphHash,
+        actorId: actor.id
+      }
+    });
+
+    return {
+      workspaceId,
+      datasourceId,
+      activeRevision: draft.revision,
+      graphHash: draft.graphHash,
+      publishGatePass: true,
+      blockingReasons: []
+    };
+  }
+
+  async rollbackDraft(
+    actor: Actor,
+    workspaceIdRaw: string,
+    datasourceIdRaw: string,
+    body: PublishWorkspaceRelationshipGraphDto
+  ): Promise<{
+    workspaceId: string;
+    datasourceId: string;
+    activeRevision: number;
+  }> {
+    const workspaceId = normalizeId(workspaceIdRaw, "workspaceId");
+    const datasourceId = normalizeId(datasourceIdRaw, "datasourceId");
+    await this.assertManagePermission(actor, workspaceId);
+    await this.assertDatasourceBound({
+      workspaceId,
+      datasourceId,
+      actorId: actor.id,
+      operation: "rollbackDraft"
+    });
+    await this.assertDatasourceExists(datasourceId);
+    const targetRevision = body.rollbackToRevision ?? body.draftRevision;
+    const state = await this.ensureScopeState(workspaceId, datasourceId);
+    const matched = state.drafts.find((item) => item.revision === targetRevision);
+    if (!matched) {
+      throw new DomainError(
+        "WORKSPACE_RELATIONSHIP_REVISION_NOT_FOUND",
+        "回滚目标 revision 不存在。",
+        404,
+        {
+          workspaceId,
+          datasourceId,
+          targetRevision
+        }
+      );
+    }
+    state.activeRevision = matched.revision;
+    if (this.modelingGraphRepository) {
+      await this.modelingGraphRepository.markActiveRevision({
+        workspaceId,
+        datasourceId,
+        revision: matched.revision,
+        actorId: actor.id
+      });
+    }
+    await this.auditLogRepository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.relationship.rollback",
+      eventCode: "WORKSPACE_RELATIONSHIP_ROLLBACK",
+      severity: "warning",
+      message: "工作空间关系图已回滚",
+      metadata: {
+        workspaceId,
+        datasourceId,
+        activeRevision: matched.revision,
+        actorId: actor.id
+      }
+    });
+    return {
+      workspaceId,
+      datasourceId,
+      activeRevision: matched.revision
+    };
+  }
+
+  private normalizeEdges(edges: ReplaceWorkspaceRelationshipGraphDto["edges"]): RelationshipEdgeRecord[] {
+    return edges.map((edge) => ({
+      id: edge.id.trim(),
+      name: edge.name?.trim() || undefined,
+      bridge: {
+        left: {
+          dataset: edge.bridge.left.dataset.trim(),
+          table: edge.bridge.left.table.trim().toLowerCase(),
+          column: edge.bridge.left.column.trim().toLowerCase()
+        },
+        right: {
+          dataset: edge.bridge.right.dataset.trim(),
+          table: edge.bridge.right.table.trim().toLowerCase(),
+          column: edge.bridge.right.column.trim().toLowerCase()
+        },
+        operator: "eq",
+        confidence: Number(edge.bridge.confidence.toFixed(4))
+      }
+    }));
+  }
+
+  private findTableViolations(edges: RelationshipEdgeRecord[], allowedTables: string[]): string[] {
+    const allowed = new Set(allowedTables.map((item) => item.toLowerCase()));
+    const violations: string[] = [];
+    for (const edge of edges) {
+      if (!allowed.has(edge.bridge.left.table)) {
+        violations.push(edge.bridge.left.table);
+      }
+      if (!allowed.has(edge.bridge.right.table)) {
+        violations.push(edge.bridge.right.table);
+      }
+    }
+    return Array.from(new Set(violations));
+  }
+
+  private assertEdgeTablesAllowed(edges: RelationshipEdgeRecord[], allowedTables: string[]): void {
+    const violations = this.findTableViolations(edges, allowedTables);
+    if (violations.length === 0) {
+      return;
+    }
+    throw new DomainError(
+      "WORKSPACE_RELATIONSHIP_TABLE_PERMISSIONS_FORBIDDEN",
+      "关系边包含未授权表。",
+      403,
+      {
+        tables: violations
+      }
+    );
+  }
+
+  private computeGraphHash(payload: ModelingGraphPayload): string {
+    return createHash("sha256")
+      .update(JSON.stringify(payload))
+      .digest("hex");
+  }
+
+  private scopeKey(workspaceId: string, datasourceId: string): string {
+    return `${workspaceId}::${datasourceId}`;
+  }
+
+  private async ensureScopeState(
+    workspaceId: string,
+    datasourceId: string
+  ): Promise<RelationshipScopeState> {
+    const key = this.scopeKey(workspaceId, datasourceId);
+    const existed = this.state.get(key);
+    if (existed) {
+      return existed;
+    }
+    const created: RelationshipScopeState = {
+      drafts: []
+    };
+    if (this.modelingGraphRepository) {
+      const revisions = await this.modelingGraphRepository.listRevisions({
+        workspaceId,
+        datasourceId
+      });
+      for (const revision of revisions) {
+        created.drafts.push({
+          workspaceId: revision.workspaceId,
+          datasourceId: revision.datasourceId,
+          policyVersion: 0,
+          revision: revision.revision,
+          graphHash: revision.graphHash,
+          edges: this.extractRelationshipEdges(revision.graphPayload),
+          updatedAt: revision.updatedAt,
+          updatedByActorId: revision.createdByActorId ?? "system"
+        });
+      }
+      const active = revisions
+        .filter((item) => item.status === "active")
+        .sort((left, right) => left.revision - right.revision)
+        .at(-1);
+      created.activeRevision = active?.revision;
+    }
+    this.state.set(key, created);
+    return created;
+  }
+
+  private upsertScopeDraft(state: RelationshipScopeState, draft: RelationshipDraftRecord): void {
+    const withoutCurrent = state.drafts.filter((item) => item.revision !== draft.revision);
+    withoutCurrent.push(draft);
+    state.drafts = withoutCurrent.sort((left, right) => left.revision - right.revision);
+  }
+
+  private buildModelingGraphPayload(
+    edges: RelationshipEdgeRecord[],
+    basePayload?: ModelingGraphPayload
+  ): ModelingGraphPayload {
+    const relationshipMetaById = new Map(
+      (basePayload?.relationships ?? []).map((item) => [
+        item.id,
+        {
+          source: item.source,
+          type:
+            item.type === "many-to-one" ||
+            item.type === "one-to-many" ||
+            item.type === "one-to-one"
+              ? item.type
+              : item.cardinality === "many-to-one" ||
+                  item.cardinality === "one-to-many" ||
+                  item.cardinality === "one-to-one"
+                ? item.cardinality
+                : undefined
+        }
+      ])
+    );
+    return {
+      models: (basePayload?.models ?? [])
+        .map((model) => ({
+          id: model.id,
+          tableName: model.tableName,
+          modelName: model.modelName,
+          displayName: model.displayName,
+          description: model.description,
+          position: model.position,
+          columns: model.columns
+            .map((column) => ({
+              name: column.name,
+              dataType: column.dataType,
+              isNullable: column.isNullable,
+              isPrimaryKey: column.isPrimaryKey,
+              displayName: column.displayName,
+              description: column.description
+            }))
+            .sort((left, right) => left.name.localeCompare(right.name))
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      relationships: edges
+        .map((edge) => {
+          const meta = relationshipMetaById.get(edge.id);
+          return {
+            id: edge.id,
+            name: edge.name,
+            source: meta?.source ?? "manual",
+            confidence: Number(edge.bridge.confidence.toFixed(4)),
+            ...(meta?.type
+              ? {
+                  type: meta.type,
+                  cardinality: meta.type
+                }
+              : {}),
+            bridge: {
+              left: {
+                dataset: edge.bridge.left.dataset,
+                table: edge.bridge.left.table,
+                column: edge.bridge.left.column
+              },
+              right: {
+                dataset: edge.bridge.right.dataset,
+                table: edge.bridge.right.table,
+                column: edge.bridge.right.column
+              },
+              operator: "eq" as const,
+              confidence: Number(edge.bridge.confidence.toFixed(4))
+            }
+          };
+        })
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      calculatedFields: (basePayload?.calculatedFields ?? [])
+        .map((field) => ({
+          id: field.id,
+          modelId: field.modelId,
+          name: field.name,
+          expression: field.expression,
+          dataType: field.dataType
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      views: (basePayload?.views ?? [])
+        .map((view) => ({
+          id: view.id,
+          name: view.name,
+          sql: view.sql,
+          displayName: view.displayName,
+          description: view.description,
+          position: view.position
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      schemaChanges: (basePayload?.schemaChanges ?? [])
+        .map((change) => ({
+          id: change.id,
+          status: change.status,
+          kind: change.kind,
+          summary: change.summary
+        }))
+        .sort((left, right) => left.id.localeCompare(right.id))
+    };
+  }
+
+  private extractRelationshipEdges(payload: ModelingGraphPayload): RelationshipEdgeRecord[] {
+    if (!Array.isArray(payload.relationships)) {
+      return [];
+    }
+    return payload.relationships
+      .filter((item) => item.bridge.operator === "eq")
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        bridge: {
+          left: {
+            dataset: item.bridge.left.dataset,
+            table: item.bridge.left.table.toLowerCase(),
+            column: item.bridge.left.column.toLowerCase()
+          },
+          right: {
+            dataset: item.bridge.right.dataset,
+            table: item.bridge.right.table.toLowerCase(),
+            column: item.bridge.right.column.toLowerCase()
+          },
+          operator: "eq" as const,
+          confidence: Number(item.bridge.confidence.toFixed(4))
+        }
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  private cloneDraft(draft: RelationshipDraftRecord): RelationshipDraftRecord {
+    return JSON.parse(JSON.stringify(draft)) as RelationshipDraftRecord;
+  }
+
+  private async assertDatasourceBound(input: {
+    workspaceId: string;
+    datasourceId: string;
+    actorId: string;
+    operation: string;
+  }): Promise<void> {
+    const bound = await this.policyRepository.isDatasourceBound(
+      input.workspaceId,
+      input.datasourceId
+    );
+    if (bound) {
+      return;
+    }
+    await this.auditLogRepository.appendEvent({
+      phase: "governance",
+      eventType: "workspace.relationship.rejected",
+      eventCode: "WORKSPACE_DATASOURCE_NOT_BOUND",
+      severity: "warning",
+      message: "检测到 relationship API 未绑定数据源访问",
+      metadata: {
+        workspaceId: input.workspaceId,
+        datasourceId: input.datasourceId,
+        actorId: input.actorId,
+        operation: input.operation
+      }
+    });
+    throw new DomainError(
+      "WORKSPACE_DATASOURCE_NOT_BOUND",
+      "当前工作空间未绑定该数据源。",
+      400,
+      {
+        workspaceId: input.workspaceId,
+        datasourceId: input.datasourceId
+      }
+    );
+  }
+
+  private async assertDatasourceExists(datasourceId: string): Promise<void> {
+    const datasource = await this.datasourceRepository.getDatasourceById(datasourceId, {
+      includeDeleted: true
+    });
+    if (!datasource || datasource.status === "deleted") {
+      throw new DomainError("DATASOURCE_NOT_FOUND", "数据源不存在或已删除。", 404, {
+        datasourceId
+      });
+    }
+  }
+
+  private async assertManagePermission(actor: Actor, workspaceId: string): Promise<void> {
+    const workspace = await this.workspaceRepository.getWorkspaceById(workspaceId);
+    if (!workspace || workspace.status === "deleted") {
+      throw new DomainError("WORKSPACE_NOT_FOUND", "工作空间不存在", 404, {
+        workspaceId
+      });
+    }
+    if (actor.role === "admin" || actor.isSystemAdmin) {
+      return;
+    }
+    if (actor.workspaceRoles?.[workspaceId] === "admin") {
+      return;
+    }
+    const allowed = await this.workspaceRepository.isWorkspaceAdmin(actor.id, workspaceId);
+    if (!allowed) {
+      throw new DomainError("FORBIDDEN", "仅系统管理员或工作空间管理员可执行该操作。", 403, {
+        workspaceId,
+        actorId: actor.id
+      });
+    }
+  }
+}
