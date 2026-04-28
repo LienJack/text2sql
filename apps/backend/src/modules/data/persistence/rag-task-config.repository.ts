@@ -123,21 +123,33 @@ export class RagTaskConfigRepository implements OnModuleInit, OnModuleDestroy {
 
   async upsertConfig(input: RagTaskConfigUpsertInput): Promise<RagTaskConfig> {
     const current = await this.getConfig(input.taskType);
+    const nextProvider = input.provider.trim();
+    const nextModel = input.model.trim();
+    const nextBaseUrl = input.baseUrl?.trim() || null;
+    const shouldPreserveApiKey =
+      input.apiKeyCiphertext === undefined &&
+      this.hasSameRuntimeTarget(current, {
+        provider: nextProvider,
+        model: nextModel,
+        baseUrl: nextBaseUrl
+      });
+    const nextApiKeyCiphertext =
+      input.apiKeyCiphertext !== undefined
+        ? input.apiKeyCiphertext
+        : shouldPreserveApiKey
+          ? (this.apiKeys.get(input.taskType) ?? null)
+          : null;
     const now = new Date().toISOString();
     const id = current?.id ?? uuidv4();
     const config: RagTaskConfig = {
       id,
       taskType: input.taskType,
-      provider: input.provider.trim(),
-      model: input.model.trim(),
-      baseUrl: input.baseUrl?.trim() || null,
+      provider: nextProvider,
+      model: nextModel,
+      baseUrl: nextBaseUrl,
       enabled: input.enabled ?? current?.enabled ?? true,
-      hasApiKey: Boolean(
-        input.apiKeyCiphertext !== undefined
-          ? input.apiKeyCiphertext
-          : current?.hasApiKey
-      ),
-      apiKeyMasked: input.apiKeyMasked ?? current?.apiKeyMasked ?? null,
+      hasApiKey: Boolean(nextApiKeyCiphertext),
+      apiKeyMasked: input.apiKeyMasked ?? (shouldPreserveApiKey ? current?.apiKeyMasked : null),
       dimensions: input.dimensions ?? current?.dimensions ?? null,
       vectorVersion: input.vectorVersion ?? current?.vectorVersion ?? null,
       timeoutMs: input.timeoutMs ?? current?.timeoutMs ?? null,
@@ -153,12 +165,10 @@ export class RagTaskConfigRepository implements OnModuleInit, OnModuleDestroy {
       updatedAt: now
     };
     this.configs.set(input.taskType, config);
-    if (input.apiKeyCiphertext !== undefined) {
-      if (input.apiKeyCiphertext) {
-        this.apiKeys.set(input.taskType, input.apiKeyCiphertext);
-      } else {
-        this.apiKeys.delete(input.taskType);
-      }
+    if (nextApiKeyCiphertext) {
+      this.apiKeys.set(input.taskType, nextApiKeyCiphertext);
+    } else {
+      this.apiKeys.delete(input.taskType);
     }
 
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
@@ -174,7 +184,7 @@ export class RagTaskConfigRepository implements OnModuleInit, OnModuleDestroy {
           provider: config.provider,
           model: config.model,
           baseUrl: config.baseUrl,
-          apiKeyCiphertext: input.apiKeyCiphertext ?? undefined,
+          apiKeyCiphertext: nextApiKeyCiphertext,
           apiKeyMasked: config.apiKeyMasked,
           enabled: config.enabled,
           dimensions: config.dimensions,
@@ -190,7 +200,7 @@ export class RagTaskConfigRepository implements OnModuleInit, OnModuleDestroy {
           provider: config.provider,
           model: config.model,
           baseUrl: config.baseUrl,
-          apiKeyCiphertext: input.apiKeyCiphertext ?? null,
+          apiKeyCiphertext: nextApiKeyCiphertext,
           apiKeyMasked: config.apiKeyMasked,
           enabled: config.enabled,
           dimensions: config.dimensions,
@@ -371,6 +381,24 @@ export class RagTaskConfigRepository implements OnModuleInit, OnModuleDestroy {
   private sortByTaskType(configs: RagTaskConfig[]): RagTaskConfig[] {
     return [...configs].sort((left, right) =>
       left.taskType.localeCompare(right.taskType)
+    );
+  }
+
+  private hasSameRuntimeTarget(
+    current: Pick<RagTaskConfig, "provider" | "model" | "baseUrl"> | undefined,
+    next: {
+      provider: string;
+      model: string;
+      baseUrl: string | null;
+    }
+  ): boolean {
+    if (!current) {
+      return false;
+    }
+    return (
+      current.provider.trim() === next.provider &&
+      current.model.trim() === next.model &&
+      (current.baseUrl?.trim() || null) === next.baseUrl
     );
   }
 
