@@ -1,6 +1,6 @@
 import type { ExecutionTrace } from "@text2sql/shared-types";
 import { Injectable } from "@nestjs/common";
-import { assertSupportedV2RunReadModel } from "../../conversation/projection/read-model/run-view-support.guard";
+import { assertSupportedV2RunReadModel } from "../../platform/read-model/run-view-support.guard";
 import {
   AuditLogRepository,
   ChatRepository

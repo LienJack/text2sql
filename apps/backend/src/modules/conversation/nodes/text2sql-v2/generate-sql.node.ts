@@ -22,7 +22,7 @@ import type { SqlSemanticIntent } from "../../agent/sql/sql-prompt.builder";
 import type {
   RagContextPack,
   RagRetrievalChunkPayload
-} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+} from "../../../rag/retrieval/rag-retrieval.types";
 
 export interface GenerateSqlNodeResult {
   draft: {
