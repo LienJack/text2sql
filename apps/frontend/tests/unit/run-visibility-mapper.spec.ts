@@ -53,6 +53,39 @@ describe("run-visibility-mapper", () => {
     });
   });
 
+  it("normalizes v2 loop evidence and termination reason", () => {
+    const normalized = normalizeDeliveryContract({
+      answer: {
+        text: "loop answer",
+        status: "executionResult",
+        provider: "mock-provider"
+      },
+      evidence: {
+        run_id: "run-loop-1",
+        v2: {
+          loop_evidence: [
+            {
+              loop_index: 1,
+              trigger_reason: "semantic_plan_requires_clarification",
+              action_type: "clarify",
+              termination_reason: "clarification_requested",
+              convergence_path: ["planning", "clarify"]
+            }
+          ],
+          termination_reason: "clarification_requested"
+        }
+      }
+    });
+
+    expect(normalized?.evidence?.v2?.terminationReason).toBe("clarification_requested");
+    expect(normalized?.evidence?.v2?.loopEvidence?.length).toBe(1);
+    expect(normalized?.evidence?.v2?.loopEvidence?.[0]?.actionType).toBe("clarify");
+    expect(normalized?.evidence?.v2?.loopEvidence?.[0]?.convergencePath).toEqual([
+      "planning",
+      "clarify"
+    ]);
+  });
+
   it("normalizes extended ChatBI artifact fields while keeping legacy row preview fields", () => {
     const normalized = normalizeDeliveryContract({
       answer: {

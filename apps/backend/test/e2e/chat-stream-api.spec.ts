@@ -129,6 +129,18 @@ describe("chat stream api (e2e)", () => {
     expect(startEvent?.data).toHaveProperty("requestId");
 
     const stateEvents = parsedEvents.filter(({ eventType }) => eventType === "state");
+    const runningGenerateIndex = parsedEvents.findIndex(({ eventType, event }) => {
+      const stateData = event.data as {
+        node?: unknown;
+        lifecycle?: unknown;
+      };
+      return (
+        eventType === "state" &&
+        stateData.node === "generate-sql" &&
+        stateData.lifecycle === "running"
+      );
+    });
+    expect(runningGenerateIndex).toBeGreaterThan(startIndex);
     for (const { event } of stateEvents) {
       const stateData = event.data as {
         node: unknown;
@@ -137,6 +149,17 @@ describe("chat stream api (e2e)", () => {
         sequence?: unknown;
         stepId?: unknown;
         lifecycle?: unknown;
+        v2?: {
+          stageArtifact?: {
+            stage?: string;
+            status?: string;
+            metadata?: {
+              taskProfile?: string;
+              reasoningTier?: string;
+              policySource?: string;
+            };
+          };
+        };
       };
       expect(typeof stateData.node).toBe("string");
       expect(["success", "failed", "skipped"]).toContain(stateData.status);
@@ -153,11 +176,50 @@ describe("chat stream api (e2e)", () => {
           stateData.lifecycle
         );
       }
+      if (stateData.v2?.stageArtifact) {
+        expect([
+          "intake",
+          "retrieve",
+          "assemble-context",
+          "semantic-plan",
+          "generate-sql",
+          "validate",
+          "correct",
+          "execute",
+          "answer"
+        ]).toContain(stateData.v2.stageArtifact.stage);
+        expect([
+          "success",
+          "failed",
+          "skipped",
+          "degraded",
+          "clarification"
+        ]).toContain(stateData.v2.stageArtifact.status);
+        const stageMetadata = stateData.v2.stageArtifact.metadata;
+        expect(typeof stageMetadata?.taskProfile).toBe("string");
+        expect(typeof stageMetadata?.reasoningTier).toBe("string");
+        expect(typeof stageMetadata?.policySource).toBe("string");
+      }
     }
+
+    expect(
+      stateEvents.some(({ event }) => {
+        const stateData = event.data as {
+          v2?: {
+            stageArtifact?: {
+              stage?: string;
+            };
+          };
+        };
+        return typeof stateData.v2?.stageArtifact?.stage === "string";
+      })
+    ).toBe(true);
 
     const textDeltaEvents = parsedEvents.filter(
       ({ eventType }) => eventType === "text-delta"
     );
+    const firstTextDeltaIndex = eventTypes.indexOf("text-delta");
+    expect(runningGenerateIndex).toBeLessThan(firstTextDeltaIndex);
     expect(textDeltaEvents.length).toBeGreaterThan(0);
     expect(
       textDeltaEvents.some(({ event }) => {
@@ -193,6 +255,13 @@ describe("chat stream api (e2e)", () => {
         evidence?: {
           runId?: string;
           contextPackStatus?: string;
+          contextPackSummary?: {
+            status?: string;
+            selectedEvidenceCount?: number;
+          };
+          v2?: {
+            stageArtifacts?: Array<{ stage?: string }>;
+          };
         };
       };
     };
@@ -210,6 +279,34 @@ describe("chat stream api (e2e)", () => {
     const contextPackStatus = finishData.delivery?.evidence?.contextPackStatus;
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
+    }
+    const streamContextPackSummary = finishData.delivery?.evidence?.contextPackSummary as
+      | {
+          status?: string;
+          selectedEvidenceCount?: number;
+        }
+      | undefined;
+    if (streamContextPackSummary) {
+      expect(["ready", "degraded"]).toContain(streamContextPackSummary.status);
+      expect(typeof streamContextPackSummary.selectedEvidenceCount).toBe("number");
+    }
+    const deliveryV2 = finishData.delivery?.evidence?.v2 as
+      | {
+          stageArtifacts?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (deliveryV2 !== undefined) {
+      expect(deliveryV2.stageArtifacts?.map((item) => item.stage)).toEqual([
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ]);
     }
 
     const messagesRes = await request(app.getHttpServer())
@@ -231,7 +328,20 @@ describe("chat stream api (e2e)", () => {
       messagesRes.body.data.latestRun.delivery.answer.text
     );
     expect(messagesRes.body.data.latestRun.delivery.evidence.runId).toBe(streamRunId);
+    if (streamContextPackSummary) {
+      expect(
+        messagesRes.body.data.latestRun.delivery.evidence.contextPackSummary
+      ).toEqual(streamContextPackSummary);
+    }
     expect(["completed", "failed"]).toContain(latestRun.trace.streamStatus);
+    const latestTraceV2 = (messagesRes.body.data.latestRun.trace?.v2 ?? null) as
+      | {
+          version?: string;
+        }
+      | null;
+    if (latestTraceV2) {
+      expect(latestTraceV2.version).toBe("v2");
+    }
     if (latestRun.trace.streamStatus === "failed") {
       expect(typeof latestRun.error).toBe("string");
       expect(latestRun.error?.trim().length).toBeGreaterThan(0);

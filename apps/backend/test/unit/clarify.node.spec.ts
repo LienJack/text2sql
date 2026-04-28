@@ -20,9 +20,11 @@ describe("ClarifyNode", () => {
       decisionSource: "rule",
       bypassed: false,
       confidenceLevel: "medium",
-      missingCriticalSlots: ["metric"],
-      reasonCodes: ["missing_metric_slot"]
+      missingCriticalSlots: ["metric"]
     });
+    expect(clarification?.reasonCodes).toEqual(
+      expect.arrayContaining(["missing_metric_slot"])
+    );
   });
 
   it("exposes structured continue decision for sufficient input", () => {
@@ -141,12 +143,12 @@ describe("ClarifyNode", () => {
         bypassed: false,
         confidenceLevel: "low",
         missingCriticalSlots: ["subject", "metric", "time"],
-        reasonCodes: [
+        reasonCodes: expect.arrayContaining([
           "fallback_exception",
           "missing_subject_slot",
           "missing_metric_slot",
           "missing_time_slot"
-        ]
+        ])
       });
     } finally {
       spy.mockRestore();

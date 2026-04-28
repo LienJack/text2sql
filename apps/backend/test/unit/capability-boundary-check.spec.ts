@@ -190,6 +190,61 @@ export class RetrieveKnowledgeNode {
     });
   });
 
+  it("allows conversation -> knowledge stable entry imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts",
+      `import { KNOWLEDGE_FACADE_CONTRACT } from "../../knowledge";
+export class Text2SqlV2ArtifactRefService {
+  constructor(private readonly contract = KNOWLEDGE_FACADE_CONTRACT) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge.ts",
+      `export const KNOWLEDGE_FACADE_CONTRACT = Symbol("KNOWLEDGE_FACADE_CONTRACT");`
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+    expect((report as unknown as Record<string, unknown>).conversationKnowledgeSubpath).toMatchObject({
+      currentCount: 0,
+      baselineCount: 15,
+      remainingFromBaseline: 15,
+      overBaselineCount: 0,
+      exceedsBaseline: false
+    });
+  });
+
+  it("reports conversation/text2sql -> legacy modules/chat imports as violations", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/text2sql/stages/prepare-run.stage.ts",
+      `import { LegacyChatService } from "../../../chat/chat.service";
+export class PrepareRunStage {
+  constructor(private readonly legacyChatService: LegacyChatService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/chat/chat.service.ts",
+      "export class LegacyChatService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(1);
+    expect(report.violations[0]).toMatchObject({
+      sourceDomain: "conversation",
+      targetDomain: "conversation",
+      sourceFile:
+        "apps/backend/src/modules/conversation/text2sql/stages/prepare-run.stage.ts",
+      targetFile: "apps/backend/src/modules/chat/chat.service.ts",
+      line: 1
+    });
+  });
+
   it("supports temporary allowlist + baseline counting for conversation -> knowledge/* direct imports", async () => {
     await writeRepoFile(
       repoRoot,

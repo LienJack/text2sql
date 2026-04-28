@@ -116,6 +116,25 @@ export class BuildSemanticQueryNode {
         : intentPlan.intent === "compare"
           ? ["normalize_time_window", "keep_metric_consistency"]
           : ["prefer_direct_lookup"];
+    if (clarificationDecision?.decision === "clarify") {
+      semanticHints.push("route_clarification_required");
+    }
+    if (clarificationDecision?.decisionSource === "metadata-intent") {
+      semanticHints.push("route_metadata_answer_preferred");
+    }
+    if (clarificationDecision?.decisionSource === "sql-write-intent") {
+      semanticHints.push("route_fail_closed_for_write_intent");
+    }
+    if (
+      (clarificationDecision?.reasonCodes ?? []).some(
+        (reasonCode) => reasonCode === "clarification_round_limit_reached"
+      )
+    ) {
+      semanticHints.push("clarification_round_limit_reached");
+      planningWarnings.semantic.push(
+        "clarification round limit reached; downstream should prefer fail-closed route"
+      );
+    }
     if (intentPlan.constraints.includes("must_use_selected_context")) {
       semanticHints.push("must_consume_selected_context");
     }

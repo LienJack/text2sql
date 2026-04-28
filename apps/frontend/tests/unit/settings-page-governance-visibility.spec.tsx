@@ -1,7 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LlmSettingsView, RagQualityGateReport } from "@text2sql/shared-types";
+import type {
+  LlmSettingsView,
+  RagQualityGateReport,
+  RagTaskSettingsView
+} from "@text2sql/shared-types";
 import SettingsPage from "@/app/settings/page";
 import {
   AdminApiError,
@@ -12,18 +16,22 @@ import {
 } from "@/lib/admin-api-client";
 import {
   batchSetModelsEnabled,
+  checkRagTaskConfigHealth,
   checkProviderHealth,
   createProviderConfig,
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  previewRagProviderModels,
+  fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
   fetchSettingsView,
   fetchSupportedProviders,
   setModelEnabled,
   submitRagMemoryFeedback,
-  syncProviderModels
+  syncProviderModels,
+  upsertRagTaskConfig
 } from "@/lib/settings-api-client";
 
 vi.mock("@/components/settings/model-catalog-table", () => ({
@@ -59,6 +67,10 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
     ...actual,
     fetchSettingsView: vi.fn(),
     fetchSupportedProviders: vi.fn(),
+    fetchRagTaskConfigs: vi.fn(),
+    previewRagProviderModels: vi.fn(),
+    upsertRagTaskConfig: vi.fn(),
+    checkRagTaskConfigHealth: vi.fn(),
     fetchBackendHealthSnapshot: vi.fn(),
     fetchRagQualityReport: vi.fn(),
     fetchRagReplayCompleteness: vi.fn(),
@@ -79,6 +91,10 @@ const mockCreateGlossaryAnchor = vi.mocked(createGlossaryAnchor);
 const mockRollbackGlossaryAnchor = vi.mocked(rollbackGlossaryAnchor);
 const mockFetchSettingsView = vi.mocked(fetchSettingsView);
 const mockFetchSupportedProviders = vi.mocked(fetchSupportedProviders);
+const mockFetchRagTaskConfigs = vi.mocked(fetchRagTaskConfigs);
+const mockPreviewRagProviderModels = vi.mocked(previewRagProviderModels);
+const mockUpsertRagTaskConfig = vi.mocked(upsertRagTaskConfig);
+const mockCheckRagTaskConfigHealth = vi.mocked(checkRagTaskConfigHealth);
 const mockFetchBackendHealthSnapshot = vi.mocked(fetchBackendHealthSnapshot);
 const mockFetchRagQualityReport = vi.mocked(fetchRagQualityReport);
 const mockFetchRagReplayCompleteness = vi.mocked(fetchRagReplayCompleteness);
@@ -100,6 +116,63 @@ function createSettingsView(role: "admin" | "user"): LlmSettingsView {
     },
     providers: [],
     models: []
+  };
+}
+
+function createRagTaskSettingsView(role: "admin" | "user"): RagTaskSettingsView {
+  return {
+    actor: {
+      id: role === "admin" ? "frontend-admin" : "frontend-user",
+      role
+    },
+    items: [
+      {
+        id: "rag-embedding",
+        taskType: "embedding",
+        provider: "openai",
+        model: "text-embedding-3-small",
+        baseUrl: "https://api.openai.com/v1",
+        enabled: true,
+        hasApiKey: true,
+        apiKeyMasked: "sk-e***1234",
+        dimensions: 1536,
+        vectorVersion: "v1",
+        timeoutMs: 30000,
+        note: null,
+        healthStatus: "unknown",
+        lastCheckedAt: null,
+        lastHealthLatencyMs: null,
+        lastHealthMessage: null,
+        lastError: null,
+        configSource: "settings",
+        configSourceNote: null,
+        createdAt: "2026-04-16T00:00:00.000Z",
+        updatedAt: "2026-04-16T00:00:00.000Z"
+      },
+      {
+        id: "rag-rerank",
+        taskType: "rerank",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        baseUrl: "https://api.openai.com/v1",
+        enabled: true,
+        hasApiKey: true,
+        apiKeyMasked: "sk-r***1234",
+        dimensions: null,
+        vectorVersion: null,
+        timeoutMs: 5000,
+        note: null,
+        healthStatus: "unknown",
+        lastCheckedAt: null,
+        lastHealthLatencyMs: null,
+        lastHealthMessage: null,
+        lastError: null,
+        configSource: "settings",
+        configSourceNote: null,
+        createdAt: "2026-04-16T00:00:00.000Z",
+        updatedAt: "2026-04-16T00:00:00.000Z"
+      }
+    ]
   };
 }
 
@@ -209,6 +282,24 @@ describe("SettingsPage governance visibility", () => {
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState({}, "", "/settings");
     mockFetchSupportedProviders.mockResolvedValue([]);
+    mockFetchRagTaskConfigs.mockResolvedValue(createRagTaskSettingsView("admin"));
+    mockPreviewRagProviderModels.mockResolvedValue({
+      provider: "openai",
+      supportsModelListing: true,
+      recommendedModel: "text-embedding-3-small",
+      models: []
+    });
+    mockUpsertRagTaskConfig.mockResolvedValue(createRagTaskSettingsView("admin").items[0]!);
+    mockCheckRagTaskConfigHealth.mockResolvedValue({
+      taskType: "embedding",
+      status: "healthy",
+      reasonCode: "ok",
+      message: "ok",
+      checkedAt: "2026-04-16T00:00:00.000Z",
+      latencyMs: 1,
+      configSource: "settings",
+      checkedAgainst: "persisted"
+    });
     mockFetchBackendHealthSnapshot.mockResolvedValue(createHealthSnapshot());
     mockFetchRagQualityReport.mockResolvedValue(createQualityReport());
     mockFetchRagReplayCompleteness.mockResolvedValue({

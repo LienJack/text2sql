@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
+import { DomainError } from "../../../common/domain-error";
+import { EmbeddingRouterService } from "../../llm/embedding-router.service";
 import { GraphService } from "../../knowledge/graph/graph.service";
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
@@ -91,6 +93,16 @@ interface WideTableProfile {
   columns: string[];
 }
 
+interface DenseVectorMetadata {
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
+  scope?: string;
+  assetType?: string;
+}
+
 interface TablePruningPlan {
   tableName: string;
   normalizedTableName: string;
@@ -109,6 +121,7 @@ export class RagRetrievalService {
   constructor(
     private readonly indexRepository: RagIndexRepository,
     private readonly replayRepository: RagReplayRepository,
+    private readonly embeddingRouter: EmbeddingRouterService,
     private readonly skillRegistry: SkillRegistryService,
     private readonly graphService: GraphService,
     private readonly cacheKeyFactory: RagCacheKeyFactory,
@@ -523,16 +536,61 @@ export class RagRetrievalService {
     return this.sortHits(hits).slice(0, limit);
   }
 
-  private runDenseLane(
+  private async runDenseLane(
     query: string,
     contexts: RagRetrievalEntryContext[],
     limit: number
-  ): RagRetrievalLaneHit[] {
-    const queryVector = this.buildDenseVector(query);
+  ): Promise<LaneExecutionOutput> {
+    if (contexts.length === 0) {
+      return {
+        hits: []
+      };
+    }
+
+    let queryVector: number[];
+    let queryMetadata: DenseVectorMetadata | undefined;
+    try {
+      const embeddings = await this.embeddingRouter.embed({
+        texts: [query],
+        indexVersion: contexts[0]?.indexVersionId,
+        scope: "retrieval_query",
+        assetType: "query"
+      });
+      queryVector = embeddings[0]?.vector ?? [];
+      queryMetadata = embeddings[0]
+        ? this.toDenseVectorMetadata(embeddings[0].metadata)
+        : undefined;
+    } catch (error) {
+      return {
+        hits: [],
+        degradeReason: this.resolveDenseUnavailableReason(error)
+      };
+    }
+
+    if (!queryVector || queryVector.length === 0) {
+      return {
+        hits: [],
+        degradeReason: "dense_unavailable_empty_query_vector"
+      };
+    }
+
     const hits: RagRetrievalLaneHit[] = [];
+    let incompatibleVectorSpaceDetected = false;
     for (const context of contexts) {
       const vector = this.parseDenseVector(context.entry.denseVector);
-      if (!vector || vector.length === 0 || vector.length !== queryVector.length) {
+      if (!vector || vector.length === 0) {
+        continue;
+      }
+      const candidateDenseMetadata = this.readDenseVectorMetadata(context);
+      if (
+        vector.length !== queryVector.length ||
+        !this.isDenseVectorSpaceCompatible({
+          queryMetadata,
+          candidateMetadata: candidateDenseMetadata,
+          indexVersionId: context.indexVersionId
+        })
+      ) {
+        incompatibleVectorSpaceDetected = true;
         continue;
       }
       const cosine = this.cosineSimilarity(queryVector, vector);
@@ -543,11 +601,27 @@ export class RagRetrievalService {
         lane: "dense",
         chunk_id: context.entry.chunkId,
         score: Number(cosine.toFixed(12)),
-        evidence: [`cosine:${cosine.toFixed(6)}`],
+        evidence: this.unique([
+          `cosine:${cosine.toFixed(6)}`,
+          ...(candidateDenseMetadata?.provider
+            ? [`dense_provider:${candidateDenseMetadata.provider}`]
+            : []),
+          ...(candidateDenseMetadata?.model
+            ? [`dense_model:${candidateDenseMetadata.model}`]
+            : [])
+        ]),
         chunk: this.toChunkPayload(context)
       });
     }
-    return this.sortHits(hits).slice(0, limit);
+    if (incompatibleVectorSpaceDetected) {
+      return {
+        hits: [],
+        degradeReason: "dense_unavailable_incompatible_vector_space"
+      };
+    }
+    return {
+      hits: this.sortHits(hits).slice(0, limit)
+    };
   }
 
   private async runGraphLane(
@@ -661,7 +735,8 @@ export class RagRetrievalService {
           this.readString(parsed.chunkProfile) ??
           this.readString(sourceMetadata.chunkProfile),
         startOffset: this.readNumber(parsed.startOffset) ?? this.readNumber(sourceMetadata.startOffset),
-        endOffset: this.readNumber(parsed.endOffset) ?? this.readNumber(sourceMetadata.endOffset)
+        endOffset: this.readNumber(parsed.endOffset) ?? this.readNumber(sourceMetadata.endOffset),
+        denseMetadata: this.readDenseVectorMetadataFromParsed(parsed, sourceMetadata)
       }
     };
   }
@@ -679,7 +754,14 @@ export class RagRetrievalService {
       columnNames: this.readStringArray(context.parsedMetadata.columnNames),
       sourceMetadata: this.isRecord(context.parsedMetadata.sourceMetadata)
         ? context.parsedMetadata.sourceMetadata
-        : {}
+        : {},
+      denseProvider: context.parsedMetadata.denseMetadata?.provider,
+      denseModel: context.parsedMetadata.denseMetadata?.model,
+      denseDimensions: context.parsedMetadata.denseMetadata?.dimensions,
+      vectorVersion: context.parsedMetadata.denseMetadata?.vectorVersion,
+      indexVersion: context.parsedMetadata.denseMetadata?.indexVersion,
+      scope: context.parsedMetadata.denseMetadata?.scope,
+      assetType: context.parsedMetadata.denseMetadata?.assetType
     };
 
     return {
@@ -1543,16 +1625,6 @@ export class RagRetrievalService {
     }
   }
 
-  private buildDenseVector(input: string): number[] {
-    const digest = createHash("sha256").update(input).digest();
-    const dimensions = 8;
-    return Array.from({ length: dimensions }, (_, index) => {
-      const byte = digest[index] ?? 0;
-      const normalized = byte / 255;
-      return Number((normalized * 2 - 1).toFixed(6));
-    });
-  }
-
   private cosineSimilarity(left: number[], right: number[]): number {
     let dot = 0;
     let leftNorm = 0;
@@ -1618,6 +1690,117 @@ export class RagRetrievalService {
       columnPruning?: ColumnPruningEvidence;
     };
     return source.column_pruning ?? source.columnPruning;
+  }
+
+  private readDenseVectorMetadata(
+    context: RagRetrievalEntryContext
+  ): DenseVectorMetadata | undefined {
+    return context.parsedMetadata.denseMetadata as DenseVectorMetadata | undefined;
+  }
+
+  private readDenseVectorMetadataFromParsed(
+    parsed: Record<string, unknown>,
+    sourceMetadata: Record<string, unknown>
+  ): DenseVectorMetadata | undefined {
+    const denseRaw = this.isRecord(parsed.dense)
+      ? parsed.dense
+      : this.isRecord(sourceMetadata.dense)
+        ? sourceMetadata.dense
+        : undefined;
+    if (!denseRaw) {
+      return undefined;
+    }
+    return {
+      provider: this.readString(denseRaw.provider),
+      model: this.readString(denseRaw.model),
+      dimensions: this.readNumber(denseRaw.dimensions),
+      vectorVersion: this.readString(denseRaw.vectorVersion),
+      indexVersion: this.readString(denseRaw.indexVersion),
+      scope: this.readString(denseRaw.scope),
+      assetType: this.readString(denseRaw.assetType)
+    };
+  }
+
+  private toDenseVectorMetadata(metadata: {
+    provider: string;
+    model: string;
+    dimensions: number;
+    vectorVersion: string;
+    indexVersion?: string;
+    scope?: string;
+    assetType?: string;
+  }): DenseVectorMetadata {
+    return {
+      provider: metadata.provider,
+      model: metadata.model,
+      dimensions: metadata.dimensions,
+      vectorVersion: metadata.vectorVersion,
+      indexVersion: metadata.indexVersion,
+      scope: metadata.scope,
+      assetType: metadata.assetType
+    };
+  }
+
+  private isDenseVectorSpaceCompatible(input: {
+    queryMetadata?: DenseVectorMetadata;
+    candidateMetadata?: DenseVectorMetadata;
+    indexVersionId: string;
+  }): boolean {
+    const { queryMetadata, candidateMetadata, indexVersionId } = input;
+    if (!queryMetadata || !candidateMetadata) {
+      return false;
+    }
+    if (
+      queryMetadata.dimensions !== undefined &&
+      candidateMetadata.dimensions !== undefined &&
+      queryMetadata.dimensions !== candidateMetadata.dimensions
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.provider &&
+      candidateMetadata.provider &&
+      queryMetadata.provider !== candidateMetadata.provider
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.model &&
+      candidateMetadata.model &&
+      queryMetadata.model !== candidateMetadata.model
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.vectorVersion &&
+      candidateMetadata.vectorVersion &&
+      queryMetadata.vectorVersion !== candidateMetadata.vectorVersion
+    ) {
+      return false;
+    }
+    if (
+      candidateMetadata.indexVersion &&
+      candidateMetadata.indexVersion !== indexVersionId
+    ) {
+      return false;
+    }
+    if (
+      queryMetadata.indexVersion &&
+      queryMetadata.indexVersion !== indexVersionId
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private resolveDenseUnavailableReason(error: unknown): string {
+    if (error instanceof DomainError) {
+      return `dense_unavailable:${error.code.toLowerCase()}`;
+    }
+    if (error instanceof Error) {
+      return `dense_unavailable:${error.message.toLowerCase().replace(/\s+/g, "_")}`;
+    }
+    return "dense_unavailable:unknown_error";
   }
 
   private readPriorSqlLaneEvidence(

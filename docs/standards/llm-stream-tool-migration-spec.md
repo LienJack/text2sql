@@ -5,6 +5,8 @@
 - Backend LLM gateway migrates to Vercel AI SDK core (`ai` + `@ai-sdk/openai-compatible`).
 - Chat primary request path supports SSE streaming endpoint.
 - Tool Calling baseline is enabled with allowlisted server-side tools.
+- Text2SQL v2 active runtime seam 固定为 `Text2SQLWorkflowRunner -> RunV2LangGraphStage -> Text2SqlV2LangGraphRunnerService`，并落位于 `conversation/application/workflow` 与 `conversation/runtime/{stages,langgraph,evaluation}` 分层目录；`RunV2StateMachineStage` 仅保留兼容壳角色。
+- Text2SQL v2 Phase A 运行时收口必须满足 `delegation=0`：LangGraph 主链节点不得委托 `Text2SqlV2RunnerService` / `runLegacyRuntime`。
 - 开发联调入口拓扑统一为 `http://localhost:3000`（Nginx）；`/` 转前端内部 `3001`，`/api/*` 转后端内部 `3002`。
 - 上述入口拓扑调整不改变 `/api/v1/*` 路由合同、SSE 事件字段或 Tool Calling 语义。
 
@@ -36,7 +38,10 @@
   - `run.delivery.evidence.promptTemplate?`：与 trace 同源的模板证据镜像（用于前端回放展示）
   - `run.delivery.evidence.modelingRevision?`：与 `run.trace.modelingRevision?` 同源镜像字段，语义必须一致
   - `run.delivery.evidence.effectiveContextSummary?` / `run.delivery.evidence.conflictHint?`：trace 同语义镜像字段
-  - backward compatibility：历史 run 缺失 `run.trace.modelingRevision?` 或 `run.delivery.evidence.modelingRevision?` 时，读取端必须按“字段可选”处理，不得因缺字段导致反序列化或回放失败
+  - Full Mermaid strict-completion（2026-04-27）语义：metadata 仅走 `retrieve -> assemble-context -> semantic-plan -> answer`（no-SQL）；correction 重试必须输出结构化 `correctionGrounding`
+  - Runtime intelligence（2026-04-28）语义：`run.trace.v2` 是 `runtimePlan`、`artifactRefs`、`smartDefaults` 的 canonical owner；`run.delivery.evidence.v2` 只做同语义投影；`artifactRefs` 必须由 producer-backed category policy 生成，覆盖 `context_snippets` / `schema_supplement` / `prompt_input` / `provider_output_summary` / `validation_diagnostics` / `correction_grounding` / `execution_preview`
+  - `run.delivery.evidence.v2` 在 strict-completion 与 runtime-intelligence 场景应包含 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults`，并与 `run.trace.v2` 保持语义一致
+  - hard-cut read-model：run read/save-view/replay 必须命中显式 v2 marker（`run.trace.v2.version === "v2"`、`run.trace.v2.stageOrder.length > 0`、`run.trace.v2.stages.length > 0`）；命中授权但不支持历史 shape 时返回 `410 LEGACY_RUN_UNSUPPORTED`
   - `agent: { provider, model, hasSql, hasToolCalls, hasError }`
 
 ### Stream Contract (`/messages/stream`)
@@ -59,7 +64,8 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
-- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（允许兼容旧 run 字段缺失）。
+- `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
+- strict-completion/runtime-intelligence 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults` 与 `run.trace.v2` 的同语义镜像；`state` 事件只能暴露 runtime plan 的安全摘要，不得暴露 raw graph state/checkpoint。Full Mermaid stages 必须在 stream `state` 中产生安全的 `running` 与 terminal lifecycle（completed/skipped/failed/clarification）摘要。
 
 ## Tool Calling Baseline
 
@@ -94,9 +100,19 @@
 - 同步/流式的错误分类在相同故障输入下保持一致。
 - Compare stream endpoint success rate against legacy endpoint baseline.
 - Verify trace persistence includes tool events when tools are called.
-- Verify `GET /api/v1/runs/:runId` 对历史 run（无模板字段）与新 run（含模板字段）都可稳定返回，且不会破坏反序列化。
-- Verify `GET /api/v1/runs/:runId` 对历史 run（无 `modelingRevision` 字段）与新 run（含 `run.trace.modelingRevision` + `run.delivery.evidence.modelingRevision`）均可稳定返回，且前端回放不因缺字段降级失败。
+- Verify `GET /api/v1/runs/:runId`、`POST /api/v1/runs/:runId/save-as-view` 与 replay 读路径只接受显式 v2 read-model；历史 shape 返回 `410 LEGACY_RUN_UNSUPPORTED`，错误详情包含迁移 runbook hint。
 - Verify modeling parity shadow gate report includes:
   - `modelingWorkspace.metrics.deployBlockRate / rollbackRate / schemaBacklogAvg`
   - `modelingWorkspace.signalCoverage.*`（样本信号覆盖率）
   - `rollout.recommendedStage` 与 `rollout.rollbackSuggested`
+- Text2SQL v2 closeout must also collect focused coverage evidence after a Jest coverage run:
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+  - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
+  - the report must include scoped line/branch coverage, critical file thresholds, A-M flow-node blockers, eval fixture behavior-test traceability, and `delegationZero` static-scan结果。
+  - Full Mermaid strict-completion 场景下，报告还必须包含 `strictCompletionRows`（metadata grounding / correction grounding / context-pack parity）并参与 gate 判定。
+  - Runtime intelligence 场景下，报告还必须包含 `runtimeCoverageRows`（runtime plan / artifact refs / Smart Defaults）、`runtimeArtifactProducerRows`（七类 artifact producer coverage）、`streamLifecycleRows`（全 stage running/terminal lifecycle coverage）与 eval fixture families（plain-general-no-sql / runtime-plan-consistency / artifact-ref-compaction / smart-defaults-evidence / large-context-compaction / validation-diagnostics / correction-grounding / execution-preview / all-stage-stream-lifecycle）。
+- 叙事边界：`007 closeout` 表示 LangGraph topology + `delegation=0` 收口完成；`008 strict-completion` 在此基础上要求 metadata grounding / correction grounding / context-pack parity；`009 runtime-intelligence` 额外要求 runtime plan / artifact refs / Smart Defaults 的可观测与可门禁。
+- Text2SQL v2 closeout rollout must use `collect:text2sql-v2-eval-gate` as the aggregated report entry:
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - strict release mode: `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+  - output must include `closeoutGates.evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage` and final `rollout.recommendedStage/rollbackSuggested/reasons`.

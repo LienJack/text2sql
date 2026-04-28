@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { ChatMessage, ChatSessionView, Datasource, Session, SqlRun } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
+import { assertSupportedV2RunReadModel } from "../../projection/read-model/run-view-support.guard";
 import { DatasourceService } from "../../../governance/datasource/datasource.service";
 import { RedisBufferService } from "../../../platform/data/cache/index";
 import { ChatRepository } from "../../../platform/data/persistence/index";
@@ -54,7 +55,7 @@ export class RunViewUsecase {
     const messages = await this.listMessages(input);
     const latestRunRaw = await this.repository.getLatestRunBySessionId(input.sessionId);
     const latestRun = latestRunRaw
-      ? await this.chatDeliveryEnrichmentService.attachDeliveryContract(latestRunRaw)
+      ? await this.attachSupportedDelivery(latestRunRaw)
       : undefined;
     return {
       session: await this.mergeDatasourceMetadata(session),
@@ -72,6 +73,13 @@ export class RunViewUsecase {
     if (!session) {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
+    return this.attachSupportedDelivery(run);
+  }
+
+  private async attachSupportedDelivery(run: SqlRun): Promise<SqlRun> {
+    assertSupportedV2RunReadModel(run, {
+      unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能读取。"
+    });
     return this.chatDeliveryEnrichmentService.attachDeliveryContract(run);
   }
 

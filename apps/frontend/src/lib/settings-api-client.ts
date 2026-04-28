@@ -4,6 +4,11 @@ import type {
   LlmSettingsView,
   ModelCatalogItem,
   ProviderConfig,
+  RagTaskConfig,
+  RagTaskConfigHealthRequest,
+  RagTaskConfigHealthResult as SharedRagTaskConfigHealthResult,
+  RagTaskSettingsView,
+  RagTaskType,
   RagMemoryFeedbackRequest,
   RagMemoryFeedbackResponse,
   RagQualityGateReport,
@@ -217,6 +222,38 @@ export type ProviderPayload = {
   enabled?: boolean;
 };
 
+export type RagTaskConfigPayload = {
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  enabled?: boolean;
+  dimensions?: number;
+  vectorVersion?: string;
+  timeoutMs?: number;
+  note?: string;
+};
+
+export type RagTaskConfigHealthPayload = RagTaskConfigHealthRequest;
+export type RagTaskConfigHealthResult = SharedRagTaskConfigHealthResult;
+export type RagProviderModelPreviewRequest = {
+  provider: LlmProviderCode;
+  baseUrl?: string;
+  apiKey: string;
+};
+export type RagProviderModelPreviewResult = {
+  provider: LlmProviderCode;
+  supportsModelListing: boolean;
+  recommendedModel?: string;
+  models: Array<{
+    model: string;
+    displayName: string;
+    capabilities?: string[];
+    contextWindow?: number | null;
+    metadata?: Record<string, unknown>;
+  }>;
+};
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const role = process.env.NEXT_PUBLIC_USER_ROLE === "user" ? "user" : "admin";
   const userId = process.env.NEXT_PUBLIC_USER_ID ?? "frontend-admin";
@@ -252,6 +289,49 @@ export async function fetchSettingsView(): Promise<LlmSettingsView> {
 
 export async function fetchSupportedProviders(): Promise<SupportedProvider[]> {
   return request<SupportedProvider[]>("/api/v1/settings/providers/supported");
+}
+
+export async function fetchRagTaskConfigs(): Promise<RagTaskSettingsView> {
+  return request<RagTaskSettingsView>("/api/v1/settings/rag-configs");
+}
+
+export async function upsertRagTaskConfig(
+  taskType: RagTaskType,
+  payload: RagTaskConfigPayload
+): Promise<RagTaskConfig> {
+  return request<RagTaskConfig>(
+    `/api/v1/settings/rag-configs/${encodeURIComponent(taskType)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export async function checkRagTaskConfigHealth(
+  taskType: RagTaskType,
+  payload?: RagTaskConfigHealthRequest
+): Promise<RagTaskConfigHealthResult> {
+  return request<RagTaskConfigHealthResult>(
+    `/api/v1/settings/rag-configs/${encodeURIComponent(taskType)}/health`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload ?? {})
+    }
+  );
+}
+
+export async function previewRagProviderModels(
+  taskType: RagTaskType,
+  payload: RagProviderModelPreviewRequest
+): Promise<RagProviderModelPreviewResult> {
+  return request<RagProviderModelPreviewResult>(
+    `/api/v1/settings/rag-configs/${encodeURIComponent(taskType)}/models`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }
+  );
 }
 
 export async function createProviderConfig(

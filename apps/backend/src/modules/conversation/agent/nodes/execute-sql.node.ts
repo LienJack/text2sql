@@ -1,4 +1,5 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import type { SemanticPlanV1 } from "@text2sql/shared-types";
 import { DomainError } from "../../../../common/domain-error";
 import {
   AuditLogRepository,
@@ -11,6 +12,9 @@ import {
 import { DatasourceService } from "../../../governance/datasource/datasource.service";
 import type { AccessContext } from "../../../governance/access/datasource-access-policy.service";
 import { PolicyEvaluatorService } from "../../../governance/access/policy-evaluator.service";
+import { SqlCorrectionService } from "../../adapters/sql-correction.service";
+import { SqlValidationService } from "../../adapters/sql-validation.service";
+import type { StructuredSqlGenerationArtifact } from "../sql/sql-generation.service";
 
 @Injectable()
 export class ExecuteSqlNode {
@@ -19,15 +23,20 @@ export class ExecuteSqlNode {
     private readonly queryExecutorRouter: QueryExecutorRouterService,
     private readonly chatRepository: ChatRepository,
     private readonly policyEvaluatorService: PolicyEvaluatorService,
-    private readonly auditLogRepository: AuditLogRepository
+    private readonly auditLogRepository: AuditLogRepository,
+    private readonly sqlCorrectionService: SqlCorrectionService,
+    @Optional()
+    private readonly sqlValidationService?: SqlValidationService
   ) {}
 
   async run(input: {
     sql: string;
+    sqlArtifact?: StructuredSqlGenerationArtifact;
     datasourceId: string;
     sessionId: string;
     requestId?: string;
     accessContext?: SqlTableAccessContext;
+    semanticPlan?: SemanticPlanV1;
   }): Promise<{
     rows: Array<Record<string, unknown>>;
     columns: string[];
@@ -67,6 +76,49 @@ export class ExecuteSqlNode {
         }
       : undefined;
 
+    if (this.sqlValidationService) {
+      const validation = await this.sqlValidationService.validate({
+        sql: input.sql,
+        datasourceId: input.datasourceId,
+        datasourceType: datasource.type,
+        semanticPlan: input.semanticPlan,
+        sqlArtifact: input.sqlArtifact,
+        accessContext: effectiveAccessContext,
+        allowedTables: policyResult?.readableTables
+      });
+      if (validation.status === "failed" && validation.failure) {
+        if (validation.failure.correctable) {
+          throw new DomainError(
+            "SQL_CORRECTABLE_EXECUTION_FAILED",
+            validation.failure.message,
+            422,
+            {
+              correctable: true,
+              validationOutcome: "correctable",
+              correctionReason: validation.failure.code,
+              maxAttempts: this.sqlCorrectionService.maxAttempts,
+              validationFailure: validation.failure,
+              validationArtifact: validation
+            }
+          );
+        }
+        throw new DomainError(
+          "SQL_TERMINAL_VALIDATION_FAILED",
+          validation.failure.message,
+          422,
+          {
+            correctable: false,
+            validationOutcome: "terminal",
+            governanceFailClosed:
+              validation.failure.category === "governance" ||
+              validation.failure.code === "SQL_READ_ONLY_VIOLATION",
+            validationFailure: validation.failure,
+            validationArtifact: validation
+          }
+        );
+      }
+    }
+
     try {
       return await this.queryExecutorRouter.execute({
         datasource,
@@ -88,6 +140,26 @@ export class ExecuteSqlNode {
           requestId: input.requestId,
           accessContext: effectiveAccessContext
         });
+      }
+      if (
+        error instanceof DomainError &&
+        (error.code === "SQL_TERMINAL_VALIDATION_FAILED" ||
+          error.code === "SQL_CORRECTABLE_EXECUTION_FAILED")
+      ) {
+        throw error;
+      }
+      const correctionDecision = this.sqlCorrectionService.decide(error);
+      if (correctionDecision.correctable) {
+        throw new DomainError(
+          "SQL_CORRECTABLE_EXECUTION_FAILED",
+          error instanceof Error ? error.message : String(error),
+          422,
+          {
+            correctable: true,
+            correctionReason: correctionDecision.reason,
+            maxAttempts: correctionDecision.maxAttempts
+          }
+        );
       }
       throw error;
     }

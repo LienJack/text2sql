@@ -14,6 +14,8 @@ import type {
   GlossaryAnchor,
   LlmSettingsView,
   ModelCatalogItem,
+  RagTaskConfig,
+  RagTaskSettingsView,
   RagMemoryStatus,
   RagQualityGateReport,
   RagReplayCompletenessReport,
@@ -23,6 +25,9 @@ import type {
 import { RagFoundationStatusCard } from "@/components/chat/rag-foundation-status-card";
 import { ModelCatalogTable } from "@/components/settings/model-catalog-table";
 import { ProviderConfigSheet } from "@/components/settings/provider-config-sheet";
+import { RagActiveIndexProfileCard } from "@/components/settings/rag-active-index-profile-card";
+import { RagEmbeddingConfigPanel } from "@/components/settings/rag-embedding-config-panel";
+import { RagRerankConfigPanel } from "@/components/settings/rag-rerank-config-panel";
 import { UsersManagementPanel } from "@/components/settings/users-management-panel";
 import { WorkspaceManagementPanel } from "@/components/settings/workspace-management-panel";
 import { Badge } from "@/components/ui/badge";
@@ -43,12 +48,15 @@ import { getRun } from "@/lib/api-client";
 import { readActiveWorkspaceId, writeActiveWorkspaceId } from "@/lib/datasource-session-context";
 import {
   batchSetModelsEnabled,
+  checkRagTaskConfigHealth,
   checkProviderHealth,
   createProviderConfig,
   extractRagFoundationSnapshot,
   deleteProviderConfig,
   fetchBackendHealthSnapshot,
   fetchModelStatuses,
+  previewRagProviderModels,
+  fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
   fetchSettingsView,
@@ -56,13 +64,14 @@ import {
   resolveRagQualityLatestRunId,
   setModelEnabled,
   submitRagMemoryFeedback,
-  syncProviderModels
+  syncProviderModels,
+  upsertRagTaskConfig
 } from "@/lib/settings-api-client";
 
-type SettingsTab = "users" | "workspaces" | "models" | "rag";
+type SettingsTab = "users" | "workspaces" | "models" | "rag-config" | "rag";
 type RagRunSource = "deep-link" | "latest-run" | "none";
-const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models", "rag"];
-const USER_TABS: SettingsTab[] = ["models", "rag"];
+const ADMIN_TABS: SettingsTab[] = ["users", "workspaces", "models", "rag-config", "rag"];
+const USER_TABS: SettingsTab[] = ["models", "rag-config", "rag"];
 
 function readWorkspaceIdFromQuery(): string {
   if (typeof window === "undefined") {
@@ -146,6 +155,9 @@ export default function SettingsPage() {
       supportsModelListing: boolean;
     }>
   >([]);
+  const [ragConfigLoading, setRagConfigLoading] = useState(false);
+  const [ragConfigError, setRagConfigError] = useState("");
+  const [ragConfigView, setRagConfigView] = useState<RagTaskSettingsView | null>(null);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragError, setRagError] = useState("");
   const [ragFoundationError, setRagFoundationError] = useState("");
@@ -204,6 +216,22 @@ export default function SettingsPage() {
       setWorkspaceId("");
     } finally {
       setWorkspaceLoading(false);
+    }
+  }, []);
+
+  const loadRagConfigView = useCallback(async (): Promise<void> => {
+    setRagConfigLoading(true);
+    setRagConfigError("");
+    try {
+      const result = await fetchRagTaskConfigs();
+      setRagConfigView(result);
+    } catch (configError) {
+      setRagConfigError(
+        configError instanceof Error ? configError.message : "加载 RAG 配置失败"
+      );
+      setRagConfigView(null);
+    } finally {
+      setRagConfigLoading(false);
     }
   }, []);
 
@@ -340,6 +368,7 @@ export default function SettingsPage() {
         setSupportedProviders(providerOptions);
         await Promise.all([
           loadWorkspaceOptions(settingsView.actor.role === "admin"),
+          loadRagConfigView(),
           loadRagView()
         ]);
       } catch (loadError) {
@@ -352,7 +381,7 @@ export default function SettingsPage() {
         }
       }
     },
-    [loadRagView, loadWorkspaceOptions]
+    [loadRagConfigView, loadRagView, loadWorkspaceOptions]
   );
 
   const refreshModels = async () => {
@@ -421,6 +450,20 @@ export default function SettingsPage() {
   const foundationSnapshot = useMemo(
     () => extractRagFoundationSnapshot(ragHealth),
     [ragHealth]
+  );
+  const embeddingConfig = useMemo(
+    () =>
+      ragConfigView?.items.find(
+        (item): item is RagTaskConfig => item.taskType === "embedding"
+      ) ?? null,
+    [ragConfigView]
+  );
+  const rerankConfig = useMemo(
+    () =>
+      ragConfigView?.items.find(
+        (item): item is RagTaskConfig => item.taskType === "rerank"
+      ) ?? null,
+    [ragConfigView]
   );
 
   const filteredView = useMemo(() => {
@@ -586,6 +629,8 @@ export default function SettingsPage() {
           <span className="rounded-full border border-[rgba(148,163,184,0.45)] bg-[rgba(248,250,252,0.7)] px-3 py-1 text-xs font-medium text-[var(--text-secondary)]">
             {tab === "models"
               ? "模型治理视图"
+              : tab === "rag-config"
+                ? "RAG 配置视图"
               : tab === "rag"
                 ? "RAG 运行视图"
                 : "组织治理视图"}
@@ -623,6 +668,13 @@ export default function SettingsPage() {
               >
                 <Settings2 className="h-3.5 w-3.5" />
                 LLM 模型
+              </TabsTrigger>
+              <TabsTrigger
+                value="rag-config"
+                className="rounded-full px-4 data-active:bg-[rgba(37,99,235,0.14)] data-active:text-[var(--action-primary-hover)]"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                RAG 配置
               </TabsTrigger>
               <TabsTrigger
                 value="rag"
@@ -663,6 +715,10 @@ export default function SettingsPage() {
               <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                 RAG 运行与记忆治理
               </p>
+            ) : tab === "rag-config" ? (
+              <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
+                Embedding / Rerank 配置治理
+              </p>
             ) : (
               <p className="hidden text-sm text-[var(--text-secondary)] sm:block">
                 工作空间与成员管理
@@ -679,8 +735,13 @@ export default function SettingsPage() {
                   void loadRagView();
                   return;
                 }
+                if (tab === "rag-config") {
+                  void loadRagConfigView();
+                  return;
+                }
                 if (actorRole === "admin") {
                   void loadWorkspaceOptions(true);
+                  void loadRagConfigView();
                   void loadRagView();
                 }
                 setManagementRefreshToken((previous) => previous + 1);
@@ -787,6 +848,134 @@ export default function SettingsPage() {
                 </StateBlock>
               )}
             </div>
+          ) : tab === "rag-config" ? (
+            <div className="space-y-5">
+              <section className="overflow-hidden rounded-3xl border border-[rgba(148,163,184,0.24)] bg-[linear-gradient(135deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.96)_45%,rgba(239,246,255,0.9)_100%)] shadow-[0_16px_36px_rgba(15,23,42,0.06)]">
+                <div className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[rgba(37,99,235,0.1)] text-[var(--action-primary)]">
+                        <Settings2 className="h-4.5 w-4.5" />
+                      </div>
+                      <div>
+                        <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--text-tertiary)] uppercase">
+                          Rag Configuration Studio
+                        </p>
+                        <h3 className="text-xl font-semibold text-[var(--text-primary)]">
+                          向量检索与重排配置工作台
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
+                      在这里统一维护 Embedding 与 Rerank 的运行参数、供应商接入和草稿联通测试。
+                      配置页只负责“当前要怎么跑”，RAG 运行页负责“已经跑成什么样”。
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3 lg:w-[34rem]">
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Embedding
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {embeddingConfig?.provider ?? "未配置"}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
+                        {embeddingConfig?.model ?? "等待配置模型"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Rerank
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {rerankConfig?.provider ?? "未配置"}
+                      </p>
+                      <p className="mt-1 line-clamp-2 text-xs text-[var(--text-secondary)]">
+                        {rerankConfig?.model ?? "等待配置模型"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-[rgba(148,163,184,0.22)] bg-white/88 p-4">
+                      <p className="text-[11px] font-semibold tracking-[0.1em] text-[var(--text-tertiary)] uppercase">
+                        Active Index
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+                        {foundationSnapshot?.activeIndexSummary.total ?? 0} 个活跃索引
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {foundationSnapshot?.activeIndexSummary.items[0]?.datasourceId ??
+                          "暂无索引画像"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              {ragConfigError ? <StateBlock variant="error">{ragConfigError}</StateBlock> : null}
+              <RagActiveIndexProfileCard
+                foundation={foundationSnapshot}
+                embeddingConfig={embeddingConfig}
+                rerankConfig={rerankConfig}
+              />
+              <div className="grid gap-5 2xl:grid-cols-2">
+                <RagEmbeddingConfigPanel
+                  actorRole={actorRole}
+                  config={embeddingConfig}
+                  loading={ragConfigLoading}
+                  onFetchModels={(payload) => previewRagProviderModels("embedding", payload)}
+                  onSave={async (payload) => {
+                    try {
+                      await upsertRagTaskConfig("embedding", payload);
+                      await loadRagConfigView();
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "保存 Embedding 配置失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                  onHealthCheck={async (payload) => {
+                    try {
+                      const result = await checkRagTaskConfigHealth("embedding", payload);
+                      await loadRagConfigView();
+                      return result;
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "Embedding 健康检查失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                />
+                <RagRerankConfigPanel
+                  actorRole={actorRole}
+                  config={rerankConfig}
+                  loading={ragConfigLoading}
+                  onFetchModels={(payload) => previewRagProviderModels("rerank", payload)}
+                  onSave={async (payload) => {
+                    try {
+                      await upsertRagTaskConfig("rerank", payload);
+                      await loadRagConfigView();
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "保存 Rerank 配置失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                  onHealthCheck={async (payload) => {
+                    try {
+                      const result = await checkRagTaskConfigHealth("rerank", payload);
+                      await loadRagConfigView();
+                      return result;
+                    } catch (error) {
+                      const message =
+                        error instanceof Error ? error.message : "Rerank 健康检查失败";
+                      setRagConfigError(message);
+                      throw new Error(message);
+                    }
+                  }}
+                />
+              </div>
+            </div>
           ) : tab === "rag" ? (
             <div className="space-y-4">
               {ragLoading ? (
@@ -803,6 +992,26 @@ export default function SettingsPage() {
                   loading={ragLoading}
                   error={ragFoundationError}
                 />
+              </section>
+
+              <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                  Active Provider Summary
+                </h3>
+                <div className="space-y-1 text-xs text-[var(--text-secondary)]">
+                  <p>
+                    embedding:{" "}
+                    {embeddingConfig
+                      ? `${embeddingConfig.provider}/${embeddingConfig.model} (${embeddingConfig.configSource})`
+                      : "unknown"}
+                  </p>
+                  <p>
+                    rerank:{" "}
+                    {rerankConfig
+                      ? `${rerankConfig.provider}/${rerankConfig.model} (${rerankConfig.configSource})`
+                      : "unknown"}
+                  </p>
+                </div>
               </section>
 
               <section className="space-y-2 rounded-lg border border-[var(--border-default)] bg-[var(--surface-subtle)] p-3">

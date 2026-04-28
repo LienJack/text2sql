@@ -39,7 +39,7 @@
 
 常用后端 DB 命令：
 - 生成 Prisma Client：`pnpm --filter @text2sql/backend run prisma:generate`
-- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+- 开发环境生成迁移：`pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 - 空库回放校验：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
 
 ## 3) 质量门禁
@@ -67,9 +67,17 @@ CI 参考：
 ## 4) 联调最小检查
 
 - 统一入口：`http://localhost:3000` 可访问，`/data-sources -> 创建会话 -> 发送消息` 主链路可用。
+- `/settings` 入口可访问，至少包含 `LLM 模型`、`RAG 配置`、`RAG 运行` 三个 tab；其中配置变更仅在 `RAG 配置` 下操作。
+- `RAG 配置` 健康检查需同时覆盖 `dry-check`（草稿）与 `persisted-check`（已保存），并校验返回 `checkedAgainst=draft|persisted`、`reasonCode` 可解释，且检测失败不应清空草稿输入。
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
-- 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查）。
+- 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查），且 `dependencies.ragConfig.embedding/rerank` 应可见当前激活 provider+model+configSource 摘要。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
+- 若本次改动涉及 Text2SQL v2 read-model/delivery hard-cut：执行
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - （发布阻断）`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+  - `pnpm run text2sql:no-legacy-compat:check`
+  - 并核对 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 - 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
 - 若本次改动需要发布门禁（go/no-go）：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`，并检查 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 
@@ -121,11 +129,19 @@ CI 参考：
 - 同步接口保持 `AgentRunResponse` 合同。
 - 流式事件字段必须完整（`type/runId/sessionId/at/data`）。
 - 工具调用走 allowlist，失败可追踪。
-- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致，且旧 run 缺字段可兼容读取。
+- Text2SQL v2 active runtime seam 固定为 `conversation/application/workflow/Text2SQLWorkflowRunner -> conversation/runtime/stages/RunV2LangGraphStage -> conversation/runtime/langgraph/Text2SqlV2LangGraphRunnerService`。
+- 若接入提示词模板运行时，必须保证 `run.trace.promptTemplate` 与 `delivery.evidence.promptTemplate` 字段语义一致。
+- hard-cut 生效后，run read/save-view/replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）；历史 shape 必须返回 `410 LEGACY_RUN_UNSUPPORTED`（见 runbook）。
+- 叙事边界必须明确：`007 closeout` 仅覆盖 LangGraph topology + `delegation=0`，`008 strict-completion` 额外覆盖 metadata grounding / correction grounding / context-pack parity（含 `strictCompletionRows` 门禁），`009 runtime-intelligence` 额外覆盖 `runtimePlan` / `artifactRefs` / `smartDefaults`（含 runtime coverage rows 与 eval fixture families）。
 
 必跑检查：
 - `GET http://localhost:3002/health` 中 stream/tool-calling 相关字段应符合预期。
 - `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate` 输出需包含 `modelingWorkspace.metrics.deployBlockRate/rollbackRate/schemaBacklogAvg` 与 `rollout.recommendedStage`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate` 输出需包含 closeout 五门禁（`evalMetrics/evalTraceability/characterization/noLegacyCompat/focusedCoverage`）及 `rollout.recommendedStage/rollbackSuggested/reasons`。
+- `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate` 输出需包含 scoped coverage、关键文件门槛、A-M flow blockers 与 eval fixture 行为测试追溯。
+- strict-completion 语义补齐后，focused coverage 输出还需包含 `strictCompletionRows` 评估结果（metadata grounding / correction grounding / context-pack parity）。
+- runtime-intelligence 生效后，focused/eval 输出还需覆盖 `runtime-plan-consistency`、`artifact-ref-compaction`、`smart-defaults-evidence`、`plain-general-no-sql`、`large-context-compaction`、`validation-diagnostics`、`correction-grounding`、`execution-preview`、`all-stage-stream-lifecycle`；focused coverage 还需包含 `runtimeArtifactProducerRows` 与 `streamLifecycleRows`。
+- `pnpm run text2sql:no-legacy-compat:check` 必须通过。
 
 ### D. Governance 术语硬切规范
 来源：`docs/standards/governance-terminology-spec.md`
@@ -172,7 +188,7 @@ CI 参考：
 
 1. 修改 `apps/backend/prisma/schema.prisma`
 2. 生成迁移：
-   - `pnpm --filter @text2sql/backend run prisma:migrate -- --name <migration_name>`
+   - `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>`
 3. 生成 Client（必跑）：
    - `pnpm --filter @text2sql/backend run prisma:generate`
 

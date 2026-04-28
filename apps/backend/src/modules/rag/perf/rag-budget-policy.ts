@@ -21,6 +21,25 @@ export interface RagRerankBudgetDecision {
   degraded: boolean;
 }
 
+export interface RagPruningDecisionInput {
+  budgetSource: "retrieval_budget" | "rerank_budget" | "context_pack";
+  decisionReasons: string[];
+  removedEvidenceIds: string[];
+  keptEvidenceIds: string[];
+}
+
+export interface RagPruningDecision {
+  budget_source: "retrieval_budget" | "rerank_budget" | "context_pack";
+  removed_evidence_ids: string[];
+  kept_evidence_ids: string[];
+  reason_codes: string[];
+  summary: string;
+  budgetSource: "retrieval_budget" | "rerank_budget" | "context_pack";
+  removedEvidenceIds: string[];
+  keptEvidenceIds: string[];
+  reasonCodes: string[];
+}
+
 const DEFAULT_PRESSURE_DEGRADE_THRESHOLD = 0.8;
 const DEFAULT_PRESSURE_EXTREME_THRESHOLD = 0.95;
 const ALL_RETRIEVAL_LANES: Array<"lexical" | "dense" | "graph"> = [
@@ -137,6 +156,27 @@ export class RagBudgetPolicy {
       secondaryTopK,
       decisionReasons: this.unique(reasons),
       degraded: reasons.length > 0
+    };
+  }
+
+  describePruningDecision(input: RagPruningDecisionInput): RagPruningDecision | undefined {
+    const reasonCodes = this.unique(input.decisionReasons);
+    if (reasonCodes.length === 0 && input.removedEvidenceIds.length === 0) {
+      return undefined;
+    }
+    const summary = `${input.budgetSource}:removed=${input.removedEvidenceIds.length},kept=${input.keptEvidenceIds.length},reasons=${
+      reasonCodes.join("|") || "none"
+    }`;
+    return {
+      budget_source: input.budgetSource,
+      removed_evidence_ids: this.unique(input.removedEvidenceIds),
+      kept_evidence_ids: this.unique(input.keptEvidenceIds),
+      reason_codes: reasonCodes,
+      summary,
+      budgetSource: input.budgetSource,
+      removedEvidenceIds: this.unique(input.removedEvidenceIds),
+      keptEvidenceIds: this.unique(input.keptEvidenceIds),
+      reasonCodes: reasonCodes
     };
   }
 

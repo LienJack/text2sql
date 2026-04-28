@@ -1,5 +1,11 @@
-import { Injectable } from "@nestjs/common";
-import type { DatasourceType, PromptTemplateTraceEvidence } from "@text2sql/shared-types";
+import { Injectable, Optional } from "@nestjs/common";
+import type {
+  DatasourceType,
+  PromptTemplateTraceEvidence,
+  SemanticContextPackV1,
+  SemanticPlanV1
+} from "@text2sql/shared-types";
+import { DomainError } from "../../../../common/domain-error";
 import type {
   LlmGatewayStreamEvent,
   LlmGatewayToolDefinition
@@ -11,13 +17,23 @@ import {
 } from "../sql/sql-generation.service";
 import type { SqlSemanticIntent } from "../sql/sql-prompt.builder";
 import type {
+  RagRetrievalBundle,
   RagContextPack,
   RagRetrievalChunkPayload
 } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import { SemanticContextPackService } from "../../adapters/semantic-context-pack.service";
+import { SemanticPlanService } from "../../adapters/semantic-plan.service";
+import { SemanticPlanValidator } from "../../adapters/semantic-plan.validator";
 
 @Injectable()
 export class GenerateSqlNode {
-  constructor(private readonly sqlGeneration: SqlGenerationService) {}
+  constructor(
+    private readonly sqlGeneration: SqlGenerationService,
+    @Optional()
+    private readonly semanticContextPackService?: SemanticContextPackService,
+    @Optional()
+    private readonly semanticPlanService?: SemanticPlanService
+  ) {}
 
   async run(
     question: string,
@@ -28,11 +44,13 @@ export class GenerateSqlNode {
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
       selectedContext?: RagRetrievalChunkPayload[];
+      retrievalBundle?: RagRetrievalBundle;
       semanticContextPack?: RagContextPack;
       datasourceId?: string;
       workspaceId?: string;
       semanticIntent?: SqlSemanticIntent;
       explicitPinning?: SqlGenerationExplicitPinningEvidence;
+      allowedTables?: string[];
     }
   ): Promise<{
     provider: string;
@@ -49,9 +67,93 @@ export class GenerateSqlNode {
     retryCount?: number;
     semanticIntent?: SqlSemanticIntent;
     coverage?: SqlEvidenceCoverage;
+    semanticContextPack?: SemanticContextPackV1;
+    semanticPlan?: SemanticPlanV1;
   }> {
+    const semanticContextPackService =
+      this.semanticContextPackService ?? new SemanticContextPackService();
+    const semanticPlanService =
+      this.semanticPlanService ??
+      new SemanticPlanService(new SemanticPlanValidator());
+
+    const semanticContextPack = semanticContextPackService.build({
+      retrievalBundle: options?.retrievalBundle,
+      selectedContext: options?.selectedContext,
+      additionalWarnings: options?.semanticContextPack?.degrade_reasons
+    });
+    const semanticPlanResult = semanticPlanService.build({
+      question,
+      contextPack: semanticContextPack,
+      semanticIntent: options?.semanticIntent,
+      allowedTables: options?.allowedTables
+    });
+    if (semanticPlanResult.plan.route === "reject") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_FAIL_CLOSED",
+        "语义计划进入 fail-closed 路径，已阻止 SQL 生成。",
+        422,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan
+        }
+      );
+    }
+    if (semanticPlanResult.plan.route === "clarify") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_REQUIRES_CLARIFICATION",
+        "语义计划要求先澄清问题，已阻止 SQL 生成。",
+        422,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan
+        }
+      );
+    }
+    if (semanticPlanResult.validation.routeKind === "metadata") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_METADATA_ANSWER",
+        "这是元数据查询，不需要生成或执行 SQL。",
+        200,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan,
+          answer: "这是元数据查询，请查看当前数据源的表、字段与语义证据。"
+        }
+      );
+    }
+    if (semanticPlanResult.validation.routeKind === "general") {
+      throw new DomainError(
+        "SEMANTIC_PLAN_GENERAL_ANSWER",
+        "这是通用说明问题，不需要生成或执行 SQL。",
+        200,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan,
+          answer: "这是通用说明问题，不需要执行 SQL；我会基于已有语义证据直接解释。"
+        }
+      );
+    }
+    if (
+      !semanticPlanResult.validation.valid &&
+      semanticPlanResult.validation.reasons.some(
+        (reason) =>
+          reason === "plan_contains_unsupported_tables" ||
+          reason === "plan_contains_unsupported_columns"
+      )
+    ) {
+      throw new DomainError(
+        "SEMANTIC_PLAN_VALIDATION_FAILED",
+        "语义计划包含未授权或不支持的表/字段，已阻止 SQL 生成。",
+        422,
+        {
+          validation: semanticPlanResult.validation,
+          semanticPlan: semanticPlanResult.plan
+        }
+      );
+    }
+
     if (options?.stream) {
-      return this.sqlGeneration.stream(
+      const draft = await this.sqlGeneration.stream(
         question,
         {
           datasourceId: options.datasourceId,
@@ -61,15 +163,21 @@ export class GenerateSqlNode {
           selectedContext: options.selectedContext,
           semanticContextPack: options.semanticContextPack,
           semanticIntent: options.semanticIntent,
-          explicitPinning: options.explicitPinning
+          explicitPinning: options.explicitPinning,
+          semanticPlan: semanticPlanResult.plan
         },
         {
           tools: options.tools,
           onEvent: options.onEvent
         }
       );
+      return {
+        ...draft,
+        semanticContextPack,
+        semanticPlan: semanticPlanResult.plan
+      };
     }
-    return this.sqlGeneration.generate(question, {
+    const draft = await this.sqlGeneration.generate(question, {
       datasourceId: options?.datasourceId,
       workspaceId: options?.workspaceId,
       datasourceType,
@@ -77,7 +185,13 @@ export class GenerateSqlNode {
       selectedContext: options?.selectedContext,
       semanticContextPack: options?.semanticContextPack,
       semanticIntent: options?.semanticIntent,
-      explicitPinning: options?.explicitPinning
+      explicitPinning: options?.explicitPinning,
+      semanticPlan: semanticPlanResult.plan
     });
+    return {
+      ...draft,
+      semanticContextPack,
+      semanticPlan: semanticPlanResult.plan
+    };
   }
 }

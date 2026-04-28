@@ -114,6 +114,8 @@ const KNOWLEDGE_MODULE_SUBPATH_PREFIX = `${MODULES_ROOT}/knowledge/`;
 const PLATFORM_DATA_AGGREGATE_MODULE_PATH =
   `${MODULES_ROOT}/platform/data/data.module.ts`;
 const PLATFORM_DATA_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/data/`;
+const CONVERSATION_TEXT2SQL_PREFIX = `${MODULES_ROOT}/conversation/text2sql/`;
+const LEGACY_CHAT_MODULE_PREFIX = `${MODULES_ROOT}/chat/`;
 const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT = 15;
 
 // Transitional cross-domain wiring allowances that are still pending module reshaping.
@@ -123,16 +125,16 @@ const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
     targetDomain: "conversation",
     sourcePathPattern: /^apps\/backend\/src\/modules\/eval\/eval\.module\.ts$/,
     targetPathPattern:
-      /^apps\/backend\/src\/modules\/conversation\/agent\/agent\.module\.ts$/,
-    reason: "Transitional wiring: eval still composes conversation agent module."
+      /^apps\/backend\/src\/modules\/conversation\/text2sql\/text2sql\.module\.ts$/,
+    reason: "Transitional wiring: eval still composes conversation text2sql module."
   },
   {
     sourceDomain: "platform",
     targetDomain: "conversation",
     sourcePathPattern: /^apps\/backend\/src\/modules\/eval\/eval\.service\.ts$/,
     targetPathPattern:
-      /^apps\/backend\/src\/modules\/conversation\/agent\/graph\/graph\.builder\.ts$/,
-    reason: "Transitional wiring: eval service still uses conversation graph builder."
+      /^apps\/backend\/src\/modules\/conversation\/text2sql\/text2sql-workflow-runner\.service\.ts$/,
+    reason: "Transitional wiring: eval service still uses conversation workflow runner."
   },
   {
     sourceDomain: "knowledge",
@@ -203,11 +205,6 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     reason: "Temporary bridge: agent module still imports knowledge module directly."
   },
   {
-    sourceFile: "apps/backend/src/modules/conversation/agent/graph/langgraph.state.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: langgraph state still imports RAG retrieval payload types directly."
-  },
-  {
     sourceFile: "apps/backend/src/modules/conversation/agent/nodes/generate-sql.node.ts",
     targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
     reason: "Temporary bridge: generate-sql node still imports RAG retrieval payload types directly."
@@ -250,9 +247,28 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     reason: "Temporary bridge: post-run hooks still imports knowledge facade contract directly."
   },
   {
+    sourceFile: "apps/backend/src/modules/conversation/text2sql/text2sql.module.ts",
+    targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
+    reason: "Temporary bridge: text2sql module still imports knowledge module directly."
+  },
+  {
     sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",
     targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
     reason: "Temporary bridge: chat module still imports knowledge module directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/agent/nodes/resolve-saved-prior-sql.node.ts",
+    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
+    reason:
+      "Temporary bridge: saved-prior-sql node still imports retrieval bundle types directly."
+  },
+  {
+    sourceFile:
+      "apps/backend/src/modules/conversation/chat/application/save-view-from-run.usecase.ts",
+    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-memory.contract.ts",
+    reason:
+      "Temporary bridge: save-view usecase still injects knowledge memory contract directly."
   }
 ];
 
@@ -535,7 +551,8 @@ function resolveDomain(repoRoot: string, absolutePath: string): {
   }
   const pathAfterModules = relativePath.slice(`${MODULES_ROOT}/`.length);
   const rootSegment = pathAfterModules.split("/")[0];
-  const domain = MODULE_DOMAIN_MAP[rootSegment];
+  const rootSegmentWithoutExtension = rootSegment.replace(/\.[^.]+$/, "");
+  const domain = MODULE_DOMAIN_MAP[rootSegment] ?? MODULE_DOMAIN_MAP[rootSegmentWithoutExtension];
   if (!domain) {
     return null;
   }
@@ -571,6 +588,16 @@ function isForbiddenBusinessDomainDependency(input: {
     return true;
   }
   return input.targetRelativePath.startsWith(PLATFORM_DATA_IMPLEMENTATION_PREFIX);
+}
+
+function isForbiddenText2SqlLegacyChatDependency(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (!input.sourceRelativePath.startsWith(CONVERSATION_TEXT2SQL_PREFIX)) {
+    return false;
+  }
+  return input.targetRelativePath.startsWith(LEGACY_CHAT_MODULE_PREFIX);
 }
 
 export async function runCapabilityBoundaryCheck(
@@ -644,6 +671,27 @@ export async function runCapabilityBoundaryCheck(
           continue;
         }
 
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        violations.push({
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        });
+        continue;
+      }
+
+      if (
+        isForbiddenText2SqlLegacyChatDependency({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
         const { line, column } = indexToLineColumn(lineStarts, reference.index);
         const lineText = lines[line - 1] ?? "";
         violations.push({

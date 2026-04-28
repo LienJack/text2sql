@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { DomainError } from "../../../../common/domain-error";
+import { assertSupportedV2RunReadModel } from "../../projection/read-model/run-view-support.guard";
 import { ChatRepository } from "../../../platform/data/persistence";
 import { ModelingGraphRepository } from "../../../platform/data/persistence/modeling-graph.repository";
 import { ModelingGraphValidator } from "../../../platform/data/persistence/modeling-graph.validator";
@@ -68,6 +69,15 @@ export class SaveViewFromRunUsecase {
     if (!run) {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
+
+    const session = await this.chatRepository.getSessionById(run.sessionId);
+    if (!session) {
+      throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
+    }
+    assertSupportedV2RunReadModel(run, {
+      unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能保存为视图。"
+    });
+
     const sql = run.sql?.trim();
     if (!sql) {
       throw new DomainError(
@@ -76,11 +86,6 @@ export class SaveViewFromRunUsecase {
         400,
         { runId }
       );
-    }
-
-    const session = await this.chatRepository.getSessionById(run.sessionId);
-    if (!session) {
-      throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, { runId });
     }
     const workspaceId = this.requireTrimmed(session.workspaceId ?? "", "workspaceId");
     const datasourceId = this.requireTrimmed(session.datasource, "datasourceId");

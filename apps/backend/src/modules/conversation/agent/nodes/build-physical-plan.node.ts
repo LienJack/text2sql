@@ -25,6 +25,31 @@ export class BuildPhysicalPlanNode {
     datasourceId: string;
   }): Promise<PhysicalPlan> {
     const { semanticPlan } = input;
+    const requiresClarification = semanticPlan.semanticHints.includes(
+      "route_clarification_required"
+    );
+    const requiresFailClosed = semanticPlan.semanticHints.includes(
+      "route_fail_closed_for_write_intent"
+    );
+    if (requiresClarification || requiresFailClosed) {
+      const summary = requiresFailClosed
+        ? "检测到写操作意图，执行计划按 fail-closed 降级。"
+        : "语义路由要求澄清，执行计划降级并等待补充信息。";
+      return {
+        status: "degraded",
+        strategy: "fallback_sql",
+        semanticConstraintMode: "fallback_text",
+        semanticVersion: semanticPlan.semanticVersion,
+        lockStatus: semanticPlan.lockStatus,
+        fallbackApplied: true,
+        cacheStatus: "miss",
+        cacheReason: requiresFailClosed
+          ? "semantic_route_fail_closed"
+          : "semantic_route_clarify",
+        summary
+      };
+    }
+
     if (semanticPlan.status === "degraded" && !semanticPlan.semanticVersion) {
       return {
         status: "degraded",

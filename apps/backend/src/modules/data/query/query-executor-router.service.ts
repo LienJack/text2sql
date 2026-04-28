@@ -14,6 +14,19 @@ import { SqliteExecutorService } from "./sqlite-executor.service";
 
 const MAX_QUERY_LIMIT = 200;
 const DEFAULT_QUERY_LIMIT = 50;
+
+export interface QueryValidationCapabilities {
+  dryRun: boolean;
+  dryPlan: boolean;
+  reason?: string;
+}
+
+export interface QueryDryPlanSnapshot {
+  complete: boolean;
+  referencedTables: string[];
+  reason?: string;
+}
+
 export interface QueryExecutionTablePermissionsOptions {
   accessContext?: SqlTableAccessContext;
   allowedTables?: Iterable<string>;
@@ -77,6 +90,29 @@ export class QueryExecutorRouterService {
       datasource: input.datasource,
       sql: normalizedSql
     });
+  }
+
+  getValidationCapabilities(datasourceType: DatasourceType): QueryValidationCapabilities {
+    if (datasourceType === "csv" || datasourceType === "excel") {
+      return {
+        dryRun: false,
+        dryPlan: true,
+        reason: `${datasourceType} datasource does not support pre-execution dry-run`
+      };
+    }
+    return {
+      dryRun: true,
+      dryPlan: true
+    };
+  }
+
+  buildDryPlan(sql: string): QueryDryPlanSnapshot {
+    const extraction = this.tableAccessGuard.extractReferencedTables(sql);
+    return {
+      complete: extraction.complete,
+      referencedTables: extraction.tables,
+      ...(extraction.reason ? { reason: extraction.reason } : {})
+    };
   }
 
   private ensureLimit(sql: string, limit?: number): string {

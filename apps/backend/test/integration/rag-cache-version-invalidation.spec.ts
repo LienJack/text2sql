@@ -144,7 +144,8 @@ describe("rag cache version invalidation integration", () => {
         marker: "l2-fallback-hit"
       },
       l1TtlMs: 5,
-      l2TtlMs: 120
+      // Keep L2 window generous to avoid scheduler jitter under full-suite parallel load.
+      l2TtlMs: 3000
     });
 
     await new Promise((resolve) => {

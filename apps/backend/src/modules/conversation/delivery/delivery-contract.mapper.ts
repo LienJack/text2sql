@@ -2,8 +2,16 @@ import { Injectable } from "@nestjs/common";
 import type {
   ClarificationDecisionEvidence,
   DeliveryContract,
+  DeliveryContextPackSummaryV1,
+  DeliveryMetadataAnswerSummaryV1,
   DeliveryEvidenceReplayLog,
-  SqlRun
+  SqlCorrectionGroundingV1,
+  SqlRun,
+  Text2SqlV2ArtifactRefV1,
+  Text2SqlV2RunArtifact,
+  Text2SqlV2RuntimePlanV1,
+  Text2SqlV2SmartDefaultsEvidenceV1,
+  Text2SqlV2StageName
 } from "@text2sql/shared-types";
 import {
   DELIVERY_SANDBOX_REPLAY_KEY,
@@ -154,6 +162,16 @@ export class DeliveryContractMapper {
     const clarificationDecision = this.readClarificationDecisionEvidence(input.run);
     const sqlCoverage = this.readSqlCoverageEvidence(input.run);
     const savedPriorSql = this.readSavedPriorSqlEvidence(input.run);
+    const traceV2Artifact = this.readTraceV2Artifact(input.run);
+    const contextPackSummary = this.readContextPackSummary(
+      traceV2Artifact?.contextPack
+    );
+    const metadataAnswer = this.readMetadataAnswerSummary({
+      run: input.run,
+      traceV2: traceV2Artifact,
+      contextPackSummary
+    });
+    const correctionGrounding = this.readCorrectionGrounding(traceV2Artifact);
     const invalidInput = replayIndex.invalidPayload;
     const artifact = input.artifactOverride ?? this.buildArtifact(input.run);
     const sandboxOutcome = this.applySandboxPostProcess({
@@ -210,7 +228,8 @@ export class DeliveryContractMapper {
           : undefined,
       retrievalLogs: replayLogs.length > 0 ? replayLogs : undefined,
       riskTags: evidenceRiskTags.length > 0 ? evidenceRiskTags : undefined,
-      semanticVersion: semanticSnapshot.semanticVersion,
+      semanticVersion:
+        semanticSnapshot.semanticVersion ?? finalSnapshot.semanticSpineVersion,
       modelingRevision:
         semanticSnapshot.modelingRevision ?? finalSnapshot.modelingRevision,
       semanticSpineVersion:
@@ -231,7 +250,33 @@ export class DeliveryContractMapper {
       conflictHint: traceContextEvidence.conflictHint,
       clarificationDecision,
       sqlCoverage,
-      savedPriorSql
+      savedPriorSql,
+      contextPackSummary,
+      metadataAnswer,
+      correctionGrounding,
+      ...(traceV2Artifact
+        ? {
+            v2: {
+              version: traceV2Artifact.version,
+              stageOrder: traceV2Artifact.stageOrder,
+              stageArtifacts: traceV2Artifact.stages,
+              contextPack: traceV2Artifact.contextPack,
+              semanticPlan: this.toSafeSemanticPlan(traceV2Artifact.semanticPlan),
+              sqlGeneration: traceV2Artifact.sqlGeneration,
+              sqlValidation: traceV2Artifact.sqlValidation,
+              planLedger:
+                traceV2Artifact.planLedger ??
+                traceV2Artifact.sqlValidation?.ledgerFulfillment ??
+                traceV2Artifact.semanticPlan?.planLedger?.summary,
+              runtimePlan: this.readRuntimePlan(traceV2Artifact.runtimePlan),
+              artifactRefs: this.readArtifactRefs(traceV2Artifact.artifactRefs),
+              smartDefaults: this.readSmartDefaults(traceV2Artifact.smartDefaults),
+              loopEvidence: traceV2Artifact.loopEvidence,
+              terminationReason: traceV2Artifact.terminationReason,
+              failure: this.resolveTraceV2Failure(traceV2Artifact)
+            }
+          }
+        : {})
     };
 
     return {
@@ -276,6 +321,16 @@ export class DeliveryContractMapper {
       rowsPreview: run.rows?.slice(0, 3),
       hasError: Boolean(run.error)
     };
+  }
+
+  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+    semanticPlan: T
+  ): T {
+    if (!semanticPlan) {
+      return semanticPlan;
+    }
+    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    return safePlan as T;
   }
 
   private toReplayLogs(records: DeliveryReplayRecordInput[] | undefined): DeliveryEvidenceReplayLog[] {
@@ -540,292 +595,569 @@ export class DeliveryContractMapper {
   }
 
   private readSemanticSnapshot(run: SqlRun): SemanticSnapshot {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      modeling_revision?: unknown;
-    };
-    const traceModelingRevision = this.readPositiveInteger(
-      traceWithCompat.modelingRevision ?? traceWithCompat.modeling_revision
+    const traceModelingRevision = this.readPositiveInteger(run.trace.modelingRevision);
+    const traceV2 = this.readTraceV2Artifact(run);
+    const contextPackStatus =
+      traceV2?.contextPack?.status === "ready" || traceV2?.contextPack?.status === "degraded"
+        ? traceV2.contextPack.status
+        : undefined;
+    const semanticDegradeReason = traceV2?.contextPack?.warnings?.find(
+      (item) => typeof item === "string" && item.trim().length > 0
     );
-    const semanticSteps = [...(run.trace.steps ?? [])]
-      .reverse()
-      .filter(
-        (step) =>
-          step.node === "build-semantic-query" || step.node === "build-physical-plan"
-      );
 
-    for (const step of semanticSteps) {
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const semanticVersionRaw = output.semanticVersion;
-      const semanticVersionCompatRaw =
-        semanticVersionRaw ?? output.semantic_version;
-      const semanticVersion = this.readPositiveInteger(semanticVersionCompatRaw);
-      const lockStatus = this.readString(output.lockStatus ?? output.lock_status);
-      const semanticLockStatus =
-        lockStatus === "locked" || lockStatus === "fallback" || lockStatus === "degraded"
-          ? lockStatus
-          : undefined;
-      const modelingRevision = this.readPositiveInteger(
-        output.modelingRevision ??
-          output.modeling_revision ??
-          output.activeRevision ??
-          output.active_revision
-      );
-      const contextPack = this.readRecord(output.contextPack ?? output.context_pack);
-      const contextPackStatusRaw = this.readString(
-        output.contextPackStatus ??
-          output.context_pack_status ??
-          contextPack?.status ??
-          contextPack?.context_pack_status
-      );
-      const contextPackStatus =
-        contextPackStatusRaw === "ready" || contextPackStatusRaw === "degraded"
-          ? contextPackStatusRaw
-          : undefined;
-      const semanticInstructionSummary = this.readSemanticInstructionSummary(
-        output.semanticBindingSummary ??
-          output.semantic_binding_summary ??
-          output.semanticInstructionSummary ??
-          output.semantic_instruction_summary
-      );
-      const semanticDegradeReason = this.readString(output.degradeReason);
-      const semanticDegradeReasonCompat =
-        semanticDegradeReason ?? this.readString(output.degrade_reason);
-
-      if (
-        semanticVersion ||
-        semanticLockStatus ||
-        semanticDegradeReasonCompat ||
-        modelingRevision !== undefined ||
-        contextPackStatus ||
-        semanticInstructionSummary
-      ) {
-        return {
-          modelingRevision: traceModelingRevision ?? modelingRevision,
-          semanticVersion,
-          semanticLockStatus,
-          contextPackStatus,
-          semanticInstructionSummary,
-          semanticDegradeReason: semanticDegradeReasonCompat
-        };
-      }
-    }
-
-    return { modelingRevision: traceModelingRevision };
+    return {
+      modelingRevision: traceModelingRevision,
+      contextPackStatus,
+      semanticDegradeReason
+    };
   }
 
   private readTraceContextEvidence(run: SqlRun): TraceContextEvidence {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      effectiveContextSummary?: unknown;
-      effective_context_summary?: unknown;
-      conflictHint?: unknown;
-      context_conflict_hint?: unknown;
-    };
-
     return {
       effectiveContextSummary: this.readEffectiveContextSummary(
-        traceWithCompat.effectiveContextSummary ??
-          traceWithCompat.effective_context_summary
+        run.trace.effectiveContextSummary
       ),
-      conflictHint: this.readConflictHint(
-        traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
-      )
+      conflictHint: this.readConflictHint(run.trace.conflictHint)
     };
   }
 
   private readClarificationDecisionEvidence(
     run: SqlRun
   ): ClarificationDecisionLayer | undefined {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      clarificationDecision?: unknown;
-      clarification_decision?: unknown;
-    };
-    const traceDecision = this.readClarificationDecision(
-      traceWithCompat.clarificationDecision ?? traceWithCompat.clarification_decision
-    );
+    const traceDecision = this.readClarificationDecision(run.trace.clarificationDecision);
     if (traceDecision) {
       return traceDecision;
     }
-
-    const stepDecision = this.readClarificationDecisionFromSteps(run.trace.steps);
-    if (stepDecision) {
-      return stepDecision;
-    }
-
     return this.readClarificationDecision(run.clarification);
   }
 
   private readSqlCoverageEvidence(run: SqlRun): SqlCoverageEvidenceSnapshot | undefined {
-    const steps = run.trace.steps ?? [];
-    for (const step of [...steps].reverse()) {
-      if (step.node !== "generate-sql") {
-        continue;
-      }
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const directCoverage = this.readSqlCoverageFromRecord(
-        output.coverage ?? output.sqlCoverage ?? output.sql_coverage
-      );
-      if (directCoverage) {
-        return directCoverage;
-      }
-      const errorCode = this.readString(output.errorCode ?? output.error_code);
-      if (errorCode !== "LLM_SQL_EVIDENCE_COVERAGE_FAILED") {
-        continue;
-      }
-      const errorDetails = this.readRecord(output.errorDetails ?? output.error_details);
-      const detailsCoverage = this.readSqlCoverageFromRecord(
-        errorDetails?.coverage ?? errorDetails?.sqlCoverage ?? errorDetails?.sql_coverage
-      );
-      if (detailsCoverage) {
-        return detailsCoverage;
-      }
+    const checks = run.trace.v2?.sqlValidation?.checks;
+    if (!Array.isArray(checks)) {
+      return undefined;
     }
-    return undefined;
+    const coverageCheck = checks.find((item) => item.check === "plan-coverage");
+    if (!coverageCheck) {
+      return undefined;
+    }
+    const gateStatus =
+      coverageCheck.status === "passed"
+        ? "passed"
+        : coverageCheck.status === "failed"
+          ? "failed"
+          : "skipped_no_evidence";
+    return {
+      gateStatus,
+      missingObjects: [],
+      triggerSource: "semantic_context"
+    };
   }
 
   private readSavedPriorSqlEvidence(
     run: SqlRun
   ): SavedPriorSqlEvidenceSnapshot | undefined {
-    const steps = run.trace.steps ?? [];
-    if (steps.length === 0) {
+    const stages = run.trace.v2?.stages;
+    if (!Array.isArray(stages) || stages.length === 0) {
       return undefined;
     }
-    const resolutionStepIndex = [...steps]
-      .map((step, index) => ({ step, index }))
-      .reverse()
-      .find((entry) => entry.step.node === "resolve-saved-prior-sql");
-    if (!resolutionStepIndex) {
+    const generateStage = stages.find((stage) => stage.stage === "generate-sql");
+    if (!generateStage || generateStage.status !== "skipped") {
       return undefined;
     }
-    const output = this.parseSummaryObject(resolutionStepIndex.step.outputSummary);
-    const statusRaw = this.readString(output?.status);
-    const status =
-      statusRaw === "hit" ||
-      statusRaw === "miss" ||
-      statusRaw === "filtered" ||
-      statusRaw === "stale" ||
-      statusRaw === "ambiguous"
-        ? statusRaw
-        : undefined;
-    if (!status) {
-      return undefined;
-    }
-
-    const reasonCodes = this.readStringArray(
-      output?.reasonCodes ?? output?.reason_codes
-    );
-    const selectedChunkId = this.readString(
-      output?.selectedChunkId ?? output?.selected_chunk_id
-    );
-    const selectedViewId = this.readString(
-      output?.selectedViewId ?? output?.selected_view_id
-    );
-    const selectedSourceRunId = this.readString(
-      output?.selectedSourceRunId ?? output?.selected_source_run_id
-    );
-
-    const subsequentSteps = steps.slice(resolutionStepIndex.index + 1);
-    const safetyStep = subsequentSteps.find((step) => step.node === "safety-check");
-    const hasFallbackGeneration = subsequentSteps.some(
-      (step) => step.node === "generate-sql"
-    );
+    const validateStage = stages.find((stage) => stage.stage === "validate");
     const safetyResult: SavedPriorSqlEvidenceSnapshot["safetyResult"] | undefined =
-      status !== "hit"
-        ? undefined
-        : safetyStep?.status === "success"
-          ? "passed"
-          : safetyStep?.status === "failed"
-            ? hasFallbackGeneration
-              ? "fallback_generated"
-              : "rejected"
-            : undefined;
-
-    const shortcutUsed = status === "hit" && safetyResult === "passed";
+      validateStage?.status === "success"
+        ? "passed"
+        : validateStage?.status === "failed"
+          ? "rejected"
+          : undefined;
+    const shortcutUsed = safetyResult === "passed";
 
     return {
-      status,
+      status: "hit",
       shortcutUsed,
-      ...(reasonCodes.length > 0 ? { reasonCodes } : {}),
-      ...(selectedChunkId ? { selectedChunkId } : {}),
-      ...(selectedViewId ? { selectedViewId } : {}),
-      ...(selectedSourceRunId ? { selectedSourceRunId } : {}),
+      reasonCodes: ["saved_prior_sql_shortcut"],
       ...(safetyResult ? { safetyResult } : {})
     };
   }
 
-  private readSqlCoverageFromRecord(
-    value: unknown
-  ): SqlCoverageEvidenceSnapshot | undefined {
-    if (!this.isRecord(value)) {
+  private readContextPackSummary(
+    contextPack: Text2SqlV2RunArtifact["contextPack"] | undefined
+  ): DeliveryContextPackSummaryV1 | undefined {
+    if (!contextPack) {
       return undefined;
     }
-    const gateStatusRaw = this.readString(value.gateStatus ?? value.gate_status);
-    const gateStatus =
-      gateStatusRaw === "passed" ||
-      gateStatusRaw === "failed" ||
-      gateStatusRaw === "skipped_no_evidence" ||
-      gateStatusRaw === "skipped_metadata_intent" ||
-      gateStatusRaw === "skipped_no_sql_objects"
-        ? gateStatusRaw
-        : undefined;
-    const triggerSourceRaw = this.readString(
-      value.triggerSource ?? value.trigger_source
+
+    const selectedEvidenceCount =
+      contextPack.selectedContextSummary?.count ??
+      contextPack.selectedEvidenceIds.length;
+    const selectedTableCount = contextPack.selectedTables.length;
+    const selectedColumnCount = contextPack.selectedColumns.length;
+    const pruningApplied = Boolean(contextPack.pruning?.applied);
+    const prunedEvidenceCount = (contextPack.pruning?.decisions ?? []).reduce(
+      (total, decision) =>
+        total +
+        (this.readNonNegativeInteger(decision.removedCount) ??
+          decision.removedEvidenceIds?.length ??
+          0),
+      0
     );
-    const triggerSource =
-      triggerSourceRaw === "selected_context" ||
-      triggerSourceRaw === "semantic_context" ||
-      triggerSourceRaw === "explicit_pinning" ||
-      triggerSourceRaw === "none"
-        ? triggerSourceRaw
-        : undefined;
-    if (!gateStatus || !triggerSource) {
-      return undefined;
-    }
+    const degradedLaneCount = (contextPack.laneStates ?? []).filter(
+      (lane) => lane.state === "degraded" || lane.state === "unavailable"
+    ).length;
+    const permissionFilteringApplied =
+      contextPack.permissionFiltering?.status === "applied";
+    const permissionDeniedEvidenceCount =
+      contextPack.permissionFiltering?.deniedEvidenceCount ??
+      contextPack.permissionFiltering?.deniedEvidenceIds?.length ??
+      0;
+    const degradationReasons = this.unique([
+      ...(contextPack.degradation?.reasons ?? []),
+      ...(contextPack.warnings ?? [])
+    ]);
+
     return {
-      gateStatus,
-      missingObjects: this.readStringArray(
-        value.missingObjects ?? value.missing_objects
-      ),
-      triggerSource
+      status: contextPack.status,
+      selectedEvidenceCount,
+      selectedTableCount,
+      selectedColumnCount,
+      pruningApplied,
+      ...(pruningApplied ? { prunedEvidenceCount } : {}),
+      ...(degradedLaneCount > 0 ? { degradedLaneCount } : {}),
+      permissionFilteringApplied,
+      ...(permissionFilteringApplied
+        ? {
+            permissionDeniedEvidenceCount
+          }
+        : {}),
+      ...(degradationReasons.length > 0 ? { degradationReasons } : {})
     };
   }
 
-  private readClarificationDecisionFromSteps(
-    steps: SqlRun["trace"]["steps"] | undefined
-  ): ClarificationDecisionLayer | undefined {
-    if (!steps || steps.length === 0) {
+  private readMetadataAnswerSummary(input: {
+    run: SqlRun;
+    traceV2: Text2SqlV2RunArtifact | undefined;
+    contextPackSummary: DeliveryContextPackSummaryV1 | undefined;
+  }): DeliveryMetadataAnswerSummaryV1 | undefined {
+    const routeKind =
+      this.readSemanticPlanRouteKind(input.traceV2?.semanticPlan) ??
+      this.readRouteKindFromIntakeStage(input.traceV2?.stages);
+    if (routeKind !== "metadata" && routeKind !== "general") {
       return undefined;
     }
 
-    for (const step of [...steps].reverse()) {
-      if (step.node !== "clarify") {
-        continue;
-      }
-      const output = this.parseSummaryObject(step.outputSummary);
-      if (!output) {
-        continue;
-      }
-      const question = this.readString(
-        output.clarificationQuestion ?? output.clarification_question
-      );
-      const stepDecision = this.readClarificationDecision(
-        output.clarificationDecision ?? output.clarification_decision ?? output,
-        {
-          question,
-          reason: this.readString(step.detail)
-        }
-      );
-      if (stepDecision) {
-        return stepDecision;
+    const selectedEvidenceCount = input.contextPackSummary?.selectedEvidenceCount ?? 0;
+    const degradationReasons = input.contextPackSummary?.degradationReasons ?? [];
+    const evidenceQuality =
+      input.contextPackSummary?.status === "ready" ? "ready" : "degraded";
+    const groundedByContextPack = Boolean(
+      input.traceV2?.contextPack && selectedEvidenceCount > 0
+    );
+
+    return {
+      groundedByContextPack,
+      routeKind,
+      evidenceQuality,
+      selectedEvidenceCount,
+      permissionFilteringApplied:
+        input.contextPackSummary?.permissionFilteringApplied ?? false,
+      pruningApplied: input.contextPackSummary?.pruningApplied ?? false,
+      ...(degradationReasons.length > 0 ? { degradationReasons } : {})
+    };
+  }
+
+  private readCorrectionGrounding(
+    traceV2: Text2SqlV2RunArtifact | undefined
+  ): SqlCorrectionGroundingV1 | undefined {
+    if (!traceV2) {
+      return undefined;
+    }
+
+    const direct = this.normalizeCorrectionGrounding(
+      traceV2.sqlGeneration?.correctionGrounding
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const generateStage = traceV2.stages.find((stage) => stage.stage === "generate-sql");
+    if (!generateStage?.metadata || !this.isRecord(generateStage.metadata)) {
+      return undefined;
+    }
+    return this.normalizeCorrectionGrounding(
+      (generateStage.metadata as { correctionGrounding?: unknown }).correctionGrounding
+    );
+  }
+
+  private readRuntimePlan(value: unknown): Text2SqlV2RuntimePlanV1 | undefined {
+    if (!this.isRecord(value) || value.version !== "runtime-plan.v1") {
+      return undefined;
+    }
+    const items = Array.isArray(value.items)
+      ? value.items
+          .map((item) => this.readRuntimePlanItem(item))
+          .filter((item): item is Text2SqlV2RuntimePlanV1["items"][number] =>
+            Boolean(item)
+          )
+      : [];
+    if (items.length === 0) {
+      return undefined;
+    }
+    return {
+      version: "runtime-plan.v1",
+      items,
+      ...(this.readString(value.currentItemId)
+        ? { currentItemId: this.readString(value.currentItemId) }
+        : {}),
+      ...(this.readString(value.summary)
+        ? { summary: this.readString(value.summary) }
+        : {})
+    };
+  }
+
+  private readRuntimePlanItem(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const id = this.readString(value.id);
+    const stage = this.readStageName(value.stage);
+    const goal = this.readString(value.goal);
+    const status = this.readRuntimePlanStatus(value.status);
+    if (!id || !stage || !goal || !status) {
+      return undefined;
+    }
+    const correctionIntent = this.readRuntimePlanCorrectionIntent(
+      value.correctionIntent
+    );
+    return {
+      id,
+      stage,
+      goal,
+      status,
+      ...(this.readStringArray(value.reasonCodes).length > 0
+        ? { reasonCodes: this.readStringArray(value.reasonCodes) }
+        : {}),
+      ...(this.readStringArray(value.evidenceRefs).length > 0
+        ? { evidenceRefs: this.readStringArray(value.evidenceRefs) }
+        : {}),
+      ...(correctionIntent ? { correctionIntent } : {}),
+      ...(this.readString(value.startedAt)
+        ? { startedAt: this.readString(value.startedAt) }
+        : {}),
+      ...(this.readString(value.endedAt)
+        ? { endedAt: this.readString(value.endedAt) }
+        : {}),
+      ...(this.readString(value.summary)
+        ? { summary: this.readString(value.summary) }
+        : {})
+    };
+  }
+
+  private readRuntimePlanCorrectionIntent(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number]["correctionIntent"] | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const retryReason = this.readString(value.retryReason);
+    if (!retryReason) {
+      return undefined;
+    }
+    return {
+      ...(this.readStageName(value.failedStage)
+        ? { failedStage: this.readStageName(value.failedStage) }
+        : {}),
+      ...(this.readString(value.failureCode)
+        ? { failureCode: this.readString(value.failureCode) }
+        : {}),
+      retryReason,
+      ...(this.readStageName(value.targetStage)
+        ? { targetStage: this.readStageName(value.targetStage) }
+        : {})
+    };
+  }
+
+  private readArtifactRefs(value: unknown): Text2SqlV2ArtifactRefV1[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const refs = value
+      .map((item) => this.readArtifactRef(item))
+      .filter((item): item is Text2SqlV2ArtifactRefV1 => Boolean(item));
+    return refs.length > 0 ? refs : undefined;
+  }
+
+  private readArtifactRef(value: unknown): Text2SqlV2ArtifactRefV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const id = this.readString(value.id);
+    const category = this.readString(value.category);
+    const summary = this.readString(value.summary);
+    const hash = this.readString(value.hash);
+    const visibility = this.readArtifactVisibility(value.visibility);
+    if (!id || !category || !summary || !hash || !visibility) {
+      return undefined;
+    }
+    return {
+      id,
+      category,
+      summary,
+      hash,
+      ...(this.readString(value.version)
+        ? { version: this.readString(value.version) }
+        : {}),
+      ...(this.readNonNegativeInteger(value.sizeBytes) !== undefined
+        ? { sizeBytes: this.readNonNegativeInteger(value.sizeBytes) }
+        : {}),
+      ...(this.readString(value.replayKeyHint)
+        ? { replayKeyHint: this.readString(value.replayKeyHint) }
+        : {}),
+      visibility,
+      ...(this.readArtifactSensitivity(value.sensitivity)
+        ? { sensitivity: this.readArtifactSensitivity(value.sensitivity) }
+        : {}),
+      ...(this.readStringArray(value.reasonCodes).length > 0
+        ? { reasonCodes: this.readStringArray(value.reasonCodes) }
+        : {}),
+      ...(this.readStringArray(value.evidenceRefs).length > 0
+        ? { evidenceRefs: this.readStringArray(value.evidenceRefs) }
+        : {})
+    };
+  }
+
+  private readSmartDefaults(
+    value: unknown
+  ): Text2SqlV2SmartDefaultsEvidenceV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const bundleId = this.readString(value.bundleId);
+    const version = this.readString(value.version);
+    const coveredStages = this.readStageNameArray(value.coveredStages);
+    const ruleIds = this.readStringArray(value.ruleIds);
+    const status =
+      value.status === "applied" || value.status === "fallback"
+        ? value.status
+        : undefined;
+    if (
+      !bundleId ||
+      !version ||
+      coveredStages.length === 0 ||
+      ruleIds.length === 0 ||
+      !status
+    ) {
+      return undefined;
+    }
+    const templateOverlay = this.readSmartDefaultsTemplateOverlay(
+      value.templateOverlay
+    );
+    return {
+      bundleId,
+      version,
+      coveredStages,
+      ruleIds,
+      status,
+      ...(this.readString(value.fallbackReason)
+        ? { fallbackReason: this.readString(value.fallbackReason) }
+        : {}),
+      ...(templateOverlay ? { templateOverlay } : {})
+    };
+  }
+
+  private readSmartDefaultsTemplateOverlay(
+    value: unknown
+  ): Text2SqlV2SmartDefaultsEvidenceV1["templateOverlay"] | undefined {
+    if (!this.isRecord(value) || typeof value.applied !== "boolean") {
+      return undefined;
+    }
+    return {
+      applied: value.applied,
+      ...(this.readString(value.templateId)
+        ? { templateId: this.readString(value.templateId) }
+        : {}),
+      ...(this.readPositiveInteger(value.version) !== undefined
+        ? { version: this.readPositiveInteger(value.version) }
+        : {})
+    };
+  }
+
+  private normalizeCorrectionGrounding(
+    value: unknown
+  ): SqlCorrectionGroundingV1 | undefined {
+    if (!this.isRecord(value)) {
+      return undefined;
+    }
+    const failedSqlRef = this.readString(value.failedSqlRef);
+    const retryReason = this.readString(value.retryReason);
+    if (!failedSqlRef || !retryReason) {
+      return undefined;
+    }
+
+    const failureCategory = this.readString(value.failureCategory);
+    const source = this.readString(value.source);
+    const semanticPlanRoute = this.readString(value.semanticPlanRoute);
+    const semanticPlanRouteKind = this.readString(value.semanticPlanRouteKind);
+    const contextPackStatus = this.readString(value.contextPackStatus);
+
+    return {
+      failedSqlRef,
+      ...(this.readString(value.failedSqlPreview)
+        ? {
+            failedSqlPreview: this.readString(value.failedSqlPreview)
+          }
+        : {}),
+      retryReason,
+      ...(this.readString(value.failureCode)
+        ? {
+            failureCode: this.readString(value.failureCode)
+          }
+        : {}),
+      ...(failureCategory &&
+      (failureCategory === "validation" ||
+        failureCategory === "governance" ||
+        failureCategory === "safety" ||
+        failureCategory === "provider" ||
+        failureCategory === "execution" ||
+        failureCategory === "unknown")
+        ? {
+            failureCategory
+          }
+        : {}),
+      ...(source && (source === "validation" || source === "execution")
+        ? {
+            source
+          }
+        : {}),
+      attemptCount: this.readNonNegativeInt(value.attemptCount),
+      maxAttempts: this.readNonNegativeInt(value.maxAttempts),
+      evidenceRefs: this.readStringArray(value.evidenceRefs),
+      ...(this.readString(value.semanticPlanSnapshotId)
+        ? {
+            semanticPlanSnapshotId: this.readString(value.semanticPlanSnapshotId)
+          }
+        : {}),
+      ...(semanticPlanRoute &&
+      (semanticPlanRoute === "answer" ||
+        semanticPlanRoute === "clarify" ||
+        semanticPlanRoute === "reject")
+        ? {
+            semanticPlanRoute
+          }
+        : {}),
+      ...(semanticPlanRouteKind &&
+      (semanticPlanRouteKind === "text_to_sql" ||
+        semanticPlanRouteKind === "metadata" ||
+        semanticPlanRouteKind === "general" ||
+        semanticPlanRouteKind === "clarify" ||
+        semanticPlanRouteKind === "fail_closed")
+        ? {
+            semanticPlanRouteKind
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.selectedTableCount) !== undefined
+        ? {
+            selectedTableCount: this.readNonNegativeInteger(value.selectedTableCount)
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.selectedColumnCount) !== undefined
+        ? {
+            selectedColumnCount: this.readNonNegativeInteger(value.selectedColumnCount)
+          }
+        : {}),
+      ...(contextPackStatus &&
+      (contextPackStatus === "ready" || contextPackStatus === "degraded")
+        ? {
+            contextPackStatus
+          }
+        : {}),
+      ...(this.readNonNegativeInteger(value.contextPackEvidenceCount) !== undefined
+        ? {
+            contextPackEvidenceCount: this.readNonNegativeInteger(
+              value.contextPackEvidenceCount
+            )
+          }
+        : {})
+    };
+  }
+
+  private readSemanticPlanRouteKind(
+    semanticPlan: Text2SqlV2RunArtifact["semanticPlan"] | undefined
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" | undefined {
+    const routeFilter = semanticPlan?.filters?.find((item) =>
+      item.startsWith("route_kind:")
+    );
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
       }
     }
 
+    if (semanticPlan?.route === "clarify") {
+      return "clarify";
+    }
+    if (semanticPlan?.route === "reject") {
+      return "fail_closed";
+    }
+    return semanticPlan ? "text_to_sql" : undefined;
+  }
+
+  private readRouteKindFromIntakeStage(
+    stages: Text2SqlV2RunArtifact["stages"] | undefined
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" | undefined {
+    if (!Array.isArray(stages)) {
+      return undefined;
+    }
+    const intake = stages.find((stage) => stage.stage === "intake");
+    if (!intake?.metadata || !this.isRecord(intake.metadata)) {
+      return undefined;
+    }
+    const route = this.readString((intake.metadata as { route?: unknown }).route);
+    if (
+      route === "text_to_sql" ||
+      route === "metadata" ||
+      route === "general" ||
+      route === "clarify" ||
+      route === "fail_closed"
+    ) {
+      return route;
+    }
     return undefined;
+  }
+
+  private readTraceV2Artifact(run: SqlRun): Text2SqlV2RunArtifact | undefined {
+    const traceWithCompat = run.trace as SqlRun["trace"] & {
+      v2?: unknown;
+    };
+    if (!this.isRecord(traceWithCompat.v2)) {
+      return undefined;
+    }
+    const stages = (traceWithCompat.v2 as { stages?: unknown }).stages;
+    if (!Array.isArray(stages)) {
+      return undefined;
+    }
+    return traceWithCompat.v2 as Text2SqlV2RunArtifact;
+  }
+
+  private resolveTraceV2Failure(
+    traceV2: Text2SqlV2RunArtifact
+  ): NonNullable<NonNullable<DeliveryContract["evidence"]>["v2"]>["failure"] {
+    for (let index = traceV2.stages.length - 1; index >= 0; index -= 1) {
+      const stage = traceV2.stages[index];
+      if (stage.status === "failed" && stage.failure) {
+        return stage.failure;
+      }
+    }
+    return traceV2.sqlValidation?.failure;
   }
 
   private readClarificationDecision(
@@ -845,10 +1177,7 @@ export class DeliveryContractMapper {
         ? (decisionRaw as ClarificationDecisionEvidence["decision"])
         : undefined;
     const triggerPathRaw = this.readString(
-      value.triggerPath ??
-        value.trigger_path ??
-        value.triggerSource ??
-        value.trigger_source
+      value.triggerPath ?? value.triggerSource
     )?.toLowerCase();
     const triggerPath =
       triggerPathRaw === "rule" ||
@@ -857,14 +1186,12 @@ export class DeliveryContractMapper {
         ? (triggerPathRaw as ClarificationDecisionEvidence["triggerPath"])
         : undefined;
     const decisionSource = this.readString(
-      value.decisionSource ?? value.decision_source ?? value.source
+      value.decisionSource ?? value.source
     );
-    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed ?? value.is_bypassed);
-    const bypassReasonCode = this.readString(
-      value.bypassReasonCode ?? value.bypass_reason_code
-    );
+    const bypassed = this.readBoolean(value.bypassed ?? value.isBypassed);
+    const bypassReasonCode = this.readString(value.bypassReasonCode);
     const confidenceLevelRaw = this.readString(
-      value.confidenceLevel ?? value.confidence_level ?? value.confidence
+      value.confidenceLevel ?? value.confidence
     )?.toLowerCase();
     const confidenceLevel =
       confidenceLevelRaw === "high" ||
@@ -873,23 +1200,14 @@ export class DeliveryContractMapper {
         ? (confidenceLevelRaw as ClarificationDecisionEvidence["confidenceLevel"])
         : undefined;
     const missingCriticalSlots = this.readStringArray(
-      value.missingCriticalSlots ??
-        value.missing_critical_slots ??
-        value.missingSlots ??
-        value.missing_slots
+      value.missingCriticalSlots ?? value.missingSlots
     );
     const conflictDetected = this.readBoolean(
-      value.conflictDetected ??
-        value.conflict_detected ??
-        value.hasConflict ??
-        value.has_conflict
+      value.conflictDetected ?? value.hasConflict
     );
-    const reasonCodes = this.readStringArray(value.reasonCodes ?? value.reason_codes);
+    const reasonCodes = this.readStringArray(value.reasonCodes);
     const question = this.readString(
-      value.question ??
-        value.clarificationQuestion ??
-        value.clarification_question ??
-        fallback?.question
+      value.question ?? value.clarificationQuestion ?? fallback?.question
     );
     const reason = this.readString(value.reason ?? fallback?.reason);
     const hasStructuredPayload = Boolean(
@@ -1074,17 +1392,6 @@ export class DeliveryContractMapper {
     }
   }
 
-  private parseSummaryObject(summary: string | undefined): Record<string, unknown> | undefined {
-    if (!summary) {
-      return undefined;
-    }
-    const trimmed = summary.trim();
-    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-      return undefined;
-    }
-    return this.parsePayload(trimmed);
-  }
-
   private isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
@@ -1179,6 +1486,71 @@ export class DeliveryContractMapper {
         .map((item) => this.readString(item))
         .filter((item): item is string => Boolean(item))
     );
+  }
+
+  private readStageName(value: unknown): Text2SqlV2StageName | undefined {
+    if (
+      value === "intake" ||
+      value === "retrieve" ||
+      value === "assemble-context" ||
+      value === "semantic-plan" ||
+      value === "generate-sql" ||
+      value === "validate" ||
+      value === "correct" ||
+      value === "execute" ||
+      value === "answer"
+    ) {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readStageNameArray(value: unknown): Text2SqlV2StageName[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is Text2SqlV2StageName =>
+      Boolean(this.readStageName(item))
+    );
+  }
+
+  private readRuntimePlanStatus(
+    value: unknown
+  ): Text2SqlV2RuntimePlanV1["items"][number]["status"] | undefined {
+    if (
+      value === "pending" ||
+      value === "running" ||
+      value === "completed" ||
+      value === "skipped" ||
+      value === "failed" ||
+      value === "clarification"
+    ) {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readArtifactVisibility(
+    value: unknown
+  ): Text2SqlV2ArtifactRefV1["visibility"] | undefined {
+    if (value === "user" || value === "internal" || value === "redacted") {
+      return value;
+    }
+    return undefined;
+  }
+
+  private readArtifactSensitivity(
+    value: unknown
+  ): Text2SqlV2ArtifactRefV1["sensitivity"] | undefined {
+    if (
+      value === "none" ||
+      value === "permission_filtered" ||
+      value === "provider_raw" ||
+      value === "sensitive"
+    ) {
+      return value;
+    }
+    return undefined;
   }
 
   private unique(values: string[]): string[] {

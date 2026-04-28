@@ -1,4 +1,5 @@
 export { QueryExecutorRouterService } from "../../../data/query/query-executor-router.service";
+export { SqliteQueryService } from "../../../data/sqlite/sqlite-query.service";
 export {
   SqlTableAccessGuardService,
   type SqlTableAccessContext

@@ -1,5 +1,6 @@
 import type { ExecutionTrace } from "@text2sql/shared-types";
 import { Injectable } from "@nestjs/common";
+import { assertSupportedV2RunReadModel } from "../../platform/read-model/run-view-support.guard";
 import {
   AuditLogRepository,
   ChatRepository
@@ -137,6 +138,13 @@ export class RagAuditReplayService {
       resolvedRunId ? this.ragReplayRepository.listByRunId(resolvedRunId) : Promise.resolve([]),
       resolvedRunId ? this.chatRepository.getRunById(resolvedRunId) : Promise.resolve(undefined)
     ]);
+    let runTrace: ExecutionTrace | undefined;
+    if (run && requestedRunId) {
+      assertSupportedV2RunReadModel(run, {
+        unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能回放审计链路。"
+      });
+      runTrace = run.trace;
+    }
 
     const fromAt = this.parseTimestamp(input.fromAt);
     const toAt = this.parseTimestamp(input.toAt);
@@ -202,7 +210,7 @@ export class RagAuditReplayService {
     return {
       runId: resolvedRunId,
       requestId: requestedRequestId || undefined,
-      runTrace: run?.trace,
+      runTrace,
       events,
       generatedAt: new Date().toISOString()
     };
@@ -577,4 +585,5 @@ export class RagAuditReplayService {
     }
     return true;
   }
+
 }

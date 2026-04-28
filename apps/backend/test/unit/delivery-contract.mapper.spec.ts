@@ -137,6 +137,316 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.artifact?.hasError).toBe(false);
   });
 
+  it("mirrors context-pack and metadata-answer summaries from trace.v2", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      sql: undefined,
+      rows: undefined,
+      columns: undefined,
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success",
+              metadata: {
+                route: "metadata"
+              }
+            },
+            { stage: "retrieve", status: "success" },
+            { stage: "assemble-context", status: "success" },
+            { stage: "semantic-plan", status: "success" },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "skipped" },
+            { stage: "correct", status: "skipped" },
+            { stage: "execute", status: "skipped" },
+            { stage: "answer", status: "success" }
+          ],
+          contextPack: {
+            status: "degraded",
+            selectedEvidenceIds: ["schema-orders", "metric-gmv"],
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id", "orders.amount"],
+            selectedContextSummary: {
+              count: 2,
+              evidenceIds: ["schema-orders", "metric-gmv"]
+            },
+            pruning: {
+              applied: true,
+              decisions: [
+                {
+                  removedCount: 1
+                }
+              ]
+            },
+            permissionFiltering: {
+              status: "applied",
+              deniedEvidenceCount: 1
+            },
+            laneStates: [
+              {
+                lane: "dense",
+                state: "unavailable"
+              }
+            ],
+            degradation: {
+              status: "degraded",
+              reasons: ["dense_unavailable:provider_missing"]
+            }
+          },
+          semanticPlan: {
+            route: "answer",
+            standaloneQuestion: "数据库有哪些表",
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id", "orders.amount"],
+            confidence: 0.87,
+            evidenceRefs: ["schema-orders", "metric-gmv"],
+            filters: ["route_kind:metadata"],
+            planLedger: {
+              version: "plan-ledger.v1",
+              snapshotId: "semantic-plan-v1",
+              obligations: [
+                {
+                  id: "ledger:warning:degraded",
+                  kind: "evidence",
+                  summary: "degraded optional context",
+                  criticality: "warning",
+                  status: "warning",
+                  evidenceRefs: [],
+                  reasonCodes: ["dense_unavailable"]
+                }
+              ],
+              summary: {
+                snapshotId: "semantic-plan-v1",
+                total: 1,
+                hardBlockerCount: 0,
+                warningCount: 1,
+                warningIds: ["ledger:warning:degraded"],
+                reasonCodes: ["dense_unavailable"]
+              }
+            }
+          },
+          planLedger: {
+            snapshotId: "semantic-plan-v1",
+            total: 1,
+            hardBlockerCount: 0,
+            warningCount: 1,
+            warningIds: ["ledger:warning:degraded"],
+            reasonCodes: ["dense_unavailable"]
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.contextPackSummary).toEqual({
+      status: "degraded",
+      selectedEvidenceCount: 2,
+      selectedTableCount: 1,
+      selectedColumnCount: 2,
+      pruningApplied: true,
+      prunedEvidenceCount: 1,
+      degradedLaneCount: 1,
+      permissionFilteringApplied: true,
+      permissionDeniedEvidenceCount: 1,
+      degradationReasons: ["dense_unavailable:provider_missing"]
+    });
+    expect(delivery.evidence?.metadataAnswer).toEqual({
+      groundedByContextPack: true,
+      routeKind: "metadata",
+      evidenceQuality: "degraded",
+      selectedEvidenceCount: 2,
+      permissionFilteringApplied: true,
+      pruningApplied: true,
+      degradationReasons: ["dense_unavailable:provider_missing"]
+    });
+    expect(delivery.evidence?.v2?.planLedger).toEqual({
+      snapshotId: "semantic-plan-v1",
+      total: 1,
+      hardBlockerCount: 0,
+      warningCount: 1,
+      warningIds: ["ledger:warning:degraded"],
+      reasonCodes: ["dense_unavailable"]
+    });
+    expect(delivery.evidence?.v2?.semanticPlan?.planLedger).toBeUndefined();
+  });
+
+  it("projects general no-sql answer evidence without pretending SQL or schema execution", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      sql: undefined,
+      rows: undefined,
+      columns: undefined,
+      answer: "GMV 是成交总额口径说明，不需要执行 SQL。",
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success",
+              metadata: {
+                route: "general"
+              }
+            },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "skipped" },
+            { stage: "correct", status: "skipped" },
+            { stage: "execute", status: "skipped" },
+            { stage: "answer", status: "success" }
+          ],
+          semanticPlan: {
+            route: "answer",
+            standaloneQuestion: "什么是 GMV 口径？",
+            selectedTables: [],
+            selectedColumns: [],
+            confidence: 0.8,
+            evidenceRefs: [],
+            filters: ["route_kind:general"]
+          },
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            items: [
+              {
+                id: "runtime-plan:generate-sql",
+                stage: "generate-sql",
+                goal: "生成 SQL",
+                status: "skipped",
+                reasonCodes: ["plain_general_no_sql"]
+              }
+            ]
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.artifact?.sql).toBeUndefined();
+    expect(delivery.evidence?.metadataAnswer).toMatchObject({
+      groundedByContextPack: false,
+      routeKind: "general",
+      evidenceQuality: "degraded",
+      selectedEvidenceCount: 0
+    });
+    expect(delivery.evidence?.v2?.runtimePlan?.items[0]).toMatchObject({
+      stage: "generate-sql",
+      status: "skipped",
+      reasonCodes: ["plain_general_no_sql"]
+    });
+  });
+
+  it("mirrors correction grounding from trace.v2 sqlGeneration artifact", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 1,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "retrieve", status: "success" },
+            { stage: "assemble-context", status: "success" },
+            { stage: "semantic-plan", status: "success" },
+            { stage: "generate-sql", status: "success" },
+            { stage: "validate", status: "success" },
+            { stage: "correct", status: "success" },
+            { stage: "execute", status: "success" },
+            { stage: "answer", status: "success" }
+          ],
+          sqlGeneration: {
+            sql: "SELECT orders.id FROM orders",
+            usedTables: ["orders"],
+            usedColumns: ["orders.id"],
+            evidenceRefs: ["chunk-orders-1"],
+            correctionGrounding: {
+              failedSqlRef: "sql.sha256.abc123abc123abcd",
+              retryReason: "missing column orders.missing_city",
+              failureCode: "SQL_MISSING_COLUMN",
+              failureCategory: "validation",
+              source: "validation",
+              attemptCount: 1,
+              maxAttempts: 2,
+              evidenceRefs: ["chunk-orders-1"],
+              semanticPlanSnapshotId: "semantic-plan-1",
+              semanticPlanRoute: "answer",
+              semanticPlanRouteKind: "text_to_sql",
+              selectedTableCount: 1,
+              selectedColumnCount: 1,
+              contextPackStatus: "ready",
+              contextPackEvidenceCount: 1
+            }
+          }
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.correctionGrounding).toMatchObject({
+      failedSqlRef: "sql.sha256.abc123abc123abcd",
+      retryReason: "missing column orders.missing_city",
+      attemptCount: 1,
+      maxAttempts: 2,
+      failureCode: "SQL_MISSING_COLUMN"
+    });
+  });
+
   it("accepts chartbi artifact override and preserves unified answer semantics", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
@@ -310,7 +620,272 @@ describe("DeliveryContractMapper", () => {
     });
   });
 
-  it("reads snake_case clarification decision from clarify step summary", () => {
+  it("maps optional trace.v2 into delivery evidence.v2 without changing base evidence fields", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            },
+            {
+              stage: "validate",
+              status: "failed",
+              failure: {
+                code: "VALIDATION_FAILED",
+                message: "table not allowed",
+                category: "validation",
+                terminal: true,
+                correctable: false
+              }
+            }
+          ],
+          semanticPlan: {
+            route: "reject",
+            standaloneQuestion: "统计订单",
+            selectedTables: ["orders"],
+            selectedColumns: ["orders.id"],
+            confidence: 0.2,
+            evidenceRefs: ["chunk:1"],
+            snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders"
+          },
+          sqlValidation: {
+            status: "failed",
+            checks: [
+              {
+                check: "permission",
+                status: "failed",
+                code: "TABLE_FORBIDDEN"
+              }
+            ],
+            correctable: false
+          },
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            currentItemId: "plan:validate",
+            items: [
+              {
+                id: "plan:validate",
+                stage: "validate",
+                goal: "Validate SQL against permissions and read-only policy.",
+                status: "failed",
+                reasonCodes: ["TABLE_FORBIDDEN"],
+                evidenceRefs: ["chunk:1"]
+              }
+            ]
+          },
+          artifactRefs: [
+            {
+              id: "artifact:validation:table-forbidden",
+              category: "validation_diagnostics",
+              summary: "Permission validation rejected the orders table.",
+              hash: "sha256:validation-table-forbidden",
+              sizeBytes: 512,
+              replayKeyHint:
+                "text2sql:artifact:validation_diagnostics:table-forbidden",
+              visibility: "internal",
+              sensitivity: "permission_filtered",
+              reasonCodes: ["permission_filtered"]
+            }
+          ],
+          smartDefaults: {
+            bundleId: "text2sql-smart-defaults",
+            version: "2026-04-28",
+            coveredStages: ["generate-sql", "validate", "answer"],
+            ruleIds: ["fail-closed-permission", "only-use-context-pack"],
+            status: "applied"
+          },
+          loopEvidence: [
+            {
+              loopIndex: 1,
+              triggerReason: "clarification_budget_exhausted|semantic_plan_fail_closed",
+              actionType: "fail_closed",
+              planDelta: {
+                route: {
+                  to: "reject"
+                },
+                snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders",
+                addedCoverageGapTypes: ["user_decision_gap"],
+                reasonCodes: [
+                  "clarification_budget_exhausted",
+                  "semantic_plan_fail_closed"
+                ]
+              },
+              terminationReason: "semantic_plan_fail_closed",
+              convergencePath: ["semantic-plan", "generate-sql", "reject"]
+            }
+          ],
+          terminationReason: "semantic_plan_fail_closed"
+        }
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.runId).toBe("run-delivery-unit");
+    expect(delivery.evidence?.v2?.version).toBe("v2");
+    expect(delivery.evidence?.v2?.stageOrder).toEqual([
+      "intake",
+      "retrieve",
+      "assemble-context",
+      "semantic-plan",
+      "generate-sql",
+      "validate",
+      "correct",
+      "execute",
+      "answer"
+    ]);
+    expect(delivery.evidence?.v2?.stageArtifacts).toHaveLength(2);
+    expect(delivery.evidence?.v2?.semanticPlan?.route).toBe("reject");
+    expect(delivery.evidence?.v2?.semanticPlan?.snapshotId).toBe(
+      "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders"
+    );
+    expect(delivery.evidence?.v2?.sqlValidation?.status).toBe("failed");
+    expect(delivery.evidence?.v2?.runtimePlan?.items).toEqual([
+      {
+        id: "plan:validate",
+        stage: "validate",
+        goal: "Validate SQL against permissions and read-only policy.",
+        status: "failed",
+        reasonCodes: ["TABLE_FORBIDDEN"],
+        evidenceRefs: ["chunk:1"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.artifactRefs).toEqual([
+      {
+        id: "artifact:validation:table-forbidden",
+        category: "validation_diagnostics",
+        summary: "Permission validation rejected the orders table.",
+        hash: "sha256:validation-table-forbidden",
+        sizeBytes: 512,
+        replayKeyHint:
+          "text2sql:artifact:validation_diagnostics:table-forbidden",
+        visibility: "internal",
+        sensitivity: "permission_filtered",
+        reasonCodes: ["permission_filtered"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.smartDefaults).toEqual({
+      bundleId: "text2sql-smart-defaults",
+      version: "2026-04-28",
+      coveredStages: ["generate-sql", "validate", "answer"],
+      ruleIds: ["fail-closed-permission", "only-use-context-pack"],
+      status: "applied"
+    });
+    expect(delivery.evidence?.v2?.loopEvidence).toEqual([
+      {
+        loopIndex: 1,
+        triggerReason: "clarification_budget_exhausted|semantic_plan_fail_closed",
+        actionType: "fail_closed",
+        planDelta: {
+          route: {
+            to: "reject"
+          },
+          snapshotId: "semantic-plan:fail-closed:ready:t1:c1:e1:g1:orders",
+          addedCoverageGapTypes: ["user_decision_gap"],
+          reasonCodes: [
+            "clarification_budget_exhausted",
+            "semantic_plan_fail_closed"
+          ]
+        },
+        terminationReason: "semantic_plan_fail_closed",
+        convergencePath: ["semantic-plan", "generate-sql", "reject"]
+      }
+    ]);
+    expect(delivery.evidence?.v2?.terminationReason).toBe("semantic_plan_fail_closed");
+    expect(delivery.evidence?.v2?.failure?.code).toBe("VALIDATION_FAILED");
+  });
+
+  it("ignores malformed optional runtime intelligence fields in delivery projection", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            {
+              stage: "intake",
+              status: "success"
+            }
+          ],
+          runtimePlan: {
+            version: "runtime-plan.v1",
+            items: [
+              {
+                id: "plan:bad",
+                stage: "not-a-stage",
+                goal: "bad item",
+                status: "completed"
+              }
+            ]
+          },
+          artifactRefs: [
+            {
+              id: "artifact:missing-hash",
+              category: "context_snippets",
+              summary: "missing hash",
+              visibility: "user"
+            }
+          ],
+          smartDefaults: {
+            bundleId: "text2sql-smart-defaults",
+            version: "2026-04-28",
+            coveredStages: [],
+            ruleIds: [],
+            status: "applied"
+          }
+        } as unknown as NonNullable<SqlRun["trace"]["v2"]>
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: []
+    });
+
+    expect(delivery.evidence?.v2?.version).toBe("v2");
+    expect(delivery.evidence?.v2?.runtimePlan).toBeUndefined();
+    expect(delivery.evidence?.v2?.artifactRefs).toBeUndefined();
+    expect(delivery.evidence?.v2?.smartDefaults).toBeUndefined();
+  });
+
+  it("ignores legacy clarify step summaries without canonical trace decision payload", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       status: "clarification",
@@ -349,39 +924,45 @@ describe("DeliveryContractMapper", () => {
       replayRecords: []
     });
 
-    expect(delivery.evidence?.clarificationDecision).toEqual({
-      decision: "clarify",
-      triggerPath: "rule",
-      confidenceLevel: "low",
-      missingCriticalSlots: ["time"],
-      conflictDetected: false,
-      reasonCodes: ["missing_time_slot"],
-      question: "请补充时间范围（例如近30天、本季度或具体起止日期）。",
-      reason: "关键槽位缺失：时间范围"
-    });
+    expect(delivery.evidence?.clarificationDecision).toBeUndefined();
   });
 
-  it("maps SQL coverage evidence from generate-sql step summary", () => {
+  it("maps SQL coverage evidence from canonical trace.v2 sqlValidation", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "generate-sql",
-            status: "success",
-            at: "2026-04-18T00:00:00.500Z",
-            outputSummary: JSON.stringify({
-              coverage: {
-                gateStatus: "passed",
-                missingObjects: [],
-                triggerSource: "selected_context"
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "validate", status: "success" }
+          ],
+          sqlValidation: {
+            status: "passed",
+            checks: [
+              {
+                check: "plan-coverage",
+                status: "passed"
               }
-            })
+            ],
+            correctable: false
           }
-        ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -402,7 +983,7 @@ describe("DeliveryContractMapper", () => {
     expect(evidenceWithCoverage?.sqlCoverage).toEqual({
       gateStatus: "passed",
       missingObjects: [],
-      triggerSource: "selected_context"
+      triggerSource: "semantic_context"
     });
   });
 
@@ -426,32 +1007,33 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.modelingRevision).toBe(12);
   });
 
-  it("maps saved prior SQL shortcut evidence from resolve+safety trace steps", () => {
+  it("maps saved prior SQL shortcut evidence from canonical v2 stage artifacts", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "resolve-saved-prior-sql",
-            status: "success",
-            at: "2026-04-25T00:00:00.100Z",
-            outputSummary: JSON.stringify({
-              status: "hit",
-              reasonCodes: ["prior_sql_shortcut_hit"],
-              selectedChunkId: "chunk-saved-prior-1",
-              selectedViewId: "view.chat_run.run-1",
-              selectedSourceRunId: "run-1"
-            })
-          },
-          {
-            node: "safety-check",
-            status: "success",
-            at: "2026-04-25T00:00:00.200Z"
-          }
-        ]
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [
+            { stage: "intake", status: "success" },
+            { stage: "generate-sql", status: "skipped" },
+            { stage: "validate", status: "success" }
+          ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -463,40 +1045,42 @@ describe("DeliveryContractMapper", () => {
     expect(delivery.evidence?.savedPriorSql).toEqual({
       status: "hit",
       shortcutUsed: true,
-      reasonCodes: ["prior_sql_shortcut_hit"],
-      selectedChunkId: "chunk-saved-prior-1",
-      selectedViewId: "view.chat_run.run-1",
-      selectedSourceRunId: "run-1",
+      reasonCodes: ["saved_prior_sql_shortcut"],
       safetyResult: "passed"
     });
   });
 
-  it("falls back to semantic step summary for revision and binding evidence", () => {
+  it("reads semantic snapshot from canonical trace.v2 context pack", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({
       trace: {
         runId: "run-delivery-unit",
         provider: "volcengine",
         retryCount: 0,
-        steps: [
-          {
-            node: "build-semantic-query",
-            status: "success",
-            at: "2026-04-18T00:00:00.500Z",
-            outputSummary: JSON.stringify({
-              semanticVersion: 13,
-              lockStatus: "locked",
-              modelingRevision: 21,
-              contextPackStatus: "ready",
-              semanticBindingSummary: {
-                modelBindingCount: 4,
-                relationshipBindingCount: 2,
-                metricBindingCount: 3,
-                calculatedFieldBindingCount: 1
-              }
-            })
+        modelingRevision: 21,
+        steps: [],
+        v2: {
+          version: "v2",
+          stageOrder: [
+            "intake",
+            "retrieve",
+            "assemble-context",
+            "semantic-plan",
+            "generate-sql",
+            "validate",
+            "correct",
+            "execute",
+            "answer"
+          ],
+          stages: [{ stage: "intake", status: "success" }],
+          contextPack: {
+            status: "ready",
+            selectedEvidenceIds: [],
+            selectedTables: [],
+            selectedColumns: [],
+            warnings: ["semantic_context_ready"]
           }
-        ]
+        }
       } as SqlRun["trace"]
     });
 
@@ -506,15 +1090,8 @@ describe("DeliveryContractMapper", () => {
     });
 
     expect(delivery.evidence?.modelingRevision).toBe(21);
-    expect(delivery.evidence?.semanticVersion).toBe(13);
-    expect(delivery.evidence?.semanticLockStatus).toBe("locked");
     expect(delivery.evidence?.contextPackStatus).toBe("ready");
-    expect(delivery.evidence?.semanticInstructionSummary).toEqual({
-      modelBindingCount: 4,
-      relationshipBindingCount: 2,
-      metricBindingCount: 3,
-      calculatedFieldBindingCount: 1
-    });
+    expect(delivery.evidence?.semanticDegradeReason).toBe("semantic_context_ready");
   });
 
   it("keeps trace modelingRevision when step summary has a different revision", () => {

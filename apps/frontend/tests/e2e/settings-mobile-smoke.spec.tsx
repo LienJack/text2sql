@@ -6,6 +6,7 @@ import SettingsPage from "@/app/settings/page";
 import { getRun } from "@/lib/api-client";
 import {
   fetchBackendHealthSnapshot,
+  fetchRagTaskConfigs,
   fetchRagQualityReport,
   fetchRagReplayCompleteness,
   fetchSettingsView,
@@ -35,6 +36,7 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
     ...actual,
     fetchSettingsView: vi.fn(),
     fetchSupportedProviders: vi.fn(),
+    fetchRagTaskConfigs: vi.fn(),
     fetchBackendHealthSnapshot: vi.fn(),
     fetchRagQualityReport: vi.fn(),
     fetchRagReplayCompleteness: vi.fn()
@@ -44,6 +46,7 @@ vi.mock("@/lib/settings-api-client", async (importOriginal) => {
 const mockGetRun = vi.mocked(getRun);
 const mockFetchSettingsView = vi.mocked(fetchSettingsView);
 const mockFetchSupportedProviders = vi.mocked(fetchSupportedProviders);
+const mockFetchRagTaskConfigs = vi.mocked(fetchRagTaskConfigs);
 const mockFetchBackendHealthSnapshot = vi.mocked(fetchBackendHealthSnapshot);
 const mockFetchRagQualityReport = vi.mocked(fetchRagQualityReport);
 const mockFetchRagReplayCompleteness = vi.mocked(fetchRagReplayCompleteness);
@@ -71,6 +74,13 @@ describe("settings mobile smoke", () => {
 
     mockFetchSettingsView.mockResolvedValue(createSettingsView("user"));
     mockFetchSupportedProviders.mockResolvedValue([]);
+    mockFetchRagTaskConfigs.mockResolvedValue({
+      actor: {
+        id: "frontend-user",
+        role: "user"
+      },
+      items: []
+    });
     mockFetchBackendHealthSnapshot.mockResolvedValue({
       status: "ok",
       dependencies: {

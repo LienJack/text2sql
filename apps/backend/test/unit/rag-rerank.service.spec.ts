@@ -1,4 +1,5 @@
 import { RagRerankService } from "../../src/modules/rag/rerank/rag-rerank.service";
+import { DomainError } from "../../src/common/domain-error";
 import type { ModelRerankerAdapter } from "../../src/modules/rag/rerank/model-reranker.adapter";
 import type { RagReplayRepository } from "../../src/modules/rag/observability/rag-replay.repository";
 import type { RagRetrievalBundle } from "../../src/modules/rag/retrieval/rag-retrieval.types";
@@ -85,7 +86,7 @@ const createBundle = (): RagRetrievalBundle => ({
 
 describe("rag rerank service", () => {
   function createService(
-    adapter: Pick<ModelRerankerAdapter, "rerank">,
+    adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata">,
     replay: Pick<RagReplayRepository, "writeReplay">
   ): RagRerankService {
     return new RagRerankService(
@@ -101,8 +102,15 @@ describe("rag rerank service", () => {
   }
 
   it("skips secondary rerank when candidate count is below threshold", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([])
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [],
+        metadata: {
+          mode: "mock",
+          inputCount: 0,
+          outputCount: 0
+        }
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -115,7 +123,7 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 10
     });
 
-    expect(adapter.rerank).not.toHaveBeenCalled();
+    expect(adapter.rerankWithMetadata).not.toHaveBeenCalled();
     expect(response.retrieval_bundle.reranked?.length).toBe(2);
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["secondary_rerank_skipped_low_candidates"])
@@ -123,8 +131,8 @@ describe("rag rerank service", () => {
   });
 
   it("falls back to primary ranking when secondary rerank fails", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockRejectedValue(new Error("secondary_model_unavailable"))
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockRejectedValue(new Error("secondary_model_unavailable"))
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -137,29 +145,157 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 2
     });
 
-    expect(adapter.rerank).toHaveBeenCalledTimes(1);
+    expect(adapter.rerankWithMetadata).toHaveBeenCalledTimes(1);
     expect(response.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
       true
     );
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
-      expect.arrayContaining(["secondary_model_unavailable"])
+      expect.arrayContaining(["secondary_rerank_unavailable_secondary_model_unavailable"])
+    );
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.unavailable_reason).toBe(
+      "secondary_rerank_unavailable_secondary_model_unavailable"
+    );
+  });
+
+  it.each([
+    {
+      label: "timeout",
+      error: new Error("secondary_rerank_timeout"),
+      reason: "secondary_rerank_timeout"
+    },
+    {
+      label: "provider missing",
+      error: new DomainError("LLM_CONFIG_MISSING", "rerank config missing", 503),
+      reason: "secondary_rerank_unavailable_provider_config_missing"
+    },
+    {
+      label: "invalid payload",
+      error: new DomainError(
+        "RERANK_PROVIDER_INVALID_PAYLOAD",
+        "provider returned invalid payload",
+        502,
+        {
+          provider: "openai",
+          model: "gpt-4.1-mini"
+        }
+      ),
+      reason: "secondary_rerank_unavailable_invalid_payload"
+    }
+  ])("records deterministic fallback metadata for $label", async ({ error, reason }) => {
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockRejectedValue(error)
+    };
+    const replay: Pick<RagReplayRepository, "writeReplay"> = {
+      writeReplay: jest.fn().mockResolvedValue(undefined)
+    };
+    const service = createService(adapter, replay);
+
+    const response = await service.rerank({
+      retrievalBundle: createBundle(),
+      secondaryMinCandidates: 2
+    });
+
+    expect(response.retrieval_bundle.status).toBe("degraded");
+    expect(response.retrieval_bundle.degrade_reasons).toEqual(
+      expect.arrayContaining([reason])
+    );
+    expect(response.retrieval_bundle.rerank_metadata?.secondary).toMatchObject({
+      status: "degraded",
+      unavailable_reason: reason,
+      inputCount: 2,
+      outputCount: 0,
+      evidenceIds: ["chunk-a", "chunk-b"]
+    });
+
+    const secondaryReplayCall = (replay.writeReplay as jest.Mock).mock.calls
+      .map(([payload]) => payload)
+      .find((payload) => payload.replayKey === "rerank:secondary");
+    expect(secondaryReplayCall?.payload).toMatchObject({
+      status: "degraded",
+      reason,
+      metadata: {
+        status: "degraded",
+        unavailableReason: reason
+      }
+    });
+  });
+
+  it("treats secondary output count mismatch as unavailable and keeps primary ordering", async () => {
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [
+          {
+            candidateId: "chunk-a",
+            score: 0.99,
+            reason: "only one result returned"
+          }
+        ],
+        metadata: {
+          mode: "provider",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          inputCount: 2,
+          outputCount: 1
+        }
+      })
+    };
+    const replay: Pick<RagReplayRepository, "writeReplay"> = {
+      writeReplay: jest.fn().mockResolvedValue(undefined)
+    };
+    const service = createService(adapter, replay);
+
+    const response = await service.rerank({
+      retrievalBundle: createBundle(),
+      secondaryMinCandidates: 2
+    });
+
+    expect(response.retrieval_bundle.degrade_reasons).toEqual(
+      expect.arrayContaining([
+        "secondary_rerank_unavailable_rerank_provider_output_candidate_mismatch"
+      ])
+    );
+    expect(response.retrieval_bundle.reranked?.[0]?.chunk_id).toBe("chunk-a");
+    expect(response.retrieval_bundle.reranked?.every((item) => item.secondary_score === undefined)).toBe(
+      true
+    );
+    const contextPack = response.retrieval_bundle.context_pack as
+      | {
+          lane_metadata?: Array<{ lane?: string; state?: string }>;
+        }
+      | undefined;
+    expect(contextPack?.lane_metadata).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lane: "rerank",
+          state: "unavailable"
+        })
+      ])
     );
   });
 
   it("applies secondary scores when model rerank succeeds", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([
-        {
-          candidateId: "chunk-a",
-          score: 0.2,
-          reason: "less relevant"
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [
+          {
+            candidateId: "chunk-a",
+            score: 0.2,
+            reason: "less relevant"
+          },
+          {
+            candidateId: "chunk-b",
+            score: 0.95,
+            reason: "strong semantic match"
+          }
+        ],
+        metadata: {
+          mode: "provider",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+          inputCount: 2,
+          outputCount: 2
         },
-        {
-          candidateId: "chunk-b",
-          score: 0.95,
-          reason: "strong semantic match"
-        }
-      ])
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)
@@ -172,14 +308,23 @@ describe("rag rerank service", () => {
       secondaryMinCandidates: 2
     });
 
-    expect(adapter.rerank).toHaveBeenCalledTimes(1);
+    expect(adapter.rerankWithMetadata).toHaveBeenCalledTimes(1);
     expect(response.retrieval_bundle.reranked?.[0]?.chunk_id).toBe("chunk-b");
     expect(response.retrieval_bundle.reranked?.[0]?.secondary_score).toBeCloseTo(0.95);
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.provider).toBe("openai");
+    expect(response.retrieval_bundle.rerank_metadata?.secondary.model).toBe("gpt-4.1-mini");
   });
 
   it("keeps retrieval column pruning evidence visible in rerank replay payload", async () => {
-    const adapter: Pick<ModelRerankerAdapter, "rerank"> = {
-      rerank: jest.fn().mockResolvedValue([])
+    const adapter: Pick<ModelRerankerAdapter, "rerankWithMetadata"> = {
+      rerankWithMetadata: jest.fn().mockResolvedValue({
+        results: [],
+        metadata: {
+          mode: "mock",
+          inputCount: 0,
+          outputCount: 0
+        }
+      })
     };
     const replay: Pick<RagReplayRepository, "writeReplay"> = {
       writeReplay: jest.fn().mockResolvedValue(undefined)

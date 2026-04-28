@@ -140,8 +140,95 @@ export class AppConfigService {
     return this.config.get<string>("LLM_MOCK_MODE", "false") === "true";
   }
 
+  get embeddingProvider(): string {
+    return this.config.get<string>("EMBEDDING_PROVIDER", this.llmProvider);
+  }
+
+  get embeddingApiKey(): string {
+    return this.config.get<string>("EMBEDDING_API_KEY", this.llmApiKey);
+  }
+
+  get embeddingBaseUrl(): string {
+    return this.config.get<string>("EMBEDDING_BASE_URL", this.llmBaseUrl);
+  }
+
+  get embeddingModel(): string {
+    return this.config.get<string>("EMBEDDING_MODEL", "text-embedding-3-small");
+  }
+
+  get embeddingTimeoutMs(): number {
+    const raw = this.config.get<string>("EMBEDDING_TIMEOUT_MS", String(this.llmTimeoutMs));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `EMBEDDING_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${this.llmTimeoutMs}。`
+    );
+    return this.llmTimeoutMs;
+  }
+
+  get embeddingDimensions(): number | undefined {
+    const raw = this.config.get<string>("EMBEDDING_DIMENSIONS", "").trim();
+    if (!raw) {
+      return undefined;
+    }
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `EMBEDDING_DIMENSIONS 配置无效（${raw}），将忽略并使用 provider 默认维度。`
+    );
+    return undefined;
+  }
+
+  get embeddingVectorVersion(): string {
+    return this.config.get<string>("EMBEDDING_VECTOR_VERSION", "v1");
+  }
+
+  get embeddingMockMode(): boolean {
+    return this.config.get<string>("EMBEDDING_MOCK_MODE", "false") === "true";
+  }
+
+  get rerankProvider(): string {
+    return this.config.get<string>("RERANK_PROVIDER", this.llmProvider);
+  }
+
+  get rerankApiKey(): string {
+    return this.config.get<string>("RERANK_API_KEY", this.llmApiKey);
+  }
+
+  get rerankBaseUrl(): string {
+    return this.config.get<string>("RERANK_BASE_URL", this.llmBaseUrl);
+  }
+
+  get rerankModel(): string {
+    return this.config.get<string>("RERANK_MODEL", this.llmModel);
+  }
+
+  get rerankTimeoutMs(): number {
+    const raw = this.config.get<string>("RERANK_TIMEOUT_MS", String(this.llmTimeoutMs));
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    this.logger.warn(
+      `RERANK_TIMEOUT_MS 配置无效（${raw}），已回退到 LLM_TIMEOUT_MS=${this.llmTimeoutMs}。`
+    );
+    return this.llmTimeoutMs;
+  }
+
+  get rerankMockMode(): boolean {
+    return this.config.get<string>("RERANK_MOCK_MODE", "false") === "true";
+  }
+
   get agentPlanningScaffoldEnabled(): boolean {
     return this.config.get<string>("AGENT_PLANNING_SCAFFOLD_ENABLED", "false") === "true";
+  }
+
+  get agentRagRetrievalEnabled(): boolean {
+    return this.config.get<string>("AGENT_RAG_RETRIEVAL_ENABLED", "true") === "true";
   }
 
   get clarificationHybridEnabled(): boolean {

@@ -2,7 +2,6 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/commo
 import type {
   ChatMessage,
   EvaluationReport,
-  PromptTemplateTraceEvidenceCompat,
   Session,
   SessionSyncStatus,
   SqlRun
@@ -756,22 +755,13 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     const traceWithPlannerMetadata = trace as SqlRun["trace"] & {
       plannerCache?: Record<string, unknown>;
       plannerReplay?: Record<string, unknown>;
-      prompt_template?: unknown;
-      prompt_template_evidence?: unknown;
-      templateEvidence?: unknown;
     };
     const {
       promptTemplate: canonicalPromptTemplate,
-      prompt_template: legacySnakePromptTemplate,
-      prompt_template_evidence: legacyEvidencePromptTemplate,
-      templateEvidence: legacyTemplateEvidence,
       ...traceWithoutPromptTemplateAliases
     } = traceWithPlannerMetadata;
     const normalizedPromptTemplate = this.normalizePromptTemplateTraceEvidence(
-      canonicalPromptTemplate ??
-        legacySnakePromptTemplate ??
-        legacyEvidencePromptTemplate ??
-        legacyTemplateEvidence
+      canonicalPromptTemplate
     );
     const normalizedSteps = (trace.steps ?? []).map((step, index) => {
       const sequence = step.sequence ?? index + 1;
@@ -807,18 +797,18 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     if (!this.isRecord(value)) {
       return undefined;
     }
-    const candidate = value as PromptTemplateTraceEvidenceCompat;
-    const templateId = this.readNonEmptyString(candidate.templateId ?? candidate.template_id);
-    const scope = this.normalizePromptTemplateScope(
-      candidate.scope ?? candidate.scope_type ?? candidate.template_scope
-    );
-    const version = this.readPositiveInteger(candidate.version ?? candidate.template_version);
-    const fallbackReason = this.readNonEmptyString(
-      candidate.fallbackReason ?? candidate.fallback_reason
-    );
-    const scene = this.normalizePromptTemplateScene(
-      candidate.scene ?? candidate.scene_name ?? candidate.template_scene
-    );
+    const candidate = value as {
+      templateId?: unknown;
+      scope?: unknown;
+      version?: unknown;
+      fallbackReason?: unknown;
+      scene?: unknown;
+    };
+    const templateId = this.readNonEmptyString(candidate.templateId);
+    const scope = this.normalizePromptTemplateScope(candidate.scope);
+    const version = this.readPositiveInteger(candidate.version);
+    const fallbackReason = this.readNonEmptyString(candidate.fallbackReason);
+    const scene = this.normalizePromptTemplateScene(candidate.scene);
 
     if (!templateId && !scope && version === undefined && !fallbackReason && !scene) {
       return undefined;

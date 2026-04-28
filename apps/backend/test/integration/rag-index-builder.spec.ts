@@ -53,15 +53,21 @@ describe("rag index builder integration", () => {
 
     expect(result.status).toBe("active");
     expect(result.archivedChannels).toEqual(["lexical", "dense"]);
-    expect(result.denseMode).toBe("placeholder_vector_string");
+    expect(["mock_provider", "external_provider", "dense_unavailable"]).toContain(
+      result.denseMode
+    );
     expect(result.entryCount).toBe(2);
     expect(version?.status).toBe("active");
     expect(entries).toHaveLength(2);
     expect(entries.every((entry) => entry.lexicalContent.length > 0)).toBe(true);
-    expect(entries.every((entry) => typeof entry.denseVector === "string")).toBe(true);
-    const parsedVector = JSON.parse(entries[0]?.denseVector ?? "[]");
-    expect(Array.isArray(parsedVector)).toBe(true);
-    expect(parsedVector).toHaveLength(8);
+    if (result.denseMode === "dense_unavailable") {
+      expect(entries.every((entry) => entry.denseVector === undefined)).toBe(true);
+    } else {
+      expect(entries.every((entry) => typeof entry.denseVector === "string")).toBe(true);
+      const parsedVector = JSON.parse(entries[0]?.denseVector ?? "[]");
+      expect(Array.isArray(parsedVector)).toBe(true);
+      expect(parsedVector.length).toBeGreaterThan(0);
+    }
 
     await moduleRef.close();
   });

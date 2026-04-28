@@ -1184,6 +1184,7 @@ describe("ModelingWorkspacePage", () => {
     render(<ModelingWorkspacePage />);
 
     await waitForWorkspaceDatasourceReady();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     await user.click(screen.getByRole("button", { name: "trigger-node-action-edit-relationship" }));
 
     expect(screen.getByTestId("modeling-top-status-bar")).toHaveTextContent(
@@ -1191,6 +1192,7 @@ describe("ModelingWorkspacePage", () => {
     );
     expect(screen.getByTestId("modeling-context-drawer")).toHaveAttribute("data-open", "false");
     expect(await screen.findByRole("dialog", { name: "Edit relationship" })).toBeInTheDocument();
+    confirmSpy.mockRestore();
   });
 
   it("falls back to add-relationship dialog when target relationship no longer exists", async () => {

@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { Test, type TestingModule } from "@nestjs/testing";
 import { AppModule } from "../src/app.module";
-import { GraphBuilderService } from "../src/modules/conversation/agent/graph/graph.builder";
+import { ChatService } from "../src/modules/conversation/chat/chat.service";
 import { createSeededSqliteFixture } from "../test/support/sqlite-fixture";
 
 type RunStatus =
@@ -295,6 +295,30 @@ function findTraceStep(run: { trace?: { steps?: unknown[] } }, node: string) {
   }) as Record<string, unknown> | undefined;
 }
 
+function readString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function findTraceV2Stage(
+  run: { trace?: { v2?: { stages?: unknown[] } } },
+  stage: string
+): Record<string, unknown> | undefined {
+  const stages = run.trace?.v2?.stages;
+  if (!Array.isArray(stages)) {
+    return undefined;
+  }
+  return stages.find((item) => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      return false;
+    }
+    return (item as Record<string, unknown>).stage === stage;
+  }) as Record<string, unknown> | undefined;
+}
+
 function readRunStatus(value: unknown): RunStatus {
   if (
     value === "clarification" ||
@@ -311,6 +335,9 @@ function detectMetadataBypass(run: {
   status: RunStatus;
   trace?: {
     steps?: unknown[];
+    v2?: {
+      stages?: unknown[];
+    };
     clarificationDecision?: {
       decisionSource?: unknown;
       bypassed?: unknown;
@@ -321,6 +348,15 @@ function detectMetadataBypass(run: {
   if (run.status === "clarification") {
     return false;
   }
+  const intakeStage = findTraceV2Stage(run, "intake");
+  const intakeMetadata =
+    intakeStage && typeof intakeStage.metadata === "object" && intakeStage.metadata !== null
+      ? (intakeStage.metadata as Record<string, unknown>)
+      : undefined;
+  if (readString(intakeMetadata?.route) === "metadata") {
+    return true;
+  }
+
   const decisionSource = run.trace?.clarificationDecision?.decisionSource;
   const bypassed = run.trace?.clarificationDecision?.bypassed;
   const bypassReasonCode = run.trace?.clarificationDecision?.bypassReasonCode;
@@ -340,15 +376,49 @@ function detectMetadataBypass(run: {
   return outputSummary?.semanticIntent === "metadata";
 }
 
-function detectStrictSemanticPath(run: { trace?: { steps?: unknown[] } }): boolean {
-  const semanticStep = findTraceStep(run, "build-semantic-query");
-  if (!semanticStep) {
+function detectStrictSemanticPath(run: {
+  trace?: { steps?: unknown[]; v2?: { stages?: unknown[] } };
+}): boolean {
+  const semanticStage = findTraceV2Stage(run, "semantic-plan");
+  if (semanticStage?.status !== undefined && semanticStage.status !== "skipped") {
+    return true;
+  }
+
+  const intakeStage = findTraceV2Stage(run, "intake");
+  const intakeMetadata =
+    intakeStage && typeof intakeStage.metadata === "object" && intakeStage.metadata !== null
+      ? (intakeStage.metadata as Record<string, unknown>)
+      : undefined;
+  const intakeRoute = readString(intakeMetadata?.route);
+  if (
+    intakeRoute === "metadata" ||
+    intakeRoute === "general" ||
+    intakeRoute === "text_to_sql" ||
+    intakeRoute === "needs_clarification" ||
+    intakeRoute === "unsafe" ||
+    intakeRoute === "unsupported"
+  ) {
+    return true;
+  }
+
+  const legacySemanticStep = findTraceStep(run, "build-semantic-query");
+  if (!legacySemanticStep) {
     return false;
   }
-  return semanticStep.status !== "skipped";
+  return legacySemanticStep.status !== "skipped";
 }
 
-function extractSemanticPlanStatus(run: { trace?: { steps?: unknown[] } }): string | undefined {
+function extractSemanticPlanStatus(run: {
+  trace?: { steps?: unknown[]; v2?: { stages?: unknown[] } };
+}): string | undefined {
+  const semanticStage = findTraceV2Stage(run, "semantic-plan");
+  if (semanticStage) {
+    const status = readString(semanticStage.status);
+    if (status) {
+      return status;
+    }
+  }
+
   const semanticStep = findTraceStep(run, "build-semantic-query");
   const outputSummary = parseOutputSummary(
     typeof semanticStep?.outputSummary === "string"
@@ -363,16 +433,19 @@ function extractSemanticPlanStatus(run: { trace?: { steps?: unknown[] } }): stri
 
 function evaluatePostClarifySemanticPass(run: {
   status: RunStatus;
-  trace?: { steps?: unknown[] };
+  trace?: { steps?: unknown[]; v2?: { stages?: unknown[] } };
 }): boolean {
   if (run.status === "clarification" || run.status === "failed") {
     return false;
   }
-  const semanticStep = findTraceStep(run, "build-semantic-query");
-  if (!semanticStep) {
-    return false;
+
+  const semanticStage = findTraceV2Stage(run, "semantic-plan");
+  if (semanticStage) {
+    return semanticStage.status === "success";
   }
-  return semanticStep.status === "success";
+
+  const semanticStep = findTraceStep(run, "build-semantic-query");
+  return semanticStep?.status === "success";
 }
 
 async function readFixture(filePath: string): Promise<ClarificationBalanceFixture> {
@@ -433,7 +506,7 @@ export async function collectClarificationBalanceGate(
       imports: [AppModule]
     }).compile();
     moduleRef = builtModule;
-    const graph = builtModule.get(GraphBuilderService);
+    const chatService = builtModule.get(ChatService);
 
     for (const testCase of fixture.cases) {
       const diagnostics: CaseDiagnostics = {
@@ -450,13 +523,12 @@ export async function collectClarificationBalanceGate(
       };
 
       try {
-        const firstRun = await graph.run({
-          runId: randomUUID(),
-          sessionId: `clarification-balance:${testCase.id}`,
-          question: testCase.initialQuestion,
-          datasourceId: "sqlite_main",
-          datasourceType: "sqlite"
-        });
+        const session = await chatService.createSession("sqlite_main");
+        const firstRun = await chatService.sendMessage(
+          session.id,
+          testCase.initialQuestion,
+          randomUUID()
+        );
         const firstRunStatus = readRunStatus(firstRun.status);
         diagnostics.firstRunStatus = firstRunStatus;
 
@@ -488,13 +560,11 @@ export async function collectClarificationBalanceGate(
           trace: firstRun.trace
         });
         if (triggeredClarification && testCase.followUpQuestion) {
-          const followUpRun = await graph.run({
-            runId: randomUUID(),
-            sessionId: `clarification-balance:${testCase.id}`,
-            question: testCase.followUpQuestion,
-            datasourceId: "sqlite_main",
-            datasourceType: "sqlite"
-          });
+          const followUpRun = await chatService.sendMessage(
+            session.id,
+            testCase.followUpQuestion,
+            randomUUID()
+          );
           diagnostics.followUpRunStatus = readRunStatus(followUpRun.status);
           diagnostics.strictSemanticPathDetected =
             diagnostics.strictSemanticPathDetected ||

@@ -8,16 +8,20 @@ import type {
   EvaluationCaseResult,
   EvaluationReport
 } from "@text2sql/shared-types";
-import { GraphBuilderService } from "../conversation/agent/graph/graph.builder";
+import { Text2SQLWorkflowRunner } from "../conversation/text2sql/text2sql-workflow-runner.service";
 import { ChatRepository } from "../data/persistence/chat.repository";
 import { AppConfigService } from "../config/app-config.service";
+import { LangsmithTraceService } from "../observability/langsmith-trace.service";
+
+const EVALUATION_ROUTE = "/api/v1/evaluations/run";
 
 @Injectable()
 export class EvalService {
   constructor(
-    private readonly graphBuilder: GraphBuilderService,
+    private readonly workflowRunner: Text2SQLWorkflowRunner,
     private readonly repository: ChatRepository,
-    private readonly appConfig: AppConfigService
+    private readonly appConfig: AppConfigService,
+    private readonly langsmithTrace: LangsmithTraceService
   ) {}
 
   async run(caseFilePath?: string, requestId?: string): Promise<EvaluationReport> {
@@ -26,25 +30,64 @@ export class EvalService {
     const jobId = uuidv4();
     for (const item of cases) {
       const evalSessionId = `eval-${jobId}-${item.id}`;
+      const traceRunId = uuidv4();
       await this.repository.createSession({
         id: evalSessionId,
         datasource: "sqlite_main",
         createdAt: new Date().toISOString()
       });
-      const run = await this.graphBuilder.run({
-        runId: uuidv4(),
+      const rootTrace = this.langsmithTrace.startRoot({
+        runId: traceRunId,
         sessionId: evalSessionId,
         question: item.question,
-        datasourceId: "sqlite_main",
-        datasourceType: "sqlite",
-        traceContext: {
-          source: "evaluation",
-          route: "/api/v1/evaluations/run",
-          requestId,
-          jobId,
-          caseId: item.id
-        }
+        source: "evaluation",
+        route: EVALUATION_ROUTE,
+        requestId,
+        jobId,
+        caseId: item.id
       });
+      let runEnded = false;
+      const run = await this.workflowRunner
+        .runSync({
+          sessionId: evalSessionId,
+          message: item.question,
+          requestId
+        })
+        .then((result) => {
+          this.langsmithTrace.endRoot(rootTrace, {
+            status: result.status,
+            provider: result.provider,
+            outputs: {
+              rowCount: result.rows?.length,
+              hasError: Boolean(result.error)
+            },
+            metadata: {
+              source: "evaluation",
+              route: EVALUATION_ROUTE,
+              requestId,
+              jobId,
+              caseId: item.id
+            }
+          });
+          runEnded = true;
+          return result;
+        })
+        .catch((error: unknown) => {
+          if (!runEnded) {
+            this.langsmithTrace.endRoot(rootTrace, {
+              status: "failed",
+              error: error instanceof Error ? error.message : String(error),
+              metadata: {
+                source: "evaluation",
+                route: EVALUATION_ROUTE,
+                requestId,
+                jobId,
+                caseId: item.id
+              }
+            });
+          }
+          throw error;
+        });
 
       let passed = true;
       let reason = "";

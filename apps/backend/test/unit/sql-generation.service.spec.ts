@@ -4,6 +4,7 @@ import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql
 import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
 import type { ProviderRouterService } from "../../src/modules/llm/provider-router.service";
 import type { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
+import { Text2SqlSmartDefaultsService } from "../../src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.service";
 
 describe("SqlGenerationService semantic guardrails", () => {
   const promptTemplateService = {
@@ -23,7 +24,8 @@ describe("SqlGenerationService semantic guardrails", () => {
       new SqlPromptBuilder(),
       new SqlOutputExtractor(),
       providerRouter as unknown as ProviderRouterService,
-      promptTemplateService as unknown as PromptTemplateService
+      promptTemplateService as unknown as PromptTemplateService,
+      new Text2SqlSmartDefaultsService()
     );
 
   beforeEach(() => {
@@ -58,6 +60,11 @@ describe("SqlGenerationService semantic guardrails", () => {
     const firstPrompt = providerRouter.generate.mock.calls[0][0];
     const secondPrompt = providerRouter.generate.mock.calls[1][0];
     expect(firstPrompt.systemPrompt).toContain("business count-intent query");
+    expect(firstPrompt.systemPrompt).toContain("Text2SQL Smart Defaults");
+    expect(draft.smartDefaults).toMatchObject({
+      bundleId: "text2sql-smart-defaults",
+      status: "applied"
+    });
     expect(secondPrompt.systemPrompt).toContain("single automatic retry");
     expect(secondPrompt.systemPrompt).toContain(
       "count-intent requires business counting SQL"
@@ -148,6 +155,117 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(draft.sql).toBe("SELECT COUNT(*) AS total FROM orders;");
     expect(providerRouter.stream).toHaveBeenCalledTimes(1);
     expect(providerRouter.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a semantic shortcut for grouped count proportions before calling the stream provider", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("有多少种支付方式，他们比例是如何", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "有多少种支付方式，他们比例是如何",
+        selectedTables: ["payments"],
+        selectedColumns: [
+          "payments.id",
+          "payments.method",
+          "payments.amount",
+          "payments.created_at"
+        ],
+        metrics: ["count"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:payments"],
+        confidence: 0.49
+      },
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:payments",
+          content: "payments table schema",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:payments",
+            domain: "schema",
+            tableNames: ["payments"],
+            columnNames: ["payments.id", "payments.method", "payments.amount"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.sql).toBe(
+      [
+        "SELECT method AS group_value,",
+        "  COUNT(*) AS item_count,",
+        "  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 2) AS item_percentage",
+        "FROM payments",
+        "GROUP BY method",
+        "ORDER BY item_count DESC;"
+      ].join("\n")
+    );
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
+  });
+
+  it("uses a semantic shortcut for simple counts before calling the stream provider", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("一共有多少订单", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "一共有多少订单",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.id"],
+        metrics: ["count"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:orders"],
+        confidence: 0.62
+      },
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:orders",
+          content: "orders table schema",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:orders",
+            domain: "schema",
+            tableNames: ["orders"],
+            columnNames: ["orders.id"],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.model).toBe("simple-count-v1");
+    expect(draft.sql).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
   });
 
   it("prioritizes structured semantic instructions when context pack is provided", async () => {
@@ -343,11 +461,204 @@ describe("SqlGenerationService semantic guardrails", () => {
         explicitPinning: {
           source: "context_envelope",
           tables: ["orders"],
-        columns: ["orders.amount"]
-      }
-    })
-  ).rejects.toMatchObject<Partial<DomainError>>({
-    code: "LLM_SQL_EVIDENCE_COVERAGE_FAILED"
+          columns: ["orders.amount"]
+        }
+      })
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "LLM_SQL_EVIDENCE_COVERAGE_FAILED"
+    });
   });
-});
+
+  it("fails semantic plan coverage when SQL references tables outside allowed plan tables", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT amount FROM invoices;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await expect(
+      service.generate("查询金额", {
+        semanticPlan: {
+          route: "answer",
+          standaloneQuestion: "查询金额",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.amount"],
+          allowedTables: ["orders"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"]
+        }
+      })
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "LLM_SQL_PLAN_COVERAGE_FAILED"
+    });
+  });
+
+  it("injects typed semantic plan guidance into SQL prompt", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT amount FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("查询订单金额", {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "查询订单金额",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.amount"],
+        allowedTables: ["orders"],
+        forbiddenTables: ["refunds"],
+        confidence: 0.91,
+        evidenceRefs: ["chunk-orders-1"]
+      }
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.systemPrompt).toContain("Typed semantic plan (must follow):");
+    expect(prompt.systemPrompt).toContain("selectedTables=orders");
+    expect(prompt.systemPrompt).toContain("forbiddenTables=refunds");
+  });
+
+  it("records ledger obligation claims and unsupported SQL facts in structured artifact", () => {
+    const service = createService({
+      generate: jest.fn(),
+      stream: jest.fn()
+    });
+
+    const artifact = service.buildStructuredArtifact({
+      cause: "initial",
+      datasourceType: "sqlite",
+      draft: {
+        provider: "mock-provider",
+        model: "mock-model",
+        sql: "SELECT orders.amount, invoices.total FROM orders JOIN invoices ON invoices.order_id = orders.id",
+        explanation: "uses orders and invoices",
+        rawText: "",
+        prompt: {
+          systemPrompt: "",
+          userPrompt: ""
+        },
+        semanticPlan: {
+          route: "answer",
+          standaloneQuestion: "查询订单金额",
+          selectedTables: ["orders"],
+          selectedColumns: ["orders.amount"],
+          confidence: 0.9,
+          evidenceRefs: ["chunk-orders-1"],
+          filters: ["route_kind:text_to_sql"],
+          snapshotId: "semantic-plan-v1",
+          planLedger: {
+            version: "plan-ledger.v1",
+            snapshotId: "semantic-plan-v1",
+            obligations: [
+              {
+                id: "ledger:table:orders",
+                kind: "table",
+                summary: "orders table",
+                criticality: "hard_blocker",
+                status: "grounded",
+                evidenceRefs: ["chunk-orders-1"],
+                reasonCodes: ["selected_table_grounded"],
+                subject: "orders"
+              },
+              {
+                id: "ledger:column:orders.amount",
+                kind: "column",
+                summary: "orders amount",
+                criticality: "hard_blocker",
+                status: "grounded",
+                evidenceRefs: ["chunk-orders-1"],
+                reasonCodes: ["selected_column_grounded"],
+                subject: "orders.amount"
+              }
+            ],
+            summary: {
+              snapshotId: "semantic-plan-v1",
+              total: 2,
+              hardBlockerCount: 2,
+              warningCount: 0,
+              failedHardBlockerIds: []
+            }
+          }
+        }
+      }
+    });
+
+    expect(artifact.claimedObligationIds).toEqual([
+      "ledger:table:orders",
+      "ledger:column:orders.amount"
+    ]);
+    expect(artifact.unsupportedClaims).toEqual(
+      expect.arrayContaining([
+        {
+          kind: "table",
+          value: "invoices",
+          reasonCode: "table_not_in_ledger"
+        },
+        {
+          kind: "column",
+          value: "invoices.total",
+          reasonCode: "column_not_in_ledger"
+        }
+      ])
+    );
+    expect(artifact.ledgerSnapshotId).toBe("semantic-plan-v1");
+  });
+
+  it("injects structured correction grounding into retry prompt", async () => {
+    const providerRouter = {
+      generate: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT orders.id FROM orders;\n```"
+      }),
+      stream: jest.fn()
+    };
+    const service = createService(providerRouter);
+
+    await service.generate("查询订单ID", {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "查询订单ID",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.id"],
+        confidence: 0.9,
+        evidenceRefs: ["chunk-orders-1"],
+        filters: ["route_kind:text_to_sql"],
+        snapshotId: "semantic-plan-v1"
+      },
+      correctionGrounding: {
+        failedSqlRef: "sql.sha256.abc123abc123abcd",
+        failedSqlPreview: "SELECT missing_city FROM orders",
+        retryReason: "missing column orders.missing_city",
+        failureCode: "SQL_MISSING_COLUMN",
+        failureCategory: "validation",
+        source: "validation",
+        attemptCount: 1,
+        maxAttempts: 2,
+        evidenceRefs: ["chunk-orders-1"],
+        semanticPlanSnapshotId: "semantic-plan-v1",
+        semanticPlanRouteKind: "text_to_sql"
+      },
+      semanticIntent: "general"
+    });
+
+    const prompt = providerRouter.generate.mock.calls[0][0];
+    expect(prompt.systemPrompt).toContain(
+      "Correction grounding (must consume for this retry):"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "failedSqlRef=sql.sha256.abc123abc123abcd"
+    );
+    expect(prompt.systemPrompt).toContain("failureCode=SQL_MISSING_COLUMN");
+    expect(prompt.systemPrompt).toContain("retryReason=missing column orders.missing_city");
+  });
 });

@@ -51,9 +51,7 @@ describe("chat api (e2e)", () => {
     expect(runRes.body.data.run.runId).toBeDefined();
     expect(runRes.body.data.run.sql).toMatch(/select/i);
     expect(runRes.body.data.run.explanation).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw).toBeTruthy();
-    expect(runRes.body.data.run.llmRaw.provider).toBe("volcengine");
-    expect(runRes.body.data.run.llmRaw.model).toBeTruthy();
+    expect(runRes.body.data.run.llmRaw).toBeNull();
     expect(runRes.body.data.delivery).toBeTruthy();
     expect(runRes.body.data.run.delivery).toEqual(runRes.body.data.delivery);
     expect(runRes.body.data.run.answer).toBe(runRes.body.data.delivery.answer.text);
@@ -76,6 +74,48 @@ describe("chat api (e2e)", () => {
     if (contextPackStatus !== undefined) {
       expect(["ready", "degraded"]).toContain(contextPackStatus);
     }
+    const contextPackSummary = runRes.body.data.delivery?.evidence?.contextPackSummary as
+      | {
+          selectedEvidenceCount?: number;
+          status?: string;
+        }
+      | undefined;
+    if (contextPackSummary) {
+      expect(typeof contextPackSummary.selectedEvidenceCount).toBe("number");
+      expect(["ready", "degraded"]).toContain(contextPackSummary.status);
+    }
+    const traceV2 = runRes.body.data.run.trace?.v2 as
+      | {
+          version?: string;
+          stageOrder?: string[];
+          stages?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (traceV2 !== undefined) {
+      expect(traceV2.version).toBe("v2");
+      expect(traceV2.stageOrder).toEqual([
+        "intake",
+        "retrieve",
+        "assemble-context",
+        "semantic-plan",
+        "generate-sql",
+        "validate",
+        "correct",
+        "execute",
+        "answer"
+      ]);
+      expect(traceV2.stages?.map((item) => item.stage)).toEqual(traceV2.stageOrder);
+    }
+    const deliveryV2 = runRes.body.data.delivery?.evidence?.v2 as
+      | {
+          stageArtifacts?: Array<{ stage?: string }>;
+        }
+      | undefined;
+    if (deliveryV2 !== undefined) {
+      expect(deliveryV2.stageArtifacts?.map((item) => item.stage)).toEqual(
+        traceV2?.stageOrder
+      );
+    }
 
     const messageViewRes = await request(app.getHttpServer())
       .get(`/api/v1/sessions/${sessionId}/messages`)
@@ -91,7 +131,20 @@ describe("chat api (e2e)", () => {
     expect(messageViewRes.body.data.latestRun.delivery.evidence.runId).toBe(
       messageViewRes.body.data.latestRun.runId
     );
+    if (contextPackSummary) {
+      expect(
+        messageViewRes.body.data.latestRun.delivery.evidence.contextPackSummary
+      ).toEqual(contextPackSummary);
+    }
     expect(messageViewRes.body.data.latestRun.delivery.artifact.summary.text).toBeTruthy();
+    const latestTraceV2 = messageViewRes.body.data.latestRun.trace?.v2 as
+      | {
+          version?: string;
+        }
+      | undefined;
+    if (latestTraceV2 !== undefined) {
+      expect(latestTraceV2.version).toBe("v2");
+    }
   });
 
   it("should accept optional contextEnvelope on sync message endpoint", async () => {

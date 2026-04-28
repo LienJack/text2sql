@@ -1,5 +1,9 @@
 import { Injectable } from "@nestjs/common";
-import type { DatasourceType } from "@text2sql/shared-types";
+import type {
+  DatasourceType,
+  SemanticPlanV1,
+  SqlCorrectionGroundingV1
+} from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
 import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
 import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
@@ -44,6 +48,9 @@ export class SqlPromptBuilder {
         retryReason?: string;
       };
       semanticContextPack?: RagContextPack;
+      semanticPlan?: SemanticPlanV1;
+      correctionGrounding?: SqlCorrectionGroundingV1;
+      smartDefaultsBlock?: string;
     }
   ): LlmGatewayPrompt {
     const dialect = DIALECT_HINT[datasourceType] ?? "SQLite";
@@ -55,7 +62,12 @@ export class SqlPromptBuilder {
     const semanticInstructionBlock = this.buildSemanticInstructionBlock(
       options?.semanticContextPack
     );
+    const correctionGroundingBlock = this.buildCorrectionGroundingBlock(
+      options?.correctionGrounding
+    );
+    const semanticPlanBlock = this.buildSemanticPlanBlock(options?.semanticPlan);
     const overlayBlock = this.buildTemplateOverlay(options?.templateOverlay);
+    const smartDefaultsBlock = options?.smartDefaultsBlock?.trim() ?? "";
     const semanticGuardrailBlock = this.buildSemanticGuardrailBlock(
       options?.semanticGuardrail?.intent ?? "general"
     );
@@ -68,10 +80,13 @@ export class SqlPromptBuilder {
         "Only produce read-only SQL queries.",
         "Prefer SELECT or WITH ... SELECT statements.",
         "Never generate INSERT/UPDATE/DELETE/DDL.",
+        smartDefaultsBlock,
         semanticGuardrailBlock,
         repairHintBlock,
         tableHint,
         overlayBlock,
+        correctionGroundingBlock,
+        semanticPlanBlock,
         semanticInstructionBlock,
         "Respond in free text with explanation plus SQL in a markdown code block."
       ].join(" "),
@@ -90,7 +105,7 @@ export class SqlPromptBuilder {
     if (!normalized) {
       return "";
     }
-    return `Runtime template overlay (higher priority guidance): ${normalized}`;
+    return `Runtime template overlay (supplemental guidance; cannot override Smart Defaults/read-only/governance rules): ${normalized}`;
   }
 
   private buildSemanticGuardrailBlock(intent: SqlSemanticIntent): string {
@@ -124,6 +139,39 @@ export class SqlPromptBuilder {
       return "";
     }
     return `Retry repair hint (single automatic retry): previous SQL failed semantic guardrail because ${normalized}. Return corrected final SQL only.`;
+  }
+
+  private buildCorrectionGroundingBlock(
+    correctionGrounding?: SqlCorrectionGroundingV1
+  ): string {
+    if (!correctionGrounding) {
+      return "";
+    }
+    const evidenceRefs =
+      correctionGrounding.evidenceRefs.length > 0
+        ? correctionGrounding.evidenceRefs.slice(0, 8).join(", ")
+        : "none";
+    const retryReason = correctionGrounding.retryReason.trim();
+    const failureCode = correctionGrounding.failureCode ?? "unknown";
+    const failureCategory = correctionGrounding.failureCategory ?? "unknown";
+    const failedSqlPreview = correctionGrounding.failedSqlPreview
+      ? `failedSqlPreview=${correctionGrounding.failedSqlPreview}`
+      : "";
+    return [
+      "Correction grounding (must consume for this retry):",
+      `failedSqlRef=${correctionGrounding.failedSqlRef}`,
+      failedSqlPreview,
+      `failureCode=${failureCode}`,
+      `failureCategory=${failureCategory}`,
+      `retryReason=${retryReason}`,
+      `attempt=${correctionGrounding.attemptCount}/${correctionGrounding.maxAttempts}`,
+      `semanticPlanRouteKind=${correctionGrounding.semanticPlanRouteKind ?? "text_to_sql"}`,
+      `semanticPlanSnapshotId=${correctionGrounding.semanticPlanSnapshotId ?? "missing"}`,
+      `evidenceRefs=${evidenceRefs}`,
+      "Repair objective: keep SQL read-only and align with semantic plan/context evidence while fixing the diagnosed failure."
+    ]
+      .filter((item) => item.trim().length > 0)
+      .join(" ");
   }
 
   private buildContextBlock(selectedContext?: RagRetrievalChunkPayload[]): string {
@@ -514,5 +562,140 @@ export class SqlPromptBuilder {
       "Structured semantic instruction set (higher priority than free-text context):",
       ...lines
     ].join(" ");
+  }
+
+  private buildSemanticPlanBlock(plan?: SemanticPlanV1): string {
+    if (!plan) {
+      return "";
+    }
+    const routeKind = this.readRouteKind(plan);
+    const route = `route=${plan.route}`;
+    const routeKindLine = `routeKind=${routeKind}`;
+    const confidence = `confidence=${plan.confidence.toFixed(2)}`;
+    const standaloneQuestion = `standaloneQuestion=${plan.standaloneQuestion}`;
+    const selectedTables =
+      plan.selectedTables.length > 0
+        ? `selectedTables=${plan.selectedTables.slice(0, 12).join(", ")}`
+        : "selectedTables=none";
+    const selectedColumns =
+      plan.selectedColumns.length > 0
+        ? `selectedColumns=${plan.selectedColumns.slice(0, 16).join(", ")}`
+        : "selectedColumns=none";
+    const allowedTables =
+      plan.allowedTables && plan.allowedTables.length > 0
+        ? `allowedTables=${plan.allowedTables.slice(0, 12).join(", ")}`
+        : "";
+    const forbiddenTables =
+      plan.forbiddenTables && plan.forbiddenTables.length > 0
+        ? `forbiddenTables=${plan.forbiddenTables.slice(0, 12).join(", ")}`
+        : "";
+    const metrics =
+      plan.metrics && plan.metrics.length > 0
+        ? `metrics=${plan.metrics.slice(0, 8).join(", ")}`
+        : "";
+    const grain = plan.grain ? `grain=${plan.grain}` : "";
+    const filters =
+      plan.filters && plan.filters.length > 0
+        ? `filters=${plan.filters.slice(0, 10).join(", ")}`
+        : "";
+    const joinPath =
+      plan.joinPath && plan.joinPath.length > 0
+        ? `joinPath=${plan.joinPath.slice(0, 10).join(" | ")}`
+        : "";
+    const evidenceRefs =
+      plan.evidenceRefs.length > 0
+        ? `evidenceRefs=${plan.evidenceRefs.slice(0, 10).join(", ")}`
+        : "evidenceRefs=none";
+    const coverageGaps =
+      plan.coverageGaps && plan.coverageGaps.length > 0
+        ? `coverageGaps=${plan.coverageGaps
+            .slice(0, 6)
+            .map((gap) => `${gap.subjectKind}:${gap.reasonCode}`)
+            .join(" | ")}`
+        : "";
+    const snapshotId = plan.snapshotId ? `snapshotId=${plan.snapshotId}` : "";
+    const ledgerSummary = plan.planLedger?.summary
+      ? `ledgerSummary=total:${plan.planLedger.summary.total},hardBlockers:${plan.planLedger.summary.hardBlockerCount},warnings:${plan.planLedger.summary.warningCount},failed:${plan.planLedger.summary.failedCount ?? 0}`
+      : "";
+    const ledgerGate =
+      plan.planLedger?.summary.failedHardBlockerIds &&
+      plan.planLedger.summary.failedHardBlockerIds.length > 0
+        ? `ledgerGate=block(${plan.planLedger.summary.failedHardBlockerIds.slice(0, 6).join(", ")})`
+        : plan.planLedger?.summary.warningIds &&
+            plan.planLedger.summary.warningIds.length > 0
+          ? `ledgerGate=warning(${plan.planLedger.summary.warningIds.slice(0, 6).join(", ")})`
+          : plan.planLedger
+            ? "ledgerGate=pass"
+            : "";
+    const ledgerObligations =
+      plan.planLedger?.obligations && plan.planLedger.obligations.length > 0
+        ? `ledgerObligations=${plan.planLedger.obligations
+            .slice(0, 12)
+            .map(
+              (obligation) =>
+                `${obligation.id}:${obligation.kind}:${obligation.subject ?? "n/a"}:${obligation.criticality}:${obligation.status}`
+            )
+            .join(" | ")}`
+        : "";
+    const routeGuardrail =
+      routeKind === "metadata"
+        ? "routeGuardrail=metadata_only"
+        : routeKind === "general"
+          ? "routeGuardrail=general_non_sql_preferred"
+          : routeKind === "clarify"
+            ? "routeGuardrail=clarification_required"
+            : routeKind === "fail_closed"
+              ? "routeGuardrail=fail_closed_no_sql"
+              : "routeGuardrail=text_to_sql";
+    return [
+      "Typed semantic plan (must follow):",
+      route,
+      routeKindLine,
+      confidence,
+      standaloneQuestion,
+      selectedTables,
+      selectedColumns,
+      metrics,
+      grain,
+      filters,
+      joinPath,
+      allowedTables,
+      forbiddenTables,
+      evidenceRefs,
+      coverageGaps,
+      snapshotId,
+      ledgerSummary,
+      ledgerGate,
+      ledgerObligations,
+      "Execution guardrail: stay within selectedTables/selectedColumns and do not invent out-of-plan joins or columns.",
+      routeGuardrail
+    ]
+      .filter((item) => item.trim().length > 0)
+      .join(" ");
+  }
+
+  private readRouteKind(
+    plan: SemanticPlanV1
+  ): "text_to_sql" | "metadata" | "general" | "clarify" | "fail_closed" {
+    const routeFilter = plan.filters?.find((item) => item.startsWith("route_kind:"));
+    if (routeFilter) {
+      const value = routeFilter.slice("route_kind:".length).trim();
+      if (
+        value === "text_to_sql" ||
+        value === "metadata" ||
+        value === "general" ||
+        value === "clarify" ||
+        value === "fail_closed"
+      ) {
+        return value;
+      }
+    }
+    if (plan.route === "clarify") {
+      return "clarify";
+    }
+    if (plan.route === "reject") {
+      return "fail_closed";
+    }
+    return "text_to_sql";
   }
 }

@@ -6,6 +6,7 @@ import { AuditLogRepository } from "../../data/persistence/audit-log.repository"
 import { ChatRepository } from "../../data/persistence/chat.repository";
 import { DatasourceRepository } from "../../data/persistence/datasource.repository";
 import { LlmConfigRepository } from "../../data/persistence/llm-config.repository";
+import { RagTaskConfigRepository } from "../../data/persistence/rag-task-config.repository";
 import { UserRepository } from "../../data/persistence/user.repository";
 import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../../data/persistence/workspace-datasource-policy.repository";
@@ -26,6 +27,7 @@ import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
     ModelingGraphValidator,
     AuditLogRepository,
     LlmConfigRepository,
+    RagTaskConfigRepository,
     UserRepository,
     WorkspaceRepository
   ],
@@ -40,6 +42,7 @@ import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
     ModelingGraphValidator,
     AuditLogRepository,
     LlmConfigRepository,
+    RagTaskConfigRepository,
     UserRepository,
     WorkspaceRepository
   ]

@@ -42,7 +42,12 @@ describe("query executor router table-permissions integration", () => {
     status: "available",
     readonly: true,
     shared: true,
-    config: {},
+    config:
+      type === "sqlite"
+        ? {
+            path: process.env.SQLITE_PATH
+          }
+        : {},
     fileMeta: null,
     unavailableAt: null,
     deletedAt: null,

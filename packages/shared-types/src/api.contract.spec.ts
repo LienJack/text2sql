@@ -16,6 +16,7 @@ import type {
   RollbackGlossaryAnchorResponse,
   SendMessageRequest,
   SqlRun,
+  Text2SqlV2RunArtifact,
   UpdatePromptTemplateRequest,
   UpsertGlossaryTermResponse
 } from "./api";
@@ -190,6 +191,219 @@ const chatbiFullArtifactSample: DeliveryArtifactLayer = {
   hasError: false
 };
 
+const runtimeIntelligenceV2Sample: Text2SqlV2RunArtifact = {
+  version: "v2",
+  stageOrder: [
+    "intake",
+    "retrieve",
+    "assemble-context",
+    "semantic-plan",
+    "generate-sql",
+    "validate",
+    "correct",
+    "execute",
+    "answer"
+  ],
+  stages: [
+    {
+      stage: "intake",
+      status: "success"
+    },
+    {
+      stage: "generate-sql",
+      status: "success"
+    }
+  ],
+  semanticPlan: {
+    route: "answer",
+    standaloneQuestion: "统计华东区本季度净销售额",
+    selectedTables: ["orders", "refunds"],
+    selectedColumns: ["orders.amount", "refunds.amount"],
+    metrics: ["net_revenue"],
+    grain: "month",
+    filters: ["region=east_china", "quarter=2026Q1"],
+    joinPath: ["orders.customer_id = customers.id"],
+    allowedTables: ["orders", "refunds", "customers"],
+    forbiddenTables: ["internal_audit_logs"],
+    confidence: 0.86,
+    evidenceRefs: ["chunk-orders-1", "metric-net-revenue"],
+    snapshotId: "semantic-plan:snapshot:001",
+    planLedger: {
+      version: "plan-ledger.v1",
+      snapshotId: "semantic-plan:snapshot:001",
+      obligations: [
+        {
+          id: "obligation:table:orders",
+          kind: "table",
+          summary: "SQL must read from the orders table.",
+          criticality: "hard_blocker",
+          status: "fulfilled",
+          evidenceRefs: ["chunk-orders-1"],
+          reasonCodes: ["selected_table_grounded"],
+          subject: "orders"
+        },
+        {
+          id: "obligation:metric:net-revenue",
+          kind: "metric",
+          summary: "SQL must compute net revenue using the grounded metric definition.",
+          criticality: "hard_blocker",
+          status: "fulfilled",
+          evidenceRefs: ["metric-net-revenue"],
+          reasonCodes: ["metric_grounded"],
+          subject: "net_revenue"
+        },
+        {
+          id: "obligation:warning:optional-example",
+          kind: "evidence",
+          summary: "Optional example SQL was pruned from the context pack.",
+          criticality: "warning",
+          status: "warning",
+          evidenceRefs: [],
+          reasonCodes: ["optional_context_pruned"]
+        }
+      ],
+      summary: {
+        snapshotId: "semantic-plan:snapshot:001",
+        total: 3,
+        hardBlockerCount: 2,
+        warningCount: 1,
+        fulfilledCount: 2,
+        failedCount: 0,
+        warningIds: ["obligation:warning:optional-example"],
+        reasonCodes: ["selected_table_grounded", "metric_grounded", "optional_context_pruned"],
+        selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+      }
+    }
+  },
+  sqlGeneration: {
+    sql: "select date_trunc('month', paid_at) as month, sum(amount) as net_revenue from orders group by 1",
+    usedTables: ["orders"],
+    usedColumns: ["orders.paid_at", "orders.amount"],
+    evidenceRefs: ["chunk-orders-1", "metric-net-revenue"],
+    claimedObligationIds: ["obligation:table:orders", "obligation:metric:net-revenue"],
+    unsupportedClaims: [
+      {
+        kind: "column",
+        value: "orders.discount_amount",
+        reasonCode: "column_not_in_ledger"
+      }
+    ],
+    ledgerSnapshotId: "semantic-plan:snapshot:001",
+    correctionGrounding: {
+      failedSqlRef: "sql-generation:attempt:001",
+      retryReason: "missing required net revenue obligation",
+      failureCategory: "validation",
+      source: "validation",
+      attemptCount: 1,
+      maxAttempts: 2,
+      evidenceRefs: ["metric-net-revenue"],
+      semanticPlanSnapshotId: "semantic-plan:snapshot:001",
+      failedObligationIds: ["obligation:metric:net-revenue"]
+    }
+  },
+  sqlValidation: {
+    status: "failed",
+    checks: [
+      {
+        check: "ledger-fulfillment",
+        status: "failed",
+        code: "ledger_obligation_unfulfilled",
+        message: "Metric obligation was not fully satisfied.",
+        obligationIds: ["obligation:metric:net-revenue"],
+        failedObligationIds: ["obligation:metric:net-revenue"],
+        reasonCodes: ["metric_formula_mismatch"]
+      }
+    ],
+    correctable: true,
+    ledgerFulfillment: {
+      snapshotId: "semantic-plan:snapshot:001",
+      total: 3,
+      hardBlockerCount: 2,
+      warningCount: 1,
+      fulfilledCount: 1,
+      failedCount: 1,
+      failedHardBlockerIds: ["obligation:metric:net-revenue"],
+      warningIds: ["obligation:warning:optional-example"],
+      reasonCodes: ["metric_formula_mismatch"],
+      selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+    },
+    failedObligationIds: ["obligation:metric:net-revenue"],
+    correctableObligationIds: ["obligation:metric:net-revenue"]
+  },
+  planLedger: {
+    snapshotId: "semantic-plan:snapshot:001",
+    total: 3,
+    hardBlockerCount: 2,
+    warningCount: 1,
+    fulfilledCount: 1,
+    failedCount: 1,
+    failedHardBlockerIds: ["obligation:metric:net-revenue"],
+    warningIds: ["obligation:warning:optional-example"],
+    reasonCodes: ["metric_formula_mismatch"],
+    selectedEvidenceRefs: ["chunk-orders-1", "metric-net-revenue"]
+  },
+  runtimePlan: {
+    version: "runtime-plan.v1",
+    currentItemId: "plan:generate-sql",
+    summary: "Generate SQL from grounded semantic context.",
+    items: [
+      {
+        id: "plan:intake",
+        stage: "intake",
+        goal: "Classify user intent and route safely.",
+        status: "completed",
+        reasonCodes: ["intake_ready_for_text_to_sql"]
+      },
+      {
+        id: "plan:correct",
+        stage: "correct",
+        goal: "Repair SQL only when validation failure is correctable.",
+        status: "skipped",
+        reasonCodes: ["validation_passed"],
+        evidenceRefs: ["validation:read-only"]
+      }
+    ]
+  },
+  artifactRefs: [
+    {
+      id: "artifact:context:orders",
+      category: "context_snippets",
+      summary: "Selected orders schema and metric evidence.",
+      hash: "sha256:context-orders",
+      version: "artifact-ref.v1",
+      sizeBytes: 2048,
+      replayKeyHint: "text2sql:artifact:context_snippets:context-orders",
+      visibility: "user",
+      sensitivity: "none",
+      reasonCodes: ["large_context_compacted"],
+      evidenceRefs: ["chunk-orders-1"]
+    }
+  ],
+  smartDefaults: {
+    bundleId: "text2sql-smart-defaults",
+    version: "2026-04-28",
+    coveredStages: ["generate-sql", "correct", "answer"],
+    ruleIds: ["only-use-context-pack", "fail-closed-read-only"],
+    status: "applied",
+    templateOverlay: {
+      applied: true,
+      templateId: promptTemplateSample.id,
+      version: promptTemplateSample.version
+    }
+  }
+};
+
+const oldV2WithoutRuntimeIntelligenceSample: Text2SqlV2RunArtifact = {
+  version: "v2",
+  stageOrder: runtimeIntelligenceV2Sample.stageOrder,
+  stages: [
+    {
+      stage: "intake",
+      status: "success"
+    }
+  ]
+};
+
 const chatbiTableFallbackArtifactSample: DeliveryArtifactLayer = {
   summary: {
     text: "结果已回退到表格视图，请根据明细继续核验。"
@@ -305,6 +519,18 @@ const deliverySample: DeliveryContract = {
       selectedViewName: "orders_paid_gmv",
       selectedSourceRunId: "run_123",
       safetyResult: "passed"
+    },
+    v2: {
+      version: runtimeIntelligenceV2Sample.version,
+      stageOrder: runtimeIntelligenceV2Sample.stageOrder,
+      stageArtifacts: runtimeIntelligenceV2Sample.stages,
+      semanticPlan: runtimeIntelligenceV2Sample.semanticPlan,
+      sqlGeneration: runtimeIntelligenceV2Sample.sqlGeneration,
+      sqlValidation: runtimeIntelligenceV2Sample.sqlValidation,
+      planLedger: runtimeIntelligenceV2Sample.planLedger,
+      runtimePlan: runtimeIntelligenceV2Sample.runtimePlan,
+      artifactRefs: runtimeIntelligenceV2Sample.artifactRefs,
+      smartDefaults: runtimeIntelligenceV2Sample.smartDefaults
     }
   },
   artifact: chatbiFullArtifactSample
@@ -343,10 +569,20 @@ const sqlRunSample: SqlRun = {
     provider: "openai",
     retryCount: 0,
     steps: [],
-    promptTemplate: promptTemplateTraceEvidenceSample
+    promptTemplate: promptTemplateTraceEvidenceSample,
+    v2: runtimeIntelligenceV2Sample
   },
   delivery: deliverySample,
   createdAt: "2026-04-18T00:00:00.000Z"
+};
+
+const oldV2RunWithoutRuntimeIntelligenceSample: SqlRun = {
+  ...sqlRunSample,
+  runId: "run_old_v2",
+  trace: {
+    ...sqlRunSample.trace,
+    v2: oldV2WithoutRuntimeIntelligenceSample
+  }
 };
 
 const agentRunResponseSample: AgentRunResponse = {
@@ -603,6 +839,57 @@ type TracePinningEvidenceShape = Expect<
       NonNullable<SqlRun["trace"]["effectiveContextSummary"]>["retrievalContext"]
     >["pinning"]
   >
+>;
+type TraceV2RuntimePlanShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.runtimePlan,
+    NonNullable<SqlRun["trace"]["v2"]>["runtimePlan"]
+  >
+>;
+type TraceV2ArtifactRefsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.artifactRefs,
+    NonNullable<SqlRun["trace"]["v2"]>["artifactRefs"]
+  >
+>;
+type TraceV2SmartDefaultsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.smartDefaults,
+    NonNullable<SqlRun["trace"]["v2"]>["smartDefaults"]
+  >
+>;
+type TraceV2SemanticPlanLedgerShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.semanticPlan,
+    NonNullable<SqlRun["trace"]["v2"]>["semanticPlan"]
+  >
+>;
+type TraceV2GenerationClaimsShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.sqlGeneration,
+    NonNullable<SqlRun["trace"]["v2"]>["sqlGeneration"]
+  >
+>;
+type TraceV2ValidationLedgerShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.sqlValidation,
+    NonNullable<SqlRun["trace"]["v2"]>["sqlValidation"]
+  >
+>;
+type TraceV2PlanLedgerSummaryShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.planLedger,
+    NonNullable<SqlRun["trace"]["v2"]>["planLedger"]
+  >
+>;
+type DeliveryV2PlanLedgerSummaryShape = Expect<
+  IsAssignable<
+    typeof runtimeIntelligenceV2Sample.planLedger,
+    NonNullable<NonNullable<DeliveryContract["evidence"]>["v2"]>["planLedger"]
+  >
+>;
+type OldV2WithoutRuntimeIntelligenceShape = Expect<
+  IsAssignable<typeof oldV2RunWithoutRuntimeIntelligenceSample, SqlRun>
 >;
 type SendMessageRequestContextOptional = Expect<
   IsAssignable<ContextEnvelope | undefined, SendMessageRequest["contextEnvelope"]>

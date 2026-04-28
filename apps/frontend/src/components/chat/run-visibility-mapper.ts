@@ -212,6 +212,53 @@ function normalizeSkillContextSummary(
   };
 }
 
+function normalizeV2LoopEvidence(value: unknown): NonNullable<
+  NonNullable<DeliveryEvidenceLayer["v2"]>["loopEvidence"]
+> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => {
+      if (!isRecord(item)) {
+        return undefined;
+      }
+      const loopIndexRaw = readNumber(item.loopIndex) ?? readNumber(item.loop_index);
+      const triggerReason =
+        readString(item.triggerReason) ?? readString(item.trigger_reason);
+      const actionType = readString(item.actionType) ?? readString(item.action_type);
+      if (loopIndexRaw === undefined || !triggerReason || !actionType) {
+        return undefined;
+      }
+      const convergencePath = readStringArray(
+        item.convergencePath ?? item.convergence_path
+      );
+      const terminationReason =
+        readString(item.terminationReason) ?? readString(item.termination_reason);
+      const planDeltaRaw = sanitizeJsonValue(item.planDelta ?? item.plan_delta);
+      const normalizedPlanDelta = isRecord(planDeltaRaw)
+        ? (planDeltaRaw as NonNullable<
+            NonNullable<DeliveryEvidenceLayer["v2"]>["loopEvidence"]
+          >[number]["planDelta"])
+        : undefined;
+      return {
+        loopIndex: Math.max(0, Math.floor(loopIndexRaw)),
+        triggerReason,
+        actionType,
+        ...(normalizedPlanDelta ? { planDelta: normalizedPlanDelta } : {}),
+        ...(terminationReason ? { terminationReason } : {}),
+        ...(convergencePath.length > 0 ? { convergencePath } : {})
+      };
+    })
+    .filter(
+      (
+        item
+      ): item is NonNullable<
+        NonNullable<DeliveryEvidenceLayer["v2"]>["loopEvidence"]
+      >[number] => Boolean(item)
+    );
+}
+
 function normalizeEvidence(value: unknown): DeliveryEvidenceLayer | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -281,6 +328,12 @@ function normalizeEvidence(value: unknown): DeliveryEvidenceLayer | undefined {
     value.skillContextSummary ?? value.skill_context_summary ?? value.skill_context
   );
   const evidenceStale = readBoolean(value.evidenceStale) ?? readBoolean(value.evidence_stale);
+  const v2Raw = isRecord(value.v2) ? value.v2 : undefined;
+  const v2LoopEvidence = normalizeV2LoopEvidence(
+    v2Raw?.loopEvidence ?? v2Raw?.loop_evidence
+  );
+  const v2TerminationReason =
+    readString(v2Raw?.terminationReason) ?? readString(v2Raw?.termination_reason);
   const savedPriorSqlRaw = isRecord(value.savedPriorSql)
     ? value.savedPriorSql
     : isRecord(value.saved_prior_sql)
@@ -376,7 +429,15 @@ function normalizeEvidence(value: unknown): DeliveryEvidenceLayer | undefined {
     ...(semanticDegradeReason ? { semanticDegradeReason } : {}),
     ...(skillContextSummary ? { skillContextSummary } : {}),
     ...(savedPriorSql ? { savedPriorSql } : {}),
-    ...(evidenceStale !== undefined ? { evidenceStale } : {})
+    ...(evidenceStale !== undefined ? { evidenceStale } : {}),
+    ...(v2LoopEvidence.length > 0 || v2TerminationReason
+      ? {
+          v2: {
+            ...(v2LoopEvidence.length > 0 ? { loopEvidence: v2LoopEvidence } : {}),
+            ...(v2TerminationReason ? { terminationReason: v2TerminationReason } : {})
+          }
+        }
+      : {})
   };
 
   return Object.keys(normalized).length > 0 ? normalized : undefined;

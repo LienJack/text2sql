@@ -21,8 +21,6 @@ import { FormatAnswerNode } from "./nodes/format-answer.node";
 import { RetrieveKnowledgeNode } from "./nodes/retrieve-knowledge.node";
 import { BuildPhysicalPlanNode } from "./nodes/build-physical-plan.node";
 import { BuildSemanticQueryNode } from "./nodes/build-semantic-query.node";
-import { GraphBuilderService } from "./graph/graph.builder";
-import { LangGraphRuntimeService } from "./graph/langgraph.runtime";
 import { GenerateSqlNode } from "./nodes/generate-sql.node";
 import { ResolveSavedPriorSqlNode } from "./nodes/resolve-saved-prior-sql.node";
 import { SafetyCheckNode } from "./nodes/safety-check.node";
@@ -35,6 +33,25 @@ import { SqlSafetyGuard } from "./sql/tools/sql-safety.guard";
 import { SqlToolRegistryService } from "./sql/tools/sql-tool-registry.service";
 import { PlannerVersionLockService } from "./planner/planner-version-lock.service";
 import { PlannerCacheService } from "./planner/planner-cache.service";
+import { SemanticContextPackService } from "../adapters/semantic-context-pack.service";
+import { SemanticPlanService } from "../adapters/semantic-plan.service";
+import { SemanticPlanValidator } from "../adapters/semantic-plan.validator";
+import { SqlValidationService } from "../adapters/sql-validation.service";
+import { SqlCorrectionService } from "../adapters/sql-correction.service";
+import { Text2SqlV2ArtifactBuilder } from "../artifacts/text2sql-v2-artifact-builder";
+import { Text2SqlV2ArtifactRefService } from "../artifacts/text2sql-v2-artifact-ref.service";
+import { Text2SqlV2LangGraphResultMapper } from "../runtime/langgraph/text2sql-v2-langgraph-result.mapper";
+import { Text2SqlV2LangGraphRunnerService } from "../runtime/langgraph/text2sql-v2-langgraph-runner.service";
+import { Text2SqlSmartDefaultsService } from "../runtime/smart-defaults/text2sql-smart-defaults.service";
+import { AnswerNode as LangGraphAnswerNode } from "../nodes/answer.node";
+import { AssembleContextNode as LangGraphAssembleContextNode } from "../nodes/assemble-context.node";
+import { CorrectSqlNode as LangGraphCorrectSqlNode } from "../nodes/correct-sql.node";
+import { ExecuteSqlNode as LangGraphExecuteSqlNode } from "../nodes/execute-sql.node";
+import { GenerateSqlNode as LangGraphGenerateSqlNode } from "../nodes/generate-sql.node";
+import { IntakeNode as LangGraphIntakeNode } from "../nodes/intake.node";
+import { RetrieveContextNode as LangGraphRetrieveContextNode } from "../nodes/retrieve-context.node";
+import { SemanticPlanNode as LangGraphSemanticPlanNode } from "../nodes/semantic-plan.node";
+import { ValidateSqlNode as LangGraphValidateSqlNode } from "../nodes/validate-sql.node";
 
 @Module({
   imports: [
@@ -60,8 +77,6 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
         >,
       inject: [KNOWLEDGE_FACADE_CONTRACT]
     },
-    GraphBuilderService,
-    LangGraphRuntimeService,
     ClarifyNode,
     ClarificationSemanticEvaluatorService,
     ClarificationFusionPolicy,
@@ -81,11 +96,30 @@ import { PlannerCacheService } from "./planner/planner-cache.service";
     SqlGenerationService,
     SqlSafetyGuard,
     SqlReadonlyTool,
-    SqlToolRegistryService
+    SqlToolRegistryService,
+    SemanticContextPackService,
+    SemanticPlanService,
+    SemanticPlanValidator,
+    SqlValidationService,
+    SqlCorrectionService,
+    Text2SqlV2ArtifactRefService,
+    Text2SqlSmartDefaultsService,
+    LangGraphIntakeNode,
+    LangGraphRetrieveContextNode,
+    LangGraphAssembleContextNode,
+    LangGraphSemanticPlanNode,
+    LangGraphGenerateSqlNode,
+    LangGraphValidateSqlNode,
+    LangGraphCorrectSqlNode,
+    LangGraphExecuteSqlNode,
+    LangGraphAnswerNode,
+    Text2SqlV2ArtifactBuilder,
+    Text2SqlV2LangGraphResultMapper,
+    Text2SqlV2LangGraphRunnerService
   ],
   exports: [
-    GraphBuilderService,
-    SqlToolRegistryService
+    SqlToolRegistryService,
+    Text2SqlV2LangGraphRunnerService
   ]
 })
 export class AgentModule {}

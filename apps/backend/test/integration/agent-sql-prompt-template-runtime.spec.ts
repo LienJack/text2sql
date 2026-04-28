@@ -5,6 +5,7 @@ import { GenerateSqlNode } from "../../src/modules/conversation/agent/nodes/gene
 import { SqlGenerationService } from "../../src/modules/conversation/agent/sql/sql-generation.service";
 import { SqlOutputExtractor } from "../../src/modules/conversation/agent/sql/sql-output-extractor";
 import { SqlPromptBuilder } from "../../src/modules/conversation/agent/sql/sql-prompt.builder";
+import { Text2SqlSmartDefaultsService } from "../../src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.service";
 import { PromptTemplateService } from "../../src/modules/governance/settings/prompt-template.service";
 
 describe("agent sql prompt template runtime integration", () => {
@@ -14,6 +15,20 @@ describe("agent sql prompt template runtime integration", () => {
     generate: jest.Mock;
     stream: jest.Mock;
   };
+  const selectedContext = [
+    {
+      chunk_id: "chunk-orders-schema",
+      content: "table orders(id, status, total_amount, payment_method)",
+      metadata: {
+        datasourceId: "ds_001",
+        indexVersionId: "index-v1",
+        chunkId: "chunk-orders-schema",
+        domain: "schema",
+        tableNames: ["orders"],
+        columnNames: ["id", "status", "total_amount", "payment_method"]
+      }
+    }
+  ];
 
   beforeEach(async () => {
     providerRouter = {
@@ -46,6 +61,7 @@ describe("agent sql prompt template runtime integration", () => {
         SqlPromptBuilder,
         SqlOutputExtractor,
         PromptTemplateService,
+        Text2SqlSmartDefaultsService,
         SqlGenerationService,
         GenerateSqlNode,
         {
@@ -96,7 +112,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_001",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     expect(providerRouter.generate).toHaveBeenCalledTimes(1);
@@ -138,7 +155,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_not_exists",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     const prompt = providerRouter.generate.mock.calls[0][0] as LlmGatewayPrompt;
@@ -155,7 +173,8 @@ describe("agent sql prompt template runtime integration", () => {
 
     const result = await generateSqlNode.run("统计订单状态分布", "sqlite", undefined, {
       datasourceId: "ds_001",
-      workspaceId: "ws_001"
+      workspaceId: "ws_001",
+      selectedContext
     });
 
     const prompt = providerRouter.generate.mock.calls[0][0] as LlmGatewayPrompt;
@@ -182,6 +201,21 @@ describe("agent sql prompt template runtime integration", () => {
       stream: true,
       datasourceId: "ds_stream",
       workspaceId: "ws_stream",
+      selectedContext: [
+        ...selectedContext,
+        {
+          chunk_id: "chunk-refunds-schema",
+          content: "table refunds(id, order_id, refund_amount)",
+          metadata: {
+            datasourceId: "ds_stream",
+            indexVersionId: "index-v1",
+            chunkId: "chunk-refunds-schema",
+            domain: "schema",
+            tableNames: ["refunds"],
+            columnNames: ["id", "order_id", "refund_amount"]
+          }
+        }
+      ],
       onEvent: async () => {
         return;
       }

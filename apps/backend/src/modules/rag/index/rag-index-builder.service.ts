@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { DomainError } from "../../../common/domain-error";
+import { EmbeddingRouterService } from "../../llm/embedding-router.service";
 import {
   type RagChunkBuildInput,
   type RagChunkIndexEntryRecord,
@@ -22,12 +23,22 @@ export interface RagIndexBuildResult {
   status: "active";
   entryCount: number;
   archivedChannels: Array<"lexical" | "dense">;
-  denseMode: "placeholder_vector_string";
+  denseMode: "external_provider" | "mock_provider" | "dense_unavailable";
+  denseUnavailableReason?: string;
+  denseProvider?: string;
+  denseModel?: string;
+  denseConfigSource?: "settings" | "env_fallback" | "missing";
+  denseDimensions?: number;
+  vectorVersion?: string;
+  indexVersion?: string;
 }
 
 @Injectable()
 export class RagIndexBuilderService {
-  constructor(private readonly repository: RagIndexRepository) {}
+  constructor(
+    private readonly repository: RagIndexRepository,
+    private readonly embeddingRouter: EmbeddingRouterService
+  ) {}
 
   async buildAndActivate(input: RagIndexBuildRequest): Promise<RagIndexBuildResult> {
     const chunks =
@@ -52,7 +63,18 @@ export class RagIndexBuilderService {
 
     try {
       const now = new Date().toISOString();
-      const entries = chunks.map((chunk) => this.toIndexEntry(chunk, version.id, now));
+      const denseEmbedding = await this.resolveDenseEmbedding({
+        chunks,
+        indexVersionId: version.id
+      });
+      const entries = chunks.map((chunk) =>
+        this.toIndexEntry({
+          chunk,
+          indexVersionId: version.id,
+          timestamp: now,
+          denseEmbedding
+        })
+      );
 
       await this.repository.replaceEntriesForVersion(version.id, entries);
       await this.repository.markVersionReady(version.id);
@@ -69,7 +91,14 @@ export class RagIndexBuilderService {
         status: "active",
         entryCount: archived.length,
         archivedChannels: ["lexical", "dense"],
-        denseMode: "placeholder_vector_string"
+        denseMode: denseEmbedding.mode,
+        denseUnavailableReason: denseEmbedding.unavailableReason,
+        denseProvider: denseEmbedding.metadata?.provider,
+        denseModel: denseEmbedding.metadata?.model,
+        denseConfigSource: denseEmbedding.metadata?.configSource,
+        denseDimensions: denseEmbedding.metadata?.dimensions,
+        vectorVersion: denseEmbedding.metadata?.vectorVersion,
+        indexVersion: denseEmbedding.metadata?.indexVersion
       };
     } catch (error) {
       await this.safeDeprecate(version.id);
@@ -77,11 +106,13 @@ export class RagIndexBuilderService {
     }
   }
 
-  private toIndexEntry(
-    chunk: RagChunkBuildInput,
-    indexVersionId: string,
-    timestamp: string
-  ): RagChunkIndexEntryRecord {
+  private toIndexEntry(input: {
+    chunk: RagChunkBuildInput;
+    indexVersionId: string;
+    timestamp: string;
+    denseEmbedding: DenseEmbeddingResolution;
+  }): RagChunkIndexEntryRecord {
+    const { chunk, indexVersionId, timestamp, denseEmbedding } = input;
     const lexicalContent = chunk.content.trim();
     if (!lexicalContent) {
       throw new DomainError("RAG_INDEX_EMPTY_CHUNK", "切块内容为空，无法构建索引条目。", 400, {
@@ -97,8 +128,12 @@ export class RagIndexBuilderService {
       datasourceId: chunk.datasourceId,
       domain: chunk.domain,
       lexicalContent,
-      denseVector: this.buildPlaceholderDenseVector(lexicalContent),
-      metadata: this.buildEntryMetadata(chunk.metadata),
+      denseVector: denseEmbedding.vectorsByChunkId.get(chunk.id),
+      metadata: this.buildEntryMetadata({
+        rawMetadata: chunk.metadata,
+        denseEmbedding,
+        chunkDomain: chunk.domain
+      }),
       createdAt: timestamp,
       updatedAt: timestamp
     };
@@ -110,27 +145,34 @@ export class RagIndexBuilderService {
       .digest("hex");
   }
 
-  private buildPlaceholderDenseVector(content: string): string {
-    const digest = createHash("sha256").update(content).digest();
-    const dimensions = 8;
-    const vector = Array.from({ length: dimensions }, (_, index) => {
-      const byte = digest[index] ?? 0;
-      const normalized = byte / 255;
-      const scaled = normalized * 2 - 1;
-      return Number(scaled.toFixed(6));
-    });
-    return JSON.stringify(vector);
-  }
-
-  private buildEntryMetadata(rawMetadata?: string): string {
+  private buildEntryMetadata(input: {
+    rawMetadata?: string;
+    denseEmbedding: DenseEmbeddingResolution;
+    chunkDomain: string;
+  }): string {
+    const { rawMetadata, denseEmbedding, chunkDomain } = input;
     const sourceMetadata =
       rawMetadata && rawMetadata.trim().length > 0
         ? this.safeParseJson(rawMetadata)
         : undefined;
 
+    const denseMetadata = {
+      mode: denseEmbedding.mode,
+      provider: denseEmbedding.metadata?.provider,
+      model: denseEmbedding.metadata?.model,
+      dimensions: denseEmbedding.metadata?.dimensions,
+      vectorVersion: denseEmbedding.metadata?.vectorVersion,
+      indexVersion: denseEmbedding.metadata?.indexVersion,
+      scope: denseEmbedding.metadata?.scope ?? "datasource",
+      assetType: chunkDomain,
+      configSource: denseEmbedding.metadata?.configSource,
+      unavailableReason: denseEmbedding.unavailableReason
+    };
+
     return JSON.stringify({
-      denseMode: "placeholder_vector_string",
+      denseMode: denseEmbedding.mode,
       lexicalMode: "plain_text",
+      dense: denseMetadata,
       ...(sourceMetadata ? { sourceMetadata } : {})
     });
   }
@@ -150,4 +192,70 @@ export class RagIndexBuilderService {
     }
     await this.repository.markVersionDeprecated(indexVersionId);
   }
+
+  private async resolveDenseEmbedding(input: {
+    chunks: RagChunkBuildInput[];
+    indexVersionId: string;
+  }): Promise<DenseEmbeddingResolution> {
+    const texts = input.chunks.map((chunk) => chunk.content.trim());
+    try {
+      const embeddings = await this.embeddingRouter.embed({
+        texts,
+        indexVersion: input.indexVersionId,
+        scope: "datasource",
+        assetType: "rag_chunk"
+      });
+      if (embeddings.length !== input.chunks.length) {
+        return {
+          mode: "dense_unavailable",
+          vectorsByChunkId: new Map<string, string>(),
+          unavailableReason: "dense_unavailable_embedding_count_mismatch"
+        };
+      }
+
+      const vectorsByChunkId = new Map<string, string>();
+      for (let index = 0; index < input.chunks.length; index += 1) {
+        const chunk = input.chunks[index];
+        const vector = embeddings[index]?.vector;
+        if (!Array.isArray(vector) || vector.length === 0) {
+          continue;
+        }
+        vectorsByChunkId.set(chunk.id, JSON.stringify(vector));
+      }
+      const metadata = embeddings[0]?.metadata;
+      const mode: DenseEmbeddingResolution["mode"] = metadata?.provider.endsWith(":mock")
+        ? "mock_provider"
+        : "external_provider";
+      return {
+        mode,
+        vectorsByChunkId,
+        metadata
+      };
+    } catch (error) {
+      const unavailableReason =
+        error instanceof DomainError
+          ? error.code.toLowerCase()
+          : "dense_unavailable_provider_error";
+      return {
+        mode: "dense_unavailable",
+        vectorsByChunkId: new Map<string, string>(),
+        unavailableReason
+      };
+    }
+  }
+}
+
+interface DenseEmbeddingResolution {
+  mode: "external_provider" | "mock_provider" | "dense_unavailable";
+  vectorsByChunkId: Map<string, string>;
+  unavailableReason?: string;
+  metadata?: {
+    provider: string;
+    model: string;
+    dimensions: number;
+    vectorVersion: string;
+    configSource?: "settings" | "env_fallback" | "missing";
+    indexVersion?: string;
+    scope?: string;
+  };
 }

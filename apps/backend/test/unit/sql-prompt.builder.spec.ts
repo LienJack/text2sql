@@ -16,7 +16,22 @@ describe("SqlPromptBuilder", () => {
     });
 
     expect(prompt.systemPrompt).toContain("Runtime template overlay");
+    expect(prompt.systemPrompt).toContain("cannot override Smart Defaults");
     expect(prompt.systemPrompt).toContain("Always join users table with explicit alias.");
+  });
+
+  it("places Smart Defaults baseline before supplemental template overlay", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("统计订单状态分布", "sqlite", undefined, {
+      smartDefaultsBlock:
+        "Text2SQL Smart Defaults text2sql-smart-defaults@2026-04-28: only-use-context-pack",
+      templateOverlay: "Prefer short aliases."
+    });
+
+    expect(prompt.systemPrompt.indexOf("Text2SQL Smart Defaults")).toBeLessThan(
+      prompt.systemPrompt.indexOf("Runtime template overlay")
+    );
+    expect(prompt.systemPrompt).toContain("Prefer short aliases.");
   });
 
   it("adds explicit count-intent guardrail instructions", () => {
@@ -94,6 +109,43 @@ describe("SqlPromptBuilder", () => {
     expect(prompt.systemPrompt).toContain("Metric bindings: metric.gmv");
     expect(prompt.systemPrompt).toContain(
       "Relationship bindings: rel.orders_customers"
+    );
+  });
+
+  it("renders semantic-plan guardrails including coverage gaps and snapshot id", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("统计订单 GMV", "sqlite", undefined, {
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "统计订单 GMV",
+        selectedTables: ["orders", "customers"],
+        selectedColumns: ["orders.amount", "orders.customer_id", "customers.id"],
+        confidence: 0.91,
+        evidenceRefs: ["chunk-orders-1"],
+        filters: ["route_kind:text_to_sql"],
+        joinPath: ["orders->customers"],
+        coverageGaps: [
+          {
+            gapType: "evidence_gap",
+            subjectKind: "join_path",
+            reasonCode: "relationship_path_needs_review",
+            evidenceRefs: ["chunk-orders-1"],
+            impactScope: "sql_generation"
+          }
+        ],
+        snapshotId: "semantic-plan:text-to-sql:ready:t2:c3:e1:g1:orders"
+      }
+    });
+
+    expect(prompt.systemPrompt).toContain("Typed semantic plan (must follow):");
+    expect(prompt.systemPrompt).toContain(
+      "coverageGaps=join_path:relationship_path_needs_review"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "snapshotId=semantic-plan:text-to-sql:ready:t2:c3:e1:g1:orders"
+    );
+    expect(prompt.systemPrompt).toContain(
+      "Execution guardrail: stay within selectedTables/selectedColumns"
     );
   });
 });

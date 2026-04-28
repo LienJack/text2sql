@@ -1,0 +1,1360 @@
+{
+  "version": "2026-04-27.text2sql-v2-closeout.v2",
+  "nodes": [
+    {
+      "id": "A.context-envelope",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R4",
+        "R13",
+        "R15"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
+        "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[].input",
+        "run.delivery.evidence.v2"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-workflow-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "B.intake",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R20",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[intake]",
+        "run.trace.v2.route"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/nodes/intake.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "C.route",
+      "requirementIds": [
+        "R3",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.route",
+        "run.delivery.evidence.v2.route"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/intake.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "C1.targeted-clarification",
+      "requirementIds": [
+        "R3",
+        "R21",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan]",
+        "run.delivery.evidence.v2.clarification"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/intake.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "C2.general-metadata-answer",
+      "requirementIds": [
+        "R3",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.route",
+        "run.delivery.evidence.v2.answer"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/intake.node.ts",
+        "apps/backend/src/modules/conversation/nodes/answer.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "D.retrieve-context",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R16",
+        "R19",
+        "R21"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[retrieve]",
+        "run.delivery.evidence.v2.retrieval"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/integration/rag-retrieval.service.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/retrieve-context.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "D1.external-embedding-rerank",
+      "requirementIds": [
+        "R16",
+        "R17",
+        "R18"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/llm/embedding-router.service.ts",
+        "apps/backend/src/modules/llm/rerank-router.service.ts",
+        "apps/backend/src/modules/rag/rerank/rag-rerank.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[retrieve].provider",
+        "run.delivery.evidence.v2.retrieval.unavailable"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
+        "apps/backend/test/unit/rag-rerank.service.spec.ts",
+        "apps/backend/test/unit/rerank-router.service.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/nodes/retrieve-context.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "D2.schema-ddl-supplement",
+      "requirementIds": [
+        "R2",
+        "R19"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[assemble-context].ddlSupplement",
+        "run.delivery.evidence.v2.context"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/nodes/assemble-context.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "E.semantic-context-pack",
+      "requirementIds": [
+        "R2",
+        "R19"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[assemble-context]",
+        "run.delivery.evidence.v2.context"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/assemble-context.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "F.semantic-plan",
+      "requirementIds": [
+        "R2",
+        "R20",
+        "R21"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.validator.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan]",
+        "run.delivery.evidence.v2.semanticPlan"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/semantic-plan.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "G.plan-confidence",
+      "requirementIds": [
+        "R3",
+        "R21",
+        "R22"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[semantic-plan].confidence",
+        "run.trace.v2.routeDecision"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/semantic-plan.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "H.structured-sql-generation",
+      "requirementIds": [
+        "R1",
+        "R2",
+        "R20"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[generate-sql]",
+        "run.delivery.evidence.v2.sqlGeneration"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/generate-sql.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "I.validation",
+      "requirementIds": [
+        "R9",
+        "R10",
+        "R11",
+        "R12"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[validate]",
+        "run.delivery.evidence.v2.validation"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/validate-sql.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "J.read-only-execution",
+      "requirementIds": [
+        "R3",
+        "R11",
+        "R12"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[execute]",
+        "run.delivery.evidence.v2.execution"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/validate-sql.node.ts",
+        "apps/backend/src/modules/conversation/nodes/execute-sql.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "K.diagnosis-bounded-correction",
+      "requirementIds": [
+        "R9",
+        "R10",
+        "R11"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/sql-correction.service.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[correct]",
+        "run.delivery.evidence.v2.correction"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/correct-sql.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "L.fail-closed-evidence",
+      "requirementIds": [
+        "R3",
+        "R11",
+        "R16",
+        "R17",
+        "R23"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
+        "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.failure",
+        "run.delivery.evidence.v2.failure"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/rag-audit-replay.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+        "apps/backend/src/modules/conversation/nodes/validate-sql.node.ts",
+        "apps/backend/src/modules/conversation/nodes/semantic-plan.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "M.final-answer-replay-artifacts",
+      "requirementIds": [
+        "R2",
+        "R4",
+        "R14",
+        "R15",
+        "R23",
+        "R24",
+        "R25"
+      ],
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/text2sql/stream/text2sql-stream-event.mapper.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
+        "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
+        "apps/backend/src/modules/conversation/chat/application/run-view.usecase.ts",
+        "apps/backend/src/modules/conversation/chat/application/save-view-from-run.usecase.ts",
+        "apps/backend/src/modules/rag/audit/rag-audit-replay.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2",
+        "run.delivery.evidence.v2",
+        "SSE.state.data.v2.stageArtifact"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts",
+        "apps/backend/test/integration/save-view-from-run.spec.ts"
+      ],
+      "gateRelevance": true,
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "canonicalRuntimeOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+        "apps/backend/src/modules/conversation/nodes/answer.node.ts"
+      ],
+      "canonicalOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    }
+  ],
+  "strictCompletionRows": [
+    {
+      "id": "SC.metadata-grounding",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/nodes/answer.node.ts",
+        "apps/backend/src/modules/conversation/agent/nodes/format-answer.node.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.stages[intake].metadata.route",
+        "run.delivery.evidence.metadataAnswer",
+        "run.delivery.evidence.contextPackSummary"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/integration/chat-context-envelope-accuracy.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "SC.correction-grounding",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/nodes/correct-sql.node.ts",
+        "apps/backend/src/modules/conversation/nodes/generate-sql.node.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-prompt.builder.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.sqlGeneration.correctionGrounding",
+        "run.delivery.evidence.correctionGrounding"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    },
+    {
+      "id": "SC.context-pack-parity",
+      "implementationOwners": [
+        "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts",
+        "apps/backend/src/modules/conversation/nodes/assemble-context.node.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.contextPack",
+        "run.delivery.evidence.contextPackSummary",
+        "run.delivery.evidence.v2.contextPack"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/integration/delivery-contract.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "contractAssertionMode": "behavior_contract"
+    }
+  ],
+  "evalFixtureFamilies": [
+    {
+      "family": "chinese-alias",
+      "evalCases": [
+        "zh-alias-gmv-001"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "F.semantic-plan",
+        "H.structured-sql-generation"
+      ]
+    },
+    {
+      "family": "ambiguous-business-term",
+      "evalCases": [
+        "zh-ambiguous-term-clarify-002"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C1.targeted-clarification",
+        "G.plan-confidence"
+      ]
+    },
+    {
+      "family": "multi-table-join",
+      "evalCases": [
+        "zh-join-multi-table-003"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/integration/agent-relationship-correction-loop.spec.ts"
+      ],
+      "flowNodes": [
+        "F.semantic-plan",
+        "I.validation",
+        "K.diagnosis-bounded-correction"
+      ]
+    },
+    {
+      "family": "follow-up",
+      "evalCases": [
+        "zh-follow-up-004"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "A.context-envelope",
+        "B.intake"
+      ]
+    },
+    {
+      "family": "metadata-general",
+      "evalCases": [
+        "zh-metadata-route-005",
+        "zh-general-route-006"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "C.route",
+        "C2.general-metadata-answer"
+      ]
+    },
+    {
+      "family": "unsafe-write",
+      "evalCases": [
+        "zh-unsafe-write-007"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    },
+    {
+      "family": "dense-unavailable",
+      "evalCases": [
+        "zh-dense-unavailable-008"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-embedding-provider.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "L.fail-closed-evidence"
+      ]
+    },
+    {
+      "family": "rerank-unavailable",
+      "evalCases": [
+        "zh-rerank-unavailable-009"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/rerank-router.service.spec.ts",
+        "apps/backend/test/unit/rag-rerank.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-context-pack.spec.ts"
+      ],
+      "flowNodes": [
+        "D1.external-embedding-rerank",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "correction-success",
+      "evalCases": [
+        "zh-correction-success-010"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "K.diagnosis-bounded-correction"
+      ]
+    },
+    {
+      "family": "terminal-governance-failure",
+      "evalCases": [
+        "zh-terminal-governance-failure-011"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-runner.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-closeout-flow.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "L.fail-closed-evidence"
+      ]
+    },
+    {
+      "family": "plain-general-no-sql",
+      "evalCases": [
+        "zh-plain-general-no-sql-runtime-intelligence-012"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-nodes.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "flowNodes": [
+        "B.intake",
+        "C.route",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "runtime-plan-consistency",
+      "evalCases": [
+        "zh-plain-general-no-sql-runtime-intelligence-012",
+        "zh-artifact-ref-compaction-smart-defaults-013"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-result.mapper.spec.ts",
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts"
+      ],
+      "flowNodes": [
+        "H.structured-sql-generation",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "artifact-ref-compaction",
+      "evalCases": [
+        "zh-artifact-ref-compaction-smart-defaults-013"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "flowNodes": [
+        "D.retrieve",
+        "E.assemble-context",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "large-context-compaction",
+      "evalCases": [
+        "zh-artifact-ref-compaction-smart-defaults-013"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "flowNodes": [
+        "E.assemble-context",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "smart-defaults-evidence",
+      "evalCases": [
+        "zh-artifact-ref-compaction-smart-defaults-013"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/sql-prompt.builder.spec.ts",
+        "apps/backend/test/unit/chat-delivery-enrichment.service.spec.ts"
+      ],
+      "flowNodes": [
+        "H.structured-sql-generation",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "validation-diagnostics",
+      "evalCases": [
+        "zh-correction-success-010"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": [
+        "I.validation",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "correction-grounding",
+      "evalCases": [
+        "zh-correction-success-010"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts",
+        "apps/backend/test/unit/langgraph-runtime.spec.ts"
+      ],
+      "flowNodes": [
+        "K.diagnosis-bounded-correction",
+        "SC.correction-grounding"
+      ]
+    },
+    {
+      "family": "execution-preview",
+      "evalCases": [
+        "zh-artifact-ref-compaction-smart-defaults-013"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "flowNodes": [
+        "J.execution",
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "all-stage-stream-lifecycle",
+      "evalCases": [
+        "zh-plain-general-no-sql-runtime-intelligence-012"
+      ],
+      "behaviorTests": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts"
+      ],
+      "flowNodes": [
+        "M.final-answer-replay-artifacts"
+      ]
+    },
+    {
+      "family": "ledger-single-table-fulfillment",
+      "evalCases": ["zh-alias-gmv-001"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "H.structured-sql-generation", "I.validation"]
+    },
+    {
+      "family": "ledger-multi-table-join-fulfillment",
+      "evalCases": ["zh-join-multi-table-003"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "I.validation"]
+    },
+    {
+      "family": "ledger-missing-table-evidence",
+      "evalCases": ["zh-ambiguous-term-clarify-002"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
+    },
+    {
+      "family": "ledger-missing-required-column",
+      "evalCases": ["zh-correction-success-010"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "flowNodes": ["I.validation", "K.diagnosis-bounded-correction"]
+    },
+    {
+      "family": "ledger-missing-join-path",
+      "evalCases": ["zh-join-multi-table-003"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
+    },
+    {
+      "family": "ledger-warning-only-degraded-context",
+      "evalCases": ["zh-dense-unavailable-008"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "flowNodes": ["F.semantic-plan", "M.final-answer-replay-artifacts"]
+    },
+    {
+      "family": "ledger-correctable-sql-coverage-miss",
+      "evalCases": ["zh-correction-success-010"],
+      "behaviorTests": [
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "flowNodes": ["I.validation", "K.diagnosis-bounded-correction"]
+    },
+    {
+      "family": "ledger-terminal-governance-safety-miss",
+      "evalCases": ["zh-terminal-governance-failure-011", "zh-unsafe-write-007"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-validation.spec.ts"],
+      "flowNodes": ["I.validation", "L.fail-closed-evidence"]
+    },
+    {
+      "family": "ledger-metric-time-grain-ambiguity",
+      "evalCases": ["zh-ambiguous-term-clarify-002"],
+      "behaviorTests": ["apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"],
+      "flowNodes": ["F.semantic-plan", "C1.targeted-clarification"]
+    }
+  ],
+  "criticalFileOwnerMigrations": [
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "reason": "Layered runtime migration moves the canonical LangGraph runner owner under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/text2sql/stages/run-v2-langgraph.stage.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+      "reason": "Layered runtime migration moves the canonical workflow seam stage under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph.graph.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+      "reason": "Layered runtime migration moves the canonical graph owner under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "reason": "Layered runtime migration moves result mapping ownership under conversation/runtime",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/langgraph/nodes/intake.node.ts",
+      "to": "apps/backend/src/modules/conversation/nodes/intake.node.ts",
+      "reason": "Layered runtime migration moves canonical node ownership under conversation/nodes",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/text2sql-v2-runner.service.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "reason": "Legacy long-form v2 runner ownership is superseded by the layered LangGraph runtime seam",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts",
+      "to": "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+      "reason": "Legacy state-machine stage ownership is superseded by the layered LangGraph stage seam",
+      "threshold": {
+        "line": 80
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/sql-correction.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/sql-correction.service.ts",
+      "reason": "Layered runtime migration moves SQL correction ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/sql-validation.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts",
+      "reason": "Layered runtime migration moves SQL validation ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
+      }
+    },
+    {
+      "from": "apps/backend/src/modules/conversation/agent/v2/semantic-context-pack.service.ts",
+      "to": "apps/backend/src/modules/conversation/adapters/semantic-context-pack.service.ts",
+      "reason": "Layered runtime migration moves semantic context-pack ownership under conversation/adapters",
+      "threshold": {
+        "line": 75
+      }
+    }
+  ],
+  "runtimePaths": {
+    "currentActivePath": [
+      "apps/backend/src/modules/conversation/application/workflow/text2sql-workflow-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+    ],
+    "targetActivePath": [
+      "apps/backend/src/modules/conversation/application/workflow/text2sql-workflow-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+    ],
+    "criticalOwners": [
+      "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+      "apps/backend/src/modules/conversation/nodes/intake.node.ts"
+    ],
+    "blockerPolicy": "Closeout must stay blocked if a canonical LangGraph owner is missing or if behavior tests still rely on legacy runtime-detail assertions.",
+    "delegationPolicy": "phase_a_delegation_zero",
+    "delegationOwners": [
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+      "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+    ],
+    "delegationForbiddenPatterns": [
+      "runLegacyRuntime",
+      "legacyRunner",
+      "Text2SqlV2RunnerService"
+    ]
+  },
+  "runtimeCoverageRows": [
+    {
+      "id": "langgraph-runtime.seam",
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/stages/run-v2-langgraph.stage.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-workflow-runner.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-runtime.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Active workflow seam coverage must move to RunV2LangGraphStage and Text2SqlV2LangGraphRunner before closeout can pass."
+    },
+    {
+      "id": "langgraph-runtime.topology",
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts",
+        "apps/backend/src/modules/conversation/nodes/intake.node.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-runtime.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Canonical graph topology, result mapping, and intake node coverage are required before the LangGraph runtime cutover can close out."
+    },
+    {
+      "id": "langgraph-runtime.delegation-zero",
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/integration/text2sql-v2-focused-coverage-gate.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Phase A closeout requires delegation=0 (no graph main-path fallback to legacy runner)."
+    },
+    {
+      "id": "runtime-intelligence.runtime-plan",
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.state.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-result.mapper.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/langgraph-runtime.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-langgraph-result.mapper.spec.ts",
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Runtime plan must be produced deterministically and projected through trace/stream."
+    },
+    {
+      "id": "runtime-intelligence.artifact-refs",
+      "owners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts",
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph-runner.service.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Artifact refs must use safe summaries and visible degradation."
+    },
+    {
+      "id": "runtime-intelligence.smart-defaults",
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/smart-defaults/text2sql-smart-defaults.service.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+        "apps/backend/src/modules/conversation/agent/sql/sql-prompt.builder.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/sql-prompt.builder.spec.ts",
+        "apps/backend/test/unit/chat-delivery-enrichment.service.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Smart Defaults must have structured id/version evidence and cannot be erased by template overlays."
+    },
+    {
+      "id": "plan-ledger.obligation-contract",
+      "owners": [
+        "packages/shared-types/src/api.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.service.ts",
+        "apps/backend/src/modules/conversation/adapters/semantic-plan.validator.ts"
+      ],
+      "expectedTestFiles": [
+        "packages/shared-types/src/api.contract.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-semantic-plan.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Plan Ledger must create grounded obligations and block hard evidence gaps before SQL generation."
+    },
+    {
+      "id": "plan-ledger.generation-validation",
+      "owners": [
+        "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
+        "apps/backend/src/modules/conversation/adapters/sql-validation.service.ts",
+        "apps/backend/src/modules/conversation/nodes/correct-sql.node.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/sql-generation.service.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-validation.spec.ts",
+        "apps/backend/test/unit/text2sql-v2-correction.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "SQL generation must claim ledger obligations and validation must report failed obligation ids before execution/correction."
+    },
+    {
+      "id": "plan-ledger.delivery-stream-projection",
+      "owners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-builder.ts",
+        "apps/backend/src/modules/conversation/delivery/delivery-contract.mapper.ts",
+        "apps/backend/src/modules/conversation/text2sql/stream/text2sql-stream-event.mapper.ts"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-langgraph-result.mapper.spec.ts",
+        "apps/backend/test/unit/delivery-contract.mapper.spec.ts",
+        "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts"
+      ],
+      "coverageOwnerStatus": "covered",
+      "critical": true,
+      "blocker": "Trace, delivery, replay, and stream surfaces must expose compact ledger summaries without leaking full obligation payloads."
+    }
+  ],
+  "runtimeArtifactProducerRows": [
+    {
+      "category": "context_snippets",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[context_snippets]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "schema_supplement",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[schema_supplement]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "prompt_input",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[prompt_input]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "provider_output_summary",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[provider_output_summary]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "validation_diagnostics",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[validation_diagnostics]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "correction_grounding",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[correction_grounding]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "execution_preview",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[execution_preview]"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    }
+  ],
+  "streamLifecycleRows": [
+    {
+      "stage": "intake",
+      "lifecycles": ["running", "completed"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "retrieve",
+      "lifecycles": ["running", "completed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "assemble-context",
+      "lifecycles": ["running", "completed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "semantic-plan",
+      "lifecycles": ["running", "completed", "failed", "clarification"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "generate-sql",
+      "lifecycles": ["running", "completed", "failed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "validate",
+      "lifecycles": ["running", "completed", "failed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "correct",
+      "lifecycles": ["running", "completed", "failed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "execute",
+      "lifecycles": ["running", "completed", "failed", "skipped"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "stage": "answer",
+      "lifecycles": ["running", "completed", "failed", "clarification"],
+      "owners": [
+        "apps/backend/src/modules/conversation/runtime/langgraph/text2sql-v2-langgraph.graph.ts"
+      ],
+      "expectedTestFiles": ["apps/backend/test/unit/langgraph-runtime.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    }
+  ]
+}

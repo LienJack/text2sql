@@ -180,6 +180,69 @@ describe("rag retrieval service integration", () => {
     await moduleRef.close();
   });
 
+  it("marks dense lane unavailable when index/query vector spaces are incompatible", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const datasourceId = "ds-rag-retrieval-dense-incompatible";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-dense-incompatible-schema",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount, status)"
+      },
+      {
+        id: "chunk-dense-incompatible-sql",
+        datasourceId,
+        domain: "sql_example",
+        content: "SELECT SUM(amount) FROM orders"
+      }
+    ]);
+    const build = await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "source-rag-retrieval-dense-incompatible-v1",
+      createdByRunId: "run-rag-retrieval-dense-incompatible-build-v1",
+      activatedByRunId: "run-rag-retrieval-dense-incompatible-build-v1"
+    });
+    const indexedEntries = await indexRepository.listEntriesByVersion(build.indexVersionId);
+    await indexRepository.replaceEntriesForVersion(
+      build.indexVersionId,
+      indexedEntries.map((entry) => {
+        const metadata = JSON.parse(entry.metadata ?? "{}") as Record<string, unknown>;
+        const dense = ((metadata.dense as Record<string, unknown> | undefined) ?? {});
+        return {
+          ...entry,
+          metadata: JSON.stringify({
+            ...metadata,
+            dense: {
+              ...dense,
+              dimensions: 999
+            }
+          })
+        };
+      })
+    );
+
+    const response = await retrievalService.retrieve({
+      query: "orders amount",
+      datasourceId,
+      runId: "run-rag-retrieval-dense-incompatible-v1"
+    });
+
+    expect(response.retrieval_bundle.lane_results.dense.status).toBe("degraded");
+    expect(response.retrieval_bundle.degrade_reasons).toEqual(
+      expect.arrayContaining(["dense_unavailable_incompatible_vector_space"])
+    );
+
+    await moduleRef.close();
+  });
+
   it("marks trusted prior SQL as hit and promotes it into retrieval candidates", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]

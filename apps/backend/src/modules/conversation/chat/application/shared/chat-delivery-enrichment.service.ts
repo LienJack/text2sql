@@ -1,7 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   DeliveryContract,
-  PromptTemplateTraceEvidenceCompat,
   SqlRun
 } from "@text2sql/shared-types";
 import {
@@ -102,50 +101,31 @@ export class ChatDeliveryEnrichmentService {
   }
 
   withPromptTemplateEvidence(run: SqlRun): SqlRun {
-    const traceWithCompat = run.trace as SqlRun["trace"] & {
-      prompt_template?: unknown;
-      prompt_template_evidence?: unknown;
-      templateEvidence?: unknown;
-      effectiveContextSummary?: unknown;
-      effective_context_summary?: unknown;
-      conflictHint?: unknown;
-      context_conflict_hint?: unknown;
-    };
-    const evidenceWithCompat = run.delivery?.evidence as
-      | (NonNullable<SqlRun["delivery"]>["evidence"] & {
-          effectiveContextSummary?: unknown;
-          effective_context_summary?: unknown;
-          conflictHint?: unknown;
-          context_conflict_hint?: unknown;
-        })
-      | undefined;
     const tracePromptTemplate = this.normalizePromptTemplateTraceEvidence(
-      traceWithCompat.promptTemplate ??
-        traceWithCompat.prompt_template ??
-        traceWithCompat.prompt_template_evidence ??
-        traceWithCompat.templateEvidence
+      run.trace.promptTemplate
     );
     const evidencePromptTemplate = this.normalizePromptTemplateTraceEvidence(
       run.delivery?.evidence?.promptTemplate
     );
     const traceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
-      traceWithCompat.effectiveContextSummary ??
-        traceWithCompat.effective_context_summary
+      run.trace.effectiveContextSummary
     );
     const evidenceEffectiveContextSummary = this.normalizeEffectiveContextSummary(
-      evidenceWithCompat?.effectiveContextSummary ??
-        evidenceWithCompat?.effective_context_summary
+      run.delivery?.evidence?.effectiveContextSummary
     );
     const traceConflictHint = this.normalizeContextConflictHint(
-      traceWithCompat.conflictHint ?? traceWithCompat.context_conflict_hint
+      run.trace.conflictHint
     );
     const evidenceConflictHint = this.normalizeContextConflictHint(
-      evidenceWithCompat?.conflictHint ?? evidenceWithCompat?.context_conflict_hint
+      run.delivery?.evidence?.conflictHint
     );
     const resolvedPromptTemplate = evidencePromptTemplate ?? tracePromptTemplate;
     const resolvedEffectiveContextSummary =
       evidenceEffectiveContextSummary ?? traceEffectiveContextSummary;
     const resolvedConflictHint = evidenceConflictHint ?? traceConflictHint;
+    const resolvedTraceV2 = run.trace.v2;
+    const resolvedEvidenceV2 =
+      run.delivery?.evidence?.v2 ?? this.buildEvidenceV2FromTrace(run.trace.v2);
 
     const normalizedTrace = resolvedPromptTemplate
       ? {
@@ -160,6 +140,11 @@ export class ChatDeliveryEnrichmentService {
             ? {
                 conflictHint: resolvedConflictHint
               }
+            : {}),
+          ...(resolvedTraceV2
+            ? {
+                v2: resolvedTraceV2
+              }
             : {})
         }
       : ({
@@ -173,6 +158,11 @@ export class ChatDeliveryEnrichmentService {
             ? {
                 conflictHint: resolvedConflictHint
               }
+            : {}),
+          ...(resolvedTraceV2
+            ? {
+                v2: resolvedTraceV2
+              }
             : {})
         } as SqlRun["trace"]);
 
@@ -181,7 +171,11 @@ export class ChatDeliveryEnrichmentService {
     }
 
     const nextEvidence =
-      run.delivery.evidence || resolvedPromptTemplate
+      run.delivery.evidence ||
+      resolvedPromptTemplate ||
+      resolvedEffectiveContextSummary ||
+      resolvedConflictHint ||
+      resolvedEvidenceV2
         ? {
             runId: run.delivery.evidence?.runId ?? run.runId,
             ...run.delivery.evidence,
@@ -198,6 +192,11 @@ export class ChatDeliveryEnrichmentService {
             ...(resolvedConflictHint
               ? {
                   conflictHint: resolvedConflictHint
+                }
+              : {}),
+            ...(resolvedEvidenceV2
+              ? {
+                  v2: resolvedEvidenceV2
                 }
               : {})
           }
@@ -219,26 +218,25 @@ export class ChatDeliveryEnrichmentService {
     if (!this.isRecord(value)) {
       return undefined;
     }
-    const candidate = value as PromptTemplateTraceEvidenceCompat;
-    const templateId = this.readNonEmptyString(candidate.templateId ?? candidate.template_id);
+    const candidate = value as {
+      templateId?: unknown;
+      scope?: unknown;
+      version?: unknown;
+      fallbackReason?: unknown;
+      scene?: unknown;
+    };
+    const templateId = this.readNonEmptyString(candidate.templateId);
     const scope = this.normalizePromptTemplateScope(
-      candidate.scope ??
-        candidate.scope_type ??
-        candidate.template_scope ??
-        (this.isRecord(value) ? (value.scopeType as unknown) : undefined)
+      candidate.scope
     );
     const version = this.readPositiveInteger(
-      candidate.version ??
-        candidate.template_version ??
-        (this.isRecord(value) ? (value.templateVersion as unknown) : undefined)
+      candidate.version
     );
     const fallbackReason = this.readNonEmptyString(
-      candidate.fallbackReason ??
-        candidate.fallback_reason ??
-        (this.isRecord(value) ? (value.fallback_reason_code as unknown) : undefined)
+      candidate.fallbackReason
     );
     const scene = this.normalizePromptTemplateScene(
-      candidate.scene ?? candidate.scene_name ?? candidate.template_scene
+      candidate.scene
     );
 
     if (!templateId && !scope && version === undefined && !fallbackReason && !scene) {
@@ -447,6 +445,48 @@ export class ChatDeliveryEnrichmentService {
           .filter((item): item is string => Boolean(item))
       )
     );
+  }
+
+  private buildEvidenceV2FromTrace(
+    traceV2: SqlRun["trace"]["v2"] | undefined
+  ): NonNullable<NonNullable<SqlRun["delivery"]>["evidence"]>["v2"] | undefined {
+    if (!traceV2) {
+      return undefined;
+    }
+    return {
+      version: traceV2.version,
+      stageOrder: traceV2.stageOrder,
+      stageArtifacts: traceV2.stages,
+      contextPack: traceV2.contextPack,
+      semanticPlan: this.toSafeSemanticPlan(traceV2.semanticPlan),
+      sqlGeneration: traceV2.sqlGeneration,
+      sqlValidation: traceV2.sqlValidation,
+      planLedger:
+        traceV2.planLedger ??
+        traceV2.sqlValidation?.ledgerFulfillment ??
+        traceV2.semanticPlan?.planLedger?.summary,
+      runtimePlan: traceV2.runtimePlan,
+      artifactRefs: traceV2.artifactRefs,
+      smartDefaults: traceV2.smartDefaults,
+      loopEvidence: traceV2.loopEvidence,
+      terminationReason: traceV2.terminationReason,
+      failure:
+        traceV2.sqlValidation?.failure ??
+        traceV2.stages
+          .slice()
+          .reverse()
+          .find((stage) => stage.status === "failed")?.failure
+    };
+  }
+
+  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+    semanticPlan: T
+  ): T {
+    if (!semanticPlan) {
+      return semanticPlan;
+    }
+    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    return safePlan as T;
   }
 
   private async loadReplayRecords(runId: string): Promise<DeliveryReplayRecordInput[]> {

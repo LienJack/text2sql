@@ -1,29 +1,33 @@
-import {
-  MAX_RELATIONSHIP_CORRECTION_RETRY,
-  shouldRetryRelationshipCorrection
-} from "../../src/modules/conversation/agent/graph/langgraph.state";
 import { BuildSemanticQueryNode } from "../../src/modules/conversation/agent/nodes/build-semantic-query.node";
+import { DomainError } from "../../src/common/domain-error";
+import { SqlCorrectionService } from "../../src/modules/conversation/adapters/sql-correction.service";
 
 describe("agent relationship correction loop", () => {
+  const correctionService = new SqlCorrectionService();
+  const shouldRetryCorrection = (input: { error: string; retryCount: number }) => {
+    const decision = correctionService.decide(input.error);
+    return decision.correctable && input.retryCount < decision.maxAttempts;
+  };
+
   it("retries only when relationship-path errors are detected within retry budget", () => {
     expect(
-      shouldRetryRelationshipCorrection({
-        error: "missing_relation_path: cannot resolve join path",
+      shouldRetryCorrection({
+        error: "cannot resolve join path for relationship binding",
         retryCount: 0
       })
     ).toBe(true);
     expect(
-      shouldRetryRelationshipCorrection({
-        error: "join_key_mismatch on relationship binding",
+      shouldRetryCorrection({
+        error: "relationship binding mismatch",
         retryCount: 1
       })
     ).toBe(true);
   });
 
-  it("stops retrying after MAX_RELATIONSHIP_CORRECTION_RETRY", () => {
-    expect(MAX_RELATIONSHIP_CORRECTION_RETRY).toBe(2);
+  it("stops retrying after v2 correction max attempts", () => {
+    expect(correctionService.maxAttempts).toBe(2);
     expect(
-      shouldRetryRelationshipCorrection({
+      shouldRetryCorrection({
         error: "ambiguous_join_path",
         retryCount: 2
       })
@@ -32,11 +36,47 @@ describe("agent relationship correction loop", () => {
 
   it("does not retry for non-relationship execution errors", () => {
     expect(
-      shouldRetryRelationshipCorrection({
-        error: "SQL syntax error near SELECT",
+      shouldRetryCorrection({
+        error: "network timeout when contacting datasource",
         retryCount: 0
       })
     ).toBe(false);
+  });
+
+  it("does not retry when validation marks failure as terminal governance", () => {
+    const error = new DomainError(
+      "SQL_TERMINAL_VALIDATION_FAILED",
+      "未授权表: invoices",
+      422,
+      {
+        validationFailure: {
+          code: "SQL_TABLE_PERMISSION_DENIED",
+          message: "未授权表: invoices",
+          category: "governance",
+          terminal: true,
+          correctable: false
+        }
+      }
+    );
+    const decision = correctionService.decide(error);
+    expect(decision.correctable).toBe(false);
+    expect(decision.maxAttempts).toBe(0);
+    expect(decision.category).toBe("governance");
+  });
+
+  it("retries for correctable syntax/column/dialect style execution errors", () => {
+    expect(
+      shouldRetryCorrection({
+        error: "SQL syntax error near FROM",
+        retryCount: 0
+      })
+    ).toBe(true);
+    expect(
+      shouldRetryCorrection({
+        error: "unknown column `foo`",
+        retryCount: 1
+      })
+    ).toBe(true);
   });
 
   it("pins relationship retry hints when context pack includes modeling revision", async () => {

@@ -12,6 +12,7 @@ import { GateMetricsService } from "../observability/gate-metrics.service";
 import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
 import { RagQualityService } from "../rag/quality/rag-quality.service";
 import { SemanticSpineShadowGateService } from "../observability/semantic-spine-shadow-gate.service";
+import { RagTaskConfigService } from "../llm/rag-task-config.service";
 
 @Controller()
 export class HealthController {
@@ -25,7 +26,8 @@ export class HealthController {
     private readonly gateMetrics: GateMetricsService,
     private readonly ragIngestionMetrics: RagIngestionMetricsService,
     private readonly ragQuality: RagQualityService,
-    private readonly semanticSpineShadow: SemanticSpineShadowGateService
+    private readonly semanticSpineShadow: SemanticSpineShadowGateService,
+    private readonly ragTaskConfigService: RagTaskConfigService
   ) {}
 
   private async buildHealthResponse(req: Request): Promise<ApiResponse<unknown>> {
@@ -38,6 +40,14 @@ export class HealthController {
     const postgresEnabled = Boolean(this.config.databaseUrl);
     const ragQualityGate = this.ragQuality.snapshot();
     const semanticSpineShadowGate = this.semanticSpineShadow.snapshot();
+    const ragConfigView = await this.ragTaskConfigService.listSettingsView({
+      id: "system-health",
+      role: "admin"
+    });
+    const embeddingConfig =
+      ragConfigView.items.find((item) => item.taskType === "embedding") ?? null;
+    const rerankConfig =
+      ragConfigView.items.find((item) => item.taskType === "rerank") ?? null;
     return ok(req.requestId, {
       status: sqliteReady ? "ok" : "degraded",
       runtime: {
@@ -89,6 +99,24 @@ export class HealthController {
         ragQuality: {
           gate: ragQualityGate,
           r6: ragQualityGate.r6
+        },
+        ragConfig: {
+          embedding: embeddingConfig
+            ? {
+                provider: embeddingConfig.provider,
+                model: embeddingConfig.model,
+                configSource: embeddingConfig.configSource,
+                healthStatus: embeddingConfig.healthStatus
+              }
+            : null,
+          rerank: rerankConfig
+            ? {
+                provider: rerankConfig.provider,
+                model: rerankConfig.model,
+                configSource: rerankConfig.configSource,
+                healthStatus: rerankConfig.healthStatus
+              }
+            : null
         },
         semanticSpineShadow: {
           gate: semanticSpineShadowGate

@@ -118,6 +118,58 @@ function moveSessionToFront(
 }
 
 function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
+  if (event.type === "tool-call") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; input?: unknown }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "success",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "running",
+      detail: summarizeToolPayload(payload?.input),
+      at: event.at,
+      startedAt: event.at,
+      stage: "generation",
+      title: `调用工具：${toolName}`
+    };
+  }
+  if (event.type === "tool-result") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; output?: unknown }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "success",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "completed",
+      detail: summarizeToolPayload(payload?.output),
+      at: event.at,
+      endedAt: event.at,
+      stage: "generation",
+      title: `工具返回：${toolName}`
+    };
+  }
+  if (event.type === "tool-error") {
+    const payload = event.data as
+      | { toolName?: string; toolCallId?: string; message?: string }
+      | undefined;
+    const toolName = payload?.toolName ?? "tool";
+    return {
+      node: `tool:${toolName}`,
+      status: "failed",
+      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
+      lifecycle: "failed",
+      detail: payload?.message ?? "工具调用失败",
+      errorSummary: payload?.message,
+      at: event.at,
+      endedAt: event.at,
+      stage: "generation",
+      title: `工具失败：${toolName}`
+    };
+  }
   if (event.type !== "state") {
     return null;
   }
@@ -139,6 +191,30 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
     stage: payload.stage,
     title: payload.title
   };
+}
+
+function summarizeToolPayload(payload: unknown): string {
+  if (payload === undefined || payload === null) {
+    return "";
+  }
+  if (typeof payload === "string") {
+    return payload.slice(0, 180);
+  }
+  if (typeof payload !== "object") {
+    return String(payload).slice(0, 180);
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.sql === "string") {
+    return record.sql.slice(0, 180);
+  }
+  if (typeof record.rowCount === "number") {
+    return `返回 ${record.rowCount} 行`;
+  }
+  try {
+    return JSON.stringify(payload).slice(0, 180);
+  } catch {
+    return "";
+  }
 }
 
 function appendThinkingStep(
@@ -194,6 +270,9 @@ export function ChatPanel() {
   );
   const [streamDeliveryByRunId, setStreamDeliveryByRunId] = useState<
     Record<string, DeliveryContract>
+  >({});
+  const [streamTextStartedByRunId, setStreamTextStartedByRunId] = useState<
+    Record<string, boolean>
   >({});
   const [runVisibilityByRunId, setRunVisibilityByRunId] = useState<
     Record<string, RunVisibilityStatus>
@@ -267,6 +346,7 @@ export function ChatPanel() {
     setStreamThinkingByRunId({});
     setRunLoadingById({});
     setStreamDeliveryByRunId({});
+    setStreamTextStartedByRunId({});
     setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
     setThinkingRequestPending(false);
@@ -291,6 +371,7 @@ export function ChatPanel() {
     setStreamThinkingByRunId({});
     setRunLoadingById({});
     setStreamDeliveryByRunId({});
+    setStreamTextStartedByRunId({});
     setRunVisibilityByRunId((previous) => {
       if (!sessionView.latestRun) {
         return {};
@@ -711,6 +792,7 @@ export function ChatPanel() {
           streamThinkingByRunId={streamThinkingByRunId}
           runLoadingById={runLoadingById}
           streamDeliveryByRunId={streamDeliveryByRunId}
+          streamTextStartedByRunId={streamTextStartedByRunId}
           runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
@@ -744,8 +826,22 @@ export function ChatPanel() {
                 delete next[event.runId];
                 return next;
               });
+              setStreamTextStartedByRunId((previous) => {
+                const next = { ...previous };
+                delete next[event.runId];
+                return next;
+              });
               setThinkingRequestPending(true);
               return;
+            }
+            if (event.type === "text-delta") {
+              const text = (event.data as { text?: unknown } | undefined)?.text;
+              if (typeof text === "string" && text.length > 0) {
+                setStreamTextStartedByRunId((previous) => ({
+                  ...previous,
+                  [event.runId]: true
+                }));
+              }
             }
             if (event.type === "finish") {
               const finishData = event.data as

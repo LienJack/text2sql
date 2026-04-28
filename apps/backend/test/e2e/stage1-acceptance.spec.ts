@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import yaml from "js-yaml";
 import { Test } from "@nestjs/testing";
 import { AppModule } from "../../src/app.module";
-import { GraphBuilderService } from "../../src/modules/conversation/agent/graph/graph.builder";
+import { ChatService } from "../../src/modules/conversation/chat/chat.service";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
 import type { RunStatus } from "@text2sql/shared-types";
 
@@ -56,7 +56,7 @@ describe("stage1 acceptance", () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]
     }).compile();
-    const graph = moduleRef.get(GraphBuilderService);
+    const chatService = moduleRef.get(ChatService);
 
     const filePath = await resolveStageCasePath();
     const raw = await readFile(filePath, "utf8");
@@ -70,13 +70,12 @@ describe("stage1 acceptance", () => {
     const mismatches: string[] = [];
 
     for (const item of parsed.cases) {
-      const run = await graph.run({
-        runId: randomUUID(),
-        sessionId: "stage1",
-        question: item.question,
-        datasourceId: "sqlite_main",
-        datasourceType: "sqlite"
-      });
+      const session = await chatService.createSession("sqlite_main");
+      const run = await chatService.sendMessage(
+        session.id,
+        item.question,
+        randomUUID()
+      );
       if (
         run.status === "executionResult" ||
         run.status === "clarification" ||
@@ -116,6 +115,8 @@ describe("stage1 acceptance", () => {
     expect(clarificationCount).toBeGreaterThanOrEqual(2);
     expect(report.sampleReady).toBe(true);
     expect(report.gatePass).toBe(true);
+
+    await moduleRef.close();
   });
 });
 
