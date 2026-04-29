@@ -70,6 +70,7 @@ type CapabilityBoundaryCheckReport = {
   };
   ragImportReport: {
     blockedLegacyActiveImports: Violation[];
+    blockedLegacyCompatAliasEntryImports: Violation[];
     blockedDirectKnowledgeImplementationImports: Violation[];
     allowedSharedInternalImports: Array<{
       sourceFile: string;
@@ -81,6 +82,7 @@ type CapabilityBoundaryCheckReport = {
       targetFile: string;
     }>;
     blockedLegacyActiveImportCount: number;
+    blockedLegacyCompatAliasEntryImportCount: number;
     blockedDirectKnowledgeImplementationImportCount: number;
     allowedSharedInternalImportCount: number;
     canonicalPublicEntryImportCount: number;
@@ -146,7 +148,12 @@ const LEGACY_ACTIVE_RAG_PATHS = new Set<string>([
   `${MODULES_ROOT}/rag/rerank/rag-rerank.service.ts`,
   `${MODULES_ROOT}/rag/retrieval/rag-retrieval.types.ts`
 ]);
+const LEGACY_RAG_COMPAT_ALIAS_MODULE_PATH = `${MODULES_ROOT}/rag/rag.module.ts`;
 const KNOWLEDGE_RAG_DIRECT_IMPLEMENTATION_ALLOWLIST = new Set<string>([
+  toImportPairKey(
+    `${MODULES_ROOT}/rag/rag.module.ts`,
+    `${MODULES_ROOT}/knowledge/rag/rag.module.ts`
+  ),
   toImportPairKey(
     `${MODULES_ROOT}/glossary/glossary.service.ts`,
     `${MODULES_ROOT}/knowledge/rag/observability/rag-replay.repository.ts`
@@ -630,6 +637,19 @@ function isBlockedLegacyActiveRagImport(input: {
   return input.sourceRelativePath !== KNOWLEDGE_RAG_OWNER_MODULE_PATH;
 }
 
+function isBlockedLegacyCompatAliasEntryImport(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (input.targetRelativePath !== LEGACY_RAG_COMPAT_ALIAS_MODULE_PATH) {
+    return false;
+  }
+  if (input.sourceRelativePath.startsWith(`${MODULES_ROOT}/rag/`)) {
+    return false;
+  }
+  return input.sourceRelativePath !== KNOWLEDGE_RAG_OWNER_MODULE_PATH;
+}
+
 function isBlockedDirectKnowledgeRagImplementationImport(input: {
   sourceRelativePath: string;
   targetRelativePath: string;
@@ -685,6 +705,7 @@ export async function runCapabilityBoundaryCheck(
   const orderedFiles = Array.from(files).sort();
   const violations: Violation[] = [];
   const blockedLegacyActiveImports: Violation[] = [];
+  const blockedLegacyCompatAliasEntryImports: Violation[] = [];
   const blockedDirectKnowledgeImplementationImports: Violation[] = [];
   const allowedSharedInternalImports: Array<{
     sourceFile: string;
@@ -770,6 +791,29 @@ export async function runCapabilityBoundaryCheck(
           codeLine: compactLine(lineText)
         };
         blockedLegacyActiveImports.push(violation);
+        violations.push(violation);
+        continue;
+      }
+
+      if (
+        isBlockedLegacyCompatAliasEntryImport({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        const violation = {
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        };
+        blockedLegacyCompatAliasEntryImports.push(violation);
         violations.push(violation);
         continue;
       }
@@ -934,6 +978,9 @@ export async function runCapabilityBoundaryCheck(
       blockedLegacyActiveImports: blockedLegacyActiveImports.sort((a, b) =>
         a.sourceFile === b.sourceFile ? a.line - b.line : a.sourceFile.localeCompare(b.sourceFile)
       ),
+      blockedLegacyCompatAliasEntryImports: blockedLegacyCompatAliasEntryImports.sort((a, b) =>
+        a.sourceFile === b.sourceFile ? a.line - b.line : a.sourceFile.localeCompare(b.sourceFile)
+      ),
       blockedDirectKnowledgeImplementationImports:
         blockedDirectKnowledgeImplementationImports.sort((a, b) =>
           a.sourceFile === b.sourceFile
@@ -951,6 +998,7 @@ export async function runCapabilityBoundaryCheck(
           : a.sourceFile.localeCompare(b.sourceFile)
       ),
       blockedLegacyActiveImportCount: blockedLegacyActiveImports.length,
+      blockedLegacyCompatAliasEntryImportCount: blockedLegacyCompatAliasEntryImports.length,
       blockedDirectKnowledgeImplementationImportCount:
         blockedDirectKnowledgeImplementationImports.length,
       allowedSharedInternalImportCount: allowedSharedInternalImports.length,
@@ -1011,11 +1059,13 @@ async function main(): Promise<void> {
   const ragImportSummary =
     `[${SCRIPT_NAME}] rag imports: ` +
     `blockedLegacyActive=${report.ragImportReport.blockedLegacyActiveImportCount}, ` +
+    `blockedLegacyCompatAliasEntry=${report.ragImportReport.blockedLegacyCompatAliasEntryImportCount}, ` +
     `blockedDirectKnowledgeImplementation=${report.ragImportReport.blockedDirectKnowledgeImplementationImportCount}, ` +
     `allowedSharedInternal=${report.ragImportReport.allowedSharedInternalImportCount}, ` +
     `canonicalPublicEntry=${report.ragImportReport.canonicalPublicEntryImportCount}.`;
   const hasBlockedRagImports =
     report.ragImportReport.blockedLegacyActiveImportCount > 0 ||
+    report.ragImportReport.blockedLegacyCompatAliasEntryImportCount > 0 ||
     report.ragImportReport.blockedDirectKnowledgeImplementationImportCount > 0;
 
   if (
@@ -1038,6 +1088,10 @@ async function main(): Promise<void> {
     if (report.ragImportReport.blockedLegacyActiveImports.length > 0) {
       console.error("- blocked legacy active rag imports:");
       printViolations(report.ragImportReport.blockedLegacyActiveImports);
+    }
+    if (report.ragImportReport.blockedLegacyCompatAliasEntryImports.length > 0) {
+      console.error("- blocked legacy rag compat-alias entry imports:");
+      printViolations(report.ragImportReport.blockedLegacyCompatAliasEntryImports);
     }
     if (report.ragImportReport.blockedDirectKnowledgeImplementationImports.length > 0) {
       console.error("- blocked direct knowledge/rag implementation imports:");

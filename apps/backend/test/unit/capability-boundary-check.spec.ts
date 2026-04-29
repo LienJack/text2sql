@@ -353,6 +353,72 @@ export class RetrieveKnowledgeNode {
     });
   });
 
+  it("reports blocked legacy rag compat alias entry imports outside rag compat wiring", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/system/system.module.ts",
+      `import { RagModule } from "../rag/rag.module";
+export class SystemModule {
+  constructor(private readonly ragModule: RagModule) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/rag.module.ts",
+      "export class RagModule {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.ragImportReport.blockedLegacyCompatAliasEntryImportCount).toBe(1);
+    expect(report.ragImportReport.blockedLegacyCompatAliasEntryImports[0]).toMatchObject({
+      sourceFile: "apps/backend/src/modules/system/system.module.ts",
+      targetFile: "apps/backend/src/modules/rag/rag.module.ts"
+    });
+  });
+
+  it("allows legacy rag compat alias module imports inside rag namespace wiring", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/compat/compat-bridge.module.ts",
+      `import { RagModule } from "../rag.module";
+export class CompatBridgeModule {
+  constructor(private readonly ragModule: RagModule) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/rag.module.ts",
+      "export class RagModule {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+    expect(report.ragImportReport.blockedLegacyCompatAliasEntryImportCount).toBe(0);
+  });
+
+  it("allows the legacy rag module compat-only alias wiring into knowledge rag module", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/rag.module.ts",
+      `import { RagModule as KnowledgeRagModule } from "../knowledge/rag/rag.module";
+export class RagModule {
+  constructor(private readonly knowledgeRagModule: KnowledgeRagModule) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/rag.module.ts",
+      "export class RagModule {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+    expect(report.ragImportReport.blockedDirectKnowledgeImplementationImportCount).toBe(0);
+  });
+
   it("allows knowledge/rag owner imports to shared internals and reports classification reason", async () => {
     await writeRepoFile(
       repoRoot,

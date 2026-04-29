@@ -21,6 +21,11 @@ import {
 } from "../../src/modules/knowledge/contracts/knowledge-semantic-registry.contract";
 import { KnowledgeChatSupportFacade } from "../../src/modules/knowledge/knowledge-chat-support.facade";
 import { KnowledgeModule } from "../../src/modules/knowledge/knowledge.module";
+import { RagModule as LegacyRagModule } from "../../src/modules/rag/rag.module";
+import { RagRetrievalService as KnowledgeRagRetrievalService } from "../../src/modules/knowledge/rag/retrieval/rag-retrieval.service";
+import { RagRerankService as KnowledgeRagRerankService } from "../../src/modules/knowledge/rag/rerank/rag-rerank.service";
+import { RagRetrievalService as LegacyRagRetrievalService } from "../../src/modules/rag/retrieval/rag-retrieval.service";
+import { RagRerankService as LegacyRagRerankService } from "../../src/modules/rag/rerank/rag-rerank.service";
 
 describe("KnowledgeModule contract providers", () => {
   it("exports facade + capability contract tokens", async () => {
@@ -60,5 +65,29 @@ describe("KnowledgeModule contract providers", () => {
     expect(glossaryContract.terms).toBe(facadeContract.glossary.terms);
     expect(semanticContract.registry).toBe(facadeContract.semanticRegistry.registry);
     expect(memoryContract.promotion).toBe(facadeContract.memory.promotion);
+  });
+
+  it("resolves legacy rag tokens to canonical knowledge implementations", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [LegacyRagModule]
+    }).compile();
+
+    const legacyRetrieval = moduleRef.get(LegacyRagRetrievalService, {
+      strict: false
+    });
+    const canonicalRetrieval = moduleRef.get(KnowledgeRagRetrievalService, {
+      strict: false
+    });
+    const legacyRerank = moduleRef.get(LegacyRagRerankService, {
+      strict: false
+    });
+    const canonicalRerank = moduleRef.get(KnowledgeRagRerankService, {
+      strict: false
+    });
+
+    expect(canonicalRetrieval).toBeDefined();
+    expect(canonicalRerank).toBeDefined();
+    expect(legacyRetrieval).toBe(canonicalRetrieval);
+    expect(legacyRerank).toBe(canonicalRerank);
   });
 });

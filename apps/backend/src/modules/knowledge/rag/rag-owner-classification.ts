@@ -1,5 +1,11 @@
 const RAG_OWNER_CLASSIFICATION_ENTRIES = [
   {
+    file: "apps/backend/src/modules/rag/rag.module.ts",
+    classification: "compatibility-support",
+    reason:
+      "Legacy rag module path is compat-only alias wiring and must not be treated as an active owner entry."
+  },
+  {
     file: "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
     classification: "legacy-active",
     reason:
@@ -134,11 +140,14 @@ export function listRagOwnerClassifications(): readonly RagOwnerClassificationEn
 }
 
 export function isKnowledgeRagOwnerClassificationReady(): boolean {
+  const hasCompatibilitySupportCoverage = RAG_OWNER_CLASSIFICATION_ENTRIES.some(
+    (entry) => entry.classification === "compatibility-support"
+  );
   const hasLegacyActiveCoverage = RAG_OWNER_CLASSIFICATION_ENTRIES.some(
     (entry) => entry.classification === "legacy-active"
   );
   const hasSharedInternalCoverage = RAG_OWNER_CLASSIFICATION_ENTRIES.some(
     (entry) => entry.classification === "shared-internal"
   );
-  return hasLegacyActiveCoverage && hasSharedInternalCoverage;
+  return hasCompatibilitySupportCoverage && hasLegacyActiveCoverage && hasSharedInternalCoverage;
 }
