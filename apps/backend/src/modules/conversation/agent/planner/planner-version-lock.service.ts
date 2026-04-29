@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { RagRetrievalBundle } from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+import type { RagRetrievalBundle } from "../../../knowledge";
 import { SemanticRegistryService } from "../../../semantic-registry/semantic-registry.service";
 import {
   SEMANTIC_REGISTRY_DEGRADED_RISK_TAG,

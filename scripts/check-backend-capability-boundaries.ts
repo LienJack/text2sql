@@ -1,5 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  getRagOwnerClassification,
+  isRagSharedInternalPath,
+  KNOWLEDGE_RAG_OWNER_MODULE_PATH
+} from "../apps/backend/src/modules/knowledge/rag/rag-owner-classification";
 
 const SCRIPT_NAME = "check-backend-capability-boundaries";
 const MODULES_ROOT = "apps/backend/src/modules";
@@ -63,6 +68,23 @@ type CapabilityBoundaryCheckReport = {
     overBaselineCount: number;
     exceedsBaseline: boolean;
   };
+  ragImportReport: {
+    blockedLegacyActiveImports: Violation[];
+    blockedDirectKnowledgeImplementationImports: Violation[];
+    allowedSharedInternalImports: Array<{
+      sourceFile: string;
+      targetFile: string;
+      reason: string;
+    }>;
+    canonicalPublicEntryImports: Array<{
+      sourceFile: string;
+      targetFile: string;
+    }>;
+    blockedLegacyActiveImportCount: number;
+    blockedDirectKnowledgeImplementationImportCount: number;
+    allowedSharedInternalImportCount: number;
+    canonicalPublicEntryImportCount: number;
+  };
 };
 
 type CapabilityBoundaryCheckInput = {
@@ -116,7 +138,32 @@ const PLATFORM_DATA_AGGREGATE_MODULE_PATH =
 const PLATFORM_DATA_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/data/`;
 const CONVERSATION_TEXT2SQL_PREFIX = `${MODULES_ROOT}/conversation/text2sql/`;
 const LEGACY_CHAT_MODULE_PREFIX = `${MODULES_ROOT}/chat/`;
-const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT = 15;
+const KNOWLEDGE_PUBLIC_ENTRY_PATH = `${MODULES_ROOT}/knowledge.ts`;
+const KNOWLEDGE_RAG_IMPLEMENTATION_PREFIX = `${MODULES_ROOT}/knowledge/rag/`;
+const DEFAULT_CONVERSATION_KNOWLEDGE_SUBPATH_BASELINE_COUNT = 9;
+const LEGACY_ACTIVE_RAG_PATHS = new Set<string>([
+  `${MODULES_ROOT}/rag/retrieval/rag-retrieval.service.ts`,
+  `${MODULES_ROOT}/rag/rerank/rag-rerank.service.ts`,
+  `${MODULES_ROOT}/rag/retrieval/rag-retrieval.types.ts`
+]);
+const KNOWLEDGE_RAG_DIRECT_IMPLEMENTATION_ALLOWLIST = new Set<string>([
+  toImportPairKey(
+    `${MODULES_ROOT}/glossary/glossary.service.ts`,
+    `${MODULES_ROOT}/knowledge/rag/observability/rag-replay.repository.ts`
+  ),
+  toImportPairKey(
+    `${MODULES_ROOT}/memory/memory-promotion.service.ts`,
+    `${MODULES_ROOT}/knowledge/rag/observability/rag-replay.repository.ts`
+  ),
+  toImportPairKey(
+    `${MODULES_ROOT}/memory/memory.module.ts`,
+    `${MODULES_ROOT}/knowledge/rag/rag.module.ts`
+  ),
+  toImportPairKey(
+    `${MODULES_ROOT}/system/system.module.ts`,
+    `${MODULES_ROOT}/knowledge/rag/rag.module.ts`
+  )
+]);
 
 // Transitional cross-domain wiring allowances that are still pending module reshaping.
 const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
@@ -205,36 +252,6 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     reason: "Temporary bridge: agent module still imports knowledge module directly."
   },
   {
-    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/generate-sql.node.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: generate-sql node still imports RAG retrieval payload types directly."
-  },
-  {
-    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
-    targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-rag.contract.ts",
-    reason: "Temporary bridge: retrieve-knowledge node still imports knowledge RAG contract directly."
-  },
-  {
-    sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: retrieve-knowledge node still imports RAG retrieval payload types directly."
-  },
-  {
-    sourceFile: "apps/backend/src/modules/conversation/agent/planner/planner-version-lock.service.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: planner-version-lock still imports RAG retrieval payload types directly."
-  },
-  {
-    sourceFile: "apps/backend/src/modules/conversation/agent/sql/sql-generation.service.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: sql-generation still imports RAG retrieval payload types directly."
-  },
-  {
-    sourceFile: "apps/backend/src/modules/conversation/agent/sql/sql-prompt.builder.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason: "Temporary bridge: sql prompt builder still imports RAG retrieval payload types directly."
-  },
-  {
     sourceFile:
       "apps/backend/src/modules/conversation/chat/application/shared/chat-delivery-enrichment.service.ts",
     targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
@@ -255,13 +272,6 @@ ConversationKnowledgeSubpathAllowlistEntry[] = [
     sourceFile: "apps/backend/src/modules/conversation/chat/chat.module.ts",
     targetFile: "apps/backend/src/modules/knowledge/knowledge.module.ts",
     reason: "Temporary bridge: chat module still imports knowledge module directly."
-  },
-  {
-    sourceFile:
-      "apps/backend/src/modules/conversation/agent/nodes/resolve-saved-prior-sql.node.ts",
-    targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.types.ts",
-    reason:
-      "Temporary bridge: saved-prior-sql node still imports retrieval bundle types directly."
   },
   {
     sourceFile:
@@ -600,6 +610,53 @@ function isForbiddenText2SqlLegacyChatDependency(input: {
   return input.targetRelativePath.startsWith(LEGACY_CHAT_MODULE_PREFIX);
 }
 
+function isKnowledgeOwnerFile(relativePath: string): boolean {
+  return (
+    relativePath === KNOWLEDGE_PUBLIC_ENTRY_PATH ||
+    relativePath.startsWith(`${MODULES_ROOT}/knowledge/`)
+  );
+}
+
+function isBlockedLegacyActiveRagImport(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (!LEGACY_ACTIVE_RAG_PATHS.has(input.targetRelativePath)) {
+    return false;
+  }
+  if (input.sourceRelativePath.startsWith(`${MODULES_ROOT}/rag/`)) {
+    return false;
+  }
+  return input.sourceRelativePath !== KNOWLEDGE_RAG_OWNER_MODULE_PATH;
+}
+
+function isBlockedDirectKnowledgeRagImplementationImport(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (!input.targetRelativePath.startsWith(KNOWLEDGE_RAG_IMPLEMENTATION_PREFIX)) {
+    return false;
+  }
+  if (
+    KNOWLEDGE_RAG_DIRECT_IMPLEMENTATION_ALLOWLIST.has(
+      toImportPairKey(input.sourceRelativePath, input.targetRelativePath)
+    )
+  ) {
+    return false;
+  }
+  return !isKnowledgeOwnerFile(input.sourceRelativePath);
+}
+
+function isAllowedSharedInternalRagImport(input: {
+  sourceRelativePath: string;
+  targetRelativePath: string;
+}): boolean {
+  if (!input.sourceRelativePath.startsWith(`${MODULES_ROOT}/knowledge/rag/`)) {
+    return false;
+  }
+  return isRagSharedInternalPath(input.targetRelativePath);
+}
+
 export async function runCapabilityBoundaryCheck(
   input: CapabilityBoundaryCheckInput
 ): Promise<CapabilityBoundaryCheckReport> {
@@ -627,6 +684,17 @@ export async function runCapabilityBoundaryCheck(
 
   const orderedFiles = Array.from(files).sort();
   const violations: Violation[] = [];
+  const blockedLegacyActiveImports: Violation[] = [];
+  const blockedDirectKnowledgeImplementationImports: Violation[] = [];
+  const allowedSharedInternalImports: Array<{
+    sourceFile: string;
+    targetFile: string;
+    reason: string;
+  }> = [];
+  const canonicalPublicEntryImports: Array<{
+    sourceFile: string;
+    targetFile: string;
+  }> = [];
   let conversationKnowledgeSubpathCurrentCount = 0;
 
   for (const sourceAbsolutePath of orderedFiles) {
@@ -657,6 +725,75 @@ export async function runCapabilityBoundaryCheck(
 
       const targetDomain = resolveDomain(input.repoRoot, targetAbsolutePath);
       if (!targetDomain) {
+        continue;
+      }
+
+      if (targetDomain.relativePath === KNOWLEDGE_PUBLIC_ENTRY_PATH) {
+        canonicalPublicEntryImports.push({
+          sourceFile: sourceDomain.relativePath,
+          targetFile: targetDomain.relativePath
+        });
+      }
+
+      if (
+        isAllowedSharedInternalRagImport({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
+        const classification = getRagOwnerClassification(targetDomain.relativePath);
+        allowedSharedInternalImports.push({
+          sourceFile: sourceDomain.relativePath,
+          targetFile: targetDomain.relativePath,
+          reason:
+            classification?.reason ??
+            "Shared internal import remains allowed while owner hard-cut is in progress."
+        });
+      }
+
+      if (
+        isBlockedLegacyActiveRagImport({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        const violation = {
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        };
+        blockedLegacyActiveImports.push(violation);
+        violations.push(violation);
+        continue;
+      }
+
+      if (
+        isBlockedDirectKnowledgeRagImplementationImport({
+          sourceRelativePath: sourceDomain.relativePath,
+          targetRelativePath: targetDomain.relativePath
+        })
+      ) {
+        const { line, column } = indexToLineColumn(lineStarts, reference.index);
+        const lineText = lines[line - 1] ?? "";
+        const violation = {
+          sourceFile: sourceDomain.relativePath,
+          sourceDomain: sourceDomain.domain,
+          targetFile: targetDomain.relativePath,
+          targetDomain: targetDomain.domain,
+          importSpecifier: reference.specifier,
+          line,
+          column,
+          codeLine: compactLine(lineText)
+        };
+        blockedDirectKnowledgeImplementationImports.push(violation);
+        violations.push(violation);
         continue;
       }
 
@@ -792,6 +929,32 @@ export async function runCapabilityBoundaryCheck(
       ),
       overBaselineCount: conversationKnowledgeSubpathOverBaselineCount,
       exceedsBaseline: conversationKnowledgeSubpathExceedsBaseline
+    },
+    ragImportReport: {
+      blockedLegacyActiveImports: blockedLegacyActiveImports.sort((a, b) =>
+        a.sourceFile === b.sourceFile ? a.line - b.line : a.sourceFile.localeCompare(b.sourceFile)
+      ),
+      blockedDirectKnowledgeImplementationImports:
+        blockedDirectKnowledgeImplementationImports.sort((a, b) =>
+          a.sourceFile === b.sourceFile
+            ? a.line - b.line
+            : a.sourceFile.localeCompare(b.sourceFile)
+        ),
+      allowedSharedInternalImports: allowedSharedInternalImports.sort((a, b) =>
+        a.sourceFile === b.sourceFile
+          ? a.targetFile.localeCompare(b.targetFile)
+          : a.sourceFile.localeCompare(b.sourceFile)
+      ),
+      canonicalPublicEntryImports: canonicalPublicEntryImports.sort((a, b) =>
+        a.sourceFile === b.sourceFile
+          ? a.targetFile.localeCompare(b.targetFile)
+          : a.sourceFile.localeCompare(b.sourceFile)
+      ),
+      blockedLegacyActiveImportCount: blockedLegacyActiveImports.length,
+      blockedDirectKnowledgeImplementationImportCount:
+        blockedDirectKnowledgeImplementationImports.length,
+      allowedSharedInternalImportCount: allowedSharedInternalImports.length,
+      canonicalPublicEntryImportCount: canonicalPublicEntryImports.length
     }
   };
 }
@@ -845,21 +1008,40 @@ async function main(): Promise<void> {
     `current=${report.conversationKnowledgeSubpath.currentCount}, ` +
     `baseline=${report.conversationKnowledgeSubpath.baselineCount}, ` +
     `over-baseline=${report.conversationKnowledgeSubpath.overBaselineCount}.`;
+  const ragImportSummary =
+    `[${SCRIPT_NAME}] rag imports: ` +
+    `blockedLegacyActive=${report.ragImportReport.blockedLegacyActiveImportCount}, ` +
+    `blockedDirectKnowledgeImplementation=${report.ragImportReport.blockedDirectKnowledgeImplementationImportCount}, ` +
+    `allowedSharedInternal=${report.ragImportReport.allowedSharedInternalImportCount}, ` +
+    `canonicalPublicEntry=${report.ragImportReport.canonicalPublicEntryImportCount}.`;
+  const hasBlockedRagImports =
+    report.ragImportReport.blockedLegacyActiveImportCount > 0 ||
+    report.ragImportReport.blockedDirectKnowledgeImplementationImportCount > 0;
 
   if (
     report.violations.length > 0 ||
-    report.conversationKnowledgeSubpath.exceedsBaseline
+    report.conversationKnowledgeSubpath.exceedsBaseline ||
+    hasBlockedRagImports
   ) {
     console.error(
       `[${SCRIPT_NAME}] failed: found ${report.violations.length} capability boundary violation(s).`
     );
     console.error(conversationKnowledgeSubpathSummary);
+    console.error(ragImportSummary);
     printViolations(report.violations);
     if (report.conversationKnowledgeSubpath.exceedsBaseline) {
       console.error(
         "- conversation -> knowledge/* direct imports exceed baseline; reduce legacy bridges " +
         "or lower allowlist usage before merging."
       );
+    }
+    if (report.ragImportReport.blockedLegacyActiveImports.length > 0) {
+      console.error("- blocked legacy active rag imports:");
+      printViolations(report.ragImportReport.blockedLegacyActiveImports);
+    }
+    if (report.ragImportReport.blockedDirectKnowledgeImplementationImports.length > 0) {
+      console.error("- blocked direct knowledge/rag implementation imports:");
+      printViolations(report.ragImportReport.blockedDirectKnowledgeImplementationImports);
     }
     console.error("");
     console.error("Allowed dependencies:");
@@ -872,6 +1054,7 @@ async function main(): Promise<void> {
   }
 
   console.log(conversationKnowledgeSubpathSummary);
+  console.log(ragImportSummary);
   console.log(
     `[${SCRIPT_NAME}] passed: scanned ${report.scannedFiles} file(s), no capability boundary violations found.`
   );

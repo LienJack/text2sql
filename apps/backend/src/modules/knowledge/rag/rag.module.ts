@@ -31,6 +31,7 @@ import { RagRetrievalService } from "./retrieval/rag-retrieval.service";
 import { ModelRerankerAdapter } from "../../rag/rerank/model-reranker.adapter";
 import { RagRerankService as LegacyRagRerankService } from "../../rag/rerank/rag-rerank.service";
 import { RagRerankService } from "./rerank/rag-rerank.service";
+import { isKnowledgeRagOwnerClassificationReady } from "./rag-owner-classification";
 
 export const KNOWLEDGE_COMPAT_BRIDGE_RETIREMENT_WINDOW = "next-milestone";
 
@@ -52,6 +53,9 @@ export function assertKnowledgeCompatBridgeRetirementReady(
   checks: KnowledgeCompatBridgeRetirementChecks
 ): void {
   const blockers: string[] = [];
+  if (!isKnowledgeRagOwnerClassificationReady()) {
+    blockers.push("rag owner classification map is incomplete");
+  }
   if (!checks.conversationImportsClosed) {
     blockers.push("conversation imports are not fully migrated to knowledge facade contracts");
   }

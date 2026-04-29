@@ -4,7 +4,7 @@ import type {
   RagPriorSqlShortcutDecision,
   RagRetrievalBundle,
   RagRetrievalChunkPayload
-} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+} from "../../../knowledge";
 
 export interface SavedPriorSqlResolution {
   status: "hit" | "miss" | "filtered" | "stale" | "ambiguous";

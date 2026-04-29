@@ -5,12 +5,7 @@ import type {
   SqlCorrectionGroundingV1
 } from "@text2sql/shared-types";
 import type { LlmGatewayPrompt } from "../../../llm/llm-gateway.interface";
-import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
-import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
-
-type RagRetrievalChunkPayload = NonNullable<
-  NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
->[number];
+import type { RagContextPack, RagRetrievalChunkPayload } from "../../../knowledge";
 
 interface SqlPruningColumnHint {
   name: string;

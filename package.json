@@ -13,7 +13,7 @@
     "test:frontend": "pnpm --filter @text2sql/frontend test",
     "format:check": "pnpm -r lint",
     "governance:terminology:check": "pnpm --filter @text2sql/backend exec ts-node --transpile-only --skipProject --compilerOptions '{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' ../../scripts/check-governance-terminology.ts",
-    "backend:capability-boundary:check": "BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE=${BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE:-15} pnpm --filter @text2sql/backend exec ts-node --transpile-only --skipProject --compilerOptions '{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' ../../scripts/check-backend-capability-boundaries.ts",
+    "backend:capability-boundary:check": "BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE=${BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE:-9} pnpm --filter @text2sql/backend exec ts-node --transpile-only --skipProject --compilerOptions '{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' ../../scripts/check-backend-capability-boundaries.ts",
     "text2sql:no-legacy-compat:check": "pnpm --filter @text2sql/backend run check:text2sql-no-legacy-compat",
     "text2sql:v2-eval:gate": "pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate",
     "text2sql:v2-eval:gate:strict": "pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict",

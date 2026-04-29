@@ -8,12 +8,12 @@ import type {
 } from "@text2sql/shared-types";
 import {
   QueryExecutorRouterService,
+  SqliteQueryService,
   type SqlTableAccessContext
 } from "../../platform/data/query";
 import { RelationshipDryRunService } from "../../platform/data/query/relationship-dry-run.service";
 import { DomainError } from "../../../common/domain-error";
 import { DatasourceService } from "../../governance/datasource/datasource.service";
-import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
 
 interface ValidateSqlInput {
   sql: string;

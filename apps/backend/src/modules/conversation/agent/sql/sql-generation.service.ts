@@ -24,12 +24,7 @@ import {
 } from "./sql-prompt.builder";
 import { PromptTemplateService } from "../../../governance/settings/prompt-template.service";
 import { Text2SqlSmartDefaultsService } from "../../runtime/smart-defaults/text2sql-smart-defaults.service";
-import type { RetrievedKnowledge } from "../nodes/retrieve-knowledge.node";
-import type { RagContextPack } from "../../../rag/retrieval/rag-retrieval.types";
-
-type RagRetrievalChunkPayload = NonNullable<
-  NonNullable<RetrievedKnowledge["retrievalBundle"]>["selected_context"]
->[number];
+import type { RagContextPack, RagRetrievalChunkPayload } from "../../../knowledge";
 
 interface SqlGenerationSelection {
   datasourceId?: string;

@@ -8,13 +8,11 @@ import { AppConfigService } from "../../../config/app-config.service";
 import { QueryExecutorRouterService } from "../../../platform/data/query/index";
 import {
   KNOWLEDGE_RAG_CONTRACT,
-  type KnowledgeRagContract
-} from "../../../knowledge/contracts/knowledge-rag.contract";
-import type {
+  type KnowledgeRagContract,
   RagRetrievalChunkPayload,
   RagContextPack,
   RagRetrievalBundle
-} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+} from "../../../knowledge";
 
 export interface RetrievedKnowledgeTypedSummary {
   status: "ready" | "degraded";

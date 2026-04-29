@@ -208,12 +208,16 @@ export class Text2SqlV2ArtifactRefService {
 
     const report = await runCapabilityBoundaryCheck({ repoRoot });
     expect(report.violations).toHaveLength(0);
-    expect((report as unknown as Record<string, unknown>).conversationKnowledgeSubpath).toMatchObject({
+    expect(report.conversationKnowledgeSubpath).toMatchObject({
       currentCount: 0,
-      baselineCount: 15,
-      remainingFromBaseline: 15,
+      baselineCount: 9,
+      remainingFromBaseline: 9,
       overBaselineCount: 0,
       exceedsBaseline: false
+    });
+    expect(report.ragImportReport).toMatchObject({
+      blockedLegacyActiveImportCount: 0,
+      blockedDirectKnowledgeImplementationImportCount: 0
     });
   });
 
@@ -249,11 +253,11 @@ export class PrepareRunStage {
     await writeRepoFile(
       repoRoot,
       "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
-      `import { RagRetrievalService } from "../../../../knowledge/rag/retrieval/rag-retrieval.service";
+      `import { KnowledgeFacadeContract } from "../../../../knowledge/contracts/knowledge-facade.contract";
 import { MemoryPromotionService } from "../../../../knowledge/memory/memory-promotion.service";
 export class ChatPostRunHooksService {
   constructor(
-    private readonly retrieval: RagRetrievalService,
+    private readonly facade: KnowledgeFacadeContract,
     private readonly promotion: MemoryPromotionService
   ) {}
 }
@@ -261,8 +265,8 @@ export class ChatPostRunHooksService {
     );
     await writeRepoFile(
       repoRoot,
-      "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
-      "export class RagRetrievalService {}"
+      "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
+      "export interface KnowledgeFacadeContract {}"
     );
     await writeRepoFile(
       repoRoot,
@@ -277,8 +281,8 @@ export class ChatPostRunHooksService {
         {
           sourceFile:
             "apps/backend/src/modules/conversation/chat/application/shared/chat-post-run-hooks.service.ts",
-          targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
-          reason: "Temporary bridge: keep retrieval import until facade migration lands."
+          targetFile: "apps/backend/src/modules/knowledge/contracts/knowledge-facade.contract.ts",
+          reason: "Temporary bridge: keep facade contract direct import until stable entry migration lands."
         }
       ]
     });
@@ -292,12 +296,85 @@ export class ChatPostRunHooksService {
       targetFile: "apps/backend/src/modules/knowledge/memory/memory-promotion.service.ts",
       line: 2
     });
-    expect((report as unknown as Record<string, unknown>).conversationKnowledgeSubpath).toMatchObject({
+    expect(report.conversationKnowledgeSubpath).toMatchObject({
       currentCount: 2,
       baselineCount: 2,
       remainingFromBaseline: 0,
       overBaselineCount: 0,
       exceedsBaseline: false
+    });
+  });
+
+  it("reports blocked direct knowledge/rag implementation imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      `import { RagRetrievalService } from "../../../knowledge/rag/retrieval/rag-retrieval.service";
+export class RetrieveKnowledgeNode {
+  constructor(private readonly retrieval: RagRetrievalService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts",
+      "export class RagRetrievalService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.ragImportReport.blockedDirectKnowledgeImplementationImportCount).toBe(1);
+    expect(report.ragImportReport.blockedDirectKnowledgeImplementationImports[0]).toMatchObject({
+      sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      targetFile: "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts"
+    });
+  });
+
+  it("reports blocked legacy active rag service imports", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      `import { RagRetrievalService } from "../../../rag/retrieval/rag-retrieval.service";
+export class RetrieveKnowledgeNode {
+  constructor(private readonly retrieval: RagRetrievalService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts",
+      "export class RagRetrievalService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.ragImportReport.blockedLegacyActiveImportCount).toBe(1);
+    expect(report.ragImportReport.blockedLegacyActiveImports[0]).toMatchObject({
+      sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      targetFile: "apps/backend/src/modules/rag/retrieval/rag-retrieval.service.ts"
+    });
+  });
+
+  it("allows knowledge/rag owner imports to shared internals and reports classification reason", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/rag.module.ts",
+      `import { RagIndexBuilderService } from "../../rag/index/rag-index-builder.service";
+export class RagModule {
+  constructor(private readonly builder: RagIndexBuilderService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/rag/index/rag-index-builder.service.ts",
+      "export class RagIndexBuilderService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.violations).toHaveLength(0);
+    expect(report.ragImportReport.allowedSharedInternalImportCount).toBe(1);
+    expect(report.ragImportReport.allowedSharedInternalImports[0]).toMatchObject({
+      sourceFile: "apps/backend/src/modules/knowledge/rag/rag.module.ts",
+      targetFile: "apps/backend/src/modules/rag/index/rag-index-builder.service.ts"
     });
   });
 });
