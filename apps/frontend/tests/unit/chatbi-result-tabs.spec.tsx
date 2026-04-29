@@ -28,10 +28,14 @@ describe("ChatBIResultTabs", () => {
     const answerTab = screen.getByRole("tab", { name: /answer/i });
     const sqlTab = screen.getByRole("tab", { name: /view sql/i });
     const chartTab = screen.getByRole("tab", { name: /chart/i });
+    const tabList = screen.getByTestId("chatbi-result-tablist");
 
     expect(answerTab).toHaveAttribute("aria-selected", "true");
     expect(sqlTab).toHaveAttribute("aria-selected", "false");
     expect(chartTab).toHaveAttribute("aria-selected", "false");
+    expect(tabList).toHaveClass("grid-cols-3");
+    expect(tabList).toHaveClass("overflow-hidden");
+    expect(tabList).not.toHaveClass("overflow-x-auto");
 
     await user.click(chartTab);
     expect(chartTab).toHaveAttribute("aria-selected", "true");

@@ -1,13 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ChatBIResultPanel } from "@/components/chat/chatbi-result-panel";
 import { createMockRun } from "./fixtures";
 
 describe("ChatBIResultPanel", () => {
-  it("supports Answer/View SQL/Chart partition switching and keeps table evidence in Answer", async () => {
+  it("supports Answer/View SQL/Chart partition switching and keeps SQL user-facing", async () => {
     const user = userEvent.setup();
-    const onRequestSqlDetails = vi.fn();
 
     const run = createMockRun({
       delivery: {
@@ -61,7 +60,6 @@ describe("ChatBIResultPanel", () => {
         run={run}
         streamDelivery={undefined}
         runId={run.runId}
-        onRequestSqlDetails={onRequestSqlDetails}
       />
     );
 
@@ -81,10 +79,13 @@ describe("ChatBIResultPanel", () => {
 
     await user.click(sqlTab);
     expect(sqlTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText(/View SQL 为次级证据入口/i)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "打开运行详情" }));
-    expect(onRequestSqlDetails).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("用于生成当前回答的 SQL 证据。")).toBeInTheDocument();
+    expect(
+      screen.getByText(/select month, revenue from revenue_monthly/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "打开运行详情" })
+    ).not.toBeInTheDocument();
   });
 
   it("renders metric chart for metric artifacts", async () => {
@@ -218,6 +219,7 @@ describe("ChatBIResultPanel", () => {
 
     const sqlTab = screen.getByRole("tab", { name: /view sql/i });
     expect(sqlTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("用于生成当前回答的 SQL 证据。")).toBeInTheDocument();
     expect(screen.getByText(/select \* from metrics_daily/i)).toBeInTheDocument();
   });
 });

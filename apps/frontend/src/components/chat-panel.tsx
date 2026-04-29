@@ -68,6 +68,10 @@ interface ThinkingStateEventData {
 type ThinkingStep = ExecutionTraceStep & {
   stage?: ReasoningStage;
   title?: string;
+  streamKind?: "state" | "tool";
+  toolName?: string;
+  toolCallId?: string;
+  toolStatus?: "called" | "result" | "error";
 };
 
 const DATASOURCE_READONLY_STATUSES = new Set(["unavailable", "deleted"]);
@@ -120,7 +124,14 @@ function moveSessionToFront(
 function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
   if (event.type === "tool-call") {
     const payload = event.data as
-      | { toolName?: string; toolCallId?: string; input?: unknown }
+      | {
+          toolName?: string;
+          toolCallId?: string;
+          input?: unknown;
+          title?: string;
+          stage?: ReasoningStage;
+          summary?: string;
+        }
       | undefined;
     const toolName = payload?.toolName ?? "tool";
     return {
@@ -128,16 +139,27 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
       status: "success",
       stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
       lifecycle: "running",
-      detail: summarizeToolPayload(payload?.input),
+      detail: payload?.summary ?? summarizeToolPayload(payload?.input),
       at: event.at,
       startedAt: event.at,
-      stage: "generation",
-      title: `调用工具：${toolName}`
+      stage: payload?.stage ?? "generation",
+      title: payload?.title ?? `调用工具：${toolName}`,
+      streamKind: "tool",
+      toolName,
+      toolCallId: payload?.toolCallId,
+      toolStatus: "called"
     };
   }
   if (event.type === "tool-result") {
     const payload = event.data as
-      | { toolName?: string; toolCallId?: string; output?: unknown }
+      | {
+          toolName?: string;
+          toolCallId?: string;
+          output?: unknown;
+          title?: string;
+          stage?: ReasoningStage;
+          summary?: string;
+        }
       | undefined;
     const toolName = payload?.toolName ?? "tool";
     return {
@@ -145,16 +167,27 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
       status: "success",
       stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
       lifecycle: "completed",
-      detail: summarizeToolPayload(payload?.output),
+      detail: payload?.summary ?? summarizeToolPayload(payload?.output),
       at: event.at,
       endedAt: event.at,
-      stage: "generation",
-      title: `工具返回：${toolName}`
+      stage: payload?.stage ?? "generation",
+      title: payload?.title ?? `工具返回：${toolName}`,
+      streamKind: "tool",
+      toolName,
+      toolCallId: payload?.toolCallId,
+      toolStatus: "result"
     };
   }
   if (event.type === "tool-error") {
     const payload = event.data as
-      | { toolName?: string; toolCallId?: string; message?: string }
+      | {
+          toolName?: string;
+          toolCallId?: string;
+          message?: string;
+          title?: string;
+          stage?: ReasoningStage;
+          summary?: string;
+        }
       | undefined;
     const toolName = payload?.toolName ?? "tool";
     return {
@@ -162,12 +195,16 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
       status: "failed",
       stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
       lifecycle: "failed",
-      detail: payload?.message ?? "工具调用失败",
+      detail: payload?.summary ?? payload?.message ?? "工具调用失败",
       errorSummary: payload?.message,
       at: event.at,
       endedAt: event.at,
-      stage: "generation",
-      title: `工具失败：${toolName}`
+      stage: payload?.stage ?? "generation",
+      title: payload?.title ?? `工具失败：${toolName}`,
+      streamKind: "tool",
+      toolName,
+      toolCallId: payload?.toolCallId,
+      toolStatus: "error"
     };
   }
   if (event.type !== "state") {
@@ -189,7 +226,8 @@ function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
     outputSummary: payload.outputSummary,
     errorSummary: payload.errorSummary,
     stage: payload.stage,
-    title: payload.title
+    title: payload.title,
+    streamKind: "state"
   };
 }
 
@@ -796,7 +834,6 @@ export function ChatPanel() {
           runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
-          debugEnabled={Boolean(activeSession?.debugEnabled)}
           disabled={
             sessionLoading ||
             !sessionId ||

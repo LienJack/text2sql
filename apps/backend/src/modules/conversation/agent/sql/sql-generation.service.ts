@@ -70,6 +70,18 @@ export interface StructuredSqlGenerationArtifact extends SqlGenerationArtifactV1
 const MAX_SEMANTIC_REPAIR_RETRY = 1;
 const COUNT_INTENT_REGEX =
   /(多少|几条|几笔|总数|数量|计数|count|人数|单量|订单量|客户数|用户数)/i;
+const GROUPED_COUNT_INTENT_REGEX =
+  /(比例|占比|分布|各|每|多少种|几种|方式|类型|类别|渠道|状态)/i;
+const AMOUNT_METRIC_INTENT_REGEX =
+  /(销售额|净销售额|成交额|交易额|营收|收入|金额|gmv|sales|revenue|amount)/i;
+const COMPLEX_AMOUNT_METRIC_INTENT_REGEX =
+  /(平均|均值|最大|最高|最小|最低|按|每|各|分组|分布|趋势|同比|环比|排名|月份|月|周|日|年|地区|渠道|类别|类型|状态|avg|average|max|min|top)/i;
+const RECENT_TIME_INTENT_REGEX =
+  /(最近|近期|近\s*\d*|latest|recent|last\s+\d*)/i;
+const AMOUNT_COLUMN_REGEX =
+  /(^|_)(total_amount|net_sales|sales_amount|gmv|revenue|amount|subtotal_amount|price_total|order_total)$/i;
+const LOW_PRIORITY_AMOUNT_COLUMN_REGEX =
+  /(^|_)(discount_amount|shipping_amount|tax_amount|refund_amount)$/i;
 const METADATA_INTENT_REGEX =
   /(有哪些表|哪些表|多少张表|多少个表|表结构|schema|字段|列名|describe|desc\s+\w+|show\s+tables|sqlite_master|sqlite_schema|information_schema|pg_catalog|pragma|元数据|数据库结构)/i;
 const COUNT_SQL_REGEX = /\bcount\s*\(/i;
@@ -184,6 +196,7 @@ export class SqlGenerationService {
     );
     const immediateShortcut =
       this.buildGroupedCountProportionShortcut(question, selection) ??
+      this.buildAmountMetricShortcut(question, selection) ??
       this.buildSimpleCountShortcut(question, selection);
     let completion: LlmDraft;
     if (immediateShortcut) {
@@ -421,7 +434,8 @@ export class SqlGenerationService {
     const shortcut = this.buildGroupedCountProportionShortcut(
       input.question,
       input.selection
-    ) ?? this.buildSimpleCountShortcut(input.question, input.selection);
+    ) ?? this.buildAmountMetricShortcut(input.question, input.selection) ??
+      this.buildSimpleCountShortcut(input.question, input.selection);
     if (!shortcut) {
       return undefined;
     }
@@ -469,7 +483,7 @@ export class SqlGenerationService {
     if (!selectedTables || selectedTables.length !== 1) {
       return undefined;
     }
-    if (!/(比例|占比|分布|各|每|多少种|几种|方式|类型|类别|渠道|状态)/i.test(question)) {
+    if (!GROUPED_COUNT_INTENT_REGEX.test(question)) {
       return undefined;
     }
 
@@ -504,7 +518,13 @@ export class SqlGenerationService {
     if (!selectedTables || selectedTables.length !== 1) {
       return undefined;
     }
-    if (/(比例|占比|分布|各|每|多少种|几种|方式|类型|类别|渠道|状态)/i.test(question)) {
+    if (GROUPED_COUNT_INTENT_REGEX.test(question)) {
+      return undefined;
+    }
+    if (
+      !this.hasExplicitCountShortcutIntent(question, selection?.semanticPlan) ||
+      this.hasAmountMetricIntent(question, selection?.semanticPlan)
+    ) {
       return undefined;
     }
 
@@ -512,6 +532,156 @@ export class SqlGenerationService {
       model: "simple-count-v1",
       sql: `SELECT COUNT(*) AS total_count FROM ${selectedTables[0]};`
     };
+  }
+
+  private buildAmountMetricShortcut(
+    question: string,
+    selection: SqlGenerationSelection | undefined
+  ): { sql: string; model: string } | undefined {
+    const semanticPlan = selection?.semanticPlan;
+    const selectedTables = this.resolveShortcutSelectedTables(semanticPlan);
+    if (
+      !selectedTables ||
+      selectedTables.length !== 1 ||
+      !this.hasAmountMetricIntent(question, semanticPlan) ||
+      COMPLEX_AMOUNT_METRIC_INTENT_REGEX.test(question)
+    ) {
+      return undefined;
+    }
+
+    const table = selectedTables[0];
+    const amountColumn = this.resolveAmountMetricColumn({
+      table,
+      columns: semanticPlan?.selectedColumns ?? []
+    });
+    if (!amountColumn) {
+      return undefined;
+    }
+    const amountExpression = `${table}.${amountColumn}`;
+
+    const timeColumns = this.resolveRecentTimeColumns({
+      table,
+      columns: semanticPlan?.selectedColumns ?? []
+    });
+    if (RECENT_TIME_INTENT_REGEX.test(question) && timeColumns.length > 0) {
+      const qualifiedTimeColumns = timeColumns.map((column) => `${table}.${column}`);
+      const timeExpression =
+        qualifiedTimeColumns.length === 1
+          ? qualifiedTimeColumns[0]
+          : `COALESCE(${qualifiedTimeColumns.join(", ")})`;
+      return {
+        model: "amount-metric-sum-v1",
+        sql: [
+          `SELECT ROUND(SUM(${amountExpression}), 2) AS recent_sales`,
+          `FROM ${table}`,
+          `WHERE date(${timeExpression}) >= (`,
+          `  SELECT date(MAX(${timeExpression}), '-30 days') FROM ${table}`,
+          ");"
+        ].join("\n")
+      };
+    }
+
+    return {
+      model: "amount-metric-sum-v1",
+      sql: [
+        `SELECT ROUND(SUM(${amountExpression}), 2) AS total_sales`,
+        `FROM ${table};`
+      ].join("\n")
+    };
+  }
+
+  private hasExplicitCountShortcutIntent(
+    question: string,
+    semanticPlan: SemanticPlanV1 | undefined
+  ): boolean {
+    return (
+      COUNT_INTENT_REGEX.test(question) ||
+      (semanticPlan?.metrics ?? []).some((metric) =>
+        /(^|[._:-])count($|[._:-])|^count$/i.test(metric)
+      )
+    );
+  }
+
+  private hasAmountMetricIntent(
+    question: string,
+    semanticPlan: SemanticPlanV1 | undefined
+  ): boolean {
+    return (
+      AMOUNT_METRIC_INTENT_REGEX.test(question) ||
+      (semanticPlan?.metrics ?? []).some((metric) =>
+        AMOUNT_METRIC_INTENT_REGEX.test(metric)
+      )
+    );
+  }
+
+  private resolveAmountMetricColumn(input: {
+    table: string;
+    columns: string[];
+  }): string | undefined {
+    const candidates = this.resolveShortcutColumnsForTable(input);
+    const scored = candidates
+      .map((column, index) => ({
+        column,
+        index,
+        score: this.scoreAmountMetricColumn(column)
+      }))
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+
+    return scored[0]?.column;
+  }
+
+  private scoreAmountMetricColumn(column: string): number {
+    const normalizedColumn = column.toLowerCase();
+    const exactScores: Record<string, number> = {
+      total_amount: 20,
+      net_sales: 18,
+      sales_amount: 17,
+      gmv: 16,
+      revenue: 15,
+      amount: 14,
+      subtotal_amount: 12,
+      price_total: 10,
+      order_total: 10
+    };
+    if (exactScores[normalizedColumn] !== undefined) {
+      return exactScores[normalizedColumn];
+    }
+    if (LOW_PRIORITY_AMOUNT_COLUMN_REGEX.test(normalizedColumn)) {
+      return 1;
+    }
+    return AMOUNT_COLUMN_REGEX.test(normalizedColumn) ? 8 : 0;
+  }
+
+  private resolveRecentTimeColumns(input: {
+    table: string;
+    columns: string[];
+  }): string[] {
+    const candidates = this.resolveShortcutColumnsForTable(input);
+    const preferredColumns = ["paid_at", "created_at", "order_date", "date"];
+    return preferredColumns.filter((column) => candidates.includes(column));
+  }
+
+  private resolveShortcutColumnsForTable(input: {
+    table: string;
+    columns: string[];
+  }): string[] {
+    return this.unique(
+      input.columns
+        .map((column) => this.normalizeQualifiedIdentifier(column))
+        .filter((column): column is string => Boolean(column))
+        .map((column) => {
+          const [tableName, columnName] = column.includes(".")
+            ? column.split(".")
+            : [input.table, column];
+          if (tableName !== input.table || !columnName) {
+            return undefined;
+          }
+          return columnName;
+        })
+        .filter((column): column is string => Boolean(column))
+        .filter((column) => this.isSafeSqlIdentifier(column))
+    );
   }
 
   private resolveShortcutSelectedTables(

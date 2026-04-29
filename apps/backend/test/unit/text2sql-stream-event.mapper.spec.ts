@@ -118,6 +118,11 @@ describe("Text2SqlStreamEventMapper", () => {
       input: { sql: "SELECT 1" }
     });
     expect(called.type).toBe("tool-call");
+    expect(called.data).toMatchObject({
+      title: "调用 runReadOnlySql",
+      stage: "generation",
+      summary: "SELECT 1"
+    });
     expect(called.traceToolCall?.status).toBe("called");
 
     const result = mapper.mapLlmEvent({
@@ -127,6 +132,11 @@ describe("Text2SqlStreamEventMapper", () => {
       output: { rows: [] }
     });
     expect(result.type).toBe("tool-result");
+    expect(result.data).toMatchObject({
+      title: "读取 runReadOnlySql 的结果",
+      stage: "generation",
+      summary: "返回 0 行"
+    });
     expect(result.traceToolCall?.status).toBe("result");
 
     const error = mapper.mapLlmEvent({
@@ -136,6 +146,11 @@ describe("Text2SqlStreamEventMapper", () => {
       message: "failed"
     });
     expect(error.type).toBe("tool-error");
+    expect(error.data).toMatchObject({
+      title: "runReadOnlySql 调用失败",
+      stage: "generation",
+      summary: "failed"
+    });
     expect(error.traceToolCall?.status).toBe("error");
   });
 

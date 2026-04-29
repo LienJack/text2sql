@@ -62,12 +62,16 @@ export class Text2SqlStreamEventMapper {
     }
 
     if (event.type === "tool-call") {
+      const summary = this.summarizeToolPayload(event.input);
       return {
         type: "tool-call",
         data: {
           toolName: event.toolName,
           toolCallId: event.toolCallId,
-          input: event.input
+          input: event.input,
+          title: `调用 ${event.toolName}`,
+          stage: "generation",
+          ...(summary ? { summary } : {})
         },
         traceToolCall: {
           toolName: event.toolName,
@@ -80,12 +84,16 @@ export class Text2SqlStreamEventMapper {
     }
 
     if (event.type === "tool-result") {
+      const summary = this.summarizeToolPayload(event.output);
       return {
         type: "tool-result",
         data: {
           toolName: event.toolName,
           toolCallId: event.toolCallId,
-          output: event.output
+          output: event.output,
+          title: `读取 ${event.toolName} 的结果`,
+          stage: "generation",
+          ...(summary ? { summary } : {})
         },
         traceToolCall: {
           toolName: event.toolName,
@@ -102,7 +110,10 @@ export class Text2SqlStreamEventMapper {
       data: {
         toolName: event.toolName,
         toolCallId: event.toolCallId,
-        message: event.message
+        message: event.message,
+        title: `${event.toolName} 调用失败`,
+        stage: "generation",
+        summary: event.message
       },
       traceToolCall: {
         toolName: event.toolName,
@@ -285,6 +296,41 @@ export class Text2SqlStreamEventMapper {
     } catch {
       return undefined;
     }
+  }
+
+  private summarizeToolPayload(payload: unknown): string | undefined {
+    if (payload === undefined || payload === null) {
+      return undefined;
+    }
+    if (typeof payload === "string") {
+      return this.truncate(payload);
+    }
+    if (typeof payload !== "object") {
+      return this.truncate(String(payload));
+    }
+    const record = payload as Record<string, unknown>;
+    if (typeof record.sql === "string" && record.sql.trim()) {
+      return this.truncate(record.sql);
+    }
+    if (typeof record.rowCount === "number") {
+      return `返回 ${record.rowCount} 行`;
+    }
+    if (Array.isArray(record.rows)) {
+      return `返回 ${record.rows.length} 行`;
+    }
+    try {
+      return this.truncate(JSON.stringify(payload));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private truncate(value: string, maxLength = 180): string {
+    const normalized = value.trim();
+    if (normalized.length <= maxLength) {
+      return normalized;
+    }
+    return `${normalized.slice(0, maxLength - 1)}…`;
   }
 
   private resolveLifecycle(

@@ -5,7 +5,7 @@ import { AssistantThinkingPanel } from "@/components/chat/assistant-thinking-pan
 import { createMockRun } from "./fixtures";
 
 describe("AssistantThinkingPanel", () => {
-  it("shows active step and progress in collapsed header during in-progress run", () => {
+  it("shows active step and progress in an expanded timeline during in-progress run", () => {
     render(
       <AssistantThinkingPanel
         run={null}
@@ -33,12 +33,12 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "展开思考过程" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "收起处理过程" })).toHaveAttribute(
       "aria-expanded",
-      "false"
+      "true"
     );
-    expect(screen.getByText("活跃步骤：生成 SQL（进行中）")).toBeInTheDocument();
-    expect(screen.getByText(/已完成 1\/2 步/)).toBeInTheDocument();
+    expect(screen.getByText("< | 大模型 | 生成 SQL（进行中）")).toBeInTheDocument();
+    expect(screen.getByText("< | 大模型 | 理解问题（完成）")).toBeInTheDocument();
   });
 
   it("supports keyboard toggle with synced aria-expanded state", async () => {
@@ -62,14 +62,14 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    const trigger = screen.getByRole("button", { name: "展开思考过程" });
+    const trigger = screen.getByRole("button", { name: "展开处理过程" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveAttribute("aria-controls");
 
     trigger.focus();
     await user.keyboard("{Enter}");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByText("生成 SQL").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/生成 SQL/).length).toBeGreaterThan(0);
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -88,7 +88,7 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    await user.click(screen.getByRole("button", { name: "展开处理过程" }));
     await waitFor(() => {
       expect(onRequestRun).toHaveBeenCalledTimes(1);
     });
@@ -114,7 +114,7 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    const trigger = screen.getByRole("button", { name: "展开思考过程" });
+    const trigger = screen.getByRole("button", { name: "展开处理过程" });
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
 
@@ -159,9 +159,9 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
-    expect(screen.getByText("失败")).toBeInTheDocument();
-    expect(screen.getByText("Error: sql contains forbidden keyword")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开处理过程" }));
+    expect(screen.getByText("< | 大模型 | 安全校验（失败）")).toBeInTheDocument();
+    expect(screen.getByText("sql contains forbidden keyword")).toBeInTheDocument();
   });
 
   it("keeps completed steps visible after finish and does not regress to loading placeholder", async () => {
@@ -184,8 +184,8 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
-    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "展开处理过程" }));
+    expect(screen.getByText(/生成 SQL/)).toBeInTheDocument();
 
     rerender(
       <AssistantThinkingPanel
@@ -196,7 +196,7 @@ describe("AssistantThinkingPanel", () => {
       />
     );
 
-    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
-    expect(screen.queryByText("正在加载该轮思考轨迹...")).not.toBeInTheDocument();
+    expect(screen.getByText(/生成 SQL/)).toBeInTheDocument();
+    expect(screen.queryByText("正在加载该轮处理轨迹...")).not.toBeInTheDocument();
   });
 });

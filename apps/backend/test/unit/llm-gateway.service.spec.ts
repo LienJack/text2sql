@@ -108,6 +108,60 @@ describe("LlmGatewayService", () => {
     });
   });
 
+  it("should retry sync generate once for invalid JSON response", async () => {
+    mockedGenerateText
+      .mockRejectedValueOnce(new Error("Invalid JSON response"))
+      .mockResolvedValueOnce({
+        text: "SELECT COUNT(*) AS total_count FROM orders;"
+      } as Awaited<ReturnType<typeof generateText>>);
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.generate(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(mockedGenerateText).toHaveBeenCalledTimes(2);
+  });
+
+  it("should retry sync generate with expanded timeout after timeout abort", async () => {
+    mockedGenerateText
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+      .mockResolvedValueOnce({
+        text: "SELECT COUNT(*) AS total_count FROM orders;"
+      } as Awaited<ReturnType<typeof generateText>>);
+
+    const timeoutSpy = jest.spyOn(AbortSignal, "timeout");
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.generate(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(timeoutSpy).toHaveBeenNthCalledWith(1, 3000);
+    expect(timeoutSpy).toHaveBeenNthCalledWith(2, 18000);
+  });
+
   it("should stream text and tool events", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {

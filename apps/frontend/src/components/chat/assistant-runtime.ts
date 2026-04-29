@@ -56,6 +56,19 @@ function extractLatestUserText(messages: readonly ThreadMessageLike[]): string {
   return "";
 }
 
+function appendReadableDelta(current: string, delta: string): string {
+  const trimmedStart = delta.trimStart();
+  const looksLikeNextModelSection =
+    /^<\s*\|/.test(trimmedStart) ||
+    /^<\|/.test(trimmedStart) ||
+    (/^<\s/.test(trimmedStart) && /\b(tool_calls?|function|DSML)\b/i.test(trimmedStart));
+
+  if (!current || current.endsWith("\n") || !looksLikeNextModelSection) {
+    return current + delta;
+  }
+  return `${current}\n\n${delta}`;
+}
+
 function createChatModelAdapter(
   sessionId: string,
   callbacksRef: MutableRefObject<AssistantRuntimeCallbacks | undefined>,
@@ -92,7 +105,7 @@ function createChatModelAdapter(
             if (!delta) {
               continue;
             }
-            aggregatedText += delta;
+            aggregatedText = appendReadableDelta(aggregatedText, delta);
             yield {
               content: [
                 {

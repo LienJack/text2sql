@@ -162,14 +162,15 @@ describe("ChatPanel", () => {
     expect(screen.getByRole("button", { name: "发送" })).toBeDisabled();
   });
 
-  it("keeps advanced context panel collapsed by default", async () => {
+  it("does not render advanced context entry on chat page", async () => {
     render(<ChatPanel />);
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
 
-    const advancedContextButton = screen.getByRole("button", {
-      name: "展开高级上下文"
-    });
-    expect(advancedContextButton).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", {
+        name: "展开高级上下文"
+      })
+    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("指标口径")).not.toBeInTheDocument();
   });
 
@@ -187,21 +188,16 @@ describe("ChatPanel", () => {
     });
 
     expect(screen.queryByText("发送成功，已收到后端响应。")).not.toBeInTheDocument();
-    expect(screen.getByText("AI 思考过程")).toBeInTheDocument();
     expect(screen.getByTestId("assistant-result-shell")).toBeInTheDocument();
     expect(screen.getByTestId("assistant-result-shell-steps")).toBeInTheDocument();
     expect(screen.getByTestId("assistant-result-shell-answer")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
-    expect(screen.getByText("生成 SQL")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /处理过程/ }));
+    expect(screen.getByText(/大模型 \| 生成 SQL/)).toBeInTheDocument();
     expect(screen.getByText("已为你生成 SQL，并展示结果。")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    expect(screen.queryByRole("button", { name: "打开运行详情" })).not.toBeInTheDocument();
     expect(
-      screen.getByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
-    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+      screen.queryByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows live thinking steps before the model emits text", async () => {
@@ -257,7 +253,7 @@ describe("ChatPanel", () => {
 
     const liveThinking = await screen.findByTestId("assistant-live-thinking");
     expect(liveThinking).toHaveAttribute("data-run-id", "run-thinking");
-    expect(screen.getByText("活跃步骤：生成 SQL（进行中）")).toBeInTheDocument();
+    expect(screen.getByText("< | 大模型 | 生成 SQL（进行中）")).toBeInTheDocument();
 
     releaseStream?.();
   });
@@ -334,7 +330,7 @@ describe("ChatPanel", () => {
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
     await screen.findByText("已为你生成 SQL，并展示结果。");
     expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
-    await user.click(await screen.findByRole("button", { name: "展开思考过程" }));
+    await user.click(await screen.findByRole("button", { name: /处理过程/ }));
 
     await waitFor(() => {
       expect(mockGetRun).toHaveBeenCalledWith("run-1");
@@ -357,16 +353,16 @@ describe("ChatPanel", () => {
     const resultShell = screen.getByTestId("assistant-result-shell");
     expect(resultShell).toHaveAttribute("data-run-id", "run-1");
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
+    await user.click(screen.getByRole("button", { name: /处理过程/ }));
     await waitFor(() => {
       expect(mockGetRun).toHaveBeenCalledWith("run-1");
     });
 
     expect(screen.getByText("已为你生成 SQL，并展示结果。")).toBeInTheDocument();
-    expect(screen.getByText("暂未加载到该轮思考轨迹。")).toBeInTheDocument();
+    expect(screen.getByText("暂未加载到该轮流程轨迹。")).toBeInTheDocument();
   });
 
-  it("keeps run link bindings isolated per assistant message", async () => {
+  it("keeps run bindings isolated per assistant message", async () => {
     const run2 = createMockRun({
       runId: "run-2",
       question: "近7天支付方式分布",
@@ -421,17 +417,13 @@ describe("ChatPanel", () => {
     await screen.findByText("第一轮回答");
     await screen.findByText("第二轮回答");
 
-    const runLinks = screen.getAllByRole("link", {
-      name: "设置 / RAG 运行与记忆治理"
-    });
-    expect(runLinks).toHaveLength(2);
-    expect(runLinks[0]).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
-    expect(runLinks[1]).toHaveAttribute("href", "/settings?tab=rag&runId=run-2");
-
     const resultShells = screen.getAllByTestId("assistant-result-shell");
     expect(resultShells).toHaveLength(2);
     expect(resultShells[0]).toHaveAttribute("data-run-id", "run-1");
     expect(resultShells[1]).toHaveAttribute("data-run-id", "run-2");
+    expect(
+      screen.queryByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows initialization failure when session creation fails", async () => {
@@ -478,7 +470,7 @@ describe("ChatPanel", () => {
     await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
     await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(await screen.findByText(/思考中/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/正在连接模型|正在思考/)).length).toBeGreaterThan(0);
     if (releaseFirstEvent) {
       releaseFirstEvent();
     }
@@ -554,28 +546,11 @@ describe("ChatPanel", () => {
     expect(latestCall?.[3]).toBeUndefined();
   });
 
-  it("injects advanced context envelope into stream request and clears it after send by default", async () => {
+  it("sends stream request without advanced context envelope", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "展开高级上下文"
-      })
-    );
-
-    await user.type(
-      screen.getByLabelText("指标口径"),
-      "按支付成功口径统计订单"
-    );
-    await user.type(screen.getByLabelText("开始日期"), "2026-03-01");
-    await user.type(screen.getByLabelText("结束日期"), "2026-03-31");
-    await user.type(
-      screen.getByLabelText("实体映射"),
-      "华北大区=region_north"
-    );
 
     await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -585,29 +560,10 @@ describe("ChatPanel", () => {
     });
 
     const latestCall = mockStreamMessageEvents.mock.calls.at(-1);
-    expect(latestCall?.[3]).toEqual({
-      metricDefinition: "按支付成功口径统计订单",
-      timeRange: {
-        from: "2026-03-01",
-        to: "2026-03-31"
-      },
-      entityMappings: [
-        {
-          entity: "华北大区",
-          mappedTo: "region_north"
-        }
-      ]
-    });
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "展开高级上下文"
-      })
-    );
-    expect(screen.getByLabelText("指标口径")).toHaveValue("");
+    expect(latestCall?.[3]).toBeUndefined();
   });
 
-  it("keeps run detail entry visible while run backfill is still loading", async () => {
+  it("shows processing timeline backfill state while historical run data is still loading", async () => {
     const user = userEvent.setup();
     let resolveRun: (() => void) | undefined;
     const runBackfillGate = new Promise<void>((resolve) => {
@@ -632,19 +588,18 @@ describe("ChatPanel", () => {
     render(<ChatPanel />);
 
     await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
-    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
-    await user.click(screen.getByRole("button", { name: "发送" }));
-
     await screen.findByText("已为你生成 SQL，并展示结果。");
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
-    expect(screen.getByText("运行详情回填中，请稍候...")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /处理过程/ }));
+    await waitFor(() => {
+      expect(screen.getByText("正在加载该轮处理轨迹...")).toBeInTheDocument();
+    });
 
     if (resolveRun) {
       resolveRun();
     }
   }, 15000);
 
-  it("shows phase-b retrieval stages and run detail summary signals for the same run", async () => {
+  it("shows phase-b retrieval stages without surfacing debug detail panels for the same run", async () => {
     const user = userEvent.setup();
     const phaseBRun = createMockRun({
       trace: {
@@ -799,18 +754,15 @@ describe("ChatPanel", () => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
-    expect(screen.getByText("知识检索")).toBeInTheDocument();
-    expect(screen.getByText("意图规划")).toBeInTheDocument();
-    expect(screen.getByText("语义检索构建")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
-    expect(screen.getByText("运行详情")).toBeInTheDocument();
-    expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
-    expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
-    expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /处理过程/ }));
+    expect(screen.getByText(/知识检索/)).toBeInTheDocument();
+    expect(screen.getByText(/意图规划/)).toBeInTheDocument();
+    expect(screen.getByText(/语义检索构建/)).toBeInTheDocument();
+    expect(screen.queryByText("degrade_reason：retrieval_timeout")).not.toBeInTheDocument();
+    expect(screen.queryByText("semantic_registry_degraded")).not.toBeInTheDocument();
+    expect(screen.queryByText("运行详情")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
-    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+      screen.queryByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).not.toBeInTheDocument();
   });
 });

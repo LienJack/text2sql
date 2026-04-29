@@ -179,66 +179,43 @@ describe("chat mobile smoke", () => {
   });
 
   it(
-    "renders mobile-usable chat controls and progressive delivery toggles",
+    "renders a mobile-stable result panel with keyboard-accessible tabs",
     async () => {
-    const user = userEvent.setup();
-    render(<ChatPage />);
-    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+      const user = userEvent.setup();
+      render(<ChatPage />);
+      await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
 
-    expect(screen.getByLabelText("聊天输入")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "结果详情" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
+      expect(screen.getByLabelText("聊天输入")).toBeEnabled();
+      expect(screen.getByRole("button", { name: "会话" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "结果详情" }));
-    const answerTrigger = await screen.findByRole("button", {
-      name: "切换 Answer 区块"
-    });
-    const evidenceTrigger = screen.getByRole("button", {
-      name: "切换 Evidence 区块"
-    });
-    expect(answerTrigger).toBeInTheDocument();
-    expect(evidenceTrigger).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "切换 Artifact 区块" })).toBeInTheDocument();
+      await user.type(screen.getByLabelText("聊天输入"), "移动端发送链路回归");
+      await user.click(screen.getByRole("button", { name: "发送" }));
+      await waitFor(() => {
+        expect(mockStreamMessageEvents).toHaveBeenCalled();
+      });
+      expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
 
-    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
-    expect(evidenceTrigger).toHaveAttribute("aria-controls");
-    evidenceTrigger.focus();
-    await user.keyboard("{Enter}");
-    expect(evidenceTrigger).toHaveAttribute("aria-expanded", "true");
-    evidenceTrigger.focus();
-    await user.keyboard(" ");
-    await waitFor(() => {
-      expect(evidenceTrigger).toHaveAttribute("aria-expanded", "false");
-    });
+      const answerTab = screen.getByRole("tab", { name: /answer/i });
+      const chartTab = screen.getByRole("tab", { name: /chart/i });
+      const sqlTab = screen.getByRole("tab", { name: /view sql/i });
+      const tabList = screen.getByTestId("chatbi-result-tablist");
+      expect(answerTab).toHaveAttribute("aria-selected", "true");
+      expect(chartTab).toHaveAttribute("aria-controls");
+      expect(sqlTab).toHaveAttribute("aria-controls");
+      expect(tabList).toHaveClass("grid-cols-3");
+      expect(tabList).toHaveClass("overflow-hidden");
 
-    await user.type(screen.getByLabelText("聊天输入"), "移动端发送链路回归");
-    await user.click(screen.getByRole("button", { name: "发送" }));
-    await waitFor(() => {
-      expect(mockStreamMessageEvents).toHaveBeenCalled();
-    });
-    expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
+      chartTab.focus();
+      await user.keyboard("{Enter}");
+      expect(chartTab).toHaveAttribute("aria-selected", "true");
 
-    const answerTab = screen.getByRole("tab", { name: /answer/i });
-    const chartTab = screen.getByRole("tab", { name: /chart/i });
-    const sqlTab = screen.getByRole("tab", { name: /view sql/i });
-    const tabList = screen.getByTestId("chatbi-result-tablist");
-    expect(answerTab).toHaveAttribute("aria-selected", "true");
-    expect(chartTab).toHaveAttribute("aria-controls");
-    expect(sqlTab).toHaveAttribute("aria-controls");
-    expect(tabList).toHaveClass("overflow-x-auto");
-
-    chartTab.focus();
-    await user.keyboard("{Enter}");
-    expect(chartTab).toHaveAttribute("aria-selected", "true");
-
-    sqlTab.focus();
-    await user.keyboard("[Space]");
-    expect(sqlTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: "打开运行详情" })).toBeInTheDocument();
-
-    expect(
-      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
-    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+      sqlTab.focus();
+      await user.keyboard("[Space]");
+      expect(sqlTab).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByText("用于生成当前回答的 SQL 证据。")).toBeInTheDocument();
+      expect(
+        screen.getByText(/SELECT payment_method, COUNT\(\*\) AS cnt FROM orders GROUP BY payment_method/i)
+      ).toBeInTheDocument();
     },
     15000
   );

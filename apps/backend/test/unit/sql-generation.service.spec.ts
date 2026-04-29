@@ -268,6 +268,102 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(providerRouter.generate).not.toHaveBeenCalled();
   });
 
+  it("uses an amount metric shortcut for recent sales instead of a count shortcut", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("最近的销售额", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "最近的销售额",
+        selectedTables: ["orders"],
+        selectedColumns: [
+          "orders.id",
+          "orders.total_amount",
+          "orders.created_at",
+          "orders.paid_at"
+        ],
+        metrics: ["orders.total_amount"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:orders"],
+        confidence: 0.49
+      },
+      selectedContext: [
+        {
+          chunk_id: "schema-supplement:orders",
+          content: "orders table schema",
+          metadata: {
+            datasourceId: "ds-1",
+            indexVersionId: "schema-supplement",
+            chunkId: "schema-supplement:orders",
+            domain: "schema",
+            tableNames: ["orders"],
+            columnNames: [
+              "orders.id",
+              "orders.total_amount",
+              "orders.created_at",
+              "orders.paid_at"
+            ],
+            sourceMetadata: {}
+          }
+        }
+      ]
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.model).toBe("amount-metric-sum-v1");
+    expect(draft.sql).toContain("SUM(orders.total_amount)");
+    expect(draft.sql).toContain("FROM orders");
+    expect(draft.sql).toContain("COALESCE(orders.paid_at, orders.created_at)");
+    expect(draft.sql).not.toContain("COUNT(*)");
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
+  });
+
+  it("keeps simple count shortcuts when count questions include amount columns in evidence", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockRejectedValue(
+        new DomainError(
+          "LLM_REQUEST_FAILED",
+          "LLM 流式请求失败: The operation was aborted due to timeout",
+          502
+        )
+      )
+    };
+    const service = createService(providerRouter);
+
+    const draft = await service.stream("一共有多少订单", {
+      datasourceType: "sqlite",
+      semanticPlan: {
+        route: "answer",
+        standaloneQuestion: "一共有多少订单",
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.id", "orders.total_amount"],
+        metrics: ["count"],
+        filters: ["route_kind:text_to_sql"],
+        evidenceRefs: ["schema-supplement:orders"],
+        confidence: 0.62
+      }
+    });
+
+    expect(draft.provider).toBe("semantic-shortcut");
+    expect(draft.model).toBe("simple-count-v1");
+    expect(draft.sql).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(providerRouter.stream).not.toHaveBeenCalled();
+    expect(providerRouter.generate).not.toHaveBeenCalled();
+  });
+
   it("prioritizes structured semantic instructions when context pack is provided", async () => {
     const providerRouter = {
       generate: jest.fn().mockResolvedValue({

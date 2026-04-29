@@ -385,14 +385,14 @@ describe("chat demo flow", () => {
     const initialGetMessagesCalls = mockGetMessages.mock.calls.length;
     await user.type(screen.getByLabelText("聊天输入"), "统计订单支付方式");
     await user.click(screen.getByRole("button", { name: "发送" }));
-    expect(await screen.findByText(/思考中/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/正在连接模型|正在思考/)).length).toBeGreaterThan(0);
     releaseFirstEvent?.();
 
     await waitFor(() => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
     await waitFor(() => {
-      expect(screen.queryByText(/思考中/)).not.toBeInTheDocument();
+      expect(screen.queryAllByText(/正在连接模型|正在思考/)).toHaveLength(0);
     });
     await waitFor(() => {
       expect(mockGetMessages.mock.calls.length).toBeGreaterThan(
@@ -408,10 +408,10 @@ describe("chat demo flow", () => {
       "finish"
     ]);
 
-    await user.click(screen.getByRole("button", { name: "展开思考过程" }));
-    expect(screen.getByText("知识检索")).toBeInTheDocument();
-    expect(screen.getByText("意图规划")).toBeInTheDocument();
-    expect(screen.getByText("语义检索构建")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /处理过程/ }));
+    expect(screen.getByText(/知识检索/)).toBeInTheDocument();
+    expect(screen.getByText(/意图规划/)).toBeInTheDocument();
+    expect(screen.getByText(/语义检索构建/)).toBeInTheDocument();
     expect(screen.getByTestId("assistant-result-shell")).toHaveAttribute("data-run-id", "run-1");
 
     const resultPanel = await screen.findByTestId("chatbi-result-panel");
@@ -425,16 +425,16 @@ describe("chat demo flow", () => {
     expect(resultQueries.getByTestId("chatbi-bar-chart")).toBeInTheDocument();
 
     await user.click(resultQueries.getByRole("tab", { name: /view sql/i }));
-    await user.click(resultQueries.getByRole("button", { name: "打开运行详情" }));
-    expect(screen.getByText("运行详情")).toBeInTheDocument();
-    expect(screen.getByText("运行 ID：run-1")).toBeInTheDocument();
-    expect(screen.getByText("degrade_reason：retrieval_timeout")).toBeInTheDocument();
-    expect(screen.getByText("semantic_registry_degraded")).toBeInTheDocument();
-    expect(screen.getByText("context:user-explicit")).toBeInTheDocument();
-    expect(screen.getByText("context:system-inferred")).toBeInTheDocument();
+    expect(resultQueries.getByText(/SELECT payment_method, COUNT\(\*\) AS cnt FROM orders GROUP BY payment_method/i)).toBeInTheDocument();
+    expect(screen.queryByText("运行详情")).not.toBeInTheDocument();
+    expect(screen.queryByText("运行 ID：run-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("degrade_reason：retrieval_timeout")).not.toBeInTheDocument();
+    expect(screen.queryByText("semantic_registry_degraded")).not.toBeInTheDocument();
+    expect(screen.queryByText("context:user-explicit")).not.toBeInTheDocument();
+    expect(screen.queryByText("context:system-inferred")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "设置 / RAG 运行与记忆治理" })
-    ).toHaveAttribute("href", "/settings?tab=rag&runId=run-1");
+      screen.queryByRole("link", { name: "设置 / RAG 运行与记忆治理" })
+    ).not.toBeInTheDocument();
     expect(
       screen.getAllByText("SELECT payment_method, COUNT(*) AS cnt FROM orders GROUP BY payment_method").length
     ).toBeGreaterThan(0);

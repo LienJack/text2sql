@@ -31,6 +31,18 @@ const isTimeoutAbortError = (error: unknown): boolean => {
   );
 };
 
+const isInvalidJsonResponseError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return `${error.name} ${error.message}`.toLowerCase().includes("invalid json response");
+};
+
+const isRetriableGenerateError = (error: unknown): boolean =>
+  isTimeoutAbortError(error) || isInvalidJsonResponseError(error);
+
+const MAX_GENERATE_RETRY = 1;
+
 @Injectable()
 export class LlmGatewayService implements LlmGateway {
   constructor(
@@ -84,26 +96,7 @@ export class LlmGatewayService implements LlmGateway {
     }
 
     try {
-      const model = this.modelFactory.createChatModel(runtime) as never;
-      const result = await generateText({
-        model,
-        system: prompt.systemPrompt,
-        prompt: prompt.userPrompt,
-        abortSignal: AbortSignal.timeout(runtime.timeoutMs),
-        temperature: 0.2
-      });
-
-      const content = result.text?.trim();
-      if (!content) {
-        throw new DomainError(
-          "LLM_EMPTY_RESPONSE",
-          "LLM 返回为空，无法生成 SQL。",
-          502,
-          {
-            provider: runtime.provider
-          }
-        );
-      }
+      const content = await this.generateWithRetry(prompt, runtime);
 
       return {
         provider: runtime.provider,
@@ -125,6 +118,64 @@ export class LlmGatewayService implements LlmGateway {
         }
       );
     }
+  }
+
+  private async generateWithRetry(
+    prompt: LlmGatewayPrompt,
+    runtime: LlmGatewayRuntimeConfig
+  ): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_GENERATE_RETRY; attempt += 1) {
+      try {
+        return await this.executeGenerate(prompt, runtime, attempt);
+      } catch (error) {
+        lastError = error;
+        if (error instanceof DomainError) {
+          throw error;
+        }
+        if (!isRetriableGenerateError(error) || attempt >= MAX_GENERATE_RETRY) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async executeGenerate(
+    prompt: LlmGatewayPrompt,
+    runtime: LlmGatewayRuntimeConfig,
+    attempt: number
+  ): Promise<string> {
+    const model = this.modelFactory.createChatModel(runtime) as never;
+    const timeoutMs =
+      attempt === 0
+        ? runtime.timeoutMs
+        : Math.min(
+            Math.max(runtime.timeoutMs * 2, runtime.timeoutMs + 15000),
+            120000
+          );
+    const result = await generateText({
+      model,
+      system: prompt.systemPrompt,
+      prompt: prompt.userPrompt,
+      abortSignal: AbortSignal.timeout(timeoutMs),
+      temperature: 0.2
+    });
+
+    const content = result.text?.trim();
+    if (!content) {
+      throw new DomainError(
+        "LLM_EMPTY_RESPONSE",
+        "LLM 返回为空，无法生成 SQL。",
+        502,
+        {
+          provider: runtime.provider
+        }
+      );
+    }
+
+    return content;
   }
 
   async stream(

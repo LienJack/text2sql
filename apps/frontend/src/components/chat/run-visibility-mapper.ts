@@ -13,6 +13,10 @@ export type RunVisibilityStatus = "loading" | "success" | "error" | "empty";
 export type RunVisibilityThinkingStep = ExecutionTraceStep & {
   stage?: ReasoningStage;
   title?: string;
+  streamKind?: "state" | "tool";
+  toolName?: string;
+  toolCallId?: string;
+  toolStatus?: "called" | "result" | "error";
 };
 
 type JsonRecord = Record<string, unknown>;

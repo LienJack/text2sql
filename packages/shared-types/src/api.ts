@@ -1056,16 +1056,25 @@ export type ChatStreamEventData =
       toolName: string;
       toolCallId: string;
       input?: unknown;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       toolName: string;
       toolCallId: string;
       output?: unknown;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       toolName: string;
       toolCallId: string;
       message: string;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       node: string;
