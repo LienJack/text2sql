@@ -104,6 +104,20 @@ describe("saved prior sql ingestion integration", () => {
     const activeEntries = await indexRepository.listEntriesByVersion(activeVersion?.id ?? "");
     const priorChunkIds = activeEntries.filter((item) => item.domain === "sql_example");
     expect(priorChunkIds).toHaveLength(1);
+    const priorMetadata = JSON.parse(priorChunkIds[0]?.metadata ?? "{}");
+    expect(priorMetadata.sourceMetadata).toEqual(
+      expect.objectContaining({
+        assetFamily: "prior_question_sql",
+        preparationStatus: "prepared",
+        visibilityScope: "workspace",
+        trusted: true,
+        verified: true,
+        viewStatus: "active",
+        compatibilitySignals: expect.objectContaining({
+          viewStatus: "active"
+        })
+      })
+    );
 
     await moduleRef.close();
   });

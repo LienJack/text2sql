@@ -53,6 +53,11 @@ export interface ActivateVersionInput {
   simulateFailure?: "after_deprecating_current_active";
 }
 
+export interface RagIndexActivationResult {
+  activated: RagIndexVersionRecord;
+  replacedVersions: RagIndexVersionRecord[];
+}
+
 type PrismaClientLike = {
   ragChunk: {
     findMany: (args: Record<string, unknown>) => Promise<unknown[]>;
@@ -321,6 +326,13 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
   }
 
   async activateVersion(input: ActivateVersionInput): Promise<RagIndexVersionRecord> {
+    const result = await this.activateVersionWithEvidence(input);
+    return result.activated;
+  }
+
+  async activateVersionWithEvidence(
+    input: ActivateVersionInput
+  ): Promise<RagIndexActivationResult> {
     return this.withDatasourceActivationLock(input.datasourceId, async () => {
       if (this.isPrimaryPersistenceConfigured() && this.prisma) {
         return this.activateWithPrisma(input);
@@ -446,9 +458,7 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
     return entries;
   }
 
-  private async activateInMemory(
-    input: ActivateVersionInput
-  ): Promise<RagIndexVersionRecord> {
+  private async activateInMemory(input: ActivateVersionInput): Promise<RagIndexActivationResult> {
     const target = this.indexVersions.get(input.indexVersionId);
     if (!target || target.datasourceId !== input.datasourceId) {
       throw new DomainError("RAG_INDEX_VERSION_NOT_FOUND", "待激活索引版本不存在。", 404, {
@@ -471,8 +481,10 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
     const snapshot = this.snapshotDatasourceVersions(input.datasourceId);
     try {
       const now = new Date().toISOString();
+      const replacedVersions: RagIndexVersionRecord[] = [];
       for (const version of this.indexVersions.values()) {
         if (version.datasourceId === input.datasourceId && version.status === "active") {
+          replacedVersions.push({ ...version });
           version.status = "deprecated";
           version.updatedAt = now;
           this.indexVersions.set(version.id, { ...version });
@@ -491,7 +503,10 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
         updatedAt: now
       };
       this.indexVersions.set(next.id, next);
-      return { ...next };
+      return {
+        activated: { ...next },
+        replacedVersions
+      };
     } catch (error) {
       this.restoreDatasourceVersions(input.datasourceId, snapshot);
       throw error;
@@ -500,7 +515,7 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
 
   private async activateWithPrisma(
     input: ActivateVersionInput
-  ): Promise<RagIndexVersionRecord> {
+  ): Promise<RagIndexActivationResult> {
     const result = await this.tryPrismaWrite(async () =>
       this.prisma?.$transaction(async (tx) => {
         const target = (await tx.ragIndexVersion.findUnique({
@@ -525,6 +540,13 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
         }
 
         const now = new Date();
+        const replacedRows = (await tx.ragIndexVersion.findMany({
+          where: {
+            datasourceId: input.datasourceId,
+            status: "active"
+          },
+          orderBy: [{ activatedAt: "desc" }, { updatedAt: "desc" }]
+        })) as RagIndexVersionRow[];
         await tx.ragIndexVersion.updateMany({
           where: {
             datasourceId: input.datasourceId,
@@ -549,7 +571,10 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
             updatedAt: now
           }
         })) as RagIndexVersionRow;
-        return this.fromRagIndexVersionRow(activated);
+        return {
+          activated: this.fromRagIndexVersionRow(activated),
+          replacedVersions: replacedRows.map((row) => this.fromRagIndexVersionRow(row))
+        };
       })
     );
 
@@ -557,8 +582,17 @@ export class RagIndexRepository implements OnModuleInit, OnModuleDestroy {
       throw new Error("RAG 激活事务返回空结果");
     }
 
-    this.indexVersions.set(result.id, result);
-    return { ...result };
+    this.indexVersions.set(result.activated.id, result.activated);
+    for (const replaced of result.replacedVersions) {
+      this.indexVersions.set(replaced.id, {
+        ...replaced,
+        status: "deprecated"
+      });
+    }
+    return {
+      activated: { ...result.activated },
+      replacedVersions: result.replacedVersions.map((item) => ({ ...item }))
+    };
   }
 
   private async updateVersionStatus(

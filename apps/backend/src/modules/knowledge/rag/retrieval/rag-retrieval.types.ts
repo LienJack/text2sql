@@ -28,6 +28,17 @@ export interface RagRetrievalChunkMetadata {
   indexVersionId: string;
   chunkId: string;
   domain: string;
+  assetFamily?: string;
+  manifestFingerprint?: string;
+  manifestEntryId?: string;
+  sourceRef?: unknown;
+  sourceVersion?: string;
+  policyVersion?: string;
+  modelingRevision?: number;
+  visibilityScope?: string;
+  preparationStatus?: string;
+  reasonCodes?: string[];
+  lifecycleState?: "retrieved" | "selected" | "pruned" | "filtered" | "unused";
   chunkProfile?: string;
   startOffset?: number;
   endOffset?: number;
@@ -121,6 +132,7 @@ export interface RagContextPackLaneMetadata {
     | "instruction"
     | "saved_prior_sql"
     | "schema_ddl_supplement"
+    | "semantic_asset_family"
     | "dialect_function";
   state: "ready" | "degraded" | "unavailable" | "skipped";
   provider?: string;
@@ -291,6 +303,34 @@ export interface RagRetrievalBundle {
   laneMetadata?: RagContextPackLaneMetadata[];
   pruning_decisions?: RagContextPackPruningDecision[];
   pruningDecisions?: RagContextPackPruningDecision[];
+  permission_filtering?: {
+    status?: "applied" | "skipped";
+    denied_evidence_ids?: string[];
+    denied_table_names?: string[];
+    denied_column_names?: string[];
+    reason_codes?: string[];
+    kept_candidate_count?: number;
+    deniedEvidenceIds?: string[];
+    deniedTableNames?: string[];
+    deniedColumnNames?: string[];
+    reasonCodes?: string[];
+    keptCandidateCount?: number;
+  };
+  permissionFiltering?: RagRetrievalBundle["permission_filtering"];
+  two_pass_schema_recall?: {
+    status?: "applied" | "skipped";
+    selected_table_names?: string[];
+    table_description_evidence_ids?: string[];
+    supplemental_evidence_ids?: string[];
+    supplemental_families?: string[];
+    reason_codes?: string[];
+    selectedTableNames?: string[];
+    tableDescriptionEvidenceIds?: string[];
+    supplementalEvidenceIds?: string[];
+    supplementalFamilies?: string[];
+    reasonCodes?: string[];
+  };
+  twoPassSchemaRecall?: RagRetrievalBundle["two_pass_schema_recall"];
 }
 
 export interface RagRetrievalResponse {

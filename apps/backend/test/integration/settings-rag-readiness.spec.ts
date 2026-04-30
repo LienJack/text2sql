@@ -2,6 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
+import { SemanticAssetReindexService } from "../../src/modules/knowledge/rag/retrieval/semantic-asset-reindex.service";
 import { requestActorMiddleware } from "../../src/modules/auth/request-actor.middleware";
 import { requestIdMiddleware } from "../../src/modules/middleware/request-id.middleware";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
@@ -99,5 +100,45 @@ describe("settings rag readiness integration", () => {
     expect(healthRes.body.data.dependencies.ragConfig.rerank.provider).toBe(
       "siliconflow"
     );
+  });
+
+  it("exposes semantic asset readiness summary in /health after reindex", async () => {
+    const reindex = app.get(SemanticAssetReindexService, { strict: false });
+    const result = await reindex.reindex({
+      datasourceId: "ds-rag-readiness-semantic-assets",
+      workspaceId: "ws-rag-readiness",
+      triggers: ["schema"],
+      reason: "health_readiness",
+      runId: "run-rag-readiness-semantic-assets",
+      sourceSnapshots: [
+        {
+          family: "table_description",
+          sourceKind: "datasource_schema",
+          sourceRef: { type: "datasource_schema", ref: "orders.description" },
+          sourceVersion: "schema-health-v1",
+          sourceHash: "hash-schema-health-v1",
+          tableName: "orders",
+          content: "Orders table stores paid and pending order facts."
+        }
+      ]
+    });
+
+    const healthRes = await request(app.getHttpServer()).get("/health");
+
+    expect(healthRes.status).toBe(200);
+    expect(healthRes.body.data.dependencies.ragConfig.semanticAssetReadiness).toMatchObject({
+      status: "ready",
+      datasourceId: "ds-rag-readiness-semantic-assets",
+      activeManifestFingerprint: result.semanticAssetVersion,
+      activeIndexVersionId: result.indexVersionId,
+      familyCounts: {
+        table_description: 1
+      },
+      staleReasons: []
+    });
+    expect(
+      healthRes.body.data.dependencies.ragConfig.semanticAssetReadiness.embeddingProfile
+        .model
+    ).toBeTruthy();
   });
 });

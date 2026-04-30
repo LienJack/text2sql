@@ -53,6 +53,7 @@ describe("rag index builder integration", () => {
 
     expect(result.status).toBe("active");
     expect(result.archivedChannels).toEqual(["lexical", "dense"]);
+    expect(result.activation.replacedVersionIds).toEqual([]);
     expect(["mock_provider", "external_provider", "dense_unavailable"]).toContain(
       result.denseMode
     );
@@ -68,6 +69,66 @@ describe("rag index builder integration", () => {
       expect(Array.isArray(parsedVector)).toBe(true);
       expect(parsedVector.length).toBeGreaterThan(0);
     }
+
+    await moduleRef.close();
+  });
+
+  it("returns activation evidence when replacing a previous active version", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const repository = moduleRef.get(RagIndexRepository);
+    const builder = moduleRef.get(RagIndexBuilderService);
+    const datasourceId = "ds-rag-index-builder-activation-evidence";
+
+    repository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-orders-activation-1",
+        datasourceId,
+        domain: "schema",
+        content: "table orders(id, amount)"
+      }
+    ]);
+
+    const first = await builder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "semantic-assets-builder-v1:mock",
+      buildReason: "initial_build",
+      createdByRunId: "run-builder-activation-v1",
+      activatedByRunId: "run-builder-activation-v1",
+      manifest: {
+        fingerprint: "semantic-assets-builder-v1",
+        summary: {
+          entryCount: 1,
+          preparedEntryCount: 1,
+          familyCounts: { full_schema: 1 },
+          reasonCodes: ["prepared"]
+        }
+      }
+    });
+    const second = await builder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "semantic-assets-builder-v2:mock",
+      buildReason: "refresh_build",
+      createdByRunId: "run-builder-activation-v2",
+      activatedByRunId: "run-builder-activation-v2",
+      manifest: {
+        fingerprint: "semantic-assets-builder-v2",
+        summary: {
+          entryCount: 1,
+          preparedEntryCount: 1,
+          familyCounts: { full_schema: 1 },
+          reasonCodes: ["prepared"]
+        }
+      }
+    });
+
+    expect(second.manifestFingerprint).toBe("semantic-assets-builder-v2");
+    expect(second.activation.replacedVersionIds).toContain(first.indexVersionId);
+    expect(second.activation.replacedSourceVersions).toContain(
+      "semantic-assets-builder-v1:mock"
+    );
 
     await moduleRef.close();
   });

@@ -98,4 +98,43 @@ describe("RagDocumentFactory integration", () => {
       second.chunks.map((item) => item.chunkOrder)
     );
   });
+
+  it("preserves semantic asset family provenance in normalized metadata", () => {
+    const result = factory.create({
+      sourceType: "semantic_asset",
+      datasourceId: "ds-main",
+      sourceVersion: "semantic-assets-v1",
+      contentChecksum: "asset-checksum",
+      sourceRef: "datasource_schema:orders.description",
+      assetFamily: "table_description",
+      title: "Orders description",
+      content: "Table: orders\nDescription: Paid order facts",
+      tableNames: ["orders"],
+      metadata: {
+        manifestFingerprint: "semantic-assets-abc",
+        sourceHash: "source-hash",
+        visibilityScope: "datasource",
+        preparationStatus: "prepared",
+        reasonCodes: ["prepared"]
+      },
+      chunkProfile: "semantic_asset_table_description"
+    });
+
+    expect(result.document.domain).toBe("semantic_asset");
+    expect(result.chunks[0]?.chunkProfile).toBe("semantic_asset_table_description");
+    expect(JSON.parse(result.document.metadata ?? "{}")).toEqual(
+      expect.objectContaining({
+        assetFamily: "table_description",
+        manifestFingerprint: "semantic-assets-abc",
+        chunkProfile: "semantic_asset_table_description"
+      })
+    );
+    expect(JSON.parse(result.chunks[0]?.metadata ?? "{}")).toEqual(
+      expect.objectContaining({
+        assetFamily: "table_description",
+        manifestFingerprint: "semantic-assets-abc",
+        visibilityScope: "datasource"
+      })
+    );
+  });
 });

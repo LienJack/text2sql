@@ -403,14 +403,17 @@ describe("rag retrieval service integration", () => {
     const priorSqlLane = response.retrieval_bundle.prior_sql_lane;
     expect(priorSqlLane).toBeDefined();
     expect(priorSqlLane?.status).toBe("filtered");
-    expect(priorSqlLane?.matched_count).toBe(2);
+    expect(priorSqlLane?.matched_count).toBe(1);
     expect(priorSqlLane?.selected_count).toBe(0);
-    expect(priorSqlLane?.filtered_count).toBe(2);
+    expect(priorSqlLane?.filtered_count).toBe(1);
     expect(priorSqlLane?.degrade_reasons).toEqual(
-      expect.arrayContaining([
-        "prior_sql_filtered_workspace_mismatch",
-        "prior_sql_filtered_not_in_allowed_tables"
-      ])
+      expect.arrayContaining(["prior_sql_filtered_workspace_mismatch"])
+    );
+    expect(response.retrieval_bundle.permission_filtering).toMatchObject(
+      expect.objectContaining({
+        denied_evidence_ids: expect.arrayContaining(["chunk-prior-filter-tables"]),
+        reason_codes: expect.arrayContaining(["permission_filtered_before_ranking"])
+      })
     );
     expect(
       response.retrieval_bundle.candidates.some(
@@ -426,6 +429,209 @@ describe("rag retrieval service integration", () => {
     expect(response.retrieval_bundle.lane_results.lexical.status).toBe("ok");
     expect(response.retrieval_bundle.lane_results.dense.status).toBe("ok");
     expect(response.retrieval_bundle.lane_results.graph.status).toBe("ok");
+
+    await moduleRef.close();
+  });
+
+  it("filters permission-scoped semantic assets before lane ranking and fusion", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const datasourceId = "ds-rag-retrieval-permission-pre-rank";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-allowed-orders-description",
+        datasourceId,
+        domain: "semantic_asset",
+        content: "Orders table contains amount and status facts.",
+        metadata: JSON.stringify({
+          assetFamily: "table_description",
+          manifestFingerprint: "semantic-assets-permission-v1",
+          manifestEntryId: "entry-orders-description",
+          sourceVersion: "schema-v1",
+          tableNames: ["orders"],
+          columnNames: ["amount", "status"],
+          visibilityScope: "table_permissions",
+          preparationStatus: "prepared"
+        })
+      },
+      {
+        id: "chunk-forbidden-secret-description",
+        datasourceId,
+        domain: "semantic_asset",
+        content: "secret_orders contains confidential revenue and margin facts.",
+        metadata: JSON.stringify({
+          assetFamily: "table_description",
+          manifestFingerprint: "semantic-assets-permission-v1",
+          manifestEntryId: "entry-secret-description",
+          sourceVersion: "schema-v1",
+          tableNames: ["secret_orders"],
+          columnNames: ["revenue", "margin"],
+          visibilityScope: "table_permissions",
+          preparationStatus: "prepared"
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "semantic-assets-permission-v1:mock",
+      createdByRunId: "run-rag-retrieval-permission-build-v1",
+      activatedByRunId: "run-rag-retrieval-permission-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "secret_orders revenue orders amount",
+      datasourceId,
+      allowedTables: ["orders"],
+      runId: "run-rag-retrieval-permission-pre-rank-v1"
+    });
+
+    const laneHitIds = Object.values(response.retrieval_bundle.lane_results).flatMap((lane) =>
+      lane.hits.map((hit) => hit.chunk_id)
+    );
+    expect(laneHitIds).not.toContain("chunk-forbidden-secret-description");
+    expect(response.retrieval_bundle.candidates.map((item) => item.chunk_id)).not.toContain(
+      "chunk-forbidden-secret-description"
+    );
+    expect(response.retrieval_bundle.candidates[0]?.chunk.metadata).toEqual(
+      expect.objectContaining({
+        assetFamily: "table_description",
+        manifestFingerprint: "semantic-assets-permission-v1",
+        sourceVersion: "schema-v1"
+      })
+    );
+    expect(response.retrieval_bundle.permission_filtering).toMatchObject({
+      status: "applied",
+      denied_evidence_ids: ["chunk-forbidden-secret-description"],
+      reason_codes: expect.arrayContaining([
+        "permission_filtered_before_ranking",
+        "permission_filtered_not_in_allowed_tables"
+      ])
+    });
+
+    await moduleRef.close();
+  });
+
+  it("supplements table-description-first recall with schema and relationship asset families", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+
+    const indexRepository = moduleRef.get(RagIndexRepository);
+    const indexBuilder = moduleRef.get(RagIndexBuilderService);
+    const retrievalService = moduleRef.get(RagRetrievalService);
+    const replayRepository = moduleRef.get(RagReplayRepository);
+
+    const datasourceId = "ds-rag-retrieval-two-pass-schema";
+    indexRepository.seedChunksForDatasource(datasourceId, [
+      {
+        id: "chunk-two-pass-orders-description",
+        datasourceId,
+        domain: "semantic_asset",
+        content: "Orders table stores paid order facts for GMV analysis.",
+        metadata: JSON.stringify({
+          assetFamily: "table_description",
+          manifestFingerprint: "semantic-assets-two-pass-v1",
+          manifestEntryId: "entry-orders-description",
+          sourceVersion: "schema-v1",
+          tableNames: ["orders"],
+          columnNames: [],
+          visibilityScope: "datasource",
+          preparationStatus: "prepared"
+        })
+      },
+      {
+        id: "chunk-two-pass-orders-full-schema",
+        datasourceId,
+        domain: "semantic_asset",
+        content: "Schema: orders(id, amount, status, customer_id)",
+        metadata: JSON.stringify({
+          assetFamily: "full_schema",
+          manifestFingerprint: "semantic-assets-two-pass-v1",
+          manifestEntryId: "entry-orders-full-schema",
+          sourceVersion: "schema-v1",
+          tableNames: ["orders"],
+          columnNames: ["id", "amount", "status", "customer_id"],
+          visibilityScope: "datasource",
+          preparationStatus: "prepared"
+        })
+      },
+      {
+        id: "chunk-two-pass-orders-relationship",
+        datasourceId,
+        domain: "semantic_asset",
+        content: "Relationship: orders.customer_id -> customers.id",
+        metadata: JSON.stringify({
+          assetFamily: "relationship_binding",
+          manifestFingerprint: "semantic-assets-two-pass-v1",
+          manifestEntryId: "entry-orders-customers-rel",
+          sourceVersion: "modeling-v1",
+          modelingRevision: 3,
+          tableNames: ["orders", "customers"],
+          columnNames: ["customer_id", "id"],
+          visibilityScope: "datasource",
+          preparationStatus: "prepared"
+        })
+      }
+    ]);
+    await indexBuilder.buildAndActivate({
+      datasourceId,
+      sourceVersion: "semantic-assets-two-pass-v1:mock",
+      createdByRunId: "run-rag-retrieval-two-pass-build-v1",
+      activatedByRunId: "run-rag-retrieval-two-pass-build-v1"
+    });
+
+    const response = await retrievalService.retrieve({
+      query: "paid orders GMV",
+      datasourceId,
+      runId: "run-rag-retrieval-two-pass-v1",
+      perLaneLimit: 2,
+      finalCandidateLimit: 6
+    });
+
+    const candidateIds = response.retrieval_bundle.candidates.map((item) => item.chunk_id);
+    expect(candidateIds).toEqual(
+      expect.arrayContaining([
+        "chunk-two-pass-orders-description",
+        "chunk-two-pass-orders-full-schema",
+        "chunk-two-pass-orders-relationship"
+      ])
+    );
+    expect(response.retrieval_bundle.two_pass_schema_recall).toMatchObject({
+      status: "applied",
+      selected_table_names: ["orders"],
+      table_description_evidence_ids: ["chunk-two-pass-orders-description"],
+      supplemental_evidence_ids: expect.arrayContaining([
+        "chunk-two-pass-orders-full-schema",
+        "chunk-two-pass-orders-relationship"
+      ]),
+      supplemental_families: expect.arrayContaining(["full_schema", "relationship_binding"])
+    });
+
+    const replayEvents = await replayRepository.listByRunId("run-rag-retrieval-two-pass-v1");
+    const fusedPayload = JSON.parse(
+      replayEvents.find((item) => item.replayKey === "retrieval:fused")?.payload ?? "{}"
+    ) as {
+      twoPassSchemaRecall?: { status?: string; supplementalFamilies?: string[] };
+      candidates?: Array<{ assetFamily?: string; manifestFingerprint?: string }>;
+    };
+    expect(fusedPayload.twoPassSchemaRecall?.status).toBe("applied");
+    expect(fusedPayload.twoPassSchemaRecall?.supplementalFamilies).toEqual(
+      expect.arrayContaining(["full_schema", "relationship_binding"])
+    );
+    expect(fusedPayload.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assetFamily: "table_description",
+          manifestFingerprint: "semantic-assets-two-pass-v1"
+        })
+      ])
+    );
 
     await moduleRef.close();
   });

@@ -15,6 +15,29 @@ export interface RagIndexBuildRequest {
   createdByRunId?: string;
   activatedByRunId?: string;
   chunks?: RagChunkBuildInput[];
+  manifest?: RagIndexBuildManifestContext;
+}
+
+export interface RagIndexBuildManifestContext {
+  fingerprint: string;
+  summary?: {
+    entryCount?: number;
+    preparedEntryCount?: number;
+    skippedEntryCount?: number;
+    degradedEntryCount?: number;
+    familyCounts?: Record<string, number>;
+    reasonCodes?: string[];
+    embeddingProfile?: unknown;
+    sourceSnapshotSummary?: unknown;
+  };
+  entries?: Array<{
+    id?: string;
+    family?: string;
+    status?: string;
+    sourceRef?: unknown;
+    sourceVersion?: string;
+    reasonCodes?: string[];
+  }>;
 }
 
 export interface RagIndexBuildResult {
@@ -31,6 +54,13 @@ export interface RagIndexBuildResult {
   denseDimensions?: number;
   vectorVersion?: string;
   indexVersion?: string;
+  manifestFingerprint?: string;
+  manifestSummary?: RagIndexBuildManifestContext["summary"];
+  activation: {
+    activatedAt?: string;
+    replacedVersionIds: string[];
+    replacedSourceVersions: string[];
+  };
 }
 
 @Injectable()
@@ -78,11 +108,12 @@ export class RagIndexBuilderService {
 
       await this.repository.replaceEntriesForVersion(version.id, entries);
       await this.repository.markVersionReady(version.id);
-      const active = await this.repository.activateVersion({
+      const activation = await this.repository.activateVersionWithEvidence({
         datasourceId: input.datasourceId,
         indexVersionId: version.id,
         activatedByRunId: input.activatedByRunId
       });
+      const active = activation.activated;
       const archived = await this.repository.listEntriesByVersion(version.id);
 
       return {
@@ -98,7 +129,14 @@ export class RagIndexBuilderService {
         denseConfigSource: denseEmbedding.metadata?.configSource,
         denseDimensions: denseEmbedding.metadata?.dimensions,
         vectorVersion: denseEmbedding.metadata?.vectorVersion,
-        indexVersion: denseEmbedding.metadata?.indexVersion
+        indexVersion: denseEmbedding.metadata?.indexVersion,
+        manifestFingerprint: input.manifest?.fingerprint,
+        manifestSummary: input.manifest?.summary,
+        activation: {
+          activatedAt: active.activatedAt,
+          replacedVersionIds: activation.replacedVersions.map((item) => item.id),
+          replacedSourceVersions: activation.replacedVersions.map((item) => item.sourceVersion)
+        }
       };
     } catch (error) {
       await this.safeDeprecate(version.id);

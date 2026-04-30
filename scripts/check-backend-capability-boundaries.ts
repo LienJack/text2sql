@@ -169,6 +169,10 @@ const KNOWLEDGE_RAG_DIRECT_IMPLEMENTATION_ALLOWLIST = new Set<string>([
   toImportPairKey(
     `${MODULES_ROOT}/system/system.module.ts`,
     `${MODULES_ROOT}/knowledge/rag/rag.module.ts`
+  ),
+  toImportPairKey(
+    `${MODULES_ROOT}/system/health.controller.ts`,
+    `${MODULES_ROOT}/knowledge/rag/preparation/semantic-asset-readiness.service.ts`
   )
 ]);
 
@@ -223,7 +227,7 @@ const DEFAULT_ALLOW_RULES: BoundaryAllowRule[] = [
     sourcePathPattern:
       /^apps\/backend\/src\/modules\/system\/health\.controller\.ts$/,
     targetPathPattern:
-      /^apps\/backend\/src\/modules\/rag\/(observability\/rag-ingestion-metrics|quality\/rag-quality)\.service\.ts$/,
+      /^apps\/backend\/src\/modules\/((rag\/(observability\/rag-ingestion-metrics|quality\/rag-quality))|(knowledge\/rag\/preparation\/semantic-asset-readiness))\.service\.ts$/,
     reason: "Transitional wiring: system health still reads rag health signals."
   },
   {

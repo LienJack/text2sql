@@ -585,6 +585,12 @@ export interface DeliveryEvidenceLayer {
         contextCount: number;
         degradeReason?: string;
     };
+    preparationPlane?: {
+        manifestFingerprints: string[];
+        assetFamilyCounts: Record<string, number>;
+        permissionFilteredAssetCount: number;
+        twoPassSchemaRecallApplied: boolean;
+    };
     effectiveContextSummary?: {
         sourcePriority: "user_explicit_over_system";
         userEnvelope: {

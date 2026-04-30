@@ -26,6 +26,10 @@ import { RagQueryCacheService } from "../../rag/perf/rag-query-cache.service";
 import { RagQualityController } from "../../rag/quality/rag-quality.controller";
 import { RagQualityService } from "../../rag/quality/rag-quality.service";
 import { RagRetrievalService as LegacyRagRetrievalService } from "../../rag/retrieval/rag-retrieval.service";
+import { SemanticAssetFamilyChunkMapper } from "./preparation/semantic-asset-family-chunk.mapper";
+import { SemanticAssetManifestBuilder } from "./preparation/semantic-asset-manifest.builder";
+import { SemanticAssetPreparerService } from "./preparation/semantic-asset-preparer.service";
+import { SemanticAssetReadinessService } from "./preparation/semantic-asset-readiness.service";
 import { SemanticAssetReindexService } from "./retrieval/semantic-asset-reindex.service";
 import { RagRetrievalService } from "./retrieval/rag-retrieval.service";
 import { ModelRerankerAdapter } from "../../rag/rerank/model-reranker.adapter";
@@ -101,6 +105,10 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     RagAuditReplayService,
     LegacyRagReplayRepository,
     RagQualityService,
+    SemanticAssetFamilyChunkMapper,
+    SemanticAssetManifestBuilder,
+    SemanticAssetPreparerService,
+    SemanticAssetReadinessService,
     RagRetrievalService,
     SemanticAssetReindexService,
     ModelRerankerAdapter,
@@ -139,6 +147,10 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     LegacyRagReplayRepository,
     RagReplayRepository,
     RagQualityService,
+    SemanticAssetFamilyChunkMapper,
+    SemanticAssetManifestBuilder,
+    SemanticAssetPreparerService,
+    SemanticAssetReadinessService,
     LegacyRagRetrievalService,
     SemanticAssetReindexService,
     RagRetrievalService,

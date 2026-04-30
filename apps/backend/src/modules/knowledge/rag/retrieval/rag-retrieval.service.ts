@@ -21,6 +21,7 @@ import {
   type RagContextPackPruningDecision,
   type RagPriorSqlLaneEvidence,
   type RagPriorSqlShortcutDecision,
+  type RagRetrievalBundle,
   type RagRetrievalCandidate,
   type RagRetrievalChunkMetadata,
   type RagRetrievalChunkPayload,
@@ -106,6 +107,31 @@ interface PermissionFilteringEvidence {
 interface PermissionFilteringResult {
   candidates: RagRetrievalCandidate[];
   evidence: PermissionFilteringEvidence;
+}
+
+interface ContextPermissionFilteringResult {
+  contexts: RagRetrievalEntryContext[];
+  evidence: PermissionFilteringEvidence;
+}
+
+interface TwoPassSchemaRecallEvidence {
+  status: "applied" | "skipped";
+  selected_table_names: string[];
+  table_description_evidence_ids: string[];
+  supplemental_evidence_ids: string[];
+  supplemental_families: string[];
+  reason_codes: string[];
+  selectedTableNames?: string[];
+  tableDescriptionEvidenceIds?: string[];
+  supplementalEvidenceIds?: string[];
+  supplementalFamilies?: string[];
+  reasonCodes?: string[];
+}
+
+interface TwoPassSchemaRecallResult {
+  candidates: RagRetrievalCandidate[];
+  evidence: TwoPassSchemaRecallEvidence;
+  reasonCodes: string[];
 }
 
 interface WideTableProfile {
@@ -268,9 +294,13 @@ export class RagRetrievalService {
 
     const entries = await this.indexRepository.listEntriesByVersion(activeVersion.id);
     const contexts = entries.map((entry) => this.toEntryContext(activeVersion.id, entry));
+    const preRankingPermissionFiltering = this.applyPermissionFilteringToContexts({
+      contexts,
+      allowedTables
+    });
     const laneResults = await this.collectLaneResults({
       query,
-      contexts,
+      contexts: preRankingPermissionFiltering.contexts,
       perLaneLimit,
       laneTimeoutMs,
       enabledLanes: budgetDecision.enabledLanes,
@@ -302,8 +332,13 @@ export class RagRetrievalService {
       priorSqlFiltered,
       priorSqlSelection.selectedCandidates
     );
+    const schemaRecall = this.applyTwoPassSchemaRecall({
+      candidates: fusedWithPrior,
+      contexts: preRankingPermissionFiltering.contexts,
+      limit: finalCandidateLimit
+    });
     const coveredCandidates = this.applyDomainCoverage(
-      fusedWithPrior,
+      schemaRecall.candidates,
       finalCandidateLimit,
       REQUIRED_DOMAIN_COVERAGE
     );
@@ -317,11 +352,16 @@ export class RagRetrievalService {
       allowedTables
     });
     const candidates = permissionFiltering.candidates;
+    const combinedPermissionFiltering = this.mergePermissionFilteringEvidence([
+      preRankingPermissionFiltering.evidence,
+      permissionFiltering.evidence
+    ]);
     const skillContext = await this.resolveSkillContext(query, candidates);
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
     degradeReasons.push(...this.collectSemanticLinkageDegradeReasons(candidates));
-    degradeReasons.push(...permissionFiltering.evidence.reason_codes);
+    degradeReasons.push(...combinedPermissionFiltering.reason_codes);
+    degradeReasons.push(...schemaRecall.reasonCodes);
     if (skillContext.degrade_reason) {
       degradeReasons.push(skillContext.degrade_reason);
     }
@@ -352,8 +392,9 @@ export class RagRetrievalService {
     this.attachColumnPruningEvidence(response.retrieval_bundle, columnPruning.evidence);
     this.attachPermissionFilteringEvidence(
       response.retrieval_bundle,
-      permissionFiltering.evidence
+      combinedPermissionFiltering
     );
+    this.attachTwoPassSchemaRecallEvidence(response.retrieval_bundle, schemaRecall.evidence);
     response.retrieval_bundle.context_pack = await this.buildContextPack({
       bundle: response.retrieval_bundle,
       workspaceId,
@@ -390,6 +431,17 @@ export class RagRetrievalService {
       cacheHit: false,
       budgetDegraded: budgetDecision.degraded
     });
+    this.ragQualityService.recordPreparationPlane({
+      runId,
+      datasourceId,
+      manifestFingerprint: this.extractManifestFingerprint(activeVersion.sourceVersion),
+      activeIndexVersionId: activeVersion.id,
+      familyCounts: this.countCandidateAssetFamilies(candidates),
+      permissionFilteredAssetCount: combinedPermissionFiltering.denied_evidence_ids.length,
+      selectedAssetCount: candidates.length,
+      staleReasons: schemaRecall.reasonCodes.filter((reason) => reason.includes("stale")),
+      lifecycleStatus: "retrieved"
+    });
     await this.persistReplay(response.retrieval_bundle);
     return response;
   }
@@ -405,6 +457,7 @@ export class RagRetrievalService {
     const priorSqlLane = this.readPriorSqlLaneEvidence(input.cachedBundle);
     const columnPruning = this.readColumnPruningEvidence(input.cachedBundle);
     const permissionFiltering = this.readPermissionFilteringEvidence(input.cachedBundle);
+    const twoPassSchemaRecall = this.readTwoPassSchemaRecallEvidence(input.cachedBundle);
     const hydratedBundle: RagRetrievalResponse["retrieval_bundle"] = {
       ...input.cachedBundle,
       query: input.query,
@@ -424,6 +477,7 @@ export class RagRetrievalService {
     };
     this.attachColumnPruningEvidence(hydratedBundle, columnPruning);
     this.attachPermissionFilteringEvidence(hydratedBundle, permissionFiltering);
+    this.attachTwoPassSchemaRecallEvidence(hydratedBundle, twoPassSchemaRecall);
     hydratedBundle.context_pack = await this.buildContextPack({
       bundle: hydratedBundle,
       workspaceId: input.workspaceId,
@@ -806,6 +860,21 @@ export class RagRetrievalService {
       indexVersionId: context.indexVersionId,
       chunkId: context.entry.chunkId,
       domain: context.entry.domain,
+      assetFamily: this.readString(context.parsedMetadata.sourceMetadata.assetFamily),
+      manifestFingerprint: this.readString(
+        context.parsedMetadata.sourceMetadata.manifestFingerprint
+      ),
+      manifestEntryId: this.readString(context.parsedMetadata.sourceMetadata.manifestEntryId),
+      sourceRef: context.parsedMetadata.sourceMetadata.semanticAssetSourceRef,
+      sourceVersion: this.readString(context.parsedMetadata.sourceMetadata.sourceVersion),
+      policyVersion: this.readString(context.parsedMetadata.sourceMetadata.policyVersion),
+      modelingRevision: this.readNumber(context.parsedMetadata.sourceMetadata.modelingRevision),
+      visibilityScope: this.readString(context.parsedMetadata.sourceMetadata.visibilityScope),
+      preparationStatus: this.readString(
+        context.parsedMetadata.sourceMetadata.preparationStatus
+      ),
+      reasonCodes: this.readStringArray(context.parsedMetadata.sourceMetadata.reasonCodes),
+      lifecycleState: "retrieved",
       chunkProfile: this.readString(context.parsedMetadata.chunkProfile),
       startOffset: this.readNumber(context.parsedMetadata.startOffset),
       endOffset: this.readNumber(context.parsedMetadata.endOffset),
@@ -1626,6 +1695,247 @@ export class RagRetrievalService {
     };
   }
 
+  private applyPermissionFilteringToContexts(input: {
+    contexts: RagRetrievalEntryContext[];
+    allowedTables: string[];
+  }): ContextPermissionFilteringResult {
+    if (input.allowedTables.length === 0) {
+      return {
+        contexts: input.contexts,
+        evidence: {
+          status: "skipped",
+          denied_evidence_ids: [],
+          denied_table_names: [],
+          denied_column_names: [],
+          reason_codes: [],
+          kept_candidate_count: input.contexts.length,
+          deniedEvidenceIds: [],
+          deniedTableNames: [],
+          deniedColumnNames: [],
+          reasonCodes: [],
+          keptCandidateCount: input.contexts.length
+        }
+      };
+    }
+
+    const allowedTableSet = new Set(input.allowedTables.map((table) => table.trim().toLowerCase()));
+    const keptContexts: RagRetrievalEntryContext[] = [];
+    const deniedEvidenceIds: string[] = [];
+    const deniedTableNames: string[] = [];
+    const deniedColumnNames: string[] = [];
+
+    for (const context of input.contexts) {
+      const tableNames = context.parsedMetadata.tableNames
+        .map((tableName) => tableName.trim().toLowerCase())
+        .filter((tableName) => tableName.length > 0);
+      if (tableNames.length === 0) {
+        keptContexts.push(context);
+        continue;
+      }
+      const deniedTables = tableNames.filter((tableName) => !allowedTableSet.has(tableName));
+      if (deniedTables.length === 0) {
+        keptContexts.push(context);
+        continue;
+      }
+      deniedEvidenceIds.push(context.entry.chunkId);
+      deniedTableNames.push(...deniedTables);
+      deniedColumnNames.push(...context.parsedMetadata.columnNames);
+    }
+
+    const uniqueDeniedEvidenceIds = this.unique(deniedEvidenceIds).slice(0, 128);
+    const uniqueDeniedTableNames = this.unique(deniedTableNames).slice(0, 64);
+    const uniqueDeniedColumnNames = this.unique(deniedColumnNames).slice(0, 128);
+    const reasonCodes =
+      uniqueDeniedEvidenceIds.length > 0
+        ? ["permission_filtered_before_ranking", "permission_filtered_not_in_allowed_tables"]
+        : [];
+
+    return {
+      contexts: keptContexts,
+      evidence: {
+        status: uniqueDeniedEvidenceIds.length > 0 ? "applied" : "skipped",
+        denied_evidence_ids: uniqueDeniedEvidenceIds,
+        denied_table_names: uniqueDeniedTableNames,
+        denied_column_names: uniqueDeniedColumnNames,
+        reason_codes: reasonCodes,
+        kept_candidate_count: keptContexts.length,
+        deniedEvidenceIds: uniqueDeniedEvidenceIds,
+        deniedTableNames: uniqueDeniedTableNames,
+        deniedColumnNames: uniqueDeniedColumnNames,
+        reasonCodes,
+        keptCandidateCount: keptContexts.length
+      }
+    };
+  }
+
+  private mergePermissionFilteringEvidence(
+    evidences: PermissionFilteringEvidence[]
+  ): PermissionFilteringEvidence {
+    const applied = evidences.some((evidence) => evidence.status === "applied");
+    const deniedEvidenceIds = this.unique(
+      evidences.flatMap((evidence) => evidence.denied_evidence_ids ?? [])
+    ).slice(0, 128);
+    const deniedTableNames = this.unique(
+      evidences.flatMap((evidence) => evidence.denied_table_names ?? [])
+    ).slice(0, 64);
+    const deniedColumnNames = this.unique(
+      evidences.flatMap((evidence) => evidence.denied_column_names ?? [])
+    ).slice(0, 128);
+    const reasonCodes = this.unique(
+      evidences.flatMap((evidence) => evidence.reason_codes ?? [])
+    );
+    const keptCandidateCount = evidences[evidences.length - 1]?.kept_candidate_count ?? 0;
+    return {
+      status: applied ? "applied" : "skipped",
+      denied_evidence_ids: deniedEvidenceIds,
+      denied_table_names: deniedTableNames,
+      denied_column_names: deniedColumnNames,
+      reason_codes: reasonCodes,
+      kept_candidate_count: keptCandidateCount,
+      deniedEvidenceIds,
+      deniedTableNames,
+      deniedColumnNames,
+      reasonCodes,
+      keptCandidateCount
+    };
+  }
+
+  private applyTwoPassSchemaRecall(input: {
+    candidates: RagRetrievalCandidate[];
+    contexts: RagRetrievalEntryContext[];
+    limit: number;
+  }): TwoPassSchemaRecallResult {
+    const tableDescriptionCandidates = input.candidates.filter(
+      (candidate) => this.readAssetFamily(candidate.chunk.metadata) === "table_description"
+    );
+    const selectedTableNames = this.unique(
+      tableDescriptionCandidates
+        .flatMap((candidate) => candidate.chunk.metadata.tableNames)
+        .map((tableName) => tableName.trim().toLowerCase())
+        .filter((tableName) => tableName.length > 0)
+    );
+    if (selectedTableNames.length === 0) {
+      const evidence = this.emptyTwoPassSchemaRecallEvidence("two_pass_schema_recall_no_table_description");
+      return {
+        candidates: input.candidates,
+        evidence,
+        reasonCodes: []
+      };
+    }
+
+    const supplementalFamilies = new Set(["full_schema", "column_batch", "relationship_binding"]);
+    const existingSupplementalCandidates = input.candidates.filter((candidate) => {
+      const assetFamily = this.readAssetFamily(candidate.chunk.metadata);
+      if (!assetFamily || !supplementalFamilies.has(assetFamily)) {
+        return false;
+      }
+      const tableNames = candidate.chunk.metadata.tableNames.map((tableName) =>
+        tableName.trim().toLowerCase()
+      );
+      return tableNames.some((tableName) => selectedTableNames.includes(tableName));
+    });
+    const existingChunkIds = new Set(input.candidates.map((candidate) => candidate.chunk_id));
+    const supplementalCandidates: RagRetrievalCandidate[] = [];
+    for (const context of input.contexts) {
+      if (existingChunkIds.has(context.entry.chunkId)) {
+        continue;
+      }
+      const chunk = this.toChunkPayload(context);
+      const assetFamily = this.readAssetFamily(chunk.metadata);
+      if (!assetFamily || !supplementalFamilies.has(assetFamily)) {
+        continue;
+      }
+      const tableNames = chunk.metadata.tableNames.map((tableName) =>
+        tableName.trim().toLowerCase()
+      );
+      const overlapsSelectedTable = tableNames.some((tableName) =>
+        selectedTableNames.includes(tableName)
+      );
+      const isRelationshipSupplement =
+        assetFamily === "relationship_binding" &&
+        tableNames.some((tableName) => selectedTableNames.includes(tableName));
+      if (!overlapsSelectedTable && !isRelationshipSupplement) {
+        continue;
+      }
+      supplementalCandidates.push({
+        chunk_id: chunk.chunk_id,
+        source_lane: "graph",
+        evidence: this.unique([
+          "two_pass_schema_recall",
+          `asset_family:${assetFamily}`,
+          ...chunk.metadata.tableNames.map((tableName) => `table:${tableName}`)
+        ]),
+        score: 0.01,
+        lane_scores: {
+          graph: 0.01
+        },
+        lane_ranks: {
+          graph: input.candidates.length + supplementalCandidates.length + 1
+        },
+        chunk
+      });
+      existingChunkIds.add(chunk.chunk_id);
+      if (input.candidates.length + supplementalCandidates.length >= input.limit) {
+        break;
+      }
+    }
+
+    const allSupplementalCandidates = [
+      ...existingSupplementalCandidates,
+      ...supplementalCandidates
+    ];
+    const supplementalEvidenceIds = this.unique(
+      allSupplementalCandidates.map((candidate) => candidate.chunk_id)
+    );
+    const supplementalFamilyList = this.unique(
+      allSupplementalCandidates
+        .map((candidate) => this.readAssetFamily(candidate.chunk.metadata))
+        .filter((family): family is string => Boolean(family))
+    ).sort();
+    const reasonCodes =
+      supplementalEvidenceIds.length > 0
+        ? ["two_pass_schema_recall_applied"]
+        : ["two_pass_schema_recall_no_supplement"];
+    const evidence: TwoPassSchemaRecallEvidence = {
+      status: supplementalEvidenceIds.length > 0 ? "applied" : "skipped",
+      selected_table_names: selectedTableNames,
+      table_description_evidence_ids: tableDescriptionCandidates.map(
+        (candidate) => candidate.chunk_id
+      ),
+      supplemental_evidence_ids: supplementalEvidenceIds,
+      supplemental_families: supplementalFamilyList,
+      reason_codes: reasonCodes,
+      selectedTableNames: selectedTableNames,
+      tableDescriptionEvidenceIds: tableDescriptionCandidates.map(
+        (candidate) => candidate.chunk_id
+      ),
+      supplementalEvidenceIds: supplementalEvidenceIds,
+      supplementalFamilies: supplementalFamilyList,
+      reasonCodes
+    };
+    return {
+      candidates: [...input.candidates, ...supplementalCandidates],
+      evidence,
+      reasonCodes
+    };
+  }
+
+  private emptyTwoPassSchemaRecallEvidence(reasonCode: string): TwoPassSchemaRecallEvidence {
+    return {
+      status: "skipped",
+      selected_table_names: [],
+      table_description_evidence_ids: [],
+      supplemental_evidence_ids: [],
+      supplemental_families: [],
+      reason_codes: [reasonCode],
+      selectedTableNames: [],
+      tableDescriptionEvidenceIds: [],
+      supplementalEvidenceIds: [],
+      supplementalFamilies: [],
+      reasonCodes: [reasonCode]
+    };
+  }
+
   private buildFieldIntentTokens(
     queryTokens: string[],
     normalizedTableName: string
@@ -1850,10 +2160,61 @@ export class RagRetrievalService {
     return source.permission_filtering ?? source.permissionFiltering;
   }
 
+  private attachTwoPassSchemaRecallEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"],
+    evidence: TwoPassSchemaRecallEvidence | undefined
+  ): void {
+    const target = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      two_pass_schema_recall?: TwoPassSchemaRecallEvidence;
+      twoPassSchemaRecall?: TwoPassSchemaRecallEvidence;
+    };
+    if (!evidence) {
+      delete target.two_pass_schema_recall;
+      delete target.twoPassSchemaRecall;
+      return;
+    }
+    target.two_pass_schema_recall = evidence;
+    target.twoPassSchemaRecall = evidence;
+  }
+
+  private readTwoPassSchemaRecallEvidence(
+    bundle: RagRetrievalResponse["retrieval_bundle"]
+  ): TwoPassSchemaRecallEvidence | undefined {
+    const source = bundle as RagRetrievalResponse["retrieval_bundle"] & {
+      two_pass_schema_recall?: TwoPassSchemaRecallEvidence;
+      twoPassSchemaRecall?: TwoPassSchemaRecallEvidence;
+    };
+    return source.two_pass_schema_recall ?? source.twoPassSchemaRecall;
+  }
+
   private readDenseVectorMetadata(
     context: RagRetrievalEntryContext
   ): DenseVectorMetadata | undefined {
     return context.parsedMetadata.denseMetadata as DenseVectorMetadata | undefined;
+  }
+
+  private readAssetFamily(metadata: RagRetrievalChunkMetadata): string | undefined {
+    return (
+      this.readString(metadata.assetFamily) ??
+      this.readString(metadata.sourceMetadata?.assetFamily)
+    );
+  }
+
+  private countCandidateAssetFamilies(
+    candidates: RagRetrievalBundle["candidates"]
+  ): Record<string, number> {
+    return candidates.reduce<Record<string, number>>((accumulator, candidate) => {
+      const family = this.readAssetFamily(candidate.chunk.metadata);
+      if (family) {
+        accumulator[family] = (accumulator[family] ?? 0) + 1;
+      }
+      return accumulator;
+    }, {});
+  }
+
+  private extractManifestFingerprint(sourceVersion: string): string | undefined {
+    const [fingerprint] = sourceVersion.trim().split(":");
+    return fingerprint || undefined;
   }
 
   private readDenseVectorMetadataFromParsed(
@@ -2125,6 +2486,16 @@ export class RagRetrievalService {
     const priorSqlLane = bundle.prior_sql_lane ?? bundle.priorSqlLane;
     const permissionFiltering = this.readPermissionFilteringEvidence(bundle);
     const permissionReasonCodes = this.unique(permissionFiltering?.reason_codes ?? []);
+    const twoPassSchemaRecall = this.readTwoPassSchemaRecallEvidence(bundle);
+    const semanticAssetCandidates = bundle.candidates.filter((candidate) =>
+      Boolean(this.readAssetFamily(candidate.chunk.metadata))
+    );
+    const semanticAssetFamilyReasonCodes = this.unique([
+      ...(twoPassSchemaRecall?.reason_codes ?? []),
+      ...semanticAssetCandidates.flatMap(
+        (candidate) => candidate.chunk.metadata.reasonCodes ?? []
+      )
+    ]);
 
     laneMetadata.push(
       {
@@ -2206,6 +2577,24 @@ export class RagRetrievalService {
         reasonCodes: this.unique(priorSqlLane?.degrade_reasons ?? [])
       },
       {
+        lane: "semantic_asset_family",
+        state: semanticAssetCandidates.length > 0 ? "ready" : "skipped",
+        input_count: semanticAssetCandidates.length,
+        inputCount: semanticAssetCandidates.length,
+        output_count: semanticAssetCandidates.length,
+        outputCount: semanticAssetCandidates.length,
+        selected_count: selectedContext.filter((chunk) =>
+          Boolean(this.readAssetFamily(chunk.metadata))
+        ).length,
+        selectedCount: selectedContext.filter((chunk) =>
+          Boolean(this.readAssetFamily(chunk.metadata))
+        ).length,
+        evidence_ids: semanticAssetCandidates.map((candidate) => candidate.chunk_id),
+        evidenceIds: semanticAssetCandidates.map((candidate) => candidate.chunk_id),
+        reason_codes: semanticAssetFamilyReasonCodes,
+        reasonCodes: semanticAssetFamilyReasonCodes
+      },
+      {
         lane: "dialect_function",
         state:
           bundle.skill_context && bundle.skill_context.skills.length > 0 ? "ready" : "degraded",
@@ -2284,6 +2673,22 @@ export class RagRetrievalService {
         budgetSource: "context_pack",
         removedEvidenceIds: permissionFiltering.denied_evidence_ids ?? [],
         keptEvidenceIds: selectedEvidenceIds,
+        reasonCodes
+      });
+    }
+
+    const twoPassSchemaRecall = this.readTwoPassSchemaRecallEvidence(bundle);
+    if (twoPassSchemaRecall && twoPassSchemaRecall.reason_codes.length > 0) {
+      const reasonCodes = this.unique(twoPassSchemaRecall.reason_codes);
+      decisions.push({
+        budget_source: "context_pack",
+        removed_evidence_ids: [],
+        kept_evidence_ids: twoPassSchemaRecall.supplemental_evidence_ids,
+        reason_codes: reasonCodes,
+        summary: `context_pack:two_pass_schema_recall:${reasonCodes.join("|")}`,
+        budgetSource: "context_pack",
+        removedEvidenceIds: [],
+        keptEvidenceIds: twoPassSchemaRecall.supplemental_evidence_ids,
         reasonCodes
       });
     }
@@ -2528,12 +2933,17 @@ export class RagRetrievalService {
           bundle.context_pack?.pruningDecisions ??
           [],
         permissionFiltering: this.readPermissionFilteringEvidence(bundle),
+        twoPassSchemaRecall: this.readTwoPassSchemaRecallEvidence(bundle),
         skillContext: bundle.skill_context,
         candidates: bundle.candidates.map((candidate) => ({
           chunkId: candidate.chunk_id,
           sourceLane: candidate.source_lane,
           score: candidate.score,
-          domain: candidate.chunk.metadata.domain
+          domain: candidate.chunk.metadata.domain,
+          assetFamily: this.readAssetFamily(candidate.chunk.metadata),
+          manifestFingerprint: candidate.chunk.metadata.manifestFingerprint,
+          sourceVersion: candidate.chunk.metadata.sourceVersion,
+          lifecycleState: candidate.chunk.metadata.lifecycleState
         }))
       }
     });

@@ -1356,5 +1356,79 @@
       "behaviorTestStatus": "covered",
       "coverageOwnerStatus": "covered"
     }
+  ],
+  "preparationPlaneRows": [
+    {
+      "id": "manifest-completeness",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/preparation/semantic-asset-readiness.service.ts",
+        "apps/backend/src/modules/knowledge/rag/retrieval/semantic-asset-reindex.service.ts"
+      ],
+      "evidenceOwners": ["dependencies.ragConfig.semanticAssetReadiness"],
+      "expectedTestFiles": ["apps/backend/test/integration/settings-rag-readiness.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["activeManifestFingerprint", "familyCounts"]
+    },
+    {
+      "id": "typed-family-generation",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/retrieval/semantic-asset-reindex.service.ts"
+      ],
+      "evidenceOwners": ["manifestSummary.familyCounts"],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/semantic-asset-preparer.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["assetFamily", "manifestFingerprint"]
+    },
+    {
+      "id": "activation-stale-behavior",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/preparation/semantic-asset-readiness.service.ts",
+        "apps/backend/src/modules/knowledge/rag/retrieval/semantic-asset-reindex.service.ts"
+      ],
+      "evidenceOwners": ["semanticAssetReadiness.staleReasons"],
+      "expectedTestFiles": [
+        "apps/backend/test/integration/text2sql-semantic-asset-reindex.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["staleReasons", "rebuildable"]
+    },
+    {
+      "id": "permission-filtering-before-ranking",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts"
+      ],
+      "evidenceOwners": ["retrieval:fused.permissionFiltering"],
+      "expectedTestFiles": ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["permission_filtered_before_ranking"]
+    },
+    {
+      "id": "two-pass-schema-recall",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts"
+      ],
+      "evidenceOwners": ["retrieval:fused.twoPassSchemaRecall"],
+      "expectedTestFiles": ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["table_description", "full_schema"]
+    },
+    {
+      "id": "prior-sql-diagnostics",
+      "implementationOwners": [
+        "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts"
+      ],
+      "evidenceOwners": ["retrieval:fused.priorSqlLane"],
+      "expectedTestFiles": ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered",
+      "requiredEvidenceSignals": ["stale", "ambiguous", "filtered"]
+    }
   ]
 }

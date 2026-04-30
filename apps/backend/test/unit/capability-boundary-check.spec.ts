@@ -329,6 +329,31 @@ export class RetrieveKnowledgeNode {
     });
   });
 
+  it("reports blocked direct semantic asset preparation imports from conversation", async () => {
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      `import { SemanticAssetReadinessService } from "../../../knowledge/rag/preparation/semantic-asset-readiness.service";
+export class RetrieveKnowledgeNode {
+  constructor(private readonly readiness: SemanticAssetReadinessService) {}
+}
+`
+    );
+    await writeRepoFile(
+      repoRoot,
+      "apps/backend/src/modules/knowledge/rag/preparation/semantic-asset-readiness.service.ts",
+      "export class SemanticAssetReadinessService {}"
+    );
+
+    const report = await runCapabilityBoundaryCheck({ repoRoot });
+    expect(report.ragImportReport.blockedDirectKnowledgeImplementationImportCount).toBe(1);
+    expect(report.ragImportReport.blockedDirectKnowledgeImplementationImports[0]).toMatchObject({
+      sourceFile: "apps/backend/src/modules/conversation/agent/nodes/retrieve-knowledge.node.ts",
+      targetFile:
+        "apps/backend/src/modules/knowledge/rag/preparation/semantic-asset-readiness.service.ts"
+    });
+  });
+
   it("reports blocked legacy active rag service imports", async () => {
     await writeRepoFile(
       repoRoot,

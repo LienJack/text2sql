@@ -222,7 +222,13 @@ export class RagRerankService {
     const degradeReasons = this.unique([...bundle.degrade_reasons, ...rerankDegradeReasons]);
     const selectedContext = reranked
       .slice(0, selectedContextLimit)
-      .map((item) => item.chunk);
+      .map((item) => ({
+        ...item.chunk,
+        metadata: {
+          ...item.chunk.metadata,
+          lifecycleState: "selected" as const
+        }
+      }));
 
     const responseBundle: RagRetrievalBundle = {
       ...bundle,

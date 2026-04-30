@@ -64,6 +64,7 @@ interface Text2SqlV2CloseoutGateReport {
     characterization: GateSnapshot;
     noLegacyCompat: NoLegacyGateSnapshot;
     focusedCoverage: FocusedCoverageGateSnapshot;
+    preparationPlane: GateSnapshot;
   };
   rollout: {
     gatePass: boolean;
@@ -208,13 +209,27 @@ export function buildCloseoutRollout(params: {
     gatePass: params.characterization.gatePass,
     reasons: params.characterization.reasons
   };
+  const preparationPlane: GateSnapshot = params.focusedCoverage.report
+    ? {
+        gatePass:
+          params.focusedCoverage.report.flowMatrix.incompletePreparationPlaneRows.length === 0,
+        reasons:
+          params.focusedCoverage.report.flowMatrix.incompletePreparationPlaneRows.map(
+            (item) => `${item.id}:${item.reasons.join("|")}`
+          )
+      }
+    : {
+        gatePass: params.focusedCoverage.gatePass,
+        reasons: params.focusedCoverage.gatePass ? [] : ["focused_coverage_report_missing"]
+      };
 
   const reasons = [
     ...evalMetrics.reasons.map((item) => `eval:${item}`),
     ...evalTraceability.reasons.map((item) => `traceability:${item}`),
     ...characterizationGate.reasons.map((item) => `characterization:${item}`),
     ...params.noLegacy.reasons.map((item) => `no_legacy:${item}`),
-    ...params.focusedCoverage.reasons.map((item) => `focused_coverage:${item}`)
+    ...params.focusedCoverage.reasons.map((item) => `focused_coverage:${item}`),
+    ...preparationPlane.reasons.map((item) => `preparation_plane:${item}`)
   ];
 
   const gatePass =
@@ -222,7 +237,8 @@ export function buildCloseoutRollout(params: {
     evalTraceability.gatePass &&
     characterizationGate.gatePass &&
     params.noLegacy.gatePass &&
-    params.focusedCoverage.gatePass;
+    params.focusedCoverage.gatePass &&
+    preparationPlane.gatePass;
 
   const rollbackSuggested =
     params.summary.rollout.rollbackSuggested ||
@@ -242,7 +258,8 @@ export function buildCloseoutRollout(params: {
       evalTraceability,
       characterization: characterizationGate,
       noLegacyCompat: params.noLegacy,
-      focusedCoverage: params.focusedCoverage
+      focusedCoverage: params.focusedCoverage,
+      preparationPlane
     }
   };
 }

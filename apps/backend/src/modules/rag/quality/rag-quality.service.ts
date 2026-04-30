@@ -23,6 +23,22 @@ export interface RagQualityEvaluationInput {
   recordedAt?: string;
 }
 
+export interface RagPreparationPlaneMetricsInput {
+  runId: string;
+  datasourceId: string;
+  manifestFingerprint?: string;
+  activeIndexVersionId?: string;
+  familyCounts?: Record<string, number>;
+  preparedEntryCount?: number;
+  degradedEntryCount?: number;
+  skippedEntryCount?: number;
+  permissionFilteredAssetCount?: number;
+  selectedAssetCount?: number;
+  staleReasons?: string[];
+  lifecycleStatus?: string;
+  recordedAt?: string;
+}
+
 export interface RagPriorSqlLaneMetricsInput {
   totalCount: number;
   hitCount: number;
@@ -50,6 +66,37 @@ interface RagPriorSqlLaneMetricsRecord {
   duplicateCount: number;
   safetyRejectedCount: number;
   fallbackToGenerationCount: number;
+}
+
+interface RagPreparationPlaneMetricsRecord {
+  runId: string;
+  datasourceId: string;
+  manifestFingerprint?: string;
+  activeIndexVersionId?: string;
+  familyCounts: Record<string, number>;
+  preparedEntryCount: number;
+  degradedEntryCount: number;
+  skippedEntryCount: number;
+  permissionFilteredAssetCount: number;
+  selectedAssetCount: number;
+  staleReasons: string[];
+  lifecycleStatus?: string;
+  recordedAt: string;
+}
+
+export interface RagPreparationPlaneGateReport {
+  sampleSize: number;
+  latestManifestFingerprint?: string;
+  latestActiveIndexVersionId?: string;
+  familyCounts: Record<string, number>;
+  preparedEntryCount: number;
+  degradedEntryCount: number;
+  skippedEntryCount: number;
+  permissionFilteredAssetCount: number;
+  selectedAssetCount: number;
+  staleReasons: string[];
+  lifecycleStatuses: string[];
+  completenessReady: boolean;
 }
 
 export interface RagDatasourceOrchestrationSample {
@@ -135,6 +182,7 @@ export interface RagQualityGateReport {
   datasourceOrchestration: RagDatasourceOrchestrationReport;
   cacheBudget: RagCacheBudgetReport;
   priorSqlLane: RagPriorSqlLaneGateReport;
+  preparationPlane: RagPreparationPlaneGateReport;
   latest?: {
     runId: string;
     datasourceId: string;
@@ -331,6 +379,7 @@ export class RagQualityService {
   private readonly records: RagQualityEvaluationRecord[] = [];
   private readonly datasourceRecords: RagDatasourceOrchestrationRecord[] = [];
   private readonly cacheBudgetRecords: RagCacheBudgetRecord[] = [];
+  private readonly preparationPlaneRecords: RagPreparationPlaneMetricsRecord[] = [];
 
   constructor(private readonly replayRepository: RagReplayRepository) {}
 
@@ -353,6 +402,7 @@ export class RagQualityService {
     this.records.length = 0;
     this.datasourceRecords.length = 0;
     this.cacheBudgetRecords.length = 0;
+    this.preparationPlaneRecords.length = 0;
   }
 
   recordDatasourceOrchestration(input: RagDatasourceOrchestrationSample): void {
@@ -375,6 +425,36 @@ export class RagQualityService {
       cacheEligible: Boolean(input.cacheEligible),
       cacheHit: Boolean(input.cacheHit),
       budgetDegraded: Boolean(input.budgetDegraded),
+      recordedAt: this.normalizeIsoTimestamp(input.recordedAt)
+    });
+  }
+
+  recordPreparationPlane(input: RagPreparationPlaneMetricsInput): void {
+    const runId = input.runId.trim();
+    const datasourceId = input.datasourceId.trim();
+    if (!runId || !datasourceId) {
+      return;
+    }
+    const familyCounts = Object.fromEntries(
+      Object.entries(input.familyCounts ?? {})
+        .filter(([family, count]) => family.trim().length > 0 && Number.isFinite(count))
+        .map(([family, count]) => [family, this.normalizeCount(count)])
+    );
+    this.preparationPlaneRecords.push({
+      runId,
+      datasourceId,
+      manifestFingerprint: input.manifestFingerprint?.trim() || undefined,
+      activeIndexVersionId: input.activeIndexVersionId?.trim() || undefined,
+      familyCounts,
+      preparedEntryCount: this.normalizeCount(input.preparedEntryCount),
+      degradedEntryCount: this.normalizeCount(input.degradedEntryCount),
+      skippedEntryCount: this.normalizeCount(input.skippedEntryCount),
+      permissionFilteredAssetCount: this.normalizeCount(
+        input.permissionFilteredAssetCount
+      ),
+      selectedAssetCount: this.normalizeCount(input.selectedAssetCount),
+      staleReasons: this.unique(input.staleReasons ?? []),
+      lifecycleStatus: input.lifecycleStatus?.trim() || undefined,
       recordedAt: this.normalizeIsoTimestamp(input.recordedAt)
     });
   }
@@ -419,6 +499,7 @@ export class RagQualityService {
       datasourceOrchestration: this.snapshotDatasourceOrchestration(),
       cacheBudget: this.snapshotCacheBudget(),
       priorSqlLane: this.snapshotPriorSqlLane(),
+      preparationPlane: this.snapshotPreparationPlane(),
       latest: latest
         ? {
             runId: latest.runId,
@@ -767,6 +848,51 @@ export class RagQualityService {
     };
   }
 
+  private snapshotPreparationPlane(): RagPreparationPlaneGateReport {
+    const latest = this.preparationPlaneRecords.at(-1);
+    const familyCounts = new Map<string, number>();
+    let preparedEntryCount = 0;
+    let degradedEntryCount = 0;
+    let skippedEntryCount = 0;
+    let permissionFilteredAssetCount = 0;
+    let selectedAssetCount = 0;
+    const staleReasons: string[] = [];
+    const lifecycleStatuses: string[] = [];
+
+    for (const record of this.preparationPlaneRecords) {
+      for (const [family, count] of Object.entries(record.familyCounts)) {
+        familyCounts.set(family, (familyCounts.get(family) ?? 0) + count);
+      }
+      preparedEntryCount += record.preparedEntryCount;
+      degradedEntryCount += record.degradedEntryCount;
+      skippedEntryCount += record.skippedEntryCount;
+      permissionFilteredAssetCount += record.permissionFilteredAssetCount;
+      selectedAssetCount += record.selectedAssetCount;
+      staleReasons.push(...record.staleReasons);
+      if (record.lifecycleStatus) {
+        lifecycleStatuses.push(record.lifecycleStatus);
+      }
+    }
+
+    return {
+      sampleSize: this.preparationPlaneRecords.length,
+      latestManifestFingerprint: latest?.manifestFingerprint,
+      latestActiveIndexVersionId: latest?.activeIndexVersionId,
+      familyCounts: Object.fromEntries([...familyCounts.entries()].sort()),
+      preparedEntryCount,
+      degradedEntryCount,
+      skippedEntryCount,
+      permissionFilteredAssetCount,
+      selectedAssetCount,
+      staleReasons: this.unique(staleReasons),
+      lifecycleStatuses: this.unique(lifecycleStatuses),
+      completenessReady:
+        this.preparationPlaneRecords.length > 0 &&
+        preparedEntryCount > 0 &&
+        this.unique(staleReasons).length === 0
+    };
+  }
+
   private percentile(values: number[], quantile: number): number {
     if (values.length === 0) {
       return 0;
@@ -778,6 +904,10 @@ export class RagQualityService {
     );
     const value = sorted[index];
     return Number.isFinite(value) ? Number(value.toFixed(3)) : 0;
+  }
+
+  private unique(values: readonly string[]): string[] {
+    return Array.from(new Set(values.filter((item) => item.trim().length > 0))).sort();
   }
 
   private snapshotR6(

@@ -12,7 +12,11 @@ describe("RagEventConsumerService", () => {
         status: "active",
         entryCount: 2,
         archivedChannels: ["lexical", "dense"],
-        denseMode: "mock_provider"
+        denseMode: "mock_provider",
+        activation: {
+          replacedVersionIds: [],
+          replacedSourceVersions: []
+        }
       })
     };
     const replayRepository: Pick<RagReplayRepository, "writeReplay"> = {

@@ -181,6 +181,93 @@ describe("rag audit replay integration", () => {
     });
   });
 
+  it("summarizes preparation-plane manifest, filtering, and selected lifecycle replay", async () => {
+    const runId = "run-rag-audit-preparation-plane";
+    await replayRepository.writeReplay({
+      runId,
+      replayKey: "manifest:prepared:semantic-assets-audit-v1",
+      datasourceId: "ds-rag-audit-preparation",
+      stage: "manifest_prepared",
+      payload: {
+        manifestFingerprint: "semantic-assets-audit-v1",
+        summary: {
+          familyCounts: {
+            table_description: 1,
+            full_schema: 1
+          }
+        },
+        degradedFamilies: ["relationship_binding"],
+        skippedFamilies: ["prompt_instruction"]
+      },
+      createdAt: "2026-04-18T03:10:00.000Z"
+    });
+    await replayRepository.writeReplay({
+      runId,
+      replayKey: "index:activation:completed:idx-rag-audit-preparation",
+      datasourceId: "ds-rag-audit-preparation",
+      stage: "index_activation_completed",
+      indexVersionId: "idx-rag-audit-preparation",
+      payload: {
+        manifestFingerprint: "semantic-assets-audit-v1"
+      },
+      createdAt: "2026-04-18T03:10:01.000Z"
+    });
+    await replayRepository.writeReplay({
+      runId,
+      replayKey: "retrieval:fused",
+      datasourceId: "ds-rag-audit-preparation",
+      stage: "retrieval_fused",
+      payload: {
+        permissionFiltering: {
+          filteredCount: 1
+        },
+        candidates: [
+          {
+            chunkId: "chunk-table-description",
+            assetFamily: "table_description"
+          },
+          {
+            chunkId: "chunk-full-schema",
+            assetFamily: "full_schema"
+          }
+        ]
+      },
+      createdAt: "2026-04-18T03:10:02.000Z"
+    });
+    await replayRepository.writeReplay({
+      runId,
+      replayKey: "rerank:final",
+      datasourceId: "ds-rag-audit-preparation",
+      stage: "rerank_finalized",
+      payload: {
+        selectedContext: [
+          {
+            chunkId: "chunk-table-description",
+            metadata: {
+              lifecycleState: "selected"
+            }
+          }
+        ]
+      },
+      createdAt: "2026-04-18T03:10:03.000Z"
+    });
+
+    const chain = await auditReplayService.queryChain({ runId });
+
+    expect(chain.preparationPlane).toMatchObject({
+      manifestFingerprints: ["semantic-assets-audit-v1"],
+      activeManifestFingerprint: "semantic-assets-audit-v1",
+      activatedIndexVersionIds: ["idx-rag-audit-preparation"],
+      preparedFamilies: ["full_schema", "table_description"],
+      degradedFamilies: ["relationship_binding"],
+      skippedFamilies: ["prompt_instruction"],
+      filteredAssetCount: 1,
+      selectedAssetCount: 1,
+      unusedAssetCount: 1,
+      lifecycleStates: ["selected"]
+    });
+  });
+
   it("returns dlq status and failure reason for unrecoverable event", async () => {
     const runId = "run-rag-audit-chain-dlq";
     await chatRepository.persistRun(createRun(runId));

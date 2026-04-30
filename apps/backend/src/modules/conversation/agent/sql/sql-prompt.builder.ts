@@ -191,10 +191,30 @@ export class SqlPromptBuilder {
     return selectedContext.slice(0, 5).map((item, index) => {
       const domain = item.metadata.domain;
       const chunkId = item.chunk_id;
+      const provenance = this.formatContextProvenance(item);
       const compact = item.content.replace(/\s+/g, " ").trim();
       const excerpt = compact.length > 260 ? `${compact.slice(0, 260)}...` : compact;
-      return `${index + 1}. [${domain}] ${chunkId}: ${excerpt}`;
+      return `${index + 1}. [${domain}${provenance}] ${chunkId}: ${excerpt}`;
     });
+  }
+
+  private formatContextProvenance(item: RagRetrievalChunkPayload): string {
+    const sourceMetadata = this.asRecord(item.metadata.sourceMetadata);
+    const assetFamily =
+      this.readString((item.metadata as { assetFamily?: unknown }).assetFamily) ??
+      this.readString(sourceMetadata?.assetFamily);
+    const manifestFingerprint =
+      this.readString((item.metadata as { manifestFingerprint?: unknown }).manifestFingerprint) ??
+      this.readString(sourceMetadata?.manifestFingerprint);
+    const sourceVersion =
+      this.readString((item.metadata as { sourceVersion?: unknown }).sourceVersion) ??
+      this.readString(sourceMetadata?.sourceVersion);
+    const parts = [
+      assetFamily ? `family=${assetFamily}` : undefined,
+      manifestFingerprint ? `manifest=${manifestFingerprint}` : undefined,
+      sourceVersion ? `sourceVersion=${sourceVersion}` : undefined
+    ].filter((part): part is string => Boolean(part));
+    return parts.length > 0 ? ` | ${parts.join(" | ")}` : "";
   }
 
   private buildPruningContextLines(selectedContext: RagRetrievalChunkPayload[]): string[] {

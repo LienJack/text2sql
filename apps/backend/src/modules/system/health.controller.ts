@@ -11,6 +11,7 @@ import { DatasourceRegistryService } from "../governance/datasource/datasource-r
 import { GateMetricsService } from "../observability/gate-metrics.service";
 import { RagIngestionMetricsService } from "../rag/observability/rag-ingestion-metrics.service";
 import { RagQualityService } from "../rag/quality/rag-quality.service";
+import { SemanticAssetReadinessService } from "../knowledge/rag/preparation/semantic-asset-readiness.service";
 import { SemanticSpineShadowGateService } from "../observability/semantic-spine-shadow-gate.service";
 import { RagTaskConfigService } from "../llm/rag-task-config.service";
 
@@ -26,6 +27,7 @@ export class HealthController {
     private readonly gateMetrics: GateMetricsService,
     private readonly ragIngestionMetrics: RagIngestionMetricsService,
     private readonly ragQuality: RagQualityService,
+    private readonly semanticAssetReadiness: SemanticAssetReadinessService,
     private readonly semanticSpineShadow: SemanticSpineShadowGateService,
     private readonly ragTaskConfigService: RagTaskConfigService
   ) {}
@@ -39,6 +41,7 @@ export class HealthController {
     });
     const postgresEnabled = Boolean(this.config.databaseUrl);
     const ragQualityGate = this.ragQuality.snapshot();
+    const semanticAssetReadiness = await this.semanticAssetReadiness.snapshot();
     const semanticSpineShadowGate = this.semanticSpineShadow.snapshot();
     const ragConfigView = await this.ragTaskConfigService.listSettingsView({
       id: "system-health",
@@ -116,7 +119,8 @@ export class HealthController {
                 configSource: rerankConfig.configSource,
                 healthStatus: rerankConfig.healthStatus
               }
-            : null
+            : null,
+          semanticAssetReadiness
         },
         semanticSpineShadow: {
           gate: semanticSpineShadowGate

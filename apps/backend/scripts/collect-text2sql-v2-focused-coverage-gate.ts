@@ -96,6 +96,16 @@ interface StreamLifecycleCoverageRow {
   coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
 }
 
+interface PreparationPlaneCoverageRow {
+  id: string;
+  implementationOwners: string[];
+  evidenceOwners: string[];
+  expectedTestFiles: string[];
+  behaviorTestStatus: "covered" | "partial" | "missing" | "planned";
+  coverageOwnerStatus: "covered" | "partial" | "missing" | "planned";
+  requiredEvidenceSignals: string[];
+}
+
 interface RuntimePathPlan {
   currentActivePath: string[];
   targetActivePath: string[];
@@ -115,6 +125,7 @@ export interface CloseoutFlowMatrix {
   runtimeCoverageRows?: RuntimeCoverageRow[];
   runtimeArtifactProducerRows?: RuntimeArtifactProducerRow[];
   streamLifecycleRows?: StreamLifecycleCoverageRow[];
+  preparationPlaneRows?: PreparationPlaneCoverageRow[];
   runtimePaths?: RuntimePathPlan;
 }
 
@@ -150,6 +161,8 @@ export interface FocusedCoverageGateReport {
     incompleteRuntimeArtifactProducerRows: Array<{ category: string; reasons: string[] }>;
     streamLifecycleRowCount: number;
     incompleteStreamLifecycleRows: Array<{ stage: string; reasons: string[] }>;
+    preparationPlaneRowCount: number;
+    incompletePreparationPlaneRows: Array<{ id: string; reasons: string[] }>;
     runtimePathReasons: string[];
     gatePass: boolean;
   };
@@ -206,6 +219,15 @@ const REQUIRED_STREAM_LIFECYCLE_STAGES = [
   "correct",
   "execute",
   "answer"
+] as const;
+
+const REQUIRED_PREPARATION_PLANE_ROWS = [
+  "manifest-completeness",
+  "typed-family-generation",
+  "activation-stale-behavior",
+  "permission-filtering-before-ranking",
+  "two-pass-schema-recall",
+  "prior-sql-diagnostics"
 ] as const;
 
 const LAYERED_RUNTIME_STAGE_OWNER =
@@ -711,6 +733,35 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     }
   );
 
+  const preparationPlaneRows = matrix.preparationPlaneRows ?? [];
+  const incompletePreparationPlaneRows = REQUIRED_PREPARATION_PLANE_ROWS.flatMap((id) => {
+    const row = preparationPlaneRows.find((item) => item.id === id);
+    const reasons: string[] = [];
+    if (!row) {
+      reasons.push("missing_preparation_plane_row");
+      return [{ id, reasons }];
+    }
+    if (row.implementationOwners.length === 0) {
+      reasons.push("missing_preparation_implementation_owners");
+    }
+    if (row.evidenceOwners.length === 0) {
+      reasons.push("missing_preparation_evidence_owners");
+    }
+    if (row.expectedTestFiles.length === 0) {
+      reasons.push("missing_preparation_behavior_tests");
+    }
+    if (row.requiredEvidenceSignals.length === 0) {
+      reasons.push("missing_preparation_evidence_signals");
+    }
+    if (row.behaviorTestStatus !== "covered") {
+      reasons.push(`behavior_test_status_${row.behaviorTestStatus}`);
+    }
+    if (row.coverageOwnerStatus !== "covered") {
+      reasons.push(`coverage_owner_status_${row.coverageOwnerStatus}`);
+    }
+    return reasons.length > 0 ? [{ id, reasons }] : [];
+  });
+
   const runtimePathReasons: string[] = [];
   if (!matrix.runtimePaths) {
     runtimePathReasons.push("missing_runtime_paths");
@@ -759,6 +810,8 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
     incompleteRuntimeArtifactProducerRows,
     streamLifecycleRowCount: streamLifecycleRows.length,
     incompleteStreamLifecycleRows,
+    preparationPlaneRowCount: preparationPlaneRows.length,
+    incompletePreparationPlaneRows,
     runtimePathReasons,
     gatePass:
       incompleteNodes.length === 0 &&
@@ -767,6 +820,7 @@ function evaluateFlowMatrix(matrix: CloseoutFlowMatrix): FocusedCoverageGateRepo
       incompleteRuntimeCoverageRows.length === 0 &&
       incompleteRuntimeArtifactProducerRows.length === 0 &&
       incompleteStreamLifecycleRows.length === 0 &&
+      incompletePreparationPlaneRows.length === 0 &&
       runtimePathReasons.length === 0
   };
 }
@@ -787,6 +841,9 @@ function scopedFilesFromMatrix(matrix: CloseoutFlowMatrix): string[] {
     ),
     ...(matrix.streamLifecycleRows ?? []).flatMap((row) =>
       row.owners.map(effectiveOwner)
+    ),
+    ...(matrix.preparationPlaneRows ?? []).flatMap((row) =>
+      row.implementationOwners.map(effectiveOwner)
     ),
     ...(matrix.criticalFileOwnerMigrations ?? []).map((item) => item.to)
   ]);
@@ -864,6 +921,9 @@ export function evaluateFocusedCoverageGate(params: {
     ),
     ...flowMatrix.incompleteStreamLifecycleRows.map(
       (item) => `stream_lifecycle:${item.stage}:${item.reasons.join("|")}`
+    ),
+    ...flowMatrix.incompletePreparationPlaneRows.map(
+      (item) => `preparation_plane:${item.id}:${item.reasons.join("|")}`
     ),
     ...flowMatrix.runtimePathReasons.map((reason) => `runtime_path:${reason}`)
   ];

@@ -112,6 +112,32 @@ describe("SqlPromptBuilder", () => {
     );
   });
 
+  it("renders selected context asset provenance in prompt snippets", () => {
+    const builder = new SqlPromptBuilder();
+    const prompt = builder.build("统计订单 GMV", "sqlite", [
+      {
+        chunk_id: "chunk-orders-description",
+        content: "Orders table stores paid order facts.",
+        metadata: {
+          datasourceId: "ds-1",
+          indexVersionId: "idx-1",
+          chunkId: "chunk-orders-description",
+          domain: "semantic_asset",
+          assetFamily: "table_description",
+          manifestFingerprint: "semantic-assets-prompt-v1",
+          sourceVersion: "schema-v1",
+          tableNames: ["orders"],
+          columnNames: [],
+          sourceMetadata: {}
+        }
+      }
+    ]);
+
+    expect(prompt.userPrompt).toContain(
+      "[semantic_asset | family=table_description | manifest=semantic-assets-prompt-v1 | sourceVersion=schema-v1]"
+    );
+  });
+
   it("renders semantic-plan guardrails including coverage gaps and snapshot id", () => {
     const builder = new SqlPromptBuilder();
     const prompt = builder.build("统计订单 GMV", "sqlite", undefined, {

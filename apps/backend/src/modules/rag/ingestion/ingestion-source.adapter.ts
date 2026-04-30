@@ -1,7 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type { RagChunkProfile } from "./chunk-profiles";
 
-export type RagIngestionSourceType = "schema" | "sql_example" | "semantic_term";
+export type RagIngestionSourceType =
+  | "schema"
+  | "sql_example"
+  | "semantic_term"
+  | "semantic_asset";
 
 interface IngestionBaseInput {
   datasourceId: string;
@@ -39,10 +43,21 @@ export interface SemanticTermIngestionSourceInput extends IngestionBaseInput {
   columnNames?: string[];
 }
 
+export interface SemanticAssetIngestionSourceInput extends IngestionBaseInput {
+  sourceType: "semantic_asset";
+  assetFamily: string;
+  title?: string;
+  content: string;
+  tableNames?: string[];
+  columnNames?: string[];
+  chunkProfile: RagChunkProfile;
+}
+
 export type IngestionSourceInput =
   | SchemaIngestionSourceInput
   | SqlExampleIngestionSourceInput
-  | SemanticTermIngestionSourceInput;
+  | SemanticTermIngestionSourceInput
+  | SemanticAssetIngestionSourceInput;
 
 export interface NormalizedRagDocumentInput {
   datasourceId: string;
@@ -69,6 +84,8 @@ export class IngestionSourceAdapter {
         return this.normalizeSqlExampleSource(input);
       case "semantic_term":
         return this.normalizeSemanticTermSource(input);
+      case "semantic_asset":
+        return this.normalizeSemanticAssetSource(input);
       default: {
         const exhaustive: never = input;
         return exhaustive;
@@ -164,6 +181,32 @@ export class IngestionSourceAdapter {
         ...(input.metadata ?? {})
       },
       chunkProfile: "semantic_term"
+    };
+  }
+
+  private normalizeSemanticAssetSource(
+    input: SemanticAssetIngestionSourceInput
+  ): NormalizedRagDocumentInput {
+    const sourceRef = input.sourceRef ?? input.assetFamily;
+    const assetFamily = input.assetFamily.trim();
+    const title = input.title?.trim() || `Semantic Asset ${assetFamily}`;
+
+    return {
+      datasourceId: input.datasourceId,
+      domain: "semantic_asset",
+      sourceType: input.sourceType,
+      sourceRef,
+      sourceVersion: input.sourceVersion,
+      contentChecksum: input.contentChecksum,
+      title,
+      content: input.content.trim(),
+      tableNames: uniqueNonEmpty(input.tableNames ?? []),
+      columnNames: uniqueNonEmpty(input.columnNames ?? []),
+      metadata: {
+        assetFamily,
+        ...(input.metadata ?? {})
+      },
+      chunkProfile: input.chunkProfile
     };
   }
 }
