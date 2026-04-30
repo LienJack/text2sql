@@ -1,6 +1,5 @@
 import { Injectable } from "@nestjs/common";
 import type {
-  ChatStreamEvent,
   ChatStreamEventData,
   ChatStreamEventType,
   ExecutionTraceStep,
@@ -35,22 +34,6 @@ interface LlmEventOutput {
 
 @Injectable()
 export class Text2SqlStreamEventMapper {
-  createEnvelope(input: {
-    type: ChatStreamEventType;
-    data: ChatStreamEventData;
-    runId: string;
-    sessionId: string;
-    at?: string;
-  }): ChatStreamEvent {
-    return {
-      type: input.type,
-      runId: input.runId,
-      sessionId: input.sessionId,
-      at: input.at ?? new Date().toISOString(),
-      data: input.data
-    };
-  }
-
   mapLlmEvent(event: LlmGatewayStreamEvent): LlmEventOutput {
     if (event.type === "text-delta") {
       return {

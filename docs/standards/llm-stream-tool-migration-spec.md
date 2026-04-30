@@ -47,6 +47,10 @@
 ### Stream Contract (`/messages/stream`)
 
 - Response content type: `text/event-stream`
+- Ownership:
+  - `packages/shared-types` owns `ChatStreamEvent` schema and event taxonomy.
+  - `packages/chat-stream-protocol` owns reusable envelope / framing / parsing / terminal helper implementation.
+  - backend / frontend / smoke compatibility glue must not become a second canonical protocol rule source.
 - Event types:
   - `start`
   - `text-delta`
@@ -64,6 +68,7 @@
   - `at`
   - `data`
 - `data` is always a structured object, not raw string.
+- SSE writer / parser helper changes should land in `packages/chat-stream-protocol` first, then be adopted by app/test consumers.
 - `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
 - strict-completion/runtime-intelligence 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults` 与 `run.trace.v2` 的同语义镜像；`state` 事件只能暴露 runtime plan 的安全摘要，不得暴露 raw graph state/checkpoint。Full Mermaid stages 必须在 stream `state` 中产生安全的 `running` 与 terminal lifecycle（completed/skipped/failed/clarification）摘要。
 

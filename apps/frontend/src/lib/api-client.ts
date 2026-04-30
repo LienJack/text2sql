@@ -1,11 +1,11 @@
 import type {
   AgentRunResponse,
   ApiResponse,
-  ContextEnvelope,
-  DeliveryEvidenceLayer,
   ChatStreamEvent,
   ChatSessionView,
+  ContextEnvelope,
   Datasource,
+  DeliveryEvidenceLayer,
   PreviewDatasourceTablesRequest,
   PreviewDatasourceTablesResponse,
   PromptTemplateTraceEvidenceCompat,
@@ -17,6 +17,7 @@ import type {
   UpsertDatasourceWorkflowRequest,
   UpsertDatasourceWorkflowResponse
 } from "@text2sql/shared-types";
+import { readSseStream } from "@text2sql/chat-stream-protocol";
 
 const API_BASE_OVERRIDE = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
 const API_BASE = API_BASE_OVERRIDE ? API_BASE_OVERRIDE.replace(/\/+$/, "") : "";
@@ -900,44 +901,8 @@ export async function* streamMessageEvents(
   if (!response.ok) {
     throw new Error(`流式请求失败（HTTP ${response.status}）`);
   }
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new Error("流式响应体不可读。");
-  }
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() ?? "";
-
-    for (const block of blocks) {
-      const lines = block
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean);
-      if (lines.length === 0) {
-        continue;
-      }
-      const eventLine = lines.find((line) => line.startsWith("event:"));
-      const dataLines = lines.filter((line) => line.startsWith("data:"));
-      if (!eventLine || dataLines.length === 0) {
-        continue;
-      }
-      const eventType = eventLine.replace(/^event:\s*/, "");
-      const payload = dataLines
-        .map((line) => line.replace(/^data:\s*/, ""))
-        .join("\n");
-      const event = JSON.parse(payload) as ChatStreamEvent;
-      yield event;
-      if (eventType === "error") {
-        return;
-      }
-    }
+  for await (const event of readSseStream(response.body)) {
+    yield event;
   }
 }
 

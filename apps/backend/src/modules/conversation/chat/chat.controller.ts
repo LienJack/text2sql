@@ -13,6 +13,10 @@ import {
   ValidationPipe
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import {
+  writeErrorEvent,
+  writeSseEvent
+} from "@text2sql/chat-stream-protocol";
 import type {
   AgentRunResponse,
   ApiResponse,
@@ -197,12 +201,8 @@ export class ChatController {
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders?.();
 
-    const sendEvent = (type: string, data: unknown) => {
-      if (res.writableEnded) {
-        return;
-      }
-      res.write(`event: ${type}\n`);
-      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    const sendEvent = (event: ChatStreamEvent) => {
+      writeSseEvent(res, event);
     };
 
     try {
@@ -211,31 +211,19 @@ export class ChatController {
         body.message,
         req.requestId,
         async (event) => {
-          sendEvent(event.type, event);
+          sendEvent(event);
         },
         body.contextEnvelope,
         req.actor
       );
     } catch (error) {
-      const fallbackEvent: ChatStreamEvent = {
-        type: "error",
+      writeErrorEvent(res, {
         runId: "unavailable",
         sessionId,
-        at: new Date().toISOString(),
-        data:
-          error instanceof DomainError
-            ? {
-                code: error.code,
-                message: error.message,
-                details: error.details ?? null
-              }
-            : {
-                code: "INTERNAL_ERROR",
-                message: error instanceof Error ? error.message : "未知错误",
-                details: null
-              }
-      };
-      sendEvent("error", fallbackEvent);
+        code: error instanceof DomainError ? error.code : "INTERNAL_ERROR",
+        message: error instanceof Error ? error.message : "未知错误",
+        details: error instanceof DomainError ? error.details ?? null : null
+      });
     } finally {
       if (!res.writableEnded) {
         res.end();

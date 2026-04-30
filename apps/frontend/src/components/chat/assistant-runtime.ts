@@ -8,6 +8,7 @@ import type {
 } from "@text2sql/shared-types";
 import type { ChatModelAdapter, ThreadMessageLike } from "@assistant-ui/react";
 import { useLocalRuntime } from "@assistant-ui/react";
+import { collectTextDelta } from "@text2sql/chat-stream-protocol";
 import { streamMessageEvents } from "@/lib/api-client";
 
 export interface AssistantRuntimeCallbacks {
@@ -56,19 +57,6 @@ function extractLatestUserText(messages: readonly ThreadMessageLike[]): string {
   return "";
 }
 
-function appendReadableDelta(current: string, delta: string): string {
-  const trimmedStart = delta.trimStart();
-  const looksLikeNextModelSection =
-    /^<\s*\|/.test(trimmedStart) ||
-    /^<\|/.test(trimmedStart) ||
-    (/^<\s/.test(trimmedStart) && /\b(tool_calls?|function|DSML)\b/i.test(trimmedStart));
-
-  if (!current || current.endsWith("\n") || !looksLikeNextModelSection) {
-    return current + delta;
-  }
-  return `${current}\n\n${delta}`;
-}
-
 function createChatModelAdapter(
   sessionId: string,
   callbacksRef: MutableRefObject<AssistantRuntimeCallbacks | undefined>,
@@ -101,11 +89,13 @@ function createChatModelAdapter(
           callbacksRef.current?.onEvent?.(event);
 
           if (event.type === "text-delta") {
-            const delta = (event.data as { text?: string } | undefined)?.text ?? "";
-            if (!delta) {
+            const nextText = collectTextDelta(aggregatedText, event, {
+              readableSectionBreak: true
+            });
+            if (nextText === aggregatedText) {
               continue;
             }
-            aggregatedText = appendReadableDelta(aggregatedText, delta);
+            aggregatedText = nextText;
             yield {
               content: [
                 {

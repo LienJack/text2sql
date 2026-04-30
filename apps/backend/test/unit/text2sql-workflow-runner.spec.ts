@@ -71,7 +71,6 @@ describe("Text2SQLWorkflowRunner", () => {
       run: jest.fn().mockResolvedValue(undefined)
     };
     const streamEventMapper = {
-      createEnvelope: jest.fn(),
       mapLlmEvent: jest.fn(),
       mapStepEvent: jest.fn()
     };
@@ -123,7 +122,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never
@@ -168,7 +166,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never
@@ -207,13 +204,6 @@ describe("Text2SQLWorkflowRunner", () => {
     };
 
     const streamEventMapper = {
-      createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-        type,
-        data,
-        runId,
-        sessionId,
-        at: "2026-04-26T00:00:02.000Z"
-      })),
       mapLlmEvent: jest.fn(() => ({
         type: "text-delta",
         data: {
@@ -350,13 +340,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-          type,
-          data,
-          runId,
-          sessionId,
-          at: "2026-04-26T00:00:02.000Z"
-        })),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn(() => ({
           data: {
@@ -439,13 +422,6 @@ describe("Text2SQLWorkflowRunner", () => {
         run: jest.fn().mockResolvedValue(undefined)
       } as never,
       {
-        createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-          type,
-          data,
-          runId,
-          sessionId,
-          at: "2026-04-26T00:00:02.000Z"
-        })),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never

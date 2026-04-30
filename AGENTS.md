@@ -17,6 +17,7 @@
 
 - `apps/backend`：NestJS API、Agent 工作流、Prisma 数据层。
 - `apps/frontend`：Next.js 前端演示应用。
+- `packages/chat-stream-protocol`：聊天 SSE 协议工具包（event envelope、SSE framing/parsing、terminal 判定、轻量 protocol UI helpers）。
 - `packages/shared-types`：前后端共享类型定义。
 - `infra`：本地依赖编排（如 `infra/docker-compose.yml`）。
 - `data`：本地数据与运行期数据目录。

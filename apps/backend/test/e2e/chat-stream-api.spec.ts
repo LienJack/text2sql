@@ -1,54 +1,18 @@
 import { resolve } from "node:path";
 import { INestApplication } from "@nestjs/common";
+import { parseSseEventsForTest } from "@text2sql/chat-stream-protocol";
 import type { ChatStreamEvent } from "@text2sql/shared-types";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
 
-interface ParsedSseEvent {
-  eventType: string;
-  event: ChatStreamEvent;
-}
-
-const INTERMEDIATE_EVENT_TYPES = new Set([
+const INTERMEDIATE_EVENT_TYPES = new Set<ChatStreamEvent["type"]>([
   "state",
   "text-delta",
   "tool-call",
   "tool-result",
   "tool-error"
 ]);
-
-function parseSseEvents(payload: string): ParsedSseEvent[] {
-  const blocks = payload
-    .split(/\n\n+/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  const events: ParsedSseEvent[] = [];
-  for (const block of blocks) {
-    const lines = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const eventLine = lines.find((line) => line.startsWith("event:"));
-    const dataLines = lines.filter((line) => line.startsWith("data:"));
-    if (!eventLine || dataLines.length === 0) {
-      continue;
-    }
-
-    const eventType = eventLine.replace(/^event:\s*/, "").trim();
-    const dataText = dataLines
-      .map((line) => line.replace(/^data:\s*/, ""))
-      .join("\n");
-    const event = JSON.parse(dataText) as ChatStreamEvent;
-    events.push({
-      eventType,
-      event
-    });
-  }
-
-  return events;
-}
 
 describe("chat stream api (e2e)", () => {
   let app: INestApplication;
@@ -85,7 +49,7 @@ describe("chat stream api (e2e)", () => {
 
     expect(streamRes.status).toBe(200);
     expect(streamRes.headers["content-type"]).toContain("text/event-stream");
-    const parsedEvents = parseSseEvents(streamRes.text);
+    const parsedEvents = parseSseEventsForTest(streamRes.text);
     expect(parsedEvents.length).toBeGreaterThanOrEqual(2);
 
     const eventTypes = parsedEvents.map(({ eventType }) => eventType);
@@ -360,7 +324,7 @@ describe("chat stream api (e2e)", () => {
       .send({ message: "DELETE orders where id = 1" });
 
     expect(streamRes.status).toBe(200);
-    const parsedEvents = parseSseEvents(streamRes.text);
+    const parsedEvents = parseSseEventsForTest(streamRes.text);
     const finishEvent = [...parsedEvents]
       .reverse()
       .find(({ eventType }) => eventType === "finish")?.event;
@@ -420,7 +384,7 @@ describe("chat stream api (e2e)", () => {
     expect(streamRes.status).toBe(200);
     expect(streamRes.headers["content-type"]).toContain("text/event-stream");
 
-    const parsedEvents = parseSseEvents(streamRes.text);
+    const parsedEvents = parseSseEventsForTest(streamRes.text);
     expect(parsedEvents.length).toBeGreaterThanOrEqual(2);
     expect(parsedEvents.some(({ eventType }) => eventType === "start")).toBe(true);
     expect(parsedEvents.some(({ eventType }) => eventType === "finish")).toBe(true);

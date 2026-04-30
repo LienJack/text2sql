@@ -40,6 +40,7 @@ Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
 ```text
 apps/backend             NestJS API + Agent 工作流
 apps/frontend            Next.js 演示页面
+packages/chat-stream-protocol Chat SSE 协议工具包（envelope / SSE framing / parser / UI projection helpers）
 packages/shared-types    前后端共享类型
 infra/docker-compose.yml Redis/PostgreSQL 本地依赖
 vibe/plain               需求、计划、评测与运维文档
@@ -246,6 +247,10 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 
 ## Stream & Tool Calling 说明
 - 开发态统一入口为 `http://localhost:3000`（网关转发到内部 `3001/3002`）；以下 API 路径与字段契约不变。
+- 协议 ownership 分层：
+  - `packages/shared-types` 是 `ChatStreamEvent` schema owner。
+  - `packages/chat-stream-protocol` 是 stream envelope / SSE framing / parser / terminal guard / protocol-to-view helper owner。
+  - backend / frontend / smoke 只消费上述合同，不再各自维护第二套 canonical parser / writer 规则。
 - 流式主路径：`POST /api/v1/sessions/:sessionId/messages/stream`。
 - 同步消息接口 `POST /api/v1/sessions/:sessionId/messages` 返回 `AgentRunResponse`：
   - `kind`：固定为 `agent-run`
@@ -255,6 +260,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
   - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
 - SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
 - SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
+- SSE framing / parsing helper 统一由 `@text2sql/chat-stream-protocol` 提供；新增消费方应优先复用该包，而不是手写 `event:` / `data:` 或本地 chunk parser。
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
 - 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。

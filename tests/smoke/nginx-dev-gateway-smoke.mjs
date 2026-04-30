@@ -14,6 +14,15 @@ const parsedBaseline = Number.parseInt(
 const BASELINE_FIRST_SUCCESS_SESSION_MS =
   Number.isFinite(parsedBaseline) && parsedBaseline > 0 ? parsedBaseline : null;
 const SCRIPT_STARTED_AT = Date.now();
+const PROTOCOL_MODULE_PATH = new URL(
+  "../../packages/chat-stream-protocol/dist/index.js",
+  import.meta.url
+);
+const {
+  assertValidChatStreamEnvelope,
+  parseSseChunk,
+  toInvalidSseBlockError
+} = await import(PROTOCOL_MODULE_PATH);
 
 const FETCH_TIMEOUT_MS = 12_000;
 const STREAM_FIRST_EVENT_TIMEOUT_MS = 20_000;
@@ -107,17 +116,6 @@ const parseApiError = (status, bodyText) => {
 
 const formatMs = (value) => `${value}ms (${(value / 1000).toFixed(2)}s)`;
 
-const STREAM_EVENT_TYPES = new Set([
-  "start",
-  "text-delta",
-  "tool-call",
-  "tool-result",
-  "tool-error",
-  "state",
-  "finish",
-  "error"
-]);
-
 const ensureSseResponse = async (response) => {
   const contentType = response.headers.get("content-type") || "";
   if (response.status !== 200) {
@@ -133,36 +131,18 @@ const ensureSseResponse = async (response) => {
 };
 
 const parseFirstSseEvent = (chunk) => {
-  const blocks = String(chunk)
-    .split(/\n\n+/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-  if (blocks.length === 0) {
+  const parsed = parseSseChunk("", String(chunk));
+  const firstResult = parsed.results.find((result) => result.kind !== "ignored");
+  if (!firstResult) {
     throw new Error("missing SSE block in first chunk");
   }
-  const firstBlock = blocks[0];
-  const lines = firstBlock
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const eventLine = lines.find((line) => line.startsWith("event:"));
-  const dataLines = lines.filter((line) => line.startsWith("data:"));
-  if (!eventLine || dataLines.length === 0) {
-    throw new Error(`invalid SSE block format: ${clip(firstBlock)}`);
+  if (firstResult.kind === "invalid") {
+    throw toInvalidSseBlockError(firstResult);
   }
-  const eventType = eventLine.replace(/^event:\s*/, "").trim();
-  const payloadText = dataLines
-    .map((line) => line.replace(/^data:\s*/, ""))
-    .join("\n");
-  let payload;
-  try {
-    payload = JSON.parse(payloadText);
-  } catch {
-    throw new Error(`invalid SSE JSON payload: ${clip(payloadText)}`);
-  }
+  assertValidChatStreamEnvelope(firstResult.event, firstResult.eventType);
   return {
-    eventType,
-    payload
+    eventType: firstResult.eventType,
+    payload: firstResult.event
   };
 };
 
@@ -401,33 +381,13 @@ const checkStream = async (workspaceId, datasourceId) => {
     await ensureSseResponse(response);
     const chunk = await readFirstStreamChunk(response);
     const firstEvent = parseFirstSseEvent(chunk);
-    if (!STREAM_EVENT_TYPES.has(firstEvent.eventType)) {
-      throw new Error(`unexpected SSE event type "${firstEvent.eventType}"`);
-    }
-    if (!firstEvent.payload || typeof firstEvent.payload !== "object") {
-      throw new Error("first SSE payload is not an object");
-    }
-    if (firstEvent.payload.type !== firstEvent.eventType) {
-      throw new Error(
-        `event name/payload type mismatch (${firstEvent.eventType} != ${String(firstEvent.payload.type)})`
-      );
-    }
-    if (typeof firstEvent.payload.runId !== "string" || !firstEvent.payload.runId) {
-      throw new Error("first SSE payload missing runId");
-    }
-    if (typeof firstEvent.payload.sessionId !== "string" || !firstEvent.payload.sessionId) {
-      throw new Error("first SSE payload missing sessionId");
-    }
     if (mode === "session" && firstEvent.payload.sessionId !== sessionId) {
       throw new Error(
         `first SSE payload session mismatch (${firstEvent.payload.sessionId} != ${sessionId})`
       );
     }
-    if (!firstEvent.payload.at || Number.isNaN(Date.parse(String(firstEvent.payload.at)))) {
+    if (Number.isNaN(Date.parse(firstEvent.payload.at))) {
       throw new Error("first SSE payload has invalid at timestamp");
-    }
-    if (!("data" in firstEvent.payload)) {
-      throw new Error("first SSE payload missing data field");
     }
 
     logPass(

@@ -309,6 +309,44 @@ describe("LlmGatewayService", () => {
     expect(mockedGenerateText).toHaveBeenCalledTimes(1);
   });
 
+  it("should recover from invalid JSON stream responses via non-stream retry", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        throw new Error("Invalid JSON response");
+      })(),
+      text: Promise.resolve("")
+    } as unknown as ReturnType<typeof streamText>);
+
+    mockedGenerateText.mockResolvedValue({
+      text: "SELECT COUNT(*) AS total_count FROM orders;"
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const events: string[] = [];
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime,
+      {
+        onEvent: (event) => {
+          events.push(event.type);
+        }
+      }
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(events).toEqual(["text-delta"]);
+    expect(mockedGenerateText).toHaveBeenCalledTimes(1);
+  });
+
   it("should recover with successful tool SQL when provider stream breaks after tool result", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {

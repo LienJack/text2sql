@@ -518,7 +518,7 @@ export class SqlGenerationService {
     }
     if (
       !this.hasExplicitCountShortcutIntent(question, selection?.semanticPlan) ||
-      this.hasAmountMetricIntent(question, selection?.semanticPlan)
+      this.hasExplicitAmountMetricIntent(question, selection?.semanticPlan)
     ) {
       return undefined;
     }
@@ -538,7 +538,7 @@ export class SqlGenerationService {
     if (
       !selectedTables ||
       selectedTables.length !== 1 ||
-      !this.hasAmountMetricIntent(question, semanticPlan) ||
+      !this.hasExplicitAmountMetricIntent(question, semanticPlan) ||
       COMPLEX_AMOUNT_METRIC_INTENT_REGEX.test(question)
     ) {
       return undefined;
@@ -597,16 +597,27 @@ export class SqlGenerationService {
     );
   }
 
-  private hasAmountMetricIntent(
+  private hasExplicitAmountMetricIntent(
     question: string,
     semanticPlan: SemanticPlanV1 | undefined
   ): boolean {
-    return (
-      AMOUNT_METRIC_INTENT_REGEX.test(question) ||
-      (semanticPlan?.metrics ?? []).some((metric) =>
-        AMOUNT_METRIC_INTENT_REGEX.test(metric)
-      )
-    );
+    if (AMOUNT_METRIC_INTENT_REGEX.test(question)) {
+      return true;
+    }
+    if (COUNT_INTENT_REGEX.test(question)) {
+      return false;
+    }
+    const metricHints = semanticPlan?.metrics ?? [];
+    return metricHints.some((metric) => {
+      const normalizedMetric = metric.trim().toLowerCase();
+      if (!normalizedMetric || normalizedMetric === "count") {
+        return false;
+      }
+      if (/^count($|[._:-])|(^|[._:-])count$/i.test(normalizedMetric)) {
+        return false;
+      }
+      return AMOUNT_METRIC_INTENT_REGEX.test(normalizedMetric);
+    });
   }
 
   private resolveAmountMetricColumn(input: {

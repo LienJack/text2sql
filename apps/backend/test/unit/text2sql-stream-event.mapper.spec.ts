@@ -1,3 +1,4 @@
+import { createChatStreamEventEnvelope } from "@text2sql/chat-stream-protocol";
 import { Text2SqlStreamEventMapper } from "../../src/modules/conversation/text2sql/stream/text2sql-stream-event.mapper";
 
 describe("Text2SqlStreamEventMapper", () => {
@@ -154,8 +155,8 @@ describe("Text2SqlStreamEventMapper", () => {
     expect(error.traceToolCall?.status).toBe("error");
   });
 
-  it("builds stream envelope with required fields", () => {
-    const envelope = mapper.createEnvelope({
+  it("builds stream envelope with required fields via toolkit helper", () => {
+    const envelope = createChatStreamEventEnvelope({
       type: "start",
       data: {
         requestId: "req-1"
@@ -195,7 +196,7 @@ describe("Text2SqlStreamEventMapper", () => {
       runId: "run-v2-shell",
       lastSequence: 2
     });
-    const envelope = mapper.createEnvelope({
+    const envelope = createChatStreamEventEnvelope({
       type: "state",
       runId: "run-v2-shell",
       sessionId: "session-v2-shell",
@@ -286,7 +287,7 @@ describe("Text2SqlStreamEventMapper", () => {
       runId: "run-v2-progress",
       lastSequence: 7
     });
-    const envelope = mapper.createEnvelope({
+    const envelope = createChatStreamEventEnvelope({
       type: "state",
       runId: "run-v2-progress",
       sessionId: "session-v2-progress",

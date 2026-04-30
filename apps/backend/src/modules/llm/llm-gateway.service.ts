@@ -41,6 +41,9 @@ const isInvalidJsonResponseError = (error: unknown): boolean => {
 const isRetriableGenerateError = (error: unknown): boolean =>
   isTimeoutAbortError(error) || isInvalidJsonResponseError(error);
 
+const isRecoverableStreamTransportError = (error: unknown): boolean =>
+  isTimeoutAbortError(error) || isInvalidJsonResponseError(error);
+
 const MAX_GENERATE_RETRY = 1;
 
 @Injectable()
@@ -327,8 +330,8 @@ export class LlmGatewayService implements LlmGateway {
         };
       }
 
-      if (isTimeoutAbortError(error)) {
-        const recoveredText = await this.tryRecoverFromStreamTimeout(
+      if (isRecoverableStreamTransportError(error)) {
+        const recoveredText = await this.tryRecoverFromStreamTransportError(
           prompt,
           runtime,
           streamedText
@@ -361,7 +364,7 @@ export class LlmGatewayService implements LlmGateway {
     }
   }
 
-  private async tryRecoverFromStreamTimeout(
+  private async tryRecoverFromStreamTransportError(
     prompt: LlmGatewayPrompt,
     runtime: LlmGatewayRuntimeConfig,
     streamedText: string

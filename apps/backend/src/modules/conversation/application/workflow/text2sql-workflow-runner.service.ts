@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { createChatStreamEventEnvelope } from "@text2sql/chat-stream-protocol";
 import type {
   ChatStreamEvent,
   ContextEnvelope,
@@ -52,7 +53,7 @@ export class Text2SQLWorkflowRunner {
 
     const emit = async (type: ChatStreamEvent["type"], data: ChatStreamEvent["data"]) => {
       await input.onEvent(
-        this.streamEventMapper.createEnvelope({
+        createChatStreamEventEnvelope({
           type,
           data,
           runId: prepared.runId,
