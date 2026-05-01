@@ -168,6 +168,7 @@ export class SqlGenerationService {
     question: string,
     selection?: SqlGenerationSelection,
     options?: {
+      abortSignal?: AbortSignal;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }

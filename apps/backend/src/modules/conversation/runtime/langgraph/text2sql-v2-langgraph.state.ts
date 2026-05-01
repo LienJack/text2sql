@@ -43,6 +43,7 @@ export type Text2SqlV2LangGraphNodeName =
   (typeof TEXT2SQL_V2_LANGGRAPH_NODE_ORDER)[number];
 
 export interface Text2SqlV2LangGraphStreamOptions {
+  abortSignal?: AbortSignal;
   onLlmEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
   onStep?: (event: { step: ExecutionTraceStep }) => Promise<void> | void;
 }

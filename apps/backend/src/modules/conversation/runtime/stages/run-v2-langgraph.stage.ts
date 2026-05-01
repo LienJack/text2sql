@@ -5,6 +5,7 @@ import { Text2SqlV2LangGraphRunnerService } from "../langgraph/text2sql-v2-langg
 import type { Text2SqlPreparedRunContext } from "../../text2sql/stages/prepare-run.stage";
 
 export interface Text2SqlStreamV2LangGraphOptions {
+  abortSignal?: AbortSignal;
   onLlmEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
   onStep?: (event: { step: ExecutionTraceStep }) => Promise<void> | void;
 }

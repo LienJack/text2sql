@@ -25,6 +25,7 @@ interface AssistantThinkingPanelProps {
   run: SqlRun | null;
   streamSteps: ThinkingStreamStep[];
   inProgress: boolean;
+  cancelled?: boolean;
   hasRunReference?: boolean;
   runLoading?: boolean;
   onRequestRun?: () => void;
@@ -89,6 +90,7 @@ export function AssistantThinkingPanel({
   run,
   streamSteps,
   inProgress,
+  cancelled = false,
   hasRunReference = false,
   runLoading = false,
   onRequestRun
@@ -151,6 +153,8 @@ export function AssistantThinkingPanel({
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-tertiary)]" aria-hidden />
             <span>正在思考...</span>
           </span>
+        ) : cancelled ? (
+          <span className="text-[var(--text-tertiary)]">已停止生成</span>
         ) : steps.length > 0 ? (
           <span className="text-[var(--text-tertiary)]">处理过程</span>
         ) : (

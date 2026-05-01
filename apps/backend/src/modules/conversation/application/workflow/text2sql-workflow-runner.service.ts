@@ -5,6 +5,12 @@ import type {
   ContextEnvelope,
   SqlRun
 } from "@text2sql/shared-types";
+import {
+  USER_CANCELLED_CODE,
+  createUserCancelledError,
+  isUserCancelledError,
+  throwIfAborted
+} from "../../../../common/abort-utils";
 import { DomainError } from "../../../../common/domain-error";
 import { DatasourceRegistryService } from "../../../governance/datasource/datasource-registry.service";
 import type { ChatPolicyActorInput } from "../../chat/application/shared/chat-policy-guard.service";
@@ -25,6 +31,7 @@ export interface Text2SqlWorkflowInput {
 
 export interface Text2SqlStreamWorkflowInput extends Text2SqlWorkflowInput {
   onEvent: (event: ChatStreamEvent) => Promise<void> | void;
+  abortSignal?: AbortSignal;
 }
 
 @Injectable()
@@ -50,8 +57,12 @@ export class Text2SQLWorkflowRunner {
 
   async runStream(input: Text2SqlStreamWorkflowInput): Promise<SqlRun> {
     const prepared = await this.prepareRunStage.run(input);
+    const runAbortSignal = input.abortSignal;
 
     const emit = async (type: ChatStreamEvent["type"], data: ChatStreamEvent["data"]) => {
+      if (runAbortSignal?.aborted && type !== "error") {
+        return;
+      }
       await input.onEvent(
         createChatStreamEventEnvelope({
           type,
@@ -62,6 +73,12 @@ export class Text2SQLWorkflowRunner {
       );
     };
 
+    throwIfAborted(runAbortSignal, {
+      runId: prepared.runId,
+      sessionId: prepared.session.id,
+      phase: "before_start"
+    });
+
     await emit("start", {
       requestId: prepared.requestId ?? null
     });
@@ -71,6 +88,7 @@ export class Text2SQLWorkflowRunner {
 
     try {
       const run = await this.runV2LangGraphStage.runStream(prepared, this.streamRoute, {
+        abortSignal: runAbortSignal,
         onLlmEvent: async (event) => {
           const mappedEvent = this.streamEventMapper.mapLlmEvent(event);
           if (mappedEvent.traceToolCall) {
@@ -90,6 +108,11 @@ export class Text2SQLWorkflowRunner {
       });
 
       const finalizedRun = this.applyRejectedFallback(run, prepared.session.datasource);
+      throwIfAborted(runAbortSignal, {
+        runId: prepared.runId,
+        sessionId: prepared.session.id,
+        phase: "before_finish"
+      });
       finalizedRun.trace.streamStatus = finalizedRun.error ? "failed" : "completed";
       finalizedRun.trace.toolCalls = toolCalls;
 
@@ -123,7 +146,17 @@ export class Text2SQLWorkflowRunner {
       });
       return runWithDelivery;
     } catch (error) {
-      const messageText = error instanceof Error ? error.message : String(error);
+      const cancellationError =
+        isUserCancelledError(error) ||
+        runAbortSignal?.aborted
+          ? createUserCancelledError({
+              runId: prepared.runId,
+              sessionId: prepared.session.id
+            })
+          : undefined;
+      const resolvedError = cancellationError ?? error;
+      const messageText =
+        resolvedError instanceof Error ? resolvedError.message : String(resolvedError);
       const run: SqlRun = {
         runId: prepared.runId,
         sessionId: prepared.session.id,
@@ -144,12 +177,20 @@ export class Text2SQLWorkflowRunner {
         createdAt: new Date().toISOString()
       };
 
-      const domainError = error instanceof DomainError ? error : undefined;
-      await emit("error", {
-        code: domainError?.code,
-        message: messageText,
-        details: (domainError?.details as Record<string, unknown> | undefined) ?? null
-      });
+      const domainError = resolvedError instanceof DomainError ? resolvedError : undefined;
+      if (!runAbortSignal?.aborted) {
+        await emit("error", {
+          code: domainError?.code,
+          message: messageText,
+          details: (domainError?.details as Record<string, unknown> | undefined) ?? null
+        });
+      } else if (domainError?.code === USER_CANCELLED_CODE) {
+        await emit("error", {
+          code: domainError.code,
+          message: messageText,
+          details: (domainError.details as Record<string, unknown> | undefined) ?? null
+        });
+      }
 
       const runWithDelivery = await this.enrichDeliveryStage.run(run);
       await this.persistRunStage.run({

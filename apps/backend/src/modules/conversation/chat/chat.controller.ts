@@ -195,6 +195,16 @@ export class ChatController {
     @Req() req: Request,
     @Res() res: Response
   ): Promise<void> {
+    const abortController = new AbortController();
+    const abortStream = () => {
+      if (!abortController.signal.aborted) {
+        abortController.abort("client_disconnected");
+      }
+    };
+    req.on("aborted", abortStream);
+    req.on("close", abortStream);
+    res.on("close", abortStream);
+
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -213,18 +223,24 @@ export class ChatController {
         async (event) => {
           sendEvent(event);
         },
+        abortController.signal,
         body.contextEnvelope,
         req.actor
       );
     } catch (error) {
-      writeErrorEvent(res, {
-        runId: "unavailable",
-        sessionId,
-        code: error instanceof DomainError ? error.code : "INTERNAL_ERROR",
-        message: error instanceof Error ? error.message : "未知错误",
-        details: error instanceof DomainError ? error.details ?? null : null
-      });
+      if (!res.writableEnded) {
+        writeErrorEvent(res, {
+          runId: "unavailable",
+          sessionId,
+          code: error instanceof DomainError ? error.code : "INTERNAL_ERROR",
+          message: error instanceof Error ? error.message : "未知错误",
+          details: error instanceof DomainError ? error.details ?? null : null
+        });
+      }
     } finally {
+      req.off("aborted", abortStream);
+      req.off("close", abortStream);
+      res.off("close", abortStream);
       if (!res.writableEnded) {
         res.end();
       }

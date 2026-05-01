@@ -7,6 +7,7 @@ import type {
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
 } from "@text2sql/shared-types";
+import { throwIfAborted } from "../../../../common/abort-utils";
 import { DomainError } from "../../../../common/domain-error";
 import type { LlmGatewayToolDefinition } from "../../../llm/llm-gateway.interface";
 import {
@@ -312,6 +313,7 @@ const createNodeUpdate = async (input: {
   outputSummary?: Record<string, unknown>;
   patch?: Partial<Text2SqlV2LangGraphStateUpdate>;
 }): Promise<Text2SqlV2LangGraphStateUpdate> => {
+  assertStateNotAborted(input.state, `after_${input.node}`);
   const step = createStep({
     state: input.state,
     node: input.node,
@@ -356,6 +358,7 @@ const emitRunningStep = async (input: {
   evidenceIds?: string[];
   metadata?: Record<string, unknown>;
 }): Promise<string> => {
+  assertStateNotAborted(input.state, `before_${input.node}`);
   const startedAt = nowIso();
   if (!input.state.streamMode || !input.state.streamOptions?.onStep) {
     return startedAt;
@@ -509,6 +512,17 @@ const resolveCorrectRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
     return "answer";
   }
   return "generate-sql";
+};
+
+const assertStateNotAborted = (
+  state: Text2SqlV2LangGraphState,
+  phase: string
+): void => {
+  throwIfAborted(state.streamOptions?.abortSignal, {
+    runId: state.runId,
+    sessionId: state.sessionId,
+    phase
+  });
 };
 
 const semanticClarificationPrompt = (
@@ -924,6 +938,7 @@ export const createText2SqlV2LangGraph = (
           retryReason: state.correctionResult?.artifact.retryReason,
           correctionGrounding: state.correctionResult?.artifact.grounding,
           stream: state.streamMode,
+          abortSignal: state.streamOptions?.abortSignal,
           tools: deps.resolveSqlTools(state),
           onEvent: state.streamOptions?.onLlmEvent
         });

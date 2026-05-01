@@ -233,6 +233,71 @@ describe("LlmGatewayService", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(9000);
   });
 
+  it("should pass a composed abort signal to streamText when a user signal exists", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "SELECT 1" };
+      })(),
+      text: Promise.resolve("SELECT 1")
+    } as unknown as ReturnType<typeof streamText>);
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+    const abortController = new AbortController();
+
+    await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单状态分布"
+      },
+      runtime,
+      {
+        abortSignal: abortController.signal
+      }
+    );
+
+    expect(mockedStreamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal)
+      })
+    );
+  });
+
+  it("should map user-aborted streams to USER_CANCELLED without generate fallback", async () => {
+    const abortError = new Error("This operation was aborted by the user");
+    abortError.name = "AbortError";
+    mockedStreamText.mockImplementation(() => {
+      throw abortError;
+    });
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    await expect(
+      service.stream(
+        {
+          systemPrompt: "sys",
+          userPrompt: "统计订单状态分布"
+        },
+        runtime,
+        {
+          abortSignal: new AbortController().signal
+        }
+      )
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "USER_CANCELLED"
+    });
+    expect(mockedGenerateText).not.toHaveBeenCalled();
+  });
+
   it("should raise tool-call-only response when stream has no final text", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {

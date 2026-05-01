@@ -69,6 +69,8 @@
   - `data`
 - `data` is always a structured object, not raw string.
 - SSE writer / parser helper changes should land in `packages/chat-stream-protocol` first, then be adopted by app/test consumers.
+- 前端 stop / fetch abort 必须贯通到 backend request-close、workflow runner、LangGraph runtime、SQL generation 与 LLM gateway/provider 调用；不允许只停止浏览器 reader 而让后端继续消耗 provider / tool 资源。
+- 在单独的兼容性计划批准前，用户停止生成继续复用既有 terminal `error` 事件，并固定返回 `code: "USER_CANCELLED"`；不得直接新增公开 `cancelled` event type。
 - `finish` 事件中的 `data.delivery.evidence.promptTemplate?`、`modelingRevision?`、`effectiveContextSummary?`、`conflictHint?` 必须与同步接口字段语义一致（不再要求历史 snake_case / alias hydration）。
 - strict-completion/runtime-intelligence 场景下，`finish` 事件中的 `data.delivery.evidence.v2` 也必须保持 `contextPackSummary`、`metadataAnswer`、`correctionGrounding`、`runtimePlan`、`artifactRefs`、`smartDefaults` 与 `run.trace.v2` 的同语义镜像；`state` 事件只能暴露 runtime plan 的安全摘要，不得暴露 raw graph state/checkpoint。Full Mermaid stages 必须在 stream `state` 中产生安全的 `running` 与 terminal lifecycle（completed/skipped/failed/clarification）摘要。
 

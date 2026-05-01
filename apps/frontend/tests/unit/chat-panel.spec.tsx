@@ -258,6 +258,61 @@ describe("ChatPanel", () => {
     releaseStream?.();
   });
 
+  it("shows stop button and keeps partial content visible after user stops a stream", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    mockStreamMessageEvents.mockImplementationOnce(async function* (
+      _sessionId,
+      _message,
+      abortSignal
+    ) {
+      capturedSignal = abortSignal;
+      yield {
+        type: "start",
+        runId: "run-stop",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:00.000Z",
+        data: {
+          requestId: null
+        }
+      };
+      yield {
+        type: "text-delta",
+        runId: "run-stop",
+        sessionId: "session-1",
+        at: "2026-04-10T00:00:01.000Z",
+        data: {
+          text: "SELECT payment_method"
+        }
+      };
+      await new Promise<void>((resolve, reject) => {
+        abortSignal?.addEventListener(
+          "abort",
+          () => {
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          },
+          { once: true }
+        );
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<ChatPanel />);
+
+    await screen.findByText(/Datasource: sqlite_main · Session: session-1/i);
+    await user.type(screen.getByLabelText("聊天输入"), "近30天支付方式分布");
+    await user.click(screen.getByRole("button", { name: "发送" }));
+
+    const stopButton = await screen.findByRole("button", { name: "停止生成" });
+    expect(stopButton).toBeEnabled();
+    expect(capturedSignal).toBeDefined();
+
+    await user.click(stopButton);
+
+    await waitFor(() => {
+      expect(capturedSignal?.aborted).toBe(true);
+    });
+  });
+
   it("submits by pressing Enter in chat input", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);

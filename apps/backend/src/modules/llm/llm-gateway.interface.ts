@@ -59,6 +59,7 @@ export interface LlmGateway {
     prompt: LlmGatewayPrompt,
     runtime: LlmGatewayRuntimeConfig,
     options?: {
+      abortSignal?: AbortSignal;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }

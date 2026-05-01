@@ -44,10 +44,14 @@ interface AssistantThreadProps {
   runVisibilityByRunId: Record<string, RunVisibilityStatus>;
   activeStreamRunId: string | null;
   thinkingRequestPending: boolean;
+  activeAbortController: AbortController | null;
   disabled?: boolean;
+  onStopStream?: () => void;
   onRequestRun?: (runId: string) => Promise<void> | void;
+  onAbortControllerChange?: (controller: AbortController | null) => void;
   onRunStart?: () => void;
   onRunFinish?: (runId: string | undefined) => Promise<void> | void;
+  onRunCancelled?: (runId: string | undefined) => Promise<void> | void;
   onRunError?: (error: Error) => Promise<void> | void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
 }
@@ -81,10 +85,14 @@ export function AssistantThread({
   runVisibilityByRunId,
   activeStreamRunId,
   thinkingRequestPending,
+  activeAbortController,
   disabled = false,
+  onStopStream,
   onRequestRun,
+  onAbortControllerChange,
   onRunStart,
   onRunFinish,
+  onRunCancelled,
   onRunError,
   onStreamEvent
 }: AssistantThreadProps) {
@@ -117,13 +125,17 @@ export function AssistantThread({
   const callbacks = useMemo<AssistantRuntimeCallbacks>(
     () => ({
       onStart: onRunStart,
+      onAbortController: onAbortControllerChange,
       onEvent: onStreamEvent,
+      onCancelled: onRunCancelled,
       onError: onRunError,
       onFinish: async (runId) => {
         await onRunFinish?.(runId);
       }
     }),
     [
+      onAbortControllerChange,
+      onRunCancelled,
       onRunError,
       onRunFinish,
       onRunStart,
@@ -183,6 +195,7 @@ export function AssistantThread({
                       })
                     : undefined;
                   const thinkingInProgress = runVisibilityStatus === "loading";
+                  const thinkingCancelled = runVisibilityStatus === "cancelled";
                   const streamDelivery = resolvedRunId
                     ? resolveVisibleDelivery({
                         runDelivery: run?.delivery,
@@ -200,6 +213,7 @@ export function AssistantThread({
                       runId={resolvedRunId}
                       thinkingSteps={thinkingSteps}
                       thinkingInProgress={thinkingInProgress}
+                      thinkingCancelled={thinkingCancelled}
                       runLoading={Boolean(
                         resolvedRunId && runLoadingById[resolvedRunId]
                       )}
@@ -224,6 +238,7 @@ export function AssistantThread({
                   run={null}
                   streamSteps={activeStreamSteps}
                   inProgress
+                  cancelled={false}
                   hasRunReference
                 />
               </div>
@@ -237,7 +252,11 @@ export function AssistantThread({
           </div>
 
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 bg-gradient-to-t from-[var(--surface-page)] to-transparent pt-4">
-            <AssistantComposer disabled={disabled} />
+            <AssistantComposer
+              disabled={disabled}
+              showStopButton={Boolean(activeAbortController) && !disabled}
+              onStop={onStopStream}
+            />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
 

@@ -15,6 +15,7 @@ export interface StreamMessageInput {
   requestId?: string;
   contextEnvelope?: ContextEnvelope;
   actor?: ChatPolicyActorInput;
+  abortSignal?: AbortSignal;
   onEvent: (event: ChatStreamEvent) => Promise<void> | void;
 }
 
@@ -28,6 +29,7 @@ export class StreamMessageUsecase {
       message: input.message,
       requestId: input.requestId,
       onEvent: input.onEvent,
+      abortSignal: input.abortSignal,
       contextEnvelope: input.contextEnvelope,
       actor: input.actor
     });

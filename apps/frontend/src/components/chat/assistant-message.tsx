@@ -45,6 +45,7 @@ interface AssistantMessageBubbleProps {
   runId?: string;
   thinkingSteps: Array<ExecutionTraceStep & { stage?: ReasoningStage; title?: string }>;
   thinkingInProgress: boolean;
+  thinkingCancelled?: boolean;
   runLoading?: boolean;
   onRequestRun?: () => void;
   openSqlSignal?: number;
@@ -56,6 +57,7 @@ export function AssistantMessageBubble({
   runId,
   thinkingSteps,
   thinkingInProgress,
+  thinkingCancelled = false,
   runLoading = false,
   onRequestRun,
   openSqlSignal = 0
@@ -95,6 +97,7 @@ export function AssistantMessageBubble({
                 run={run}
                 streamSteps={thinkingSteps}
                 inProgress={thinkingInProgress}
+                cancelled={thinkingCancelled}
                 hasRunReference={hasRunReference}
                 runLoading={runLoading}
                 onRequestRun={onRequestRun}

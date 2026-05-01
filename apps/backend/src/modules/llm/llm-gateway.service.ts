@@ -1,5 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { generateText, streamText, tool } from "ai";
+import {
+  composeAbortSignals,
+  createUserCancelledError,
+  isUserCancelledError,
+  throwIfAborted
+} from "../../common/abort-utils";
 import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { LlmModelFactory } from "./llm-model-factory";
@@ -29,6 +35,17 @@ const isTimeoutAbortError = (error: unknown): boolean => {
     normalized.includes("aborterror") ||
     normalized.includes("timeouterror")
   );
+};
+
+const isUserAbortError = (error: unknown): boolean => {
+  if (isUserCancelledError(error)) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const normalized = `${error.name} ${error.message}`.toLowerCase();
+  return normalized.includes("abort") && !normalized.includes("timeout");
 };
 
 const isInvalidJsonResponseError = (error: unknown): boolean => {
@@ -185,15 +202,22 @@ export class LlmGatewayService implements LlmGateway {
     prompt: LlmGatewayPrompt,
     runtime: LlmGatewayRuntimeConfig,
     options?: {
+      abortSignal?: AbortSignal;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }
   ): Promise<LlmGatewayGenerateOutput> {
     if (this.config.llmMockMode) {
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_mock_stream_start"
+      });
       const simulated = (
         await this.generate(prompt, runtime)
       ).rawText;
       for (const line of simulated.split("\n")) {
+        throwIfAborted(options?.abortSignal, {
+          phase: "llm_mock_stream_chunk"
+        });
         await options?.onEvent?.({
           type: "text-delta",
           text: `${line}\n`
@@ -215,16 +239,26 @@ export class LlmGatewayService implements LlmGateway {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
       const streamTimeoutMs = runtime.streamTimeoutMs ?? runtime.timeoutMs;
+      const streamAbortSignal = composeAbortSignals([
+        AbortSignal.timeout(streamTimeoutMs),
+        options?.abortSignal
+      ]);
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_stream_start"
+      });
       const result = streamText({
         model,
         system: prompt.systemPrompt,
         prompt: prompt.userPrompt,
         temperature: 0.2,
-        abortSignal: AbortSignal.timeout(streamTimeoutMs),
+        abortSignal: streamAbortSignal,
         tools: normalizedTools
       });
 
       for await (const chunk of result.fullStream) {
+        throwIfAborted(options?.abortSignal, {
+          phase: "llm_stream_chunk"
+        });
         if (chunk.type === "text-delta") {
           streamedText += chunk.text;
           await options?.onEvent?.({
@@ -279,6 +313,9 @@ export class LlmGatewayService implements LlmGateway {
         }
       }
 
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_stream_finish"
+      });
       const fullText = (await result.text).trim() || streamedText.trim();
       if (!fullText) {
         if (toolCallSql) {
@@ -309,6 +346,11 @@ export class LlmGatewayService implements LlmGateway {
         rawText: fullText
       };
     } catch (error) {
+      if (isUserAbortError(error) || options?.abortSignal?.aborted) {
+        throw createUserCancelledError({
+          provider: runtime.provider
+        });
+      }
       if (error instanceof DomainError) {
         throw error;
       }

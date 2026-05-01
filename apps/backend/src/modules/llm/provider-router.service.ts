@@ -144,6 +144,7 @@ export class ProviderRouterService {
       modelCatalogId?: string;
     },
     options?: {
+      abortSignal?: AbortSignal;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }

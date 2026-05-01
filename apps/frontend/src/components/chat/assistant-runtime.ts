@@ -13,8 +13,10 @@ import { streamMessageEvents } from "@/lib/api-client";
 
 export interface AssistantRuntimeCallbacks {
   onStart?: () => void;
+  onAbortController?: (controller: AbortController | null) => void;
   onEvent?: (event: ChatStreamEvent) => void;
   onFinish?: (runId: string | undefined) => Promise<void> | void;
+  onCancelled?: (runId: string | undefined) => Promise<void> | void;
   onError?: (error: Error) => Promise<void> | void;
   onFinally?: () => void;
 }
@@ -57,6 +59,29 @@ function extractLatestUserText(messages: readonly ThreadMessageLike[]): string {
   return "";
 }
 
+function composeAbortSignal(
+  signal: AbortSignal | undefined,
+  localSignal: AbortSignal
+): AbortSignal {
+  if (!signal) {
+    return localSignal;
+  }
+  if (signal.aborted) {
+    return signal;
+  }
+
+  const controller = new AbortController();
+  const abortFrom = (source: AbortSignal) => {
+    if (!controller.signal.aborted) {
+      controller.abort(source.reason);
+    }
+  };
+
+  signal.addEventListener("abort", () => abortFrom(signal), { once: true });
+  localSignal.addEventListener("abort", () => abortFrom(localSignal), { once: true });
+  return controller.signal;
+}
+
 function createChatModelAdapter(
   sessionId: string,
   callbacksRef: MutableRefObject<AssistantRuntimeCallbacks | undefined>,
@@ -73,16 +98,23 @@ function createChatModelAdapter(
       const contextEnvelope = resolveContextEnvelopeRef.current?.();
 
       callbacksRef.current?.onStart?.();
+      const localAbortController = new AbortController();
+      callbacksRef.current?.onAbortController?.(localAbortController);
+      const effectiveAbortSignal = composeAbortSignal(
+        abortSignal,
+        localAbortController.signal
+      );
 
       let aggregatedText = "";
       let runId: string | undefined;
       let streamError: Error | null = null;
+      let cancelledByUser = false;
 
       try {
         for await (const event of streamMessageEvents(
           sessionId,
           userText,
-          abortSignal,
+          effectiveAbortSignal,
           contextEnvelope
         )) {
           runId = event.runId || runId;
@@ -113,11 +145,22 @@ function createChatModelAdapter(
           }
 
           if (event.type === "error") {
-            const message =
-              (event.data as { message?: string } | undefined)?.message ?? "流式响应失败";
+            const payload = event.data as
+              | { code?: string; message?: string }
+              | undefined;
+            if (payload?.code === "USER_CANCELLED") {
+              cancelledByUser = true;
+              break;
+            }
+            const message = payload?.message ?? "流式响应失败";
             streamError = new Error(message);
             break;
           }
+        }
+
+        if (cancelledByUser || effectiveAbortSignal.aborted) {
+          await callbacksRef.current?.onCancelled?.(runId);
+          return;
         }
 
         if (streamError) {
@@ -127,6 +170,10 @@ function createChatModelAdapter(
 
         await callbacksRef.current?.onFinish?.(runId);
       } catch (runtimeError) {
+        if (effectiveAbortSignal.aborted) {
+          await callbacksRef.current?.onCancelled?.(runId);
+          return;
+        }
         const normalizedError =
           runtimeError instanceof Error
             ? runtimeError
@@ -134,6 +181,7 @@ function createChatModelAdapter(
         await callbacksRef.current?.onError?.(normalizedError);
         return;
       } finally {
+        callbacksRef.current?.onAbortController?.(null);
         callbacksRef.current?.onFinally?.();
       }
     }

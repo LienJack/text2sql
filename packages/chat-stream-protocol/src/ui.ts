@@ -6,7 +6,7 @@ import type {
   RunStatus
 } from "@text2sql/shared-types";
 
-export type RunVisibilityStatus = "loading" | "success" | "error" | "empty";
+export type RunVisibilityStatus = "loading" | "success" | "error" | "empty" | "cancelled";
 
 export type RunVisibilityThinkingStep = ExecutionTraceStep & {
   stage?: ReasoningStage;
@@ -204,7 +204,13 @@ export function transitionRunVisibilityStatus(
   if (!next) {
     return previous;
   }
-  if ((previous === "success" || previous === "error" || previous === "empty") && next === "loading") {
+  if (
+    (previous === "success" ||
+      previous === "error" ||
+      previous === "empty" ||
+      previous === "cancelled") &&
+    next === "loading"
+  ) {
     return previous;
   }
   return next;
@@ -233,11 +239,12 @@ export function projectStreamEvent(event: ChatStreamEvent): StreamEventProjectio
   }
 
   if (event.type === "error") {
+    const payload = event.data as { code?: string } | undefined;
     return {
       thinkingStep,
       textStarted: false,
       terminal: true,
-      visibilityStatus: "error"
+      visibilityStatus: payload?.code === "USER_CANCELLED" ? "cancelled" : "error"
     };
   }
 

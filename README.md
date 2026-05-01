@@ -261,6 +261,7 @@ ts-node apps/backend/scripts/langsmith-coverage-check.ts \
 - SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
 - SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
 - SSE framing / parsing helper 统一由 `@text2sql/chat-stream-protocol` 提供；新增消费方应优先复用该包，而不是手写 `event:` / `data:` 或本地 chunk parser。
+- 前端 stop generation 会把 `AbortSignal` 继续传到 backend workflow / LangGraph / SQL generation / LLM provider；当前取消语义仍使用 terminal `error` 事件，并固定返回 `code: "USER_CANCELLED"`。
 - 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
 - SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
 - 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。

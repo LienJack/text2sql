@@ -133,6 +133,9 @@ function mergeSessionMessages(
 }
 
 export function ChatPanel() {
+  const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(
+    null
+  );
   const [writableSessions, setWritableSessions] = useState<Session[]>([]);
   const [readonlySessions, setReadonlySessions] = useState<Session[]>([]);
   const [datasourceId, setDatasourceId] = useState("");
@@ -227,6 +230,7 @@ export function ChatPanel() {
     setStreamTextStartedByRunId({});
     setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
+    setActiveAbortController(null);
     setThinkingRequestPending(false);
     setSaveNotice("");
     setThreadVersion((previous) => previous + 1);
@@ -674,13 +678,28 @@ export function ChatPanel() {
           runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
+          activeAbortController={activeAbortController}
           disabled={
             sessionLoading ||
             !sessionId ||
             activeSession?.datasourceStatus === "unavailable" ||
             activeSession?.datasourceStatus === "deleted"
           }
+          onStopStream={() => {
+            activeAbortController?.abort("user_stop");
+            setActiveAbortController(null);
+            setThinkingRequestPending(false);
+            if (activeStreamRunId) {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [activeStreamRunId]:
+                  transitionRunVisibilityStatus(previous[activeStreamRunId], "cancelled") ??
+                  "cancelled"
+              }));
+            }
+          }}
           onRequestRun={ensureRunLoaded}
+          onAbortControllerChange={setActiveAbortController}
           onRunStart={() => {
             setActiveStreamRunId(null);
             setThinkingRequestPending(true);
@@ -753,6 +772,7 @@ export function ChatPanel() {
             );
           }}
           onRunFinish={async (runId) => {
+            setActiveAbortController(null);
             setActiveStreamRunId((current) => (current === runId ? null : current));
             setThinkingRequestPending(false);
             if (!sessionId) {
@@ -764,7 +784,21 @@ export function ChatPanel() {
             }
             await refreshSessionBuckets();
           }}
+          onRunCancelled={async (runId) => {
+            setActiveAbortController(null);
+            setActiveStreamRunId((current) => (current === runId ? null : current));
+            setThinkingRequestPending(false);
+            if (runId) {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [runId]:
+                  transitionRunVisibilityStatus(previous[runId], "cancelled") ??
+                  "cancelled"
+              }));
+            }
+          }}
           onRunError={async (error) => {
+            setActiveAbortController(null);
             setActiveStreamRunId(null);
             setThinkingRequestPending(false);
             setSessionError(error.message || "消息发送失败，请稍后重试。");

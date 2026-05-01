@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   mergeRunThinkingSteps,
   normalizeDeliveryContract,
+  projectStreamEvent,
   resolveVisibleDelivery,
   transitionRunVisibilityStatus
 } from "@/components/chat/run-visibility-mapper";
@@ -281,7 +282,25 @@ describe("run-visibility-mapper", () => {
     expect(transitionRunVisibilityStatus("success", "loading")).toBe("success");
     expect(transitionRunVisibilityStatus("error", "loading")).toBe("error");
     expect(transitionRunVisibilityStatus("empty", "loading")).toBe("empty");
+    expect(transitionRunVisibilityStatus("cancelled", "loading")).toBe("cancelled");
     expect(transitionRunVisibilityStatus(undefined, "loading")).toBe("loading");
+  });
+
+  it("projects USER_CANCELLED stream errors to cancelled visibility", () => {
+    const projection = projectStreamEvent({
+      type: "error",
+      runId: "run-1",
+      sessionId: "session-1",
+      at: "2026-04-10T00:00:00.000Z",
+      data: {
+        code: "USER_CANCELLED",
+        message: "用户已停止本轮生成。",
+        details: null
+      }
+    });
+
+    expect(projection.terminal).toBe(true);
+    expect(projection.visibilityStatus).toBe("cancelled");
   });
 
   it("merges sync and stream thinking steps by stepId and preserves stream stage metadata", () => {

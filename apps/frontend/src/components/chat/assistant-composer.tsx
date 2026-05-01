@@ -2,15 +2,20 @@
 
 import { useRef } from "react";
 import { ComposerPrimitive } from "@assistant-ui/react";
-import { Play } from "lucide-react";
+import { Play, Square } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface AssistantComposerProps {
   disabled?: boolean;
+  showStopButton?: boolean;
+  onStop?: () => void;
 }
 
 export function AssistantComposer({
-  disabled = false
+  disabled = false,
+  showStopButton = false,
+  onStop
 }: AssistantComposerProps) {
   const imeSubmitPending = useRef(false);
 
@@ -65,12 +70,27 @@ export function AssistantComposer({
           />
           <div className="flex items-center justify-between px-2 pb-1">
             <p className="text-xs text-[var(--text-tertiary)]">Shift + Enter 换行，Enter 发送</p>
-            <ComposerPrimitive.Send
-              aria-label="发送"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
-            >
-              <Play className="h-3.5 w-3.5" />
-            </ComposerPrimitive.Send>
+            <div className="flex items-center gap-2">
+              {showStopButton ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label="停止生成"
+                  onClick={onStop}
+                  className="h-9 rounded-[10px] border-[var(--border-strong)] bg-[var(--surface-page)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"
+                >
+                  <Square className="mr-1.5 h-3.5 w-3.5" />
+                  停止
+                </Button>
+              ) : null}
+              <ComposerPrimitive.Send
+                aria-label="发送"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition hover:bg-[var(--action-primary-hover)] disabled:opacity-40"
+              >
+                <Play className="h-3.5 w-3.5" />
+              </ComposerPrimitive.Send>
+            </div>
           </div>
         </ComposerPrimitive.Root>
         <p className="text-center text-xs text-[var(--text-tertiary)]">

@@ -157,6 +157,47 @@ describe("SqlGenerationService semantic guardrails", () => {
     expect(providerRouter.generate).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards abortSignal into providerRouter.stream", async () => {
+    const providerRouter = {
+      generate: jest.fn(),
+      stream: jest.fn().mockResolvedValue({
+        provider: "mock-provider",
+        model: "mock-model",
+        rawText: "```sql\nSELECT id, status FROM orders LIMIT 20;\n```"
+      })
+    };
+    const service = createService(providerRouter);
+    const abortController = new AbortController();
+
+    await service.stream(
+      "列出订单及其支付状态",
+      {
+        datasourceType: "sqlite",
+        semanticPlan: {
+          route: "answer",
+          standaloneQuestion: "列出订单及其支付状态",
+          selectedTables: ["orders", "payments"],
+          selectedColumns: ["orders.id", "orders.status", "payments.method"],
+          metrics: ["list"],
+          filters: ["route_kind:text_to_sql"],
+          evidenceRefs: ["schema-supplement:orders", "schema-supplement:payments"],
+          confidence: 0.62
+        }
+      },
+      {
+        abortSignal: abortController.signal
+      }
+    );
+
+    expect(providerRouter.stream).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.objectContaining({
+        abortSignal: abortController.signal
+      })
+    );
+  });
+
   it("uses a semantic shortcut for grouped count proportions before calling the stream provider", async () => {
     const providerRouter = {
       generate: jest.fn(),

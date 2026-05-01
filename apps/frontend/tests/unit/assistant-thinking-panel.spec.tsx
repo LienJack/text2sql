@@ -199,4 +199,27 @@ describe("AssistantThinkingPanel", () => {
     expect(screen.getByText(/生成 SQL/)).toBeInTheDocument();
     expect(screen.queryByText("正在加载该轮处理轨迹...")).not.toBeInTheDocument();
   });
+
+  it("shows cancelled state copy when user stops generation", () => {
+    render(
+      <AssistantThinkingPanel
+        run={null}
+        streamSteps={[
+          {
+            node: "generate-sql",
+            status: "success",
+            stepId: "step-cancelled",
+            sequence: 1,
+            lifecycle: "completed",
+            title: "生成 SQL",
+            at: "2026-04-10T00:00:02.000Z"
+          }
+        ]}
+        inProgress={false}
+        cancelled
+      />
+    );
+
+    expect(screen.getByText("已停止生成")).toBeInTheDocument();
+  });
 });
