@@ -4,11 +4,8 @@ import { useEffect, useState } from "react";
 import type {
   ChatSessionView,
   ChatMessage,
-  ChatStreamEvent,
   DeliveryContract,
-  ExecutionTraceStep,
   ModelCatalogItem,
-  ReasoningStage,
   Session,
   SqlRun
 } from "@text2sql/shared-types";
@@ -19,9 +16,11 @@ import {
   mergeRunThinkingSteps,
   normalizeDeliveryContract,
   normalizeRunForVisibility,
+  projectStreamEvent,
   toRunVisibilityStatusFromRunStatus,
   transitionRunVisibilityStatus,
-  type RunVisibilityStatus
+  type RunVisibilityStatus,
+  type RunVisibilityThinkingStep
 } from "@/components/chat/run-visibility-mapper";
 import { ModelSelector } from "@/components/chat/model-selector";
 import { SessionSidebar } from "@/components/chat/session-sidebar";
@@ -47,28 +46,7 @@ import {
   writeActiveDatasourceId
 } from "@/lib/datasource-session-context";
 
-interface ThinkingStateEventData {
-  node: string;
-  status: ExecutionTraceStep["status"];
-  stepId?: string;
-  sequence?: number;
-  lifecycle?: ExecutionTraceStep["lifecycle"];
-  detail: string;
-  stage?: ReasoningStage;
-  title?: string;
-  at?: string;
-  startedAt?: string;
-  endedAt?: string;
-  durationMs?: number;
-  inputSummary?: string;
-  outputSummary?: string;
-  errorSummary?: string;
-}
-
-type ThinkingStep = ExecutionTraceStep & {
-  stage?: ReasoningStage;
-  title?: string;
-};
+type ThinkingStep = RunVisibilityThinkingStep;
 
 const DATASOURCE_READONLY_STATUSES = new Set(["unavailable", "deleted"]);
 const SESSION_ERROR_CODES = new Set(["SESSION_NOT_FOUND", "VALIDATION_ERROR"]);
@@ -117,106 +95,6 @@ function moveSessionToFront(
   return [target, ...next];
 }
 
-function toThinkingStep(event: ChatStreamEvent): ThinkingStep | null {
-  if (event.type === "tool-call") {
-    const payload = event.data as
-      | { toolName?: string; toolCallId?: string; input?: unknown }
-      | undefined;
-    const toolName = payload?.toolName ?? "tool";
-    return {
-      node: `tool:${toolName}`,
-      status: "success",
-      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
-      lifecycle: "running",
-      detail: summarizeToolPayload(payload?.input),
-      at: event.at,
-      startedAt: event.at,
-      stage: "generation",
-      title: `调用工具：${toolName}`
-    };
-  }
-  if (event.type === "tool-result") {
-    const payload = event.data as
-      | { toolName?: string; toolCallId?: string; output?: unknown }
-      | undefined;
-    const toolName = payload?.toolName ?? "tool";
-    return {
-      node: `tool:${toolName}`,
-      status: "success",
-      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
-      lifecycle: "completed",
-      detail: summarizeToolPayload(payload?.output),
-      at: event.at,
-      endedAt: event.at,
-      stage: "generation",
-      title: `工具返回：${toolName}`
-    };
-  }
-  if (event.type === "tool-error") {
-    const payload = event.data as
-      | { toolName?: string; toolCallId?: string; message?: string }
-      | undefined;
-    const toolName = payload?.toolName ?? "tool";
-    return {
-      node: `tool:${toolName}`,
-      status: "failed",
-      stepId: `${event.runId}:tool:${payload?.toolCallId ?? event.at}`,
-      lifecycle: "failed",
-      detail: payload?.message ?? "工具调用失败",
-      errorSummary: payload?.message,
-      at: event.at,
-      endedAt: event.at,
-      stage: "generation",
-      title: `工具失败：${toolName}`
-    };
-  }
-  if (event.type !== "state") {
-    return null;
-  }
-  const payload = event.data as ThinkingStateEventData;
-  return {
-    node: payload.node,
-    status: payload.status,
-    stepId: payload.stepId,
-    sequence: payload.sequence,
-    lifecycle: payload.lifecycle,
-    detail: payload.detail,
-    at: payload.at ?? event.at,
-    startedAt: payload.startedAt,
-    endedAt: payload.endedAt,
-    durationMs: payload.durationMs,
-    inputSummary: payload.inputSummary,
-    outputSummary: payload.outputSummary,
-    errorSummary: payload.errorSummary,
-    stage: payload.stage,
-    title: payload.title
-  };
-}
-
-function summarizeToolPayload(payload: unknown): string {
-  if (payload === undefined || payload === null) {
-    return "";
-  }
-  if (typeof payload === "string") {
-    return payload.slice(0, 180);
-  }
-  if (typeof payload !== "object") {
-    return String(payload).slice(0, 180);
-  }
-  const record = payload as Record<string, unknown>;
-  if (typeof record.sql === "string") {
-    return record.sql.slice(0, 180);
-  }
-  if (typeof record.rowCount === "number") {
-    return `返回 ${record.rowCount} 行`;
-  }
-  try {
-    return JSON.stringify(payload).slice(0, 180);
-  } catch {
-    return "";
-  }
-}
-
 function appendThinkingStep(
   previous: Record<string, ThinkingStep[]>,
   runId: string,
@@ -255,6 +133,9 @@ function mergeSessionMessages(
 }
 
 export function ChatPanel() {
+  const [activeAbortController, setActiveAbortController] = useState<AbortController | null>(
+    null
+  );
   const [writableSessions, setWritableSessions] = useState<Session[]>([]);
   const [readonlySessions, setReadonlySessions] = useState<Session[]>([]);
   const [datasourceId, setDatasourceId] = useState("");
@@ -349,6 +230,7 @@ export function ChatPanel() {
     setStreamTextStartedByRunId({});
     setRunVisibilityByRunId({});
     setActiveStreamRunId(null);
+    setActiveAbortController(null);
     setThinkingRequestPending(false);
     setSaveNotice("");
     setThreadVersion((previous) => previous + 1);
@@ -796,14 +678,28 @@ export function ChatPanel() {
           runVisibilityByRunId={runVisibilityByRunId}
           activeStreamRunId={activeStreamRunId}
           thinkingRequestPending={thinkingRequestPending}
-          debugEnabled={Boolean(activeSession?.debugEnabled)}
+          activeAbortController={activeAbortController}
           disabled={
             sessionLoading ||
             !sessionId ||
             activeSession?.datasourceStatus === "unavailable" ||
             activeSession?.datasourceStatus === "deleted"
           }
+          onStopStream={() => {
+            activeAbortController?.abort("user_stop");
+            setActiveAbortController(null);
+            setThinkingRequestPending(false);
+            if (activeStreamRunId) {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [activeStreamRunId]:
+                  transitionRunVisibilityStatus(previous[activeStreamRunId], "cancelled") ??
+                  "cancelled"
+              }));
+            }
+          }}
           onRequestRun={ensureRunLoaded}
+          onAbortControllerChange={setActiveAbortController}
           onRunStart={() => {
             setActiveStreamRunId(null);
             setThinkingRequestPending(true);
@@ -834,53 +730,36 @@ export function ChatPanel() {
               setThinkingRequestPending(true);
               return;
             }
-            if (event.type === "text-delta") {
-              const text = (event.data as { text?: unknown } | undefined)?.text;
-              if (typeof text === "string" && text.length > 0) {
-                setStreamTextStartedByRunId((previous) => ({
-                  ...previous,
-                  [event.runId]: true
-                }));
-              }
+            const projection = projectStreamEvent(event);
+            if (projection.textStarted) {
+              setStreamTextStartedByRunId((previous) => ({
+                ...previous,
+                [event.runId]: true
+              }));
             }
-            if (event.type === "finish") {
-              const finishData = event.data as
-                | { delivery?: unknown; status?: unknown }
-                | undefined;
-              const finishDelivery = normalizeDeliveryContract(finishData?.delivery);
-              if (finishDelivery) {
+            if (projection.deliveryPatch) {
+              const delivery = normalizeDeliveryContract(projection.deliveryPatch);
+              if (delivery) {
                 setStreamDeliveryByRunId((previous) => ({
                   ...previous,
-                  [event.runId]: finishDelivery
-                }));
-              }
-              const finishStatus = toRunVisibilityStatusFromRunStatus(
-                typeof finishData?.status === "string"
-                  ? (finishData.status as SqlRun["status"])
-                  : "executionResult"
-              );
-              if (finishStatus) {
-                setRunVisibilityByRunId((previous) => ({
-                  ...previous,
-                  [event.runId]:
-                    transitionRunVisibilityStatus(
-                      previous[event.runId],
-                      finishStatus
-                    ) ?? finishStatus
+                  [event.runId]: delivery
                 }));
               }
             }
-            const step = toThinkingStep(event);
-            if (!step) {
-              if (event.type === "finish" || event.type === "error") {
-                if (event.type === "error") {
-                  setRunVisibilityByRunId((previous) => ({
-                    ...previous,
-                    [event.runId]:
-                      transitionRunVisibilityStatus(previous[event.runId], "error") ??
-                      "error"
-                  }));
-                }
+            if (projection.visibilityStatus) {
+              const visibilityStatus = projection.visibilityStatus;
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [event.runId]:
+                  transitionRunVisibilityStatus(
+                    previous[event.runId],
+                    visibilityStatus
+                  ) ?? visibilityStatus
+              }));
+            }
+            const thinkingStep = projection.thinkingStep;
+            if (!thinkingStep) {
+              if (projection.terminal) {
                 setActiveStreamRunId((current) =>
                   current === event.runId ? null : current
                 );
@@ -889,10 +768,11 @@ export function ChatPanel() {
               return;
             }
             setStreamThinkingByRunId((previous) =>
-              appendThinkingStep(previous, event.runId, step)
+              appendThinkingStep(previous, event.runId, thinkingStep)
             );
           }}
           onRunFinish={async (runId) => {
+            setActiveAbortController(null);
             setActiveStreamRunId((current) => (current === runId ? null : current));
             setThinkingRequestPending(false);
             if (!sessionId) {
@@ -904,7 +784,21 @@ export function ChatPanel() {
             }
             await refreshSessionBuckets();
           }}
+          onRunCancelled={async (runId) => {
+            setActiveAbortController(null);
+            setActiveStreamRunId((current) => (current === runId ? null : current));
+            setThinkingRequestPending(false);
+            if (runId) {
+              setRunVisibilityByRunId((previous) => ({
+                ...previous,
+                [runId]:
+                  transitionRunVisibilityStatus(previous[runId], "cancelled") ??
+                  "cancelled"
+              }));
+            }
+          }}
           onRunError={async (error) => {
+            setActiveAbortController(null);
             setActiveStreamRunId(null);
             setThinkingRequestPending(false);
             setSessionError(error.message || "消息发送失败，请稍后重试。");

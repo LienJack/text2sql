@@ -108,6 +108,60 @@ describe("LlmGatewayService", () => {
     });
   });
 
+  it("should retry sync generate once for invalid JSON response", async () => {
+    mockedGenerateText
+      .mockRejectedValueOnce(new Error("Invalid JSON response"))
+      .mockResolvedValueOnce({
+        text: "SELECT COUNT(*) AS total_count FROM orders;"
+      } as Awaited<ReturnType<typeof generateText>>);
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.generate(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(mockedGenerateText).toHaveBeenCalledTimes(2);
+  });
+
+  it("should retry sync generate with expanded timeout after timeout abort", async () => {
+    mockedGenerateText
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+      .mockResolvedValueOnce({
+        text: "SELECT COUNT(*) AS total_count FROM orders;"
+      } as Awaited<ReturnType<typeof generateText>>);
+
+    const timeoutSpy = jest.spyOn(AbortSignal, "timeout");
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.generate(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
+    expect(timeoutSpy).toHaveBeenNthCalledWith(1, 3000);
+    expect(timeoutSpy).toHaveBeenNthCalledWith(2, 18000);
+  });
+
   it("should stream text and tool events", async () => {
     mockedStreamText.mockReturnValue({
       fullStream: (async function* () {
@@ -177,6 +231,71 @@ describe("LlmGatewayService", () => {
     );
 
     expect(timeoutSpy).toHaveBeenCalledWith(9000);
+  });
+
+  it("should pass a composed abort signal to streamText when a user signal exists", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        yield { type: "text-delta", text: "SELECT 1" };
+      })(),
+      text: Promise.resolve("SELECT 1")
+    } as unknown as ReturnType<typeof streamText>);
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+    const abortController = new AbortController();
+
+    await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单状态分布"
+      },
+      runtime,
+      {
+        abortSignal: abortController.signal
+      }
+    );
+
+    expect(mockedStreamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        abortSignal: expect.any(AbortSignal)
+      })
+    );
+  });
+
+  it("should map user-aborted streams to USER_CANCELLED without generate fallback", async () => {
+    const abortError = new Error("This operation was aborted by the user");
+    abortError.name = "AbortError";
+    mockedStreamText.mockImplementation(() => {
+      throw abortError;
+    });
+
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    await expect(
+      service.stream(
+        {
+          systemPrompt: "sys",
+          userPrompt: "统计订单状态分布"
+        },
+        runtime,
+        {
+          abortSignal: new AbortController().signal
+        }
+      )
+    ).rejects.toMatchObject<Partial<DomainError>>({
+      code: "USER_CANCELLED"
+    });
+    expect(mockedGenerateText).not.toHaveBeenCalled();
   });
 
   it("should raise tool-call-only response when stream has no final text", async () => {
@@ -251,6 +370,44 @@ describe("LlmGatewayService", () => {
     );
 
     expect(output.rawText).toBe("SELECT COUNT(*) FROM orders;");
+    expect(events).toEqual(["text-delta"]);
+    expect(mockedGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  it("should recover from invalid JSON stream responses via non-stream retry", async () => {
+    mockedStreamText.mockReturnValue({
+      fullStream: (async function* () {
+        throw new Error("Invalid JSON response");
+      })(),
+      text: Promise.resolve("")
+    } as unknown as ReturnType<typeof streamText>);
+
+    mockedGenerateText.mockResolvedValue({
+      text: "SELECT COUNT(*) AS total_count FROM orders;"
+    } as Awaited<ReturnType<typeof generateText>>);
+
+    const events: string[] = [];
+    const service = new LlmGatewayService(
+      {
+        llmMockMode: false
+      } as AppConfigService,
+      new LlmModelFactory()
+    );
+
+    const output = await service.stream(
+      {
+        systemPrompt: "sys",
+        userPrompt: "统计订单总数"
+      },
+      runtime,
+      {
+        onEvent: (event) => {
+          events.push(event.type);
+        }
+      }
+    );
+
+    expect(output.rawText).toBe("SELECT COUNT(*) AS total_count FROM orders;");
     expect(events).toEqual(["text-delta"]);
     expect(mockedGenerateText).toHaveBeenCalledTimes(1);
   });

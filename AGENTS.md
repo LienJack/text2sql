@@ -17,6 +17,7 @@
 
 - `apps/backend`：NestJS API、Agent 工作流、Prisma 数据层。
 - `apps/frontend`：Next.js 前端演示应用。
+- `packages/chat-stream-protocol`：聊天 SSE 协议工具包（event envelope、SSE framing/parsing、terminal 判定、轻量 protocol UI helpers）。
 - `packages/shared-types`：前后端共享类型定义。
 - `infra`：本地依赖编排（如 `infra/docker-compose.yml`）。
 - `data`：本地数据与运行期数据目录。
@@ -175,6 +176,8 @@ CI 参考：
 - 禁止新增“宽导出中枢”形态依赖。
 - 业务域及其兼容根模块（`chat/agent/memory/glossary/rag`）禁止直接 import `modules/data/**` 实现路径。
 - 业务域及其兼容根模块禁止依赖 `platform/data/data.module.ts`（`PlatformDataModule` 聚合入口）。
+- 能力边界门禁输出必须包含 RAG 专项 `ragImportReport`（blocked legacy active/direct implementation、allowed shared internal、canonical public entry）。
+- `conversation -> knowledge/**` 计数基线默认 `9`（可通过 `BACKEND_CAPABILITY_BOUNDARY_CONVERSATION_KNOWLEDGE_BASELINE` 覆盖）。
 
 必跑检查：
 - `pnpm run backend:capability-boundary:check`（落地后）

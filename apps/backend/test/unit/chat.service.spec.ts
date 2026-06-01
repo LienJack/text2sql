@@ -64,6 +64,7 @@ describe("ChatService", () => {
       "近30天支付方式分布",
       "req-2",
       onEvent,
+      undefined,
       contextEnvelope
     );
 

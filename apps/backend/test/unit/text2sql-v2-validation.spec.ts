@@ -1,4 +1,5 @@
 import { SqlValidationService } from "../../src/modules/conversation/adapters/sql-validation.service";
+import { DomainError } from "../../src/common/domain-error";
 
 describe("text2sql v2 sql validation", () => {
   const createService = (overrides?: {
@@ -8,6 +9,7 @@ describe("text2sql v2 sql validation", () => {
     dryRunReason?: string;
     dryPlanPass?: boolean;
     dryPlanReason?: string;
+    sqliteDryRunError?: DomainError;
   }) =>
     new SqlValidationService(
       {
@@ -28,6 +30,18 @@ describe("text2sql v2 sql validation", () => {
           missingTables: overrides?.dryPlanPass === false ? ["customers"] : [],
           reason: overrides?.dryPlanReason
         }))
+      } as never,
+      {
+        getDatasourceById: jest.fn().mockResolvedValue({
+          id: "sqlite_main",
+          type: "sqlite"
+        })
+      } as never,
+      {
+        dbPath: "/tmp/text2sql.db",
+        dryRun: overrides?.sqliteDryRunError
+          ? jest.fn().mockRejectedValue(overrides.sqliteDryRunError)
+          : jest.fn().mockResolvedValue(undefined)
       } as never
     );
 
@@ -372,6 +386,38 @@ describe("text2sql v2 sql validation", () => {
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_DRY_RUN_PARSE_REJECTED");
     expect(result.failure?.terminal).toBe(false);
+  });
+
+  it("fails sqlite dry-run missing columns as correctable validation errors", async () => {
+    const result = await createService({
+      sqliteDryRunError: new DomainError(
+        "SQL_MISSING_COLUMN",
+        "missing column order_date",
+        400,
+        {
+          originalMessage: "Error: in prepare, no such column: order_date"
+        }
+      )
+    }).validate({
+      sql: "SELECT SUM(total_amount) FROM orders WHERE order_date >= DATE('now', '-30 days')",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite",
+      semanticPlan: plan({ selectedColumns: [] })
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.correctable).toBe(true);
+    expect(result.failure).toMatchObject({
+      code: "SQL_MISSING_COLUMN",
+      message: "missing column order_date",
+      terminal: false,
+      correctable: true
+    });
+    expect(result.checks.find((check) => check.check === "dry-run")).toMatchObject({
+      status: "failed",
+      code: "SQL_MISSING_COLUMN",
+      message: "missing column order_date"
+    });
   });
 
   it("records dry-plan unsupported as explicit skipped warning", async () => {

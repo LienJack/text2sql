@@ -66,18 +66,37 @@ export class SqliteQueryService {
       const columns = rows[0] ? Object.keys(rows[0]) : [];
       return { columns, rows };
     } catch (error) {
-      if (error instanceof DomainError) {
-        throw error;
+      throw this.normalizeSqliteError(error, {
+        fallbackCode: "SQL_EXECUTION_ERROR",
+        fallbackMessage: "SQLite 查询执行失败",
+        dbPath
+      });
+    }
+  }
+
+  async dryRun(
+    sql: string,
+    options?: {
+      filePath?: string;
+    }
+  ): Promise<void> {
+    const safeSql = this.ensureSelectQuery(sql);
+    const finalSql = this.withLimit(safeSql);
+    const dbPath = options?.filePath?.trim() || this.dbPath;
+    try {
+      const { stderr } = await execFileAsync("sqlite3", [
+        dbPath,
+        `EXPLAIN QUERY PLAN ${finalSql}`
+      ]);
+      if (stderr?.trim()) {
+        throw new DomainError("SQL_DRY_RUN_FAILED", stderr.trim(), 400);
       }
-      throw new DomainError(
-        "SQL_EXECUTION_ERROR",
-        "SQLite 查询执行失败",
-        400,
-        {
-          dbPath,
-          originalMessage: error instanceof Error ? error.message : String(error)
-        }
-      );
+    } catch (error) {
+      throw this.normalizeSqliteError(error, {
+        fallbackCode: "SQL_DRY_RUN_FAILED",
+        fallbackMessage: "SQLite dry-run 校验失败",
+        dbPath
+      });
     }
   }
 
@@ -118,5 +137,43 @@ export class SqliteQueryService {
       );
     }
     return normalized;
+  }
+
+  private normalizeSqliteError(
+    error: unknown,
+    input: {
+      fallbackCode: string;
+      fallbackMessage: string;
+      dbPath: string;
+    }
+  ): DomainError {
+    if (error instanceof DomainError) {
+      return error;
+    }
+
+    const originalMessage =
+      error instanceof Error ? error.message : String(error);
+    const normalizedMessage = originalMessage.trim();
+    const missingColumnMatch = normalizedMessage.match(
+      /no such column:\s*("?)([\w.]+)\1/i
+    );
+    if (missingColumnMatch) {
+      const missingColumn = missingColumnMatch[2];
+      return new DomainError(
+        "SQL_MISSING_COLUMN",
+        `missing column ${missingColumn}`,
+        400,
+        {
+          dbPath: input.dbPath,
+          originalMessage: normalizedMessage,
+          missingColumn
+        }
+      );
+    }
+
+    return new DomainError(input.fallbackCode, input.fallbackMessage, 400, {
+      dbPath: input.dbPath,
+      originalMessage: normalizedMessage
+    });
   }
 }

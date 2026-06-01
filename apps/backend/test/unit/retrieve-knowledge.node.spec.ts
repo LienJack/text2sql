@@ -56,4 +56,63 @@ describe("RetrieveKnowledgeNode", () => {
     expect(result.typedSummary.selectedContextCount).toBe(1);
     expect(result.evidenceRefs).toContain("schema-supplement:ds-sqlite:payments");
   });
+
+  it("grounds sales questions to orders schema supplement when retrieval is degraded", async () => {
+    const queryExecutorRouter = {
+      execute: jest.fn(async () => ({
+        columns: ["columnName", "dataType"],
+        rows: [
+          { columnName: "id", dataType: "INTEGER" },
+          { columnName: "created_at", dataType: "TEXT" },
+          { columnName: "total_amount", dataType: "REAL" }
+        ]
+      }))
+    };
+    const node = new RetrieveKnowledgeNode(
+      { agentRagRetrievalEnabled: false } as never,
+      queryExecutorRouter as never,
+      {} as never
+    );
+
+    const result = await node.run({
+      question: "最近的销售额",
+      datasourceId: "ds-sqlite",
+      datasource: {
+        id: "ds-sqlite",
+        name: "SQLite",
+        type: "sqlite",
+        status: "available",
+        readonly: true,
+        shared: true,
+        config: { path: "/tmp/text2sql.db" },
+        fileMeta: null,
+        unavailableAt: null,
+        deletedAt: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      },
+      runId: "run-sales-schema-supplement",
+      allowedTables: ["orders", "payments", "refunds"]
+    });
+
+    expect(queryExecutorRouter.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sql: expect.stringContaining("pragma_table_info('orders')")
+      })
+    );
+    expect(result.retrievalBundle?.selected_context).toEqual([
+      expect.objectContaining({
+        chunk_id: "schema-supplement:ds-sqlite:orders",
+        metadata: expect.objectContaining({
+          tableNames: ["orders"],
+          columnNames: [
+            "orders.id",
+            "orders.created_at",
+            "orders.total_amount"
+          ]
+        })
+      })
+    ]);
+    expect(result.evidenceRefs).toContain("schema-supplement:ds-sqlite:orders");
+  });
 });

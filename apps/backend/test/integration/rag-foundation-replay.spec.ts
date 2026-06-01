@@ -170,13 +170,41 @@ describe("rag foundation replay repository", () => {
     const result = await buildJob.run({
       datasourceId: "ds-rag-replay-job",
       sourceVersion: "source-replay-job-v1",
-      runId: "run-rag-replay-job"
+      runId: "run-rag-replay-job",
+      manifest: {
+        fingerprint: "semantic-assets-replay-v1",
+        summary: {
+          entryCount: 1,
+          preparedEntryCount: 1,
+          familyCounts: {
+            table_description: 1
+          },
+          reasonCodes: ["prepared"]
+        },
+        entries: [
+          {
+            id: "manifest-entry-replay-orders",
+            family: "table_description",
+            status: "prepared",
+            sourceRef: { type: "datasource_schema", ref: "orders.description" },
+            sourceVersion: "schema-v1",
+            reasonCodes: ["prepared"]
+          }
+        ]
+      }
     });
 
     const replayEvents = await replayRepository.listByRunId("run-rag-replay-job");
     expect(result.status).toBe("active");
+    expect(replayEvents.some((item) => item.stage === "manifest_prepared")).toBe(true);
+    expect(replayEvents.some((item) => item.stage === "index_build_started")).toBe(true);
     expect(replayEvents.some((item) => item.stage === "index_build_completed")).toBe(true);
+    expect(replayEvents.some((item) => item.stage === "index_activation_completed")).toBe(true);
     expect(replayEvents.filter((item) => item.stage === "chunk_indexed").length).toBe(2);
+    const completedPayload = JSON.parse(
+      replayEvents.find((item) => item.stage === "index_build_completed")?.payload ?? "{}"
+    );
+    expect(completedPayload.manifestFingerprint).toBe("semantic-assets-replay-v1");
     expect(
       replayEvents.some((item) => item.replayKey === "chunk:indexed:chunk-replay-job-1")
     ).toBe(true);

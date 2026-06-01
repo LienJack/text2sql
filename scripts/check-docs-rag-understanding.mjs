@@ -26,6 +26,8 @@ const DOC_RULES = [
     ],
     anchors: [
       "selected_context",
+      "manifest fingerprint",
+      "prepared asset family",
       "AgentRunResponse",
       "ChatStreamEvent",
       "TABLE_PERMISSIONS_FORBIDDEN",
@@ -44,6 +46,8 @@ const DOC_RULES = [
     anchors: [
       "runId",
       "selected_context",
+      "manifest fingerprint",
+      "prepared asset family",
       "retrieval_fused",
       "rerank_finalized",
       "/api/v1/runs/<runId>"

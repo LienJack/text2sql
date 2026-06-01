@@ -776,6 +776,12 @@ export interface DeliveryEvidenceLayer {
     contextCount: number;
     degradeReason?: string;
   };
+  preparationPlane?: {
+    manifestFingerprints: string[];
+    assetFamilyCounts: Record<string, number>;
+    permissionFilteredAssetCount: number;
+    twoPassSchemaRecallApplied: boolean;
+  };
   effectiveContextSummary?: {
     sourcePriority: "user_explicit_over_system";
     userEnvelope: {
@@ -1056,16 +1062,25 @@ export type ChatStreamEventData =
       toolName: string;
       toolCallId: string;
       input?: unknown;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       toolName: string;
       toolCallId: string;
       output?: unknown;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       toolName: string;
       toolCallId: string;
       message: string;
+      title?: string;
+      stage?: ReasoningStage;
+      summary?: string;
     }
   | {
       node: string;

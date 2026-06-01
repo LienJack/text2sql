@@ -1,45 +1,10 @@
 import { INestApplication } from "@nestjs/common";
-import type { ChatStreamEvent } from "@text2sql/shared-types";
+import { parseSseEventsForTest } from "@text2sql/chat-stream-protocol";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
 import { DeliveryContractMapper } from "../../src/modules/conversation/delivery/delivery-contract.mapper";
 import { createSeededSqliteFixture } from "../support/sqlite-fixture";
-
-interface ParsedSseEvent {
-  eventType: string;
-  event: ChatStreamEvent;
-}
-
-function parseSseEvents(payload: string): ParsedSseEvent[] {
-  const blocks = payload
-    .split(/\n\n+/)
-    .map((block) => block.trim())
-    .filter(Boolean);
-
-  const events: ParsedSseEvent[] = [];
-  for (const block of blocks) {
-    const lines = block
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const eventLine = lines.find((line) => line.startsWith("event:"));
-    const dataLines = lines.filter((line) => line.startsWith("data:"));
-    if (!eventLine || dataLines.length === 0) {
-      continue;
-    }
-    const eventType = eventLine.replace(/^event:\s*/, "").trim();
-    const dataText = dataLines
-      .map((line) => line.replace(/^data:\s*/, ""))
-      .join("\n");
-    const event = JSON.parse(dataText) as ChatStreamEvent;
-    events.push({
-      eventType,
-      event
-    });
-  }
-  return events;
-}
 
 describe("delivery contract integration", () => {
   let app: INestApplication;
@@ -109,7 +74,7 @@ describe("delivery contract integration", () => {
       .post(`/api/v1/sessions/${sessionId}/messages/stream`)
       .send({ message: "统计订单状态分布" });
     expect(streamRes.status).toBe(200);
-    const events = parseSseEvents(streamRes.text);
+    const events = parseSseEventsForTest(streamRes.text);
     const finish = [...events].reverse().find((item) => item.eventType === "finish");
     expect(finish).toBeDefined();
 
@@ -190,7 +155,7 @@ describe("delivery contract integration", () => {
       .post(`/api/v1/sessions/${sessionId}/messages/stream`)
       .send({ message: "统计订单状态分布" });
     expect(streamRes.status).toBe(200);
-    const events = parseSseEvents(streamRes.text);
+    const events = parseSseEventsForTest(streamRes.text);
     const finish = [...events].reverse().find((item) => item.eventType === "finish");
     expect(finish).toBeDefined();
     const finishData = (finish?.event.data ?? {}) as {

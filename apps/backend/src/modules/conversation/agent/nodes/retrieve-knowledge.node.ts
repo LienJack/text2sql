@@ -8,13 +8,11 @@ import { AppConfigService } from "../../../config/app-config.service";
 import { QueryExecutorRouterService } from "../../../platform/data/query/index";
 import {
   KNOWLEDGE_RAG_CONTRACT,
-  type KnowledgeRagContract
-} from "../../../knowledge/contracts/knowledge-rag.contract";
-import type {
+  type KnowledgeRagContract,
   RagRetrievalChunkPayload,
   RagContextPack,
   RagRetrievalBundle
-} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+} from "../../../knowledge";
 
 export interface RetrievedKnowledgeTypedSummary {
   status: "ready" | "degraded";
@@ -59,7 +57,20 @@ interface LaneStateSummary {
 const MAX_SCHEMA_SUPPLEMENT_TABLES = 4;
 
 const SCHEMA_RELEVANCE_HINTS: Record<string, string[]> = {
-  orders: ["订单", "下单", "单量", "gmv", "order"],
+  orders: [
+    "订单",
+    "下单",
+    "单量",
+    "gmv",
+    "销售额",
+    "成交额",
+    "交易额",
+    "金额",
+    "营收",
+    "sales",
+    "revenue",
+    "order"
+  ],
   order_items: ["订单明细", "商品明细", "明细", "item"],
   payments: ["支付", "付款", "支付方式", "支付渠道", "payment", "method"],
   refunds: ["退款", "退货", "refund"],

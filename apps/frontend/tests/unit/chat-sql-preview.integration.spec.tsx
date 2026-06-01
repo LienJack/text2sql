@@ -137,7 +137,22 @@ describe("chat to sql preview integration", () => {
       messages: createMockMessages(),
       latestRun: createMockRun({
         sql: "SELECT * FROM orders LIMIT 20",
-        explanation: "返回最近 20 条订单。"
+        explanation: "返回最近 20 条订单。",
+        delivery: {
+          answer: {
+            text: "返回最近 20 条订单。",
+            status: "executionResult",
+            provider: "mock"
+          },
+          artifact: {
+            sql: "SELECT * FROM orders LIMIT 20",
+            rowCount: 20,
+            hasError: false,
+            summary: {
+              text: "返回最近 20 条订单。"
+            }
+          }
+        }
       })
     });
     mockGetRun.mockResolvedValue(createMockRun());
@@ -148,7 +163,7 @@ describe("chat to sql preview integration", () => {
     vi.clearAllMocks();
   });
 
-  it("updates sql preview after successful message submission", async () => {
+  it("updates sql evidence tab after successful message submission", async () => {
     const user = userEvent.setup();
     render(<ChatPanel />);
 
@@ -160,7 +175,7 @@ describe("chat to sql preview integration", () => {
       expect(mockStreamMessageEvents).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByRole("button", { name: "展开 SQL 详情" }));
+    await user.click(screen.getByRole("tab", { name: /view sql/i }));
     expect(screen.getByText("SELECT * FROM orders LIMIT 20")).toBeInTheDocument();
   });
 });

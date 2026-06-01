@@ -20,7 +20,7 @@ import type {
   RagRetrievalBundle,
   RagContextPack,
   RagRetrievalChunkPayload
-} from "../../../knowledge/rag/retrieval/rag-retrieval.types";
+} from "../../../knowledge";
 import { SemanticContextPackService } from "../../adapters/semantic-context-pack.service";
 import { SemanticPlanService } from "../../adapters/semantic-plan.service";
 import { SemanticPlanValidator } from "../../adapters/semantic-plan.validator";

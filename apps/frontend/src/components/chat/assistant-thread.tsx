@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type {
   ChatMessage,
   ChatStreamEvent,
@@ -14,10 +14,6 @@ import {
 } from "@assistant-ui/react";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { AssistantComposer } from "@/components/chat/assistant-composer";
-import {
-  buildContextEnvelopeFromDraft,
-  createEmptyContextEnvelopeDraft
-} from "@/components/chat/context-envelope-panel";
 import {
   AssistantThinkingPanel,
   type ThinkingStreamStep
@@ -48,11 +44,14 @@ interface AssistantThreadProps {
   runVisibilityByRunId: Record<string, RunVisibilityStatus>;
   activeStreamRunId: string | null;
   thinkingRequestPending: boolean;
-  debugEnabled: boolean;
+  activeAbortController: AbortController | null;
   disabled?: boolean;
+  onStopStream?: () => void;
   onRequestRun?: (runId: string) => Promise<void> | void;
+  onAbortControllerChange?: (controller: AbortController | null) => void;
   onRunStart?: () => void;
   onRunFinish?: (runId: string | undefined) => Promise<void> | void;
+  onRunCancelled?: (runId: string | undefined) => Promise<void> | void;
   onRunError?: (error: Error) => Promise<void> | void;
   onStreamEvent?: (event: ChatStreamEvent) => void;
 }
@@ -86,21 +85,17 @@ export function AssistantThread({
   runVisibilityByRunId,
   activeStreamRunId,
   thinkingRequestPending,
-  debugEnabled,
+  activeAbortController,
   disabled = false,
+  onStopStream,
   onRequestRun,
+  onAbortControllerChange,
   onRunStart,
   onRunFinish,
+  onRunCancelled,
   onRunError,
   onStreamEvent
 }: AssistantThreadProps) {
-  const [sqlOpenSignal, setSqlOpenSignal] = useState(0);
-  const [contextEnvelopeDraft, setContextEnvelopeDraft] = useState(
-    createEmptyContextEnvelopeDraft
-  );
-  const [clearContextEnvelopeAfterSend, setClearContextEnvelopeAfterSend] =
-    useState(true);
-
   const latestAssistantMessageId = useMemo(() => {
     return [...messages].reverse().find((message) => message.role === "assistant")?.id;
   }, [messages]);
@@ -130,13 +125,17 @@ export function AssistantThread({
   const callbacks = useMemo<AssistantRuntimeCallbacks>(
     () => ({
       onStart: onRunStart,
+      onAbortController: onAbortControllerChange,
       onEvent: onStreamEvent,
+      onCancelled: onRunCancelled,
       onError: onRunError,
       onFinish: async (runId) => {
         await onRunFinish?.(runId);
       }
     }),
     [
+      onAbortControllerChange,
+      onRunCancelled,
       onRunError,
       onRunFinish,
       onRunStart,
@@ -144,25 +143,10 @@ export function AssistantThread({
     ]
   );
 
-  const resolveContextEnvelopeForSend = useMemo(
-    () => () => {
-      const envelope = buildContextEnvelopeFromDraft(contextEnvelopeDraft);
-      if (clearContextEnvelopeAfterSend) {
-        setContextEnvelopeDraft(createEmptyContextEnvelopeDraft());
-      }
-      return envelope;
-    },
-    [
-      clearContextEnvelopeAfterSend,
-      contextEnvelopeDraft
-    ]
-  );
-
   const runtime = useChatAssistantRuntime({
     sessionId,
     messages,
-    callbacks,
-    resolveContextEnvelope: resolveContextEnvelopeForSend
+    callbacks
   });
   const activeStreamSteps = activeStreamRunId
     ? streamThinkingByRunId[activeStreamRunId] ?? []
@@ -172,7 +156,6 @@ export function AssistantThread({
     : false;
   const showStandaloneThinking =
     Boolean(activeStreamRunId) &&
-    activeStreamSteps.length > 0 &&
     !activeStreamTextStarted;
 
   return (
@@ -212,6 +195,7 @@ export function AssistantThread({
                       })
                     : undefined;
                   const thinkingInProgress = runVisibilityStatus === "loading";
+                  const thinkingCancelled = runVisibilityStatus === "cancelled";
                   const streamDelivery = resolvedRunId
                     ? resolveVisibleDelivery({
                         runDelivery: run?.delivery,
@@ -227,9 +211,9 @@ export function AssistantThread({
                       run={run}
                       streamDelivery={streamDelivery}
                       runId={resolvedRunId}
-                      debugEnabled={debugEnabled}
                       thinkingSteps={thinkingSteps}
                       thinkingInProgress={thinkingInProgress}
+                      thinkingCancelled={thinkingCancelled}
                       runLoading={Boolean(
                         resolvedRunId && runLoadingById[resolvedRunId]
                       )}
@@ -238,8 +222,6 @@ export function AssistantThread({
                           ? () => onRequestRun?.(resolvedRunId)
                           : undefined
                       }
-                      openSqlSignal={isLatestAssistant ? sqlOpenSignal : 0}
-                      highlightSql={isLatestAssistant}
                     />
                   );
                 }
@@ -248,7 +230,7 @@ export function AssistantThread({
             </ThreadPrimitive.Messages>
             {showStandaloneThinking && activeStreamRunId ? (
               <div
-                className="mt-3 rounded-2xl border border-[var(--chat-result-shell-border)] bg-[var(--chat-result-shell-bg)] p-2.5 shadow-[var(--chat-result-shell-shadow)]"
+                className="mt-3"
                 data-testid="assistant-live-thinking"
                 data-run-id={activeStreamRunId}
               >
@@ -256,14 +238,15 @@ export function AssistantThread({
                   run={null}
                   streamSteps={activeStreamSteps}
                   inProgress
+                  cancelled={false}
                   hasRunReference
                 />
               </div>
             ) : null}
             {thinkingRequestPending && !activeStreamRunId ? (
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
-                <Loader2 className="h-3 w-3 animate-spin text-[var(--action-primary)]" />
-                思考中...
+              <div className="mt-3 inline-flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-tertiary)]" />
+                <span>正在连接模型...</span>
               </div>
             ) : null}
           </div>
@@ -271,15 +254,8 @@ export function AssistantThread({
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 bg-gradient-to-t from-[var(--surface-page)] to-transparent pt-4">
             <AssistantComposer
               disabled={disabled}
-              onOpenDetail={() => {
-                setSqlOpenSignal((previous) => previous + 1);
-              }}
-              contextEnvelopeDraft={contextEnvelopeDraft}
-              clearContextEnvelopeAfterSend={clearContextEnvelopeAfterSend}
-              onContextEnvelopeDraftChange={setContextEnvelopeDraft}
-              onClearContextEnvelopeAfterSendChange={
-                setClearContextEnvelopeAfterSend
-              }
+              showStopButton={Boolean(activeAbortController) && !disabled}
+              onStop={onStopStream}
             />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>

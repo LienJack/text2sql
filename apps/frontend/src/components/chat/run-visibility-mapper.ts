@@ -3,17 +3,29 @@ import type {
   DeliveryContract,
   DeliveryEvidenceLayer,
   ExecutionTraceStep,
-  ReasoningStage,
   RunStatus,
   SqlRun
 } from "@text2sql/shared-types";
+import {
+  toRunVisibilityStatusFromRunStatus,
+  transitionRunVisibilityStatus
+} from "@text2sql/chat-stream-protocol";
+export {
+  projectStreamEvent,
+  toRunVisibilityStatusFromRunStatus,
+  toThinkingStepFromStreamEvent,
+  transitionRunVisibilityStatus
+} from "@text2sql/chat-stream-protocol";
+export type {
+  RunVisibilityStatus,
+  RunVisibilityThinkingStep,
+  StreamEventProjection
+} from "@text2sql/chat-stream-protocol";
 
-export type RunVisibilityStatus = "loading" | "success" | "error" | "empty";
-
-export type RunVisibilityThinkingStep = ExecutionTraceStep & {
-  stage?: ReasoningStage;
-  title?: string;
-};
+import type {
+  RunVisibilityStatus,
+  RunVisibilityThinkingStep
+} from "@text2sql/chat-stream-protocol";
 
 type JsonRecord = Record<string, unknown>;
 type SavedPriorSqlLayer = NonNullable<DeliveryEvidenceLayer["savedPriorSql"]>;
@@ -893,34 +905,6 @@ export function mergeRunThinkingSteps(
     const rightTime = right.at ?? right.startedAt ?? right.endedAt ?? "";
     return leftTime.localeCompare(rightTime);
   });
-}
-
-export function toRunVisibilityStatusFromRunStatus(
-  status: RunStatus | undefined
-): RunVisibilityStatus | undefined {
-  if (!status) {
-    return undefined;
-  }
-  if (status === "failed" || status === "rejected") {
-    return "error";
-  }
-  if (status === "clarification") {
-    return "empty";
-  }
-  return "success";
-}
-
-export function transitionRunVisibilityStatus(
-  previous: RunVisibilityStatus | undefined,
-  next: RunVisibilityStatus | undefined
-): RunVisibilityStatus | undefined {
-  if (!next) {
-    return previous;
-  }
-  if ((previous === "success" || previous === "error" || previous === "empty") && next === "loading") {
-    return previous;
-  }
-  return next;
 }
 
 export function resolveRunVisibilityStatus(input: {

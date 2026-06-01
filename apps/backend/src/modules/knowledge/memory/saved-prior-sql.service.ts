@@ -11,6 +11,7 @@ import {
   type SavedPriorSqlRecord
 } from "../contracts/knowledge-memory.contract";
 import { RagReplayRepository } from "../rag/observability/rag-replay.repository";
+import { SEMANTIC_ASSET_REASON_CODES } from "../rag/preparation/semantic-asset-reason-codes";
 
 interface NormalizedCaptureInput {
   workspaceId: string;
@@ -133,6 +134,16 @@ export class SavedPriorSqlService {
         trusted: true,
         verified: true,
         priorSql: true,
+        assetFamily: "prior_question_sql",
+        visibilityScope: "workspace",
+        preparationStatus: "prepared",
+        reasonCodes: [SEMANTIC_ASSET_REASON_CODES.prepared],
+        sourceRef: {
+          type: "saved_prior_sql",
+          ref: record.priorId
+        },
+        sourceVersion,
+        sourceHash: contentChecksum,
         workspaceId: record.workspaceId,
         datasourceId: record.datasourceId,
         sourceRunId: record.sourceRunId,
@@ -143,7 +154,13 @@ export class SavedPriorSqlService {
         viewSql: normalized.viewSql,
         savedAt: record.savedAt,
         viewExists: true,
-        viewStatus: "active"
+        viewStatus: "active",
+        compatibilitySignals: {
+          viewExists: true,
+          viewStatus: "active",
+          trusted: true,
+          verified: true
+        }
       }
     });
 

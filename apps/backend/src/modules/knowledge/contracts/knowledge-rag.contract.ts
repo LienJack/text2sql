@@ -1,11 +1,30 @@
-import type { RagReplayRepository } from "../rag/observability/rag-replay.repository";
-import type { RagRetrievalService } from "../rag/retrieval/rag-retrieval.service";
-import type { RagRerankService } from "../rag/rerank/rag-rerank.service";
+import type {
+  RagReplayRecord,
+  RagRerankRequest,
+  RagRerankResponse,
+  RagRetrievalRequest,
+  RagRetrievalResponse,
+  WriteRagReplayInput
+} from "./knowledge-rag-payload.contract";
 
 export const KNOWLEDGE_RAG_CONTRACT = Symbol("KNOWLEDGE_RAG_CONTRACT");
 
+export interface KnowledgeRagRetrievalContract {
+  retrieve(input: RagRetrievalRequest): Promise<RagRetrievalResponse>;
+}
+
+export interface KnowledgeRagRerankContract {
+  rerank(input: RagRerankRequest): Promise<RagRerankResponse>;
+}
+
+export interface KnowledgeRagReplayContract {
+  writeReplay(input: WriteRagReplayInput): Promise<RagReplayRecord>;
+  getReplay(runId: string, replayKey: string): Promise<RagReplayRecord | undefined>;
+  listByRunId(runId: string): Promise<RagReplayRecord[]>;
+}
+
 export interface KnowledgeRagContract {
-  retrieval: Pick<RagRetrievalService, "retrieve">;
-  rerank: Pick<RagRerankService, "rerank">;
-  replay: Pick<RagReplayRepository, "writeReplay" | "getReplay" | "listByRunId">;
+  retrieval: KnowledgeRagRetrievalContract;
+  rerank: KnowledgeRagRerankContract;
+  replay: KnowledgeRagReplayContract;
 }

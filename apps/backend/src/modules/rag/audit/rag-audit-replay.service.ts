@@ -65,6 +65,19 @@ export interface RagAuditReplayChain {
   runId: string;
   requestId?: string;
   runTrace?: ExecutionTrace;
+  preparationPlane?: {
+    manifestFingerprints: string[];
+    activeManifestFingerprint?: string;
+    activatedIndexVersionIds: string[];
+    preparedFamilies: string[];
+    degradedFamilies: string[];
+    skippedFamilies: string[];
+    filteredAssetCount: number;
+    selectedAssetCount: number;
+    unusedAssetCount: number;
+    lifecycleStates: string[];
+    staleReasons: string[];
+  };
   events: RagAuditReplayEventRecord[];
   generatedAt: string;
 }
@@ -211,8 +224,115 @@ export class RagAuditReplayService {
       runId: resolvedRunId,
       requestId: requestedRequestId || undefined,
       runTrace,
+      preparationPlane: this.buildPreparationPlaneSummary(replayRows),
       events,
       generatedAt: new Date().toISOString()
+    };
+  }
+
+  private buildPreparationPlaneSummary(rows: RagReplayRecord[]):
+    | RagAuditReplayChain["preparationPlane"]
+    | undefined {
+    if (rows.length === 0) {
+      return undefined;
+    }
+    const manifestFingerprints: string[] = [];
+    const activatedIndexVersionIds: string[] = [];
+    const preparedFamilies: string[] = [];
+    const degradedFamilies: string[] = [];
+    const skippedFamilies: string[] = [];
+    const lifecycleStates: string[] = [];
+    const staleReasons: string[] = [];
+    let activeManifestFingerprint: string | undefined;
+    let filteredAssetCount = 0;
+    let selectedAssetCount = 0;
+    let candidateAssetCount = 0;
+
+    for (const row of rows) {
+      const payload = this.parsePayload(row.payload);
+      const manifestFingerprint = this.readOptionalString(payload.manifestFingerprint);
+      if (manifestFingerprint) {
+        manifestFingerprints.push(manifestFingerprint);
+      }
+      if (row.stage === "index_activation_completed") {
+        activeManifestFingerprint = manifestFingerprint ?? activeManifestFingerprint;
+        if (row.indexVersionId) {
+          activatedIndexVersionIds.push(row.indexVersionId);
+        }
+      }
+      if (row.stage === "manifest_prepared") {
+        const summary = this.readRecord(payload.summary);
+        const familyCounts = this.readRecord(summary?.familyCounts);
+        preparedFamilies.push(...Object.keys(familyCounts ?? {}));
+        degradedFamilies.push(...this.readStringArray(payload.degradedFamilies));
+        skippedFamilies.push(...this.readStringArray(payload.skippedFamilies));
+      }
+      if (row.stage === "retrieval_fused") {
+        const permissionFiltering = this.readRecord(
+          payload.permissionFiltering ?? payload.permission_filtering
+        );
+        filteredAssetCount += this.readNumber(
+          permissionFiltering?.filtered_count ?? permissionFiltering?.filteredCount,
+          0
+        );
+        const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+        candidateAssetCount += candidates.filter((candidate) => {
+          if (!this.isRecord(candidate)) {
+            return false;
+          }
+          return Boolean(
+            this.readOptionalString(candidate.assetFamily) ??
+              this.readOptionalString(candidate.asset_family)
+          );
+        }).length;
+        staleReasons.push(
+          ...this.readStringArray(payload.degradeReasons ?? payload.degrade_reasons).filter(
+            (reason) => reason.includes("stale")
+          )
+        );
+      }
+      if (row.stage === "rerank_finalized") {
+        const selectedContexts = Array.isArray(payload.selectedContext)
+          ? payload.selectedContext
+          : Array.isArray(payload.selected_context)
+            ? payload.selected_context
+            : [];
+        selectedAssetCount += selectedContexts.filter((item) => this.isRecord(item)).length;
+        for (const item of selectedContexts) {
+          if (!this.isRecord(item)) {
+            continue;
+          }
+          const metadata = this.readRecord(item.metadata);
+          const lifecycleState = this.readOptionalString(
+            metadata?.lifecycleState ?? metadata?.lifecycle_state
+          );
+          if (lifecycleState) {
+            lifecycleStates.push(lifecycleState);
+          }
+        }
+      }
+    }
+
+    if (
+      manifestFingerprints.length === 0 &&
+      candidateAssetCount === 0 &&
+      selectedAssetCount === 0 &&
+      filteredAssetCount === 0
+    ) {
+      return undefined;
+    }
+    return {
+      manifestFingerprints: this.unique(manifestFingerprints),
+      activeManifestFingerprint,
+      activatedIndexVersionIds: this.unique(activatedIndexVersionIds),
+      preparedFamilies: this.unique(preparedFamilies),
+      degradedFamilies: this.unique(degradedFamilies),
+      skippedFamilies: this.unique(skippedFamilies),
+      filteredAssetCount,
+      selectedAssetCount,
+      unusedAssetCount: Math.max(0, candidateAssetCount - selectedAssetCount),
+      lifecycleStates: this.unique(lifecycleStates),
+      staleReasons: this.unique(staleReasons)
     };
   }
 
@@ -427,6 +547,29 @@ export class RagAuditReplayService {
     } catch {
       return {};
     }
+  }
+
+  private readRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+
+  private readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter((item): item is string => Boolean(item));
+  }
+
+  private unique(values: readonly string[]): string[] {
+    return Array.from(new Set(values.filter((item) => item.trim().length > 0))).sort();
   }
 
   private resolveEventId(replayKey: string, payloadEventId: unknown): string | undefined {

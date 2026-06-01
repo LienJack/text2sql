@@ -1,373 +1,327 @@
-# text2sql
+# Text2SQL
 
-Text2SQL 学习演示版（阶段0-3路线）的单仓项目。
+English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-## 技术栈
-- 后端：NestJS + TypeScript + Prisma
-- Agent：Text2SQL v2 LangGraph runtime（`intake -> retrieve -> assemble-context -> semantic-plan -> generate-sql -> validate -> correct? -> execute -> answer`，Phase A `delegation=0`），由 `conversation/text2sql` 统一入口驱动
-- 前端：Next.js + React + Tailwind CSS v4 + shadcn-ui
-- 查询数据：SQLite / MySQL / PostgreSQL / CSV / Excel（会话绑定数据源路由）
-- 功能数据：Redis 缓冲 + PostgreSQL 持久化
+Text2SQL is a full-stack learning and demo project for enterprise-style data question answering. It turns natural-language questions into governed, executable, replayable SQL, and connects datasource onboarding, semantic knowledge, permission governance, runtime evidence, and frontend interaction into one complete workflow.
 
-## 项目规范
-- 前端重写规范：`docs/standards/frontend-react-shadcn-spec.md`
-- 后端迁移规范：`docs/standards/backend-prisma-migration-spec.md`
-- R1 门禁与灰度规范：`docs/standards/r1-gate-and-rollout-spec.md`
-- LLM 流式与 Tool Calling 迁移规范：`docs/standards/llm-stream-tool-migration-spec.md`
-- 治理术语硬切规范：`docs/standards/governance-terminology-spec.md`
-- 后端能力域拓扑规范：`docs/standards/backend-business-capability-topology-spec.md`
-- 前端重写需求：`docs/brainstorms/2026-04-10-frontend-react-shadcn-rewrite-requirements.md`
+![Text2SQL platform overview](assets/readme-platform-overview.png)
 
-## Text2SQL + RAG 全流程理解文档（2026-04-21 基线）
-- 主白皮书（请求到交付）：`docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`
-- runId 回放手册（trace/replay/delivery）：`docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`
-- 本地实验剧本（学习闭环）：`docs/rag-understanding/text2sql-rag-local-learning-lab.md`
-- 文档合同检查脚本：`node scripts/check-docs-rag-understanding.mjs`
-- 文档合同 smoke：`node tests/smoke/docs-rag-understanding-contract-smoke.mjs`
+## Project Background
 
-## 后端能力域拓扑（迁移中）
-- 顶层能力域采用：`conversation`、`governance`、`knowledge`、`platform`。
-- 依赖方向固定：`conversation -> governance|knowledge|platform`，`governance|knowledge -> platform`。
-- 迁移阶段允许兼容入口（re-export/wrapper）短期存在，但禁止引入新的跨域实现细节直连。
-- 详细规则见：`docs/standards/backend-business-capability-topology-spec.md`。
+Business teams often know what they want to ask, but not which table contains the data, how a metric is defined, or how the SQL should be written. Sending the question directly to an LLM is not enough either: the model can guess the schema incorrectly, miss business terminology, bypass table permissions, and leave little explanation for why a SQL statement was produced.
 
-### 数据库结构改动铁律（必须遵守）
-- 禁止手写或手改 `apps/backend/prisma/migrations/*/migration.sql`。
-- 先改 `apps/backend/prisma/schema.prisma`，再执行 `pnpm --filter @text2sql/backend run prisma:migrate --name <migration_name>` 生成迁移。
-- 每次结构变更必须执行 `pnpm --filter @text2sql/backend run prisma:generate`。
+This project is not a prompt-only SQL generator. It is a Text2SQL platform prototype shaped around production-like constraints:
 
-## 目录结构
+- Users ask questions from a datasource context, while the system binds sessions, workspaces, and data permissions.
+- Before SQL generation, the agent retrieves schema, glossary terms, historical examples, and semantic assets.
+- Generated SQL must pass read-only, safety, permission, dialect, and execution checks.
+- Each run has a `runId` for tracing, RAG evidence, delivery artifacts, and replay.
+- Frontend and backend stay aligned through shared types and an SSE protocol package for sync responses, streaming responses, and run details.
+
+## Problems Solved
+
+1. **The context gap between natural language and SQL**
+   Users say "revenue", "active customers", or "trend over the last 30 days"; databases expose tables, columns, foreign keys, metrics, and business terms. The project uses RAG, semantic spine, glossary, and modeling workspace assets to turn that context into evidence before SQL generation.
+
+2. **Uncontrolled LLM generation**
+   The Text2SQL v2 runtime uses explicit LangGraph orchestration. Intake, retrieval, context assembly, semantic planning, SQL generation, validation, correction, execution, and answer delivery are observable stages instead of one large prompt.
+
+3. **Data permissions and safe execution**
+   A query is not accepted merely because it runs. Governance is centered on workspace datasource binding, table-permissions, and policyVersion. The execution path favors fail-closed behavior when the system is uncertain, unauthorized, or unable to parse safely.
+
+4. **Hard-to-debug failures**
+   Every analytical run is saved around a `runId`. Sync responses, streaming finish events, run views, and RAG replay all point toward the same delivery contract, making it easier to inspect retrieval hits, SQL generation, correction, execution, and frontend rendering.
+
+5. **End-to-end demos across multiple datasource types**
+   The project supports SQLite, MySQL, PostgreSQL, CSV, and Excel datasources, with frontend workbench pages such as `/data-sources`, `/chat`, `/settings`, and `/modeling` for demos and continued extension.
+
+## Feature Preview
+
+### Semantic Modeling Workbench
+
+![Semantic modeling workbench](assets/screenshots/01-modeling-erd-workbench.png)
+
+The relationship graph turns physical table structure into manageable semantic assets. The left panel contains the Models / Views asset tree, the center hosts the ERD canvas, and the selected model context can be inspected through fields, relationships, and previews. Users can sync databases, auto-layout the graph, maintain relationships, save a Modeling Draft, and publish it as the active version after checks pass.
+
+### Datasource Onboarding Wizard
+
+![Datasource onboarding wizard](assets/screenshots/02-datasource-create-wizard.png)
+
+The datasource page connects databases and files to a workspace. The wizard supports CSV, Excel, SQLite, MySQL, and PostgreSQL. Creating or editing a datasource automatically binds it to the current workspace, and idempotency keys prevent duplicate submissions. After creation, users can start a data question session directly or continue with table selection and modeling initialization.
+
+### ChatBI Workbench
+
+![ChatBI workbench](assets/screenshots/03-chat-answer-result.png)
+
+The Chat page is the main natural-language analytics entry point. Each session is bound to a datasource and model configuration, while the sidebar separates historical sessions by datasource. The main area shows the user question, agent runtime stages, final answer, table evidence, and the save-as-view entry point. The answer is not plain text only; it is a structured delivery result with `validation`, execution summary, and artifacts.
+
+### SQL Evidence Replay
+
+![SQL evidence replay](assets/screenshots/04-chat-sql-evidence.png)
+
+The same ChatBI result can be switched to the SQL evidence tab to inspect the SQL used for the answer. This view supports human verification, debugging replay, and governance audit: users can confirm whether the generated query, ordering, aggregation, and selected fields match business expectations.
+
+### Chart Result
+
+![Chart result](assets/screenshots/05-chat-chart-result.png)
+
+Result artifacts can also be projected as charts. The example renders payment-method share as a visual result. Answer, View SQL, and Chart all share evidence from the same run, avoiding drift between textual output, SQL, and visualization.
+
+## Design Philosophy
+
+- **Evidence before generation**: schema, glossary terms, relationships, permissions, and examples are organized as typed context before SQL is generated.
+- **Graph orchestration over prompt chaining**: important stages exist as runtime nodes, making them easier to observe, test, stream, and replace locally.
+- **Governance built into the main path**: workspace, datasource, table-permissions, and safety validation are part of the workflow, not after-the-fact patches.
+- **Useful without silent degradation**: RAG lanes may time out or degrade independently, but the reasons are written into evidence instead of hidden.
+- **Bounded correction**: SQL correction is a budgeted loop, avoiding unbounded agent retries.
+- **Stable contracts**: shared-types and chat-stream-protocol packages define the frontend/backend boundary so sync, stream, and replay behavior do not drift apart.
+
+## Architecture
+
+### Monorepo Structure
+
 ```text
-apps/backend             NestJS API + Agent 工作流
-apps/frontend            Next.js 演示页面
-packages/shared-types    前后端共享类型
-infra/docker-compose.yml Redis/PostgreSQL 本地依赖
-vibe/plain               需求、计划、评测与运维文档
+apps/backend                  NestJS API, Text2SQL runtime, governance, knowledge, and platform capabilities
+apps/frontend                 Next.js frontend workbench
+packages/shared-types         Shared frontend/backend types
+packages/chat-stream-protocol SSE envelope, parser, terminal guard, and UI projection helpers
+infra                         Local PostgreSQL, Redis, and Nginx orchestration
+data                          Local uploads, SQLite files, and runtime data
+docs                          Solutions, standards, troubleshooting, and understanding documents
 ```
 
-## 本地启动
-1. 安装依赖
+### System Overview
+
+```mermaid
+flowchart LR
+  User["Browser"] --> Gateway["Nginx gateway<br/>localhost:3000"]
+  Gateway --> Frontend["Frontend<br/>Next.js :3001"]
+  Gateway --> Backend["Backend<br/>NestJS :3002"]
+
+  Backend --> Conversation["conversation<br/>chat + text2sql + delivery"]
+  Backend --> Governance["governance<br/>workspace + datasource + table-permissions"]
+  Backend --> Knowledge["knowledge<br/>RAG + glossary + semantic spine + graph"]
+  Backend --> Platform["platform<br/>persistence + query + cache + config + observability"]
+
+  Conversation --> Governance
+  Conversation --> Knowledge
+  Conversation --> Platform
+  Governance --> Platform
+  Knowledge --> Platform
+
+  Platform --> Postgres["PostgreSQL"]
+  Platform --> Redis["Redis"]
+  Platform --> Datasources["SQLite / MySQL / PostgreSQL / CSV / Excel"]
+```
+
+### Four Backend Capability Domains
+
+| Domain | Directory | Responsibility |
+| --- | --- | --- |
+| `conversation` | `apps/backend/src/modules/conversation` | Chat entry points, Text2SQL workflow, LangGraph runtime, delivery contract |
+| `governance` | `apps/backend/src/modules/governance` | Workspaces, datasource binding, table permissions, users, and settings governance |
+| `knowledge` | `apps/backend/src/modules/knowledge` | RAG retrieval, semantic assets, glossary, memory, graph, and modeling context |
+| `platform` | `apps/backend/src/modules/platform` | Persistence, query execution, cache, configuration, observability, and read-model guards |
+
+Cross-domain dependencies are intentionally constrained:
+
+```text
+conversation -> governance | knowledge | platform
+governance   -> platform
+knowledge    -> platform
+platform     -> no business-domain dependency
+```
+
+### Text2SQL v2 Runtime
+
+The current main runtime path is:
+
+```text
+Text2SQLWorkflowRunner
+  -> RunV2LangGraphStage
+  -> Text2SqlV2LangGraphRunnerService
+```
+
+A typical analytical question follows this lifecycle:
+
+```mermaid
+flowchart TD
+  A["intake<br/>classify question type and risk"] --> B{"route"}
+  B -- "text_to_sql / metadata" --> C["retrieve<br/>RAG retrieval"]
+  B -- "general / unsafe / unsupported" --> I["answer"]
+  C --> D["assemble-context<br/>build selected context"]
+  D --> E["semantic-plan<br/>semantic plan and routing"]
+  E -- "ready" --> F["generate-sql"]
+  E -- "clarify / direct answer / fail closed" --> I
+  F --> G["validate<br/>read-only, safety, permission, dialect, dry-run"]
+  G -- "pass" --> H["execute"]
+  G -- "correctable" --> J["correct"]
+  G -- "terminal" --> I
+  J -- "retry_generation" --> F
+  J -- "terminal" --> I
+  H --> I["answer<br/>delivery + evidence + artifact"]
+```
+
+### RAG And Semantic Context
+
+RAG is not simple text concatenation. The current design emphasizes:
+
+- manifest-first semantic asset preparation
+- lexical, dense, and graph retrieval lanes
+- permission filtering before fusion and reranking
+- RRF fusion and two-stage rerank
+- `selected_context`, `degradeReasons`, and `riskTags` written into runtime evidence
+- `runId` threaded through trace, delivery, and replay
+
+## Installation And Run
+
+### Requirements
+
+- Node.js 20 or compatible
+- pnpm 10.x; this repository declares `pnpm@10.33.0`
+- Docker and Docker Compose
+
+### 1. Install Dependencies
+
 ```bash
 pnpm install
 ```
 
-2. 启动基础依赖（Redis/PostgreSQL + Nginx 统一入口网关）
+### 2. Start Local Infrastructure
+
 ```bash
 docker compose -f infra/docker-compose.yml up -d
 ```
 
-3. 配置环境变量
+This starts:
+
+- Nginx gateway: `http://localhost:3000`
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+
+### 3. Initialize Environment Variables
+
 ```bash
 cp apps/backend/.env.example apps/backend/.env
 cp apps/frontend/.env.example apps/frontend/.env
 ```
 
-关键配置（`apps/backend/.env`）：
-- `PORT=3002`（后端内部开发端口）
-- `CORS_ALLOWED_ORIGINS=http://localhost:3000`（默认统一入口 origin）
-- `POSTGRES_HOST=localhost`
-- `POSTGRES_PORT=5432`
-- `POSTGRES_DB=text2sql`
-- `POSTGRES_USER=admin`
-- `POSTGRES_PASSWORD=admin`
-- `POSTGRES_SCHEMA=public`
-- `DATABASE_URL=<optional>`（若配置则优先；未配置时后端会自动使用 `POSTGRES_*` 组装）
-- `DATASOURCE_UPLOAD_DIR=<upload-dir>`（默认 `data/uploads/datasources`）
-- `DATASOURCE_UPLOAD_MAX_BYTES=10485760`（上传上限，默认 10MB）
-- `DATASOURCE_CONNECT_TIMEOUT_MS=5000`
-- `DATASOURCE_QUERY_TIMEOUT_MS=10000`
-- `DATASOURCE_SECRET_KEY=<secret-key>`（生产环境务必配置自定义值）
-- `LLM_PROVIDER=volcengine`（或 siliconflow/minimax）
-- `LLM_BASE_URL=<openai-compatible-base-url>`（支持 `https://xxx`、`https://xxx/v1` 或完整 `/chat/completions` 路径）
-- `LLM_API_KEY=<api-key>`
-- `LLM_MODEL=<model-name>`
-- `LLM_MOCK_MODE=false`（联调真实模型时保持 false）
-- `EMBEDDING_PROVIDER=<provider>`（Text2SQL v2 dense retrieval 的 embedding provider）
-- `EMBEDDING_BASE_URL=<openai-compatible-base-url>`
-- `EMBEDDING_API_KEY=<api-key>`
-- `EMBEDDING_MODEL=text-embedding-3-small`
-- `EMBEDDING_DIMENSIONS=<optional>`
-- `EMBEDDING_VECTOR_VERSION=v1`
-- `RERANK_PROVIDER=<provider>`（可选，默认回退到 `LLM_PROVIDER`）
-- `RERANK_BASE_URL=<openai-compatible-base-url>`（可选，默认回退到 `LLM_BASE_URL`）
-- `RERANK_API_KEY=<api-key>`（可选，默认回退到 `LLM_API_KEY`）
-- `RERANK_MODEL=<model-name>`（可选，默认回退到 `LLM_MODEL`）
-- `RERANK_TIMEOUT_MS=<timeout-ms>`（可选，默认回退到 `LLM_TIMEOUT_MS`）
-- `/settings` 页面职责：
-  - `LLM 模型`：provider/model 目录治理
-  - `RAG 配置`：Embedding / Rerank 运行配置（settings first, env fallback），支持 `检测草稿（dry-check）` 与 `已保存配置检测（persisted-check）`
-  - `RAG 运行`：运行态观测与回放证据
-- `LANGSMITH_TRACING=true|false`（是否启用 LangSmith 追踪）
-- `LANGSMITH_API_KEY=<langsmith-api-key>`（启用追踪时必填）
-- `LANGSMITH_PROJECT=text2sql`（可选，默认 `text2sql`）
-- `LANGSMITH_ENDPOINT=https://api.smith.langchain.com`（可选）
-- `AGENT_PLANNING_SCAFFOLD_ENABLED=false`（R1 规划骨架开关，默认关闭）
-- `R1_GATE_WINDOW_MINUTES=60`（线上 Gate 指标窗口）
-- 会话 Redis 缓冲 TTL 固定为 12 小时（43200 秒），用于持久化补偿窗口。
+Important backend configuration lives in `apps/backend/.env`:
 
-4. 生成 Prisma Client（可选但推荐）
+- `PORT=3002`
+- `POSTGRES_HOST/POSTGRES_PORT/POSTGRES_DB/POSTGRES_USER/POSTGRES_PASSWORD`
+- `REDIS_URL=redis://localhost:6379`
+- `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+- `EMBEDDING_PROVIDER`, `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`
+- `RERANK_*` is optional and can fall back to the LLM provider configuration when not configured
+
+The frontend uses same-origin `/api` by default, so `NEXT_PUBLIC_API_BASE_URL` usually does not need to be changed.
+
+### 4. Prepare Prisma
+
 ```bash
-pnpm --filter @text2sql/backend prisma:generate
+pnpm --filter @text2sql/backend run prisma:generate
+pnpm --filter @text2sql/backend exec node scripts/prisma-with-database-url.cjs migrate deploy
 ```
 
-5. 校验空库迁移回放（发布前强烈建议）
+To verify that migrations can replay from an empty database, run against a separate test database:
+
 ```bash
 DATABASE_URL=postgresql://admin:admin@localhost:5432/text2sql_ci \
 pnpm --filter @text2sql/backend run prisma:verify-empty-db
 ```
 
-6. 启动前后端
+### 5. Start Frontend And Backend
+
 ```bash
 pnpm dev
 ```
 
-默认地址：
-- 浏览器默认入口（网关）：`http://localhost:3000/data-sources`
-- 前端内部开发端口（非默认直连调试）：`http://localhost:3001`
-- 后端内部开发端口（非默认直连调试）：`http://localhost:3002`
+Default URLs:
 
-## 多数据源问数主线
-- 入口强制“先选数据源，再进入聊天”：`/data-sources -> 创建会话 -> /chat?datasource=...&sessionId=...`
-- `POST /api/v1/sessions` 必须显式传入 `datasource`，缺失时返回 4xx 业务错误。
-- 聊天页会话列表按 `datasource` 过滤，只展示当前数据源历史，避免跨源串扰。
-- 每次发送都严格使用会话绑定数据源执行；数据源失效时会话历史可读、发送阻断并返回 `DATASOURCE_UNAVAILABLE`。
-- CSV / Excel 上传会注册为团队共享可复用数据源，可在后续会话中重复选择。
-- 查询边界默认值：连接超时 `5000ms`、查询超时 `10000ms`、默认 `LIMIT 50`、最大 `LIMIT 200`、上传上限 `10MB`。
+- Gateway: `http://localhost:3000`
+- Datasource entry: `http://localhost:3000/data-sources`
+- Frontend direct debugging: `http://localhost:3001`
+- Backend health check: `http://localhost:3002/health`
 
-## 工作空间治理与表清单授权（主叙事）
-- 用户侧请求可通过 `x-workspace-id`（或单空间成员自动推断）确定工作空间语境；缺失或非法语境会触发权限错误。
-- `GET /api/v1/datasources` 与 `POST /api/v1/sessions` 已接入工作空间可见性校验，只返回/允许当前空间已绑定的数据源。
-- 治理主模型为“工作空间 -> 数据源 -> 表勾选（replace）”；不再暴露规则组概念。
-- SQL 执行链路按工作空间表授权执行默认拒绝与 fail-closed，未授权或不可安全解析的读表请求会被拒绝。
-- 治理写操作与拒绝决策会写入审计事件（`workspace.datasource.*`），支持追溯变更与拒绝原因。
-- 截至 2026-04-16，`/data-sources` 向导已覆盖连接失败恢复（`retry/previous`）与提交中按钮锁定，且在 URL 带 `workspaceId` 时会透传到创建会话请求。
-- 遗留 `table-acl` 与 `rule-group` 路径已下线，治理能力统一以 `table-permissions` 接口为准。
+### 6. Quick Smoke Test
 
-## Chat 前端交互结构
-- 聊天主区已迁移到 `assistant-ui` primitives（Thread / Message / Composer）。
-- 页面采用“聊天主区优先”布局，SQL 详情改为 assistant 消息内展开，不再固定右侧详情栏。
-- 会话侧栏、会话级模型切换、调试开关能力保持不变，仍按会话粒度生效。
-- 移动端保留“会话”与“结果详情”入口，其中“结果详情”用于快速展开最新 SQL 详情块。
-
-## 联调检查清单（真实 LLM）
-- 网关入口可访问：`http://localhost:3000/data-sources`。
-- 快速网关 smoke 可通过：`node tests/smoke/nginx-dev-gateway-smoke.mjs`。
-- 后端健康检查 `GET http://localhost:3002/health` 中 `llm.configured` 与 `llm.baseUrlConfigured` 为 `true`。
-- `GET http://localhost:3002/health` 中 `dependencies.llm.streamingEnabled` 与 `dependencies.llm.toolCallingEnabled` 为 `true`。
-- 如开启 LangSmith，`GET http://localhost:3002/health` 中 `dependencies.langsmith.ready` 为 `true`。
-- `GET http://localhost:3002/health` 中 `dependencies.sessions.sync` 可查看会话同步状态统计（healthy/pending/degraded）。
-- `GET http://localhost:3002/health` 中 `dependencies.gateMetrics.acceptance` 可查看 R1 门禁指标快照（sampleReady/gatePass）。
-- `GET http://localhost:3002/api/v1/rag/quality/report` 中 `glossarySelectedContext` 可查看术语 selected_context 门禁（sampleVersion/relativeLift/status）。
-- `GET http://localhost:3002/health` 中 `dependencies.ragConfig.embedding/rerank` 可查看当前生效 provider + model + configSource 摘要。
-- 前端能经 `http://localhost:3000` 成功创建会话并发送消息，无跨域报错。
-- 前端从 `/data-sources` 选择任一可用数据源后，可自动创建绑定会话并跳转 `/chat`。
-- `GET /api/v1/sessions?datasource=<id>` 返回的会话均属于指定数据源。
-- `POST /api/v1/sessions/:sessionId/messages` 响应中包含 `run.sql` 与 `run.explanation`。
-- 当 LLM 配置缺失或不可用时，接口返回可读错误（不会回退到规则 SQL）。
-
-## LangSmith 覆盖率校验（可选）
 ```bash
-ts-node apps/backend/scripts/langsmith-coverage-check.ts \
-  --total 120 \
-  --threshold 0.95 \
-  --min-sample-size 20 \
-  --lookback-hours 24
+node tests/smoke/nginx-dev-gateway-smoke.mjs
 ```
 
-- `--total`：验收窗口内“可执行请求”总数（分母）。
-- 返回 `pass=true` 表示达到覆盖率门槛。
+## Common Workflows
 
-## 核心 API
-- `POST /api/v1/sessions`（`datasource` 必填）
-- `GET /api/v1/sessions`（支持 `status`、`datasource` 与 `view=current|readonly-history|all`）
-- `PATCH /api/v1/sessions/:sessionId`（支持 `title` 与 `debugEnabled` 局部更新）
-- `DELETE /api/v1/sessions/:sessionId`（软删除，默认列表隐藏）
-- `POST /api/v1/sessions/:sessionId/messages`
-- `POST /api/v1/sessions/:sessionId/messages/stream`（SSE 流式）
-- `GET /api/v1/sessions/:sessionId/messages`（返回 `session + messages + latestRun`）
-- `GET /api/v1/runs/:runId`
-- `POST /api/v1/runs/:runId/save-as-view`
-- `GET /api/v1/glossary/terms`
-- `POST /api/v1/glossary/terms`（管理员）
-- `PATCH /api/v1/glossary/terms/:termId`（管理员）
-- `POST /api/v1/glossary/terms/:termId/toggle`（管理员）
-- `GET /api/v1/glossary/anchors`
-- `POST /api/v1/glossary/anchors`（管理员）
-- `POST /api/v1/glossary/anchors/rollback`（管理员）
-- `GET /api/v1/settings/prompts`
-- `POST /api/v1/settings/prompts`（管理员）
-- `PATCH /api/v1/settings/prompts/:templateId`（管理员）
-- `DELETE /api/v1/settings/prompts/:templateId`（管理员，软删除）
-- `GET /api/v1/settings/rag-configs`
-- `PUT /api/v1/settings/rag-configs/:taskType`（管理员，`taskType=embedding|rerank`）
-- `POST /api/v1/settings/rag-configs/:taskType/health`（管理员，支持可选 `draft` payload；返回 `checkedAgainst=draft|persisted` 与结构化 `reasonCode`）
-- `GET /api/v1/datasources`
-- `POST /api/v1/datasources`
-- `POST /api/v1/datasources/upload`
-- `GET /api/v1/system/users`
-- `POST /api/v1/system/users`
-- `PATCH /api/v1/system/users/:userId`
-- `PATCH /api/v1/system/users/:userId/status`
-- `POST /api/v1/system/users/:userId/reset-password`
-- `DELETE /api/v1/system/users/:userId`
-- `POST /api/v1/system/users/batch-delete`
-- `GET /api/v1/system/workspaces`
-- `POST /api/v1/system/workspaces`
-- `PATCH /api/v1/system/workspaces/:workspaceId`
-- `DELETE /api/v1/system/workspaces/:workspaceId`
-- `GET /api/v1/system/workspaces/:workspaceId/members`
-- `POST /api/v1/system/workspaces/:workspaceId/members`
-- `PATCH /api/v1/system/workspaces/:workspaceId/members/:memberId/role`
-- `DELETE /api/v1/system/workspaces/:workspaceId/members/:memberId`
-- `POST /api/v1/system/workspaces/:workspaceId/members/remove-batch`
-- `GET /api/v1/system/workspaces/:workspaceId/datasources/bindings`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/add`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/bindings/remove`
-- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/tables`
-- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
-- `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/table-permissions`
-- `GET /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
-- `PUT /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/graph`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/detect`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/schema-change/resolve`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/precheck`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy`
-- `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
-- `POST /api/v1/evaluations/run`
-- `GET /api/v1/evaluations/:jobId`
-- `GET /health`
+### From Datasource To Data Question
 
-## Chat 调试回溯说明
-- 会话级调试开关字段：`Session.debugEnabled`，默认 `false`，按会话持久化保存。
-- 运行记录新增 `SqlRun.llmRaw`：包含 `provider`、`model`、`rawText`、`createdAt`，用于原始输出回溯。
-- `trace.steps` 支持节点级状态 + 可选摘要字段（输入/输出/错误摘要、时长）；前端字段缺失时自动降级为节点态。
-- 历史会话不会回填旧 `llmRaw` 数据；开启调试时会显示“该会话无历史原始返回数据”。
-- 当前策略为永久保留调试数据，不做自动清理任务。
+1. Open `http://localhost:3000/data-sources`
+2. Create or select a SQLite, MySQL, PostgreSQL, CSV, or Excel datasource
+3. Bind it to the current workspace and enter a session
+4. Ask a natural-language question in `/chat`
+5. Inspect the answer, SQL, execution result, and debugging evidence
 
-## Stream & Tool Calling 说明
-- 开发态统一入口为 `http://localhost:3000`（网关转发到内部 `3001/3002`）；以下 API 路径与字段契约不变。
-- 流式主路径：`POST /api/v1/sessions/:sessionId/messages/stream`。
-- 同步消息接口 `POST /api/v1/sessions/:sessionId/messages` 返回 `AgentRunResponse`：
-  - `kind`：固定为 `agent-run`
-  - `outcome`：`clarification | executionResult | rejected | failed`
-  - `run`：完整运行结果（含 `trace` 与可选 `llmRaw`）
-  - 请求体支持可选 `contextEnvelope`（`metricDefinition/timeRange/entityMappings/mustIncludeTables/mustExcludeTables/businessConstraints`）
-  - `agent`：聚合元信息（provider/model、是否有 SQL、是否有工具调用、是否有错误）
-- SSE 事件类型：`start`、`text-delta`、`tool-call`、`tool-result`、`tool-error`、`state`、`finish`、`error`。
-- SSE 事件必填字段：`type`、`runId`、`sessionId`、`at`、`data`；其中 `data` 为结构化对象，不再混用字符串载荷。
-- 当前 Tool Calling 基础能力默认启用，首个工具为 `runReadOnlySql`（只读 SQL 执行，含输入校验与安全守卫）。
-- SQL 运行时提示词模板命中证据通过 `run.trace.promptTemplate` 与 `run.delivery.evidence.promptTemplate` 暴露（字段：`templateId/scene/scope/version/fallbackReason`）。
-- 上下文生效证据通过 `run.trace.effectiveContextSummary/conflictHint` 与 `run.delivery.evidence.effectiveContextSummary/conflictHint` 双层暴露，前端可区分用户显式上下文与系统上下文来源。
-- Text2SQL v2 artifact 通过 `run.trace.v2`、`run.delivery.evidence.v2`、SSE `state` 事件 `data.v2.stageArtifact` 暴露；不会破坏既有 `type/runId/sessionId/at/data` 合同。
-- Full Mermaid strict-completion（2026-04-27）语义补齐：
-  - metadata 路径走 `retrieve -> assemble-context -> semantic-plan -> answer`，不进入 `generate/validate/execute`。
-  - correction 重试携带结构化 `correctionGrounding`（失败 SQL 引用、失败码、重试原因、证据引用、attempt）。
-  - delivery 增补 `contextPackSummary / metadataAnswer / correctionGrounding`，用于 sync/stream/run-view/replay 一致诊断。
-  - 叙事分层：`007 closeout` 证明 LangGraph 拓扑与 `delegation=0`；`008 strict-completion` 额外要求 metadata grounding / correction grounding / context-pack parity 语义闭环。
-- hard-cut read-model policy：`/api/v1/runs/:runId`、`/api/v1/runs/:runId/save-as-view`、RAG audit replay 仅支持显式 v2 读模型（`run.trace.v2.version/stageOrder/stages`）。授权后若命中历史 shape，会返回 `410 LEGACY_RUN_UNSUPPORTED`（含迁移 runbook 提示）。
+### Settings And Governance
 
-## Text2SQL v2 评估门禁（新增）
-- 评估脚本：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
-- 评估脚本（发布阻断模式）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
-- focused coverage gate：先运行后端 Jest coverage，再执行 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`；发布阻断模式使用 `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict`
-- focused flow matrix：`apps/backend/test/fixtures/text2sql-v2-closeout-flow-matrix.json`
-- fixture：`apps/backend/test/fixtures/text2sql-v2-eval-cases.json`
-- characterization fixture：`apps/backend/test/fixtures/text2sql-v2-characterization-cases.json`
-- 输出指标：`retrievalRelevance`、`rerankLift`、`planCoverageRate`、`validationPassRate`、`correctionSuccessRate`、`clarificationRate`、`executionSuccessRate`、`userVisibleFailureQuality`、`latencyP50Ms/P95Ms`、`denseUnavailableRate`、`rerankUnavailableRate`
-- rollout 输出：`summary.rollout`（eval 指标门禁）+ `rollout`（closeout 聚合门禁，含 `recommendedStage/rollbackSuggested/reasons`）
-- closeout 聚合门禁内容：`evalMetrics` + `evalTraceability` + `characterization` + `noLegacyCompat` + `focusedCoverage`（含 `delegationZero`；Full Mermaid strict-completion 场景还必须包含 `strictCompletionRows`：metadata grounding / correction grounding / context-pack parity）
-- anti-regression 静态检查：`pnpm run text2sql:no-legacy-compat:check`
-- 历史 run 迁移手册：`docs/runbooks/text2sql-v2-hardcut-read-model-migration.md`
-- 发布姿势：当前为 direct-v2，不提供进程内 `v1/v2/shadow` runtime 切换；回滚依赖 git/deploy rollback。
+- `/settings`: LLM model, RAG configuration, RAG run, system users, and other settings
+- `/glossary`: business glossary maintenance
+- `/modeling`: datasource modeling, relationships, and semantic views
+- `/prompts`: prompt template management
 
-## 测试
+## Quality Gates
+
+Repository-wide:
+
 ```bash
-pnpm test
-pnpm test:backend
-pnpm test:frontend
+pnpm run format:check
+pnpm run test
+pnpm run build
 ```
 
-## 后端发布完成门禁（Prisma V7）
-- 依赖与生成：`pnpm --filter @text2sql/backend run prisma:generate`
-- 质量门禁：`pnpm --filter @text2sql/backend run lint && pnpm --filter @text2sql/backend run build && pnpm --filter @text2sql/backend run test`
-- R1 离线 Gate：`pnpm --filter @text2sql/backend exec jest test/e2e/stage1-acceptance.spec.ts --runInBand`
-- 术语 selected_context 门禁：`pnpm --filter @text2sql/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
-- clarification hybrid balance gate：
-  - 观测模式：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate`
-  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
-  - 样本定义：`apps/backend/test/fixtures/clarification-balance-cases.json`
-- modeling parity shadow gate：
-  - 观测模式：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`
-  - 强门禁模式（失败返回非 0）：`pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`
-  - 聚合维度：`relationshipPlatform`、`semanticSpine`、`modelingWorkspace`
-- 迁移回放：`pnpm --filter @text2sql/backend run prisma:verify-empty-db`
-- Text2SQL v2 评估：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
-- Text2SQL v2 评估（严格）：`pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict`
-- Text2SQL v2 focused coverage：`pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
-- Text2SQL hard-cut anti-regression：`pnpm run text2sql:no-legacy-compat:check`
-- 启动 smoke：至少验证 `GET http://localhost:3002/health`；关键接口建议覆盖：
-  - 网关快速检查：`node tests/smoke/nginx-dev-gateway-smoke.mjs`
-  - 后端健康检查：`GET http://localhost:3002/health`
-  - `POST /api/v1/sessions`
-  - `POST /api/v1/sessions/:sessionId/messages`
-  - `GET /api/v1/settings/models`（管理员上下文）
-- CI 可参考：`.github/workflows/backend-prisma-quality.yml`
+Backend:
 
-## Clarification Hybrid Balanced Rollout Runbook
-
-1. 混合门控质量信号采集（观测）：
 ```bash
-pnpm --filter @text2sql/backend run collect:clarification-balance-gate
+pnpm --filter @text2sql/backend run lint
+pnpm --filter @text2sql/backend run test
+pnpm --filter @text2sql/backend run build
+pnpm --filter @text2sql/backend run prisma:verify-empty-db
 ```
-2. 发布门禁（严格）：
+
+Frontend:
+
 ```bash
-pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict
+pnpm --filter @text2sql/frontend run lint
+pnpm --filter @text2sql/frontend run test
+pnpm --filter @text2sql/frontend run build
 ```
-3. 一键回退（rules-only）：
-  - 设置 `CLARIFICATION_HYBRID_KILL_SWITCH_RULES_ONLY=true`
-  - 重启后端
-4. 回退后验证：
-  - `node tests/smoke/nginx-dev-gateway-smoke.mjs`
-  - `pnpm --filter @text2sql/backend run collect:clarification-balance-gate:strict`
-5. 详细步骤与阈值说明：`docs/runbooks/clarification-hybrid-balanced-rollout.md`
 
-## Modeling Parity Shadow Gate Rollout Runbook
+Specialized gates:
 
-1. 采集并生成报告（观测模式）：
 ```bash
+pnpm run governance:terminology:check
+pnpm run backend:capability-boundary:check
+pnpm run text2sql:no-legacy-compat:check
+pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate
+pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate
 pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
 ```
-2. 发布门禁（CI 或人工 go/no-go）使用严格模式：
-```bash
-pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict
-```
-3. 解读核心字段（`data/reports/modeling-parity-shadow/gate-summary.json`）：
-  - `gatePass`：三维聚合总门禁（relationshipPlatform + semanticSpine + modelingWorkspace）。
-  - `modelingWorkspace.metrics.deployBlockRate`、`rollbackRate`、`schemaBacklogAvg`：核心风险指标。
-  - `modelingWorkspace.signalCoverage.*`：指标信号覆盖率，避免“样本缺字段导致误判”。
-  - `rollout.recommendedStage`：
-    - `shadow_only`：样本不足，仅允许 shadow 观测。
-    - `canary_ready`：可进入灰度。
-    - `hold`：维持当前发布面，先修复指标。
-    - `rollback_or_hold`：建议优先回滚或冻结发布。
-4. 触发回滚条件（任一命中即执行）：
-  - `rollout.rollbackSuggested=true`
-  - `rollout.recommendedStage=rollback_or_hold`
-5. 回滚入口（管理员）：
-  - `POST /api/v1/system/workspaces/:workspaceId/datasources/:datasourceId/modeling/deploy/rollback`
-  - 回滚后需重跑 shadow gate，确认 `rollout.recommendedStage` 不再为 `rollback_or_hold`。
 
-## 前端术语联动（Wave A/B）验收边界
-- Wave A：术语写入后可影响 `selected_context` 命中，链路异常时前端可见降级但不阻断主回答。
-- Wave B：在保持“改动即生效”前提下补齐锚点创建/回滚治理能力，并在 `/settings` 提供最小可见入口。
-- 发布证据最小集：
-  - `pnpm -C apps/backend test -- glossary-release-rollback.spec.ts --runInBand`
-  - `pnpm -C apps/backend test -- glossary-selected-context-gate.spec.ts --runInBand`
-  - `pnpm -C apps/frontend exec vitest run tests/unit/settings-page-governance-visibility.spec.tsx`
+## Important Rules
 
-## 前端质量门禁
-```bash
-pnpm --filter @text2sql/frontend lint
-pnpm --filter @text2sql/frontend test
-pnpm --filter @text2sql/frontend build
-```
+- Prisma schema changes must start in `apps/backend/prisma/schema.prisma`, then migrations must be generated by the Prisma CLI.
+- Do not handwrite or manually edit `apps/backend/prisma/migrations/*/migration.sql`.
+- After table structure changes, run `pnpm --filter @text2sql/backend run prisma:generate`.
+- Frontend interactive controls should reuse shadcn-ui and project business wrappers first.
+- The active governance narrative uses only `workspace datasource binding`, `table-permissions`, and `policyVersion`.
+
+## Further Reading
+
+- `AGENTS.md`: repository execution entry point, hard boundaries, and quality gates
+- `docs/text2sql-architecture-and-flow-2026-04-29.md`: current architecture and Text2SQL main flow
+- `docs/rag-understanding/text2sql-rag-end-to-end-understanding.md`: end-to-end Text2SQL + RAG explanation
+- `docs/rag-understanding/text2sql-rag-runid-replay-handbook.md`: runId replay and diagnosis
+- `docs/rag-understanding/text2sql-rag-local-learning-lab.md`: local learning lab
+- `docs/standards/backend-prisma-migration-spec.md`: Prisma migration standard
+- `docs/standards/frontend-react-shadcn-spec.md`: frontend React + shadcn standard
+- `docs/standards/llm-stream-tool-migration-spec.md`: LLM stream and tool calling migration standard
+- `docs/standards/governance-terminology-spec.md`: governance terminology hard-cut standard
+- `docs/standards/backend-business-capability-topology-spec.md`: backend capability topology standard

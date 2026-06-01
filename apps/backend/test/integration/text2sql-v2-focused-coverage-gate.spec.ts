@@ -36,6 +36,12 @@ const LEGACY_STAGE_OWNER =
   "apps/backend/src/modules/conversation/text2sql/stages/run-v2-state-machine.stage.ts";
 const ARTIFACT_REF_OWNER =
   "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts";
+const PREPARATION_READINESS_OWNER =
+  "apps/backend/src/modules/knowledge/rag/preparation/semantic-asset-readiness.service.ts";
+const PREPARATION_RETRIEVAL_OWNER =
+  "apps/backend/src/modules/knowledge/rag/retrieval/rag-retrieval.service.ts";
+const PREPARATION_REINDEX_OWNER =
+  "apps/backend/src/modules/knowledge/rag/retrieval/semantic-asset-reindex.service.ts";
 
 const ALL_COVERAGE_FILES = [
   ...LEGACY_CRITICAL_FILES,
@@ -45,7 +51,10 @@ const ALL_COVERAGE_FILES = [
   PRE_LAYERED_LANGGRAPH_GRAPH_OWNER,
   PRE_LAYERED_LANGGRAPH_RESULT_MAPPER_OWNER,
   PRE_LAYERED_INTAKE_NODE_OWNER,
-  ARTIFACT_REF_OWNER
+  ARTIFACT_REF_OWNER,
+  PREPARATION_READINESS_OWNER,
+  PREPARATION_RETRIEVAL_OWNER,
+  PREPARATION_REINDEX_OWNER
 ] as const;
 
 function fileCoverage(params: {
@@ -266,6 +275,64 @@ function coveredMatrix(): CloseoutFlowMatrix {
       behaviorTestStatus: "covered" as const,
       coverageOwnerStatus: "covered" as const
     })),
+    preparationPlaneRows: [
+      {
+        id: "manifest-completeness",
+        implementationOwners: [PREPARATION_READINESS_OWNER, PREPARATION_REINDEX_OWNER],
+        evidenceOwners: ["dependencies.ragConfig.semanticAssetReadiness"],
+        expectedTestFiles: ["apps/backend/test/integration/settings-rag-readiness.spec.ts"],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["activeManifestFingerprint", "familyCounts"]
+      },
+      {
+        id: "typed-family-generation",
+        implementationOwners: [PREPARATION_REINDEX_OWNER],
+        evidenceOwners: ["manifestSummary.familyCounts"],
+        expectedTestFiles: ["apps/backend/test/unit/semantic-asset-preparer.service.spec.ts"],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["assetFamily", "manifestFingerprint"]
+      },
+      {
+        id: "activation-stale-behavior",
+        implementationOwners: [PREPARATION_READINESS_OWNER, PREPARATION_REINDEX_OWNER],
+        evidenceOwners: ["semanticAssetReadiness.staleReasons"],
+        expectedTestFiles: [
+          "apps/backend/test/integration/text2sql-semantic-asset-reindex.spec.ts"
+        ],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["staleReasons", "rebuildable"]
+      },
+      {
+        id: "permission-filtering-before-ranking",
+        implementationOwners: [PREPARATION_RETRIEVAL_OWNER],
+        evidenceOwners: ["retrieval:fused.permissionFiltering"],
+        expectedTestFiles: ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["permission_filtered_before_ranking"]
+      },
+      {
+        id: "two-pass-schema-recall",
+        implementationOwners: [PREPARATION_RETRIEVAL_OWNER],
+        evidenceOwners: ["retrieval:fused.twoPassSchemaRecall"],
+        expectedTestFiles: ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["table_description", "full_schema"]
+      },
+      {
+        id: "prior-sql-diagnostics",
+        implementationOwners: [PREPARATION_RETRIEVAL_OWNER],
+        evidenceOwners: ["retrieval:fused.priorSqlLane"],
+        expectedTestFiles: ["apps/backend/test/integration/rag-retrieval.service.spec.ts"],
+        behaviorTestStatus: "covered",
+        coverageOwnerStatus: "covered",
+        requiredEvidenceSignals: ["stale", "ambiguous", "filtered"]
+      }
+    ],
     runtimePaths: {
       currentActivePath: [
         "apps/backend/src/modules/conversation/text2sql/text2sql-workflow-runner.service.ts",
@@ -313,6 +380,7 @@ describe("text2sql v2 focused coverage gate", () => {
     expect(report.flowMatrix.incompleteRuntimeCoverageRows).toEqual([]);
     expect(report.flowMatrix.incompleteRuntimeArtifactProducerRows).toEqual([]);
     expect(report.flowMatrix.incompleteStreamLifecycleRows).toEqual([]);
+    expect(report.flowMatrix.incompletePreparationPlaneRows).toEqual([]);
     expect(report.rollout).toMatchObject({
       gatePass: true,
       recommendedStage: "closeout_ready",
@@ -504,6 +572,34 @@ describe("text2sql v2 focused coverage gate", () => {
         reasons: ["missing_running_lifecycle"]
       }
     ]);
+  });
+
+  it("fails when preparation-plane rows lose required evidence signals", () => {
+    const matrix = coveredMatrix();
+    matrix.preparationPlaneRows = matrix.preparationPlaneRows?.map((row) =>
+      row.id === "permission-filtering-before-ranking"
+        ? {
+            ...row,
+            requiredEvidenceSignals: []
+          }
+        : row
+    );
+
+    const report = evaluateFocusedCoverageGate({
+      coverage: coverageFor(ALL_COVERAGE_FILES),
+      matrix
+    });
+
+    expect(report.rollout.gatePass).toBe(false);
+    expect(report.flowMatrix.incompletePreparationPlaneRows).toEqual([
+      {
+        id: "permission-filtering-before-ranking",
+        reasons: ["missing_preparation_evidence_signals"]
+      }
+    ]);
+    expect(report.rollout.reasons).toContain(
+      "preparation_plane:permission-filtering-before-ranking:missing_preparation_evidence_signals"
+    );
   });
 
   it("requires explicit owner migration metadata when a critical file is replaced", () => {

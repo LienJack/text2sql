@@ -27,7 +27,6 @@ interface ChatBIResultPanelProps {
   streamDelivery?: DeliveryContract;
   runId?: string;
   openSqlSignal?: number;
-  onRequestSqlDetails?: () => void;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -350,8 +349,7 @@ export function ChatBIResultPanel({
   run,
   streamDelivery,
   runId,
-  openSqlSignal = 0,
-  onRequestSqlDetails
+  openSqlSignal = 0
 }: ChatBIResultPanelProps) {
   const delivery = run?.delivery ?? streamDelivery;
   const artifact = delivery?.artifact;
@@ -399,10 +397,10 @@ export function ChatBIResultPanel({
 
   return (
     <section
-      className="rounded-xl border border-[var(--chat-result-panel-border)] bg-[var(--chat-result-panel-bg)]"
+      className="overflow-hidden rounded-xl border border-[var(--chat-result-panel-border)] bg-[var(--chat-result-panel-bg)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
       data-testid="chatbi-result-panel"
     >
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2">
         <p className="text-xs font-semibold tracking-wider text-[var(--text-secondary)] uppercase">
           ChatBI Result
         </p>
@@ -462,7 +460,7 @@ export function ChatBIResultPanel({
           <TabsContent value="sql" className="mt-0">
             <section className="space-y-2" aria-label="View SQL partition">
               <p className="text-xs text-[var(--text-secondary)]">
-                View SQL 为次级证据入口，可快速跳转到运行详情查看执行链路、RAG 证据与调试信息。
+                用于生成当前回答的 SQL 证据。
               </p>
               {artifactView.sql || run?.sql ? (
                 <pre className="max-h-36 overflow-auto rounded-lg border border-[var(--border-default)] bg-[var(--surface-panel)] px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-[var(--text-primary)]">
@@ -471,11 +469,6 @@ export function ChatBIResultPanel({
               ) : (
                 <StateBlock variant="idle">当前结果未返回 SQL 文本。</StateBlock>
               )}
-              {onRequestSqlDetails ? (
-                <Button type="button" size="sm" variant="outline" onClick={onRequestSqlDetails}>
-                  打开运行详情
-                </Button>
-              ) : null}
             </section>
           </TabsContent>
         </ChatBIResultTabs>

@@ -66,7 +66,7 @@ export function ChatBIResultTabs({
         variant="line"
         aria-label="ChatBI result partitions"
         data-testid="chatbi-result-tablist"
-        className="flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-md border border-[var(--border-default)] bg-[var(--surface-subtle)] px-1 py-1 [scrollbar-width:none]"
+        className="grid h-auto w-full grid-cols-3 gap-1 overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--surface-subtle)] px-1 py-1"
       >
         {TAB_DEFINITIONS.map((item) => {
           const Icon = item.icon;
@@ -78,10 +78,10 @@ export function ChatBIResultTabs({
               disabled={disabled}
               onKeyDown={buildKeyboardHandler(item.value, onValueChange)}
               aria-label={`Switch to ${item.label} partition`}
-              className="h-8 min-w-[96px] shrink-0 justify-start gap-1.5 rounded-md px-2 text-xs sm:text-sm"
+              className="h-8 w-full min-w-0 shrink-0 justify-center gap-1 px-1.5 text-[11px] sm:gap-1.5 sm:px-2 sm:text-sm"
             >
               <Icon className="h-3.5 w-3.5" aria-hidden />
-              <span>{item.label}</span>
+              <span className="truncate">{item.label}</span>
             </TabsTrigger>
           );
         })}

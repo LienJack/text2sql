@@ -49,6 +49,18 @@ describe("rag quality gate integration", () => {
       priorSqlSafetyRejectedCount: 0,
       priorSqlFallbackToGenerationCount: 0
     });
+    expect(snapshot.preparationPlane).toMatchObject({
+      sampleSize: 0,
+      familyCounts: {},
+      preparedEntryCount: 0,
+      degradedEntryCount: 0,
+      skippedEntryCount: 0,
+      permissionFilteredAssetCount: 0,
+      selectedAssetCount: 0,
+      staleReasons: [],
+      lifecycleStatuses: [],
+      completenessReady: false
+    });
 
     await moduleRef.close();
   });
@@ -185,6 +197,49 @@ describe("rag quality gate integration", () => {
     expect(payload.dependencies.ragQuality.gate.gatePass).toBe(true);
     expect(payload.dependencies.semanticSpineShadow.gate).toBeDefined();
     expect(typeof payload.dependencies.semanticSpineShadow.gate.sampleSize).toBe("number");
+
+    await moduleRef.close();
+  });
+
+  it("aggregates preparation-plane completeness counters", async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule]
+    }).compile();
+    const quality = moduleRef.get(RagQualityService);
+    quality.reset();
+
+    quality.recordPreparationPlane({
+      runId: "run-rag-quality-preparation-v1",
+      datasourceId: "ds-rag-quality-preparation",
+      manifestFingerprint: "semantic-assets-quality-v1",
+      activeIndexVersionId: "idx-quality-v1",
+      familyCounts: {
+        table_description: 2,
+        full_schema: 1
+      },
+      preparedEntryCount: 3,
+      permissionFilteredAssetCount: 1,
+      selectedAssetCount: 2,
+      lifecycleStatus: "retrieved"
+    });
+
+    const snapshot = quality.snapshot();
+
+    expect(snapshot.preparationPlane).toMatchObject({
+      sampleSize: 1,
+      latestManifestFingerprint: "semantic-assets-quality-v1",
+      latestActiveIndexVersionId: "idx-quality-v1",
+      familyCounts: {
+        full_schema: 1,
+        table_description: 2
+      },
+      preparedEntryCount: 3,
+      permissionFilteredAssetCount: 1,
+      selectedAssetCount: 2,
+      staleReasons: [],
+      lifecycleStatuses: ["retrieved"],
+      completenessReady: true
+    });
 
     await moduleRef.close();
   });

@@ -125,6 +125,9 @@ describe("rag rerank service", () => {
 
     expect(adapter.rerankWithMetadata).not.toHaveBeenCalled();
     expect(response.retrieval_bundle.reranked?.length).toBe(2);
+    expect(response.retrieval_bundle.selected_context?.[0]?.metadata.lifecycleState).toBe(
+      "selected"
+    );
     expect(response.retrieval_bundle.degrade_reasons).toEqual(
       expect.arrayContaining(["secondary_rerank_skipped_low_candidates"])
     );

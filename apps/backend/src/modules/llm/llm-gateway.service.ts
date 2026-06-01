@@ -1,5 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { generateText, streamText, tool } from "ai";
+import {
+  composeAbortSignals,
+  createUserCancelledError,
+  isUserCancelledError,
+  throwIfAborted
+} from "../../common/abort-utils";
 import { DomainError } from "../../common/domain-error";
 import { AppConfigService } from "../config/app-config.service";
 import { LlmModelFactory } from "./llm-model-factory";
@@ -30,6 +36,32 @@ const isTimeoutAbortError = (error: unknown): boolean => {
     normalized.includes("timeouterror")
   );
 };
+
+const isUserAbortError = (error: unknown): boolean => {
+  if (isUserCancelledError(error)) {
+    return true;
+  }
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const normalized = `${error.name} ${error.message}`.toLowerCase();
+  return normalized.includes("abort") && !normalized.includes("timeout");
+};
+
+const isInvalidJsonResponseError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return `${error.name} ${error.message}`.toLowerCase().includes("invalid json response");
+};
+
+const isRetriableGenerateError = (error: unknown): boolean =>
+  isTimeoutAbortError(error) || isInvalidJsonResponseError(error);
+
+const isRecoverableStreamTransportError = (error: unknown): boolean =>
+  isTimeoutAbortError(error) || isInvalidJsonResponseError(error);
+
+const MAX_GENERATE_RETRY = 1;
 
 @Injectable()
 export class LlmGatewayService implements LlmGateway {
@@ -84,26 +116,7 @@ export class LlmGatewayService implements LlmGateway {
     }
 
     try {
-      const model = this.modelFactory.createChatModel(runtime) as never;
-      const result = await generateText({
-        model,
-        system: prompt.systemPrompt,
-        prompt: prompt.userPrompt,
-        abortSignal: AbortSignal.timeout(runtime.timeoutMs),
-        temperature: 0.2
-      });
-
-      const content = result.text?.trim();
-      if (!content) {
-        throw new DomainError(
-          "LLM_EMPTY_RESPONSE",
-          "LLM 返回为空，无法生成 SQL。",
-          502,
-          {
-            provider: runtime.provider
-          }
-        );
-      }
+      const content = await this.generateWithRetry(prompt, runtime);
 
       return {
         provider: runtime.provider,
@@ -127,19 +140,84 @@ export class LlmGatewayService implements LlmGateway {
     }
   }
 
+  private async generateWithRetry(
+    prompt: LlmGatewayPrompt,
+    runtime: LlmGatewayRuntimeConfig
+  ): Promise<string> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_GENERATE_RETRY; attempt += 1) {
+      try {
+        return await this.executeGenerate(prompt, runtime, attempt);
+      } catch (error) {
+        lastError = error;
+        if (error instanceof DomainError) {
+          throw error;
+        }
+        if (!isRetriableGenerateError(error) || attempt >= MAX_GENERATE_RETRY) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async executeGenerate(
+    prompt: LlmGatewayPrompt,
+    runtime: LlmGatewayRuntimeConfig,
+    attempt: number
+  ): Promise<string> {
+    const model = this.modelFactory.createChatModel(runtime) as never;
+    const timeoutMs =
+      attempt === 0
+        ? runtime.timeoutMs
+        : Math.min(
+            Math.max(runtime.timeoutMs * 2, runtime.timeoutMs + 15000),
+            120000
+          );
+    const result = await generateText({
+      model,
+      system: prompt.systemPrompt,
+      prompt: prompt.userPrompt,
+      abortSignal: AbortSignal.timeout(timeoutMs),
+      temperature: 0.2
+    });
+
+    const content = result.text?.trim();
+    if (!content) {
+      throw new DomainError(
+        "LLM_EMPTY_RESPONSE",
+        "LLM 返回为空，无法生成 SQL。",
+        502,
+        {
+          provider: runtime.provider
+        }
+      );
+    }
+
+    return content;
+  }
+
   async stream(
     prompt: LlmGatewayPrompt,
     runtime: LlmGatewayRuntimeConfig,
     options?: {
+      abortSignal?: AbortSignal;
       tools?: Record<string, LlmGatewayToolDefinition>;
       onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
     }
   ): Promise<LlmGatewayGenerateOutput> {
     if (this.config.llmMockMode) {
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_mock_stream_start"
+      });
       const simulated = (
         await this.generate(prompt, runtime)
       ).rawText;
       for (const line of simulated.split("\n")) {
+        throwIfAborted(options?.abortSignal, {
+          phase: "llm_mock_stream_chunk"
+        });
         await options?.onEvent?.({
           type: "text-delta",
           text: `${line}\n`
@@ -161,16 +239,26 @@ export class LlmGatewayService implements LlmGateway {
       const model = this.modelFactory.createChatModel(runtime) as never;
       const normalizedTools = this.normalizeTools(options?.tools);
       const streamTimeoutMs = runtime.streamTimeoutMs ?? runtime.timeoutMs;
+      const streamAbortSignal = composeAbortSignals([
+        AbortSignal.timeout(streamTimeoutMs),
+        options?.abortSignal
+      ]);
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_stream_start"
+      });
       const result = streamText({
         model,
         system: prompt.systemPrompt,
         prompt: prompt.userPrompt,
         temperature: 0.2,
-        abortSignal: AbortSignal.timeout(streamTimeoutMs),
+        abortSignal: streamAbortSignal,
         tools: normalizedTools
       });
 
       for await (const chunk of result.fullStream) {
+        throwIfAborted(options?.abortSignal, {
+          phase: "llm_stream_chunk"
+        });
         if (chunk.type === "text-delta") {
           streamedText += chunk.text;
           await options?.onEvent?.({
@@ -225,6 +313,9 @@ export class LlmGatewayService implements LlmGateway {
         }
       }
 
+      throwIfAborted(options?.abortSignal, {
+        phase: "llm_stream_finish"
+      });
       const fullText = (await result.text).trim() || streamedText.trim();
       if (!fullText) {
         if (toolCallSql) {
@@ -255,6 +346,11 @@ export class LlmGatewayService implements LlmGateway {
         rawText: fullText
       };
     } catch (error) {
+      if (isUserAbortError(error) || options?.abortSignal?.aborted) {
+        throw createUserCancelledError({
+          provider: runtime.provider
+        });
+      }
       if (error instanceof DomainError) {
         throw error;
       }
@@ -276,8 +372,8 @@ export class LlmGatewayService implements LlmGateway {
         };
       }
 
-      if (isTimeoutAbortError(error)) {
-        const recoveredText = await this.tryRecoverFromStreamTimeout(
+      if (isRecoverableStreamTransportError(error)) {
+        const recoveredText = await this.tryRecoverFromStreamTransportError(
           prompt,
           runtime,
           streamedText
@@ -310,7 +406,7 @@ export class LlmGatewayService implements LlmGateway {
     }
   }
 
-  private async tryRecoverFromStreamTimeout(
+  private async tryRecoverFromStreamTransportError(
     prompt: LlmGatewayPrompt,
     runtime: LlmGatewayRuntimeConfig,
     streamedText: string

@@ -23,7 +23,7 @@ import type { SqlSemanticIntent } from "../agent/sql/sql-prompt.builder";
 import type {
   RagContextPack,
   RagRetrievalChunkPayload
-} from "../../rag/retrieval/rag-retrieval.types";
+} from "../../knowledge";
 
 export interface GenerateSqlNodeResult {
   draft: {
@@ -67,6 +67,7 @@ export class GenerateSqlNode {
     retryReason?: string;
     correctionGrounding?: SqlCorrectionGroundingV1;
     stream?: boolean;
+    abortSignal?: AbortSignal;
     tools?: Record<string, LlmGatewayToolDefinition>;
     onEvent?: (event: LlmGatewayStreamEvent) => Promise<void> | void;
   }): Promise<GenerateSqlNodeResult> {
@@ -112,6 +113,7 @@ export class GenerateSqlNode {
             correctionGrounding: input.correctionGrounding
           },
           {
+            abortSignal: input.abortSignal,
             tools: input.tools,
             onEvent: input.onEvent
           }

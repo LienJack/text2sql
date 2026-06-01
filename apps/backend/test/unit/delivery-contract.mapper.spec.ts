@@ -1254,6 +1254,67 @@ describe("DeliveryContractMapper", () => {
     });
   });
 
+  it("projects safe preparation-plane summary from retrieval replay evidence", () => {
+    const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
+    const run = createBaseRun({
+      trace: {
+        runId: "run-delivery-unit-preparation",
+        provider: "volcengine",
+        retryCount: 0,
+        steps: []
+      } as SqlRun["trace"]
+    });
+
+    const delivery = mapper.map({
+      run,
+      replayRecords: [
+        {
+          replayKey: "retrieval:fused",
+          stage: "retrieval_fused",
+          indexVersionId: "idx-preparation-v1",
+          payload: JSON.stringify({
+            status: "ready",
+            permissionFiltering: {
+              filteredCount: 2,
+              deniedChunkIds: ["forbidden-secret-orders"]
+            },
+            twoPassSchemaRecall: {
+              status: "applied"
+            },
+            candidates: [
+              {
+                chunkId: "chunk-orders-description",
+                assetFamily: "table_description",
+                manifestFingerprint: "semantic-assets-delivery-v1",
+                lifecycleState: "retrieved"
+              },
+              {
+                chunkId: "chunk-orders-schema",
+                assetFamily: "full_schema",
+                manifestFingerprint: "semantic-assets-delivery-v1",
+                lifecycleState: "retrieved"
+              }
+            ]
+          }),
+          createdAt: "2026-04-18T00:00:01.000Z"
+        }
+      ]
+    });
+
+    expect(delivery.evidence?.preparationPlane).toEqual({
+      manifestFingerprints: ["semantic-assets-delivery-v1"],
+      assetFamilyCounts: {
+        full_schema: 1,
+        table_description: 1
+      },
+      permissionFilteredAssetCount: 2,
+      twoPassSchemaRecallApplied: true
+    });
+    expect(JSON.stringify(delivery.evidence?.preparationPlane)).not.toContain(
+      "forbidden-secret-orders"
+    );
+  });
+
   it("keeps contract complete when artifact is absent", () => {
     const mapper = new DeliveryContractMapper(new SandboxRuntimeService());
     const run = createBaseRun({

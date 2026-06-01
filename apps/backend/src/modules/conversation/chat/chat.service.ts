@@ -117,6 +117,7 @@ export class ChatService {
     message: string,
     requestId: string | undefined,
     onEvent: (event: ChatStreamEvent) => Promise<void> | void,
+    abortSignal?: AbortSignal,
     contextEnvelope?: ContextEnvelope,
     actor?: ChatPolicyActorInput
   ): Promise<SqlRun> {
@@ -125,6 +126,7 @@ export class ChatService {
       message,
       requestId,
       onEvent,
+      abortSignal,
       contextEnvelope,
       actor
     });

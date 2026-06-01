@@ -71,7 +71,6 @@ describe("Text2SQLWorkflowRunner", () => {
       run: jest.fn().mockResolvedValue(undefined)
     };
     const streamEventMapper = {
-      createEnvelope: jest.fn(),
       mapLlmEvent: jest.fn(),
       mapStepEvent: jest.fn()
     };
@@ -123,7 +122,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never
@@ -168,7 +166,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never
@@ -207,13 +204,6 @@ describe("Text2SQLWorkflowRunner", () => {
     };
 
     const streamEventMapper = {
-      createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-        type,
-        data,
-        runId,
-        sessionId,
-        at: "2026-04-26T00:00:02.000Z"
-      })),
       mapLlmEvent: jest.fn(() => ({
         type: "text-delta",
         data: {
@@ -350,13 +340,6 @@ describe("Text2SQLWorkflowRunner", () => {
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       { run: jest.fn().mockResolvedValue(undefined) } as never,
       {
-        createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-          type,
-          data,
-          runId,
-          sessionId,
-          at: "2026-04-26T00:00:02.000Z"
-        })),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn(() => ({
           data: {
@@ -439,13 +422,6 @@ describe("Text2SQLWorkflowRunner", () => {
         run: jest.fn().mockResolvedValue(undefined)
       } as never,
       {
-        createEnvelope: jest.fn(({ type, data, runId, sessionId }) => ({
-          type,
-          data,
-          runId,
-          sessionId,
-          at: "2026-04-26T00:00:02.000Z"
-        })),
         mapLlmEvent: jest.fn(),
         mapStepEvent: jest.fn()
       } as never
@@ -466,5 +442,79 @@ describe("Text2SQLWorkflowRunner", () => {
     expect(run.status).toBe("failed");
     expect(events.map((item) => item.type)).toEqual(["start", "error"]);
     expect(events[1]?.code).toBe("GRAPH_FAILED");
+  });
+
+  it("passes abortSignal into the v2 stream stage", async () => {
+    const prepared = createPrepared();
+    const runAgentGraphStage = {
+      runSync: jest.fn(),
+      runStream: jest.fn().mockResolvedValue(createRun())
+    };
+    const runner = new Text2SQLWorkflowRunner(
+      { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
+      { run: jest.fn().mockResolvedValue(prepared) } as never,
+      runAgentGraphStage as never,
+      { run: jest.fn(async (run) => run) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        mapLlmEvent: jest.fn(),
+        mapStepEvent: jest.fn()
+      } as never
+    );
+    const abortController = new AbortController();
+
+    await runner.runStream({
+      sessionId: "session-1",
+      message: "统计订单总数",
+      abortSignal: abortController.signal,
+      onEvent: jest.fn()
+    });
+
+    expect(runAgentGraphStage.runStream).toHaveBeenCalledWith(
+      prepared,
+      "/api/v1/sessions/:sessionId/messages/stream",
+      expect.objectContaining({
+        abortSignal: abortController.signal
+      })
+    );
+  });
+
+  it("emits USER_CANCELLED and persists a failed run on cancellation", async () => {
+    const prepared = createPrepared();
+    const runner = new Text2SQLWorkflowRunner(
+      { shouldFallbackOnReject: jest.fn().mockReturnValue(false) } as never,
+      { run: jest.fn().mockResolvedValue(prepared) } as never,
+      {
+        runSync: jest.fn(),
+        runStream: jest.fn().mockRejectedValue(
+          new DomainError("USER_CANCELLED", "用户已停止本轮生成。", 499)
+        )
+      } as never,
+      { run: jest.fn(async (run) => run) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      { run: jest.fn().mockResolvedValue(undefined) } as never,
+      {
+        mapLlmEvent: jest.fn(),
+        mapStepEvent: jest.fn()
+      } as never
+    );
+
+    const events: Array<{ type: string; code?: string }> = [];
+    const run = await runner.runStream({
+      sessionId: "session-1",
+      message: "统计订单总数",
+      onEvent: (event) => {
+        events.push({
+          type: event.type,
+          code: (event.data as { code?: string }).code
+        });
+      }
+    });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("用户已停止本轮生成。");
+    expect(events.map((item) => item.type)).toEqual(["start", "error"]);
+    expect(events[1]?.code).toBe("USER_CANCELLED");
   });
 });

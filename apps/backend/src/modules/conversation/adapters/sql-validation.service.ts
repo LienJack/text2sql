@@ -8,9 +8,12 @@ import type {
 } from "@text2sql/shared-types";
 import {
   QueryExecutorRouterService,
+  SqliteQueryService,
   type SqlTableAccessContext
 } from "../../platform/data/query";
 import { RelationshipDryRunService } from "../../platform/data/query/relationship-dry-run.service";
+import { DomainError } from "../../../common/domain-error";
+import { DatasourceService } from "../../governance/datasource/datasource.service";
 
 interface ValidateSqlInput {
   sql: string;
@@ -31,7 +34,11 @@ export class SqlValidationService {
     @Optional()
     private readonly queryExecutorRouter?: QueryExecutorRouterService,
     @Optional()
-    private readonly relationshipDryRunService?: RelationshipDryRunService
+    private readonly relationshipDryRunService?: RelationshipDryRunService,
+    @Optional()
+    private readonly datasourceService?: DatasourceService,
+    @Optional()
+    private readonly sqliteQuery?: SqliteQueryService
   ) {}
 
   async validate(input: ValidateSqlInput): Promise<SqlValidationArtifactV1> {
@@ -69,8 +76,9 @@ export class SqlValidationService {
     checks.push(ledgerFulfillment.check);
     checks.push(this.validateDialect(sql, input.datasourceType));
     checks.push(
-      this.validateDryRun({
+      await this.validateDryRun({
         sql,
+        datasourceId: input.datasourceId,
         datasourceType: input.datasourceType,
         parseStatus,
         readOnlyStatus
@@ -524,42 +532,48 @@ export class SqlValidationService {
 
   private validateDryRun(input: {
     sql: string;
+    datasourceId?: string;
     datasourceType?: DatasourceType;
     parseStatus: SqlValidationCheckV1;
     readOnlyStatus: SqlValidationCheckV1;
-  }): SqlValidationCheckV1 {
+  }): Promise<SqlValidationCheckV1> {
     if (input.parseStatus.status === "failed" || input.readOnlyStatus.status === "failed") {
-      return {
+      return Promise.resolve({
         check: "dry-run",
         status: "skipped",
         message: "dry-run skipped because parse/read-only check already failed"
-      };
+      });
     }
 
     const capability = this.resolveDryRunCapability(input.datasourceType);
     if (!capability.supported) {
-      return {
+      return Promise.resolve({
         check: "dry-run",
         status: "skipped",
         code: "SQL_DRY_RUN_UNSUPPORTED",
         message: capability.reason
-      };
+      });
     }
 
     const dryPlan = this.queryExecutorRouter?.buildDryPlan(input.sql);
     if (dryPlan && !dryPlan.complete) {
-      return {
+      return Promise.resolve({
         check: "dry-run",
         status: "failed",
         code: "SQL_DRY_RUN_PARSE_REJECTED",
         message: dryPlan.reason ?? "dry-run parse rejected"
-      };
+      });
     }
 
-    return {
-      check: "dry-run",
-      status: "passed"
-    };
+    return this.executeSqliteDryRun(input).then((failure) => {
+      if (failure) {
+        return failure;
+      }
+      return {
+        check: "dry-run",
+        status: "passed"
+      };
+    });
   }
 
   private validateDryPlan(input: {
@@ -663,6 +677,67 @@ export class SqlValidationService {
     return {
       supported: true
     };
+  }
+
+  private async executeSqliteDryRun(input: {
+    sql: string;
+    datasourceId?: string;
+    datasourceType?: DatasourceType;
+  }): Promise<SqlValidationCheckV1 | undefined> {
+    if (
+      input.datasourceType !== "sqlite" ||
+      !input.datasourceId ||
+      !this.datasourceService ||
+      !this.sqliteQuery
+    ) {
+      return undefined;
+    }
+
+    const datasource = await this.datasourceService.getDatasourceById(input.datasourceId);
+    if (!datasource || datasource.type !== "sqlite") {
+      return undefined;
+    }
+
+    const filePath = this.resolveSqliteFilePath(datasource);
+    if (!filePath) {
+      return undefined;
+    }
+
+    try {
+      await this.sqliteQuery.dryRun(input.sql, { filePath });
+      return undefined;
+    } catch (error) {
+      const failure = this.asDomainError(error);
+      return {
+        check: "dry-run",
+        status: "failed",
+        code: failure?.code ?? "SQL_DRY_RUN_FAILED",
+        message:
+          failure?.message ??
+          (error instanceof Error ? error.message : "SQLite dry-run 校验失败")
+      };
+    }
+  }
+
+  private resolveSqliteFilePath(datasource: {
+    id: string;
+    config?: Record<string, unknown> | string | null;
+  }): string | undefined {
+    if (datasource.id === "sqlite_main") {
+      return this.sqliteQuery?.dbPath;
+    }
+
+    const config =
+      datasource.config && typeof datasource.config === "object"
+        ? datasource.config
+        : undefined;
+    const filePath =
+      config && typeof config.path === "string" ? config.path.trim() : "";
+    return filePath || undefined;
+  }
+
+  private asDomainError(error: unknown): DomainError | undefined {
+    return error instanceof DomainError ? error : undefined;
   }
 
   private selectPrimaryFailure(failures: SqlValidationCheckV1[]): SqlValidationCheckV1 {

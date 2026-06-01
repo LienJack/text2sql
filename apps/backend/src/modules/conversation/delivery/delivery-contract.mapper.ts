@@ -59,7 +59,16 @@ interface RetrievalFusedSnapshot {
     chunkId: string;
     sourceLane?: string;
     domain?: string;
+    assetFamily?: string;
+    manifestFingerprint?: string;
+    lifecycleState?: string;
   }>;
+  preparationPlane?: {
+    manifestFingerprints: string[];
+    assetFamilyCounts: Record<string, number>;
+    permissionFilteredAssetCount: number;
+    twoPassSchemaRecallApplied: boolean;
+  };
   skillContextSummary?: {
     skillCount: number;
     contextCount: number;
@@ -139,6 +148,7 @@ type DeliveryEvidenceWithContext = NonNullable<DeliveryContract["evidence"]> & {
   conflictHint?: ContextConflictHint;
   sqlCoverage?: SqlCoverageEvidenceSnapshot;
   savedPriorSql?: SavedPriorSqlEvidenceSnapshot;
+  preparationPlane?: RetrievalFusedSnapshot["preparationPlane"];
 };
 
 interface SandboxPostProcessOutcome {
@@ -245,6 +255,7 @@ export class DeliveryContractMapper {
         semanticSnapshot.semanticDegradeReason ??
         finalSnapshot.contextPackDegradeReasons?.at(0),
       skillContextSummary: fusedSnapshot.skillContextSummary,
+      preparationPlane: fusedSnapshot.preparationPlane,
       evidenceStale: evidenceStale || undefined,
       effectiveContextSummary: traceContextEvidence.effectiveContextSummary,
       conflictHint: traceContextEvidence.conflictHint,
@@ -579,17 +590,56 @@ export class DeliveryContractMapper {
         return {
           chunkId,
           sourceLane: this.readString(item.sourceLane ?? item.source_lane),
-          domain: this.readString(item.domain)
+          domain: this.readString(item.domain),
+          assetFamily: this.readString(item.assetFamily ?? item.asset_family),
+          manifestFingerprint: this.readString(
+            item.manifestFingerprint ?? item.manifest_fingerprint
+          ),
+          lifecycleState: this.readString(item.lifecycleState ?? item.lifecycle_state)
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
     const skillContextSummary = this.readSkillContextSummary(
       payload.skillContext ?? payload.skill_context
     );
+    const permissionFiltering = this.readRecord(
+      payload.permissionFiltering ?? payload.permission_filtering
+    );
+    const twoPassSchemaRecall = this.readRecord(
+      payload.twoPassSchemaRecall ?? payload.two_pass_schema_recall
+    );
+    const assetFamilyCounts = candidates.reduce<Record<string, number>>(
+      (accumulator, candidate) => {
+        if (candidate.assetFamily) {
+          accumulator[candidate.assetFamily] =
+            (accumulator[candidate.assetFamily] ?? 0) + 1;
+        }
+        return accumulator;
+      },
+      {}
+    );
+    const manifestFingerprints = this.unique(
+      candidates
+        .map((candidate) => candidate.manifestFingerprint)
+        .filter((item): item is string => Boolean(item))
+    );
+    const preparationPlane =
+      manifestFingerprints.length > 0 || Object.keys(assetFamilyCounts).length > 0
+        ? {
+            manifestFingerprints,
+            assetFamilyCounts,
+            permissionFilteredAssetCount: this.readNonNegativeInt(
+              permissionFiltering?.filteredCount ?? permissionFiltering?.filtered_count
+            ),
+            twoPassSchemaRecallApplied:
+              this.readString(twoPassSchemaRecall?.status) === "applied"
+          }
+        : undefined;
 
     return {
       status,
       candidates,
+      preparationPlane,
       skillContextSummary
     };
   }

@@ -28,6 +28,17 @@ export interface RagRetrievalChunkMetadata {
   indexVersionId: string;
   chunkId: string;
   domain: string;
+  assetFamily?: string;
+  manifestFingerprint?: string;
+  manifestEntryId?: string;
+  sourceRef?: unknown;
+  sourceVersion?: string;
+  policyVersion?: string;
+  modelingRevision?: number;
+  visibilityScope?: string;
+  preparationStatus?: string;
+  reasonCodes?: string[];
+  lifecycleState?: "retrieved" | "selected" | "pruned" | "filtered" | "unused";
   chunkProfile?: string;
   startOffset?: number;
   endOffset?: number;
