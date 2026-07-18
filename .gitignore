@@ -2,6 +2,7 @@
 /data/*
 /vibe/*
 /docs/*
+!/docs/text2sql-project-architecture-business-flow-review.md
 # Node / monorepo artifacts
 node_modules/
 dist/
