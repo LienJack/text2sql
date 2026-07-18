@@ -148,6 +148,37 @@ describe("Text2SqlV2ArtifactRefService", () => {
       ruleIds: ["prompt-template-overlay"],
       status: "applied"
     };
+    run.trace.v2!.accuracy = {
+      version: "text2sql-accuracy-evidence.v1",
+      gateReceipts: [
+        {
+          version: "accuracy-gate-receipt.v1",
+          receiptId: "accuracy-gate:intent:test",
+          receiptDigest: "accuracy-gate-digest-test",
+          runId: run.runId,
+          queryContractDigest: "query-contract-test",
+          sqlDigest: "sql-digest-test",
+          versions: {
+            questionSet: "q1",
+            semantic: "s1",
+            schema: "sc1",
+            policy: "p1",
+            data: "d1",
+            model: "m1",
+            prompt: "pr1",
+            workflow: "w1",
+            code: "c1"
+          },
+          gate: "intent",
+          status: "passed",
+          capability: "available",
+          reasonCodes: [],
+          evidenceRefs: [],
+          parentReceiptDigests: [],
+          issuedAt: "2026-07-17T00:00:00.000Z"
+        }
+      ]
+    };
 
     const withRefs = await service.attachRunArtifactRefs(run, "ds-main");
 

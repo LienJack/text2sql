@@ -29,6 +29,29 @@ export class ExecuteSqlNode {
     private readonly sqlValidationService?: SqlValidationService
   ) {}
 
+  async preflight(input: {
+    sql: string;
+    datasourceId: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }) {
+    const datasource = await this.datasourceService.getDatasourceById(input.datasourceId);
+    if (!datasource || datasource.status !== "available") {
+      throw new DomainError(
+        "DATASOURCE_UNAVAILABLE",
+        "Datasource is unavailable for EXPLAIN preflight.",
+        409,
+        { datasourceId: input.datasourceId }
+      );
+    }
+    return this.queryExecutorRouter.explain({
+      datasource,
+      sql: input.sql,
+      abortSignal: input.abortSignal,
+      timeoutMs: input.timeoutMs
+    });
+  }
+
   async run(input: {
     sql: string;
     sqlArtifact?: StructuredSqlGenerationArtifact;
@@ -37,6 +60,7 @@ export class ExecuteSqlNode {
     requestId?: string;
     accessContext?: SqlTableAccessContext;
     semanticPlan?: SemanticPlanV1;
+    abortSignal?: AbortSignal;
   }): Promise<{
     rows: Array<Record<string, unknown>>;
     columns: string[];
@@ -71,6 +95,12 @@ export class ExecuteSqlNode {
       ? {
           ...accessContext,
           evaluatorMode: policyResult?.mode ?? accessContext.evaluatorMode,
+          workspaceDatasourceBindingId:
+            policyResult?.workspaceDatasourceBindingId ??
+            accessContext.workspaceDatasourceBindingId,
+          policyVersion: policyResult?.policyVersion ?? accessContext.policyVersion,
+          policyDigest: policyResult?.policyDigest ?? accessContext.policyDigest,
+          allowedTables: policyResult?.readableTables ?? accessContext.allowedTables,
           allowedColumnsByTable: policyResult?.allowedColumnsByTable ?? {},
           rowFiltersByTable: policyResult?.rowFiltersByTable ?? {}
         }
@@ -128,7 +158,8 @@ export class ExecuteSqlNode {
               accessContext: effectiveAccessContext,
               allowedTables: policyResult?.readableTables
             }
-          : undefined
+          : undefined,
+        abortSignal: input.abortSignal
       });
     } catch (error) {
       if (this.isTablePermissionsGuardError(error) && effectiveAccessContext) {
@@ -204,6 +235,9 @@ export class ExecuteSqlNode {
     datasourceId: string
   ): Promise<{
     mode: "workspace_table_permissions";
+    workspaceDatasourceBindingId: string;
+    policyVersion: number;
+    policyDigest: string;
     readableTables: string[];
     allowedColumnsByTable: Record<string, string[]>;
     rowFiltersByTable: Record<string, string>;
@@ -218,6 +252,9 @@ export class ExecuteSqlNode {
     });
     return {
       mode: resolved.mode,
+      workspaceDatasourceBindingId: resolved.workspaceDatasourceBindingId,
+      policyVersion: resolved.policyVersion,
+      policyDigest: resolved.policyDigest,
       readableTables: resolved.readableTables,
       allowedColumnsByTable: resolved.allowedColumnsByTable,
       rowFiltersByTable: resolved.rowFiltersByTable

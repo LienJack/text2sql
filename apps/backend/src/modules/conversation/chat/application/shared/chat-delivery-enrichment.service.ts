@@ -12,6 +12,7 @@ import {
   KNOWLEDGE_FACADE_CONTRACT,
   type KnowledgeFacadeContract
 } from "../../../../knowledge/contracts/knowledge-facade.contract";
+import { buildText2SqlAccuracyDeliverySummary } from "../../../../platform/read-model/text2sql-accuracy-evidence.projection";
 
 @Injectable()
 export class ChatDeliveryEnrichmentService {
@@ -468,6 +469,10 @@ export class ChatDeliveryEnrichmentService {
       runtimePlan: traceV2.runtimePlan,
       artifactRefs: traceV2.artifactRefs,
       smartDefaults: traceV2.smartDefaults,
+      accuracy: buildText2SqlAccuracyDeliverySummary({
+        evidence: traceV2.accuracy,
+        terminationReason: traceV2.terminationReason
+      }),
       loopEvidence: traceV2.loopEvidence,
       terminationReason: traceV2.terminationReason,
       failure:
@@ -479,13 +484,19 @@ export class ChatDeliveryEnrichmentService {
     };
   }
 
-  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+  private toSafeSemanticPlan<
+    T extends { planLedger?: unknown; queryContract?: unknown } | undefined
+  >(
     semanticPlan: T
   ): T {
     if (!semanticPlan) {
       return semanticPlan;
     }
-    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    const {
+      planLedger: _planLedger,
+      queryContract: _queryContract,
+      ...safePlan
+    } = semanticPlan;
     return safePlan as T;
   }
 

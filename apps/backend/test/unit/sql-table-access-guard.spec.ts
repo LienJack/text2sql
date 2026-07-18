@@ -42,19 +42,19 @@ describe("SqlTableAccessGuardService", () => {
     expect(result.tables).toEqual(["public.orders", "crm.customers"]);
   });
 
-  it("fails closed on derived table syntax it cannot fully parse", () => {
+  it("uses AST lineage to resolve derived-table references", () => {
     const result = guard.extractReferencedTables(
       "SELECT * FROM (SELECT * FROM orders) o"
     );
 
-    expect(result.complete).toBe(false);
-    expect(result.reason).toContain("无法穷尽引用表");
+    expect(result.complete).toBe(true);
+    expect(result.tables).toEqual(["orders"]);
   });
 
-  it("returns TABLE_PERMISSIONS_PARSE_REJECTED for incomplete extraction", async () => {
+  it("rejects an unauthorized table hidden in a derived query", async () => {
     await expect(
       guard.assertTableAccess({
-        sql: "SELECT * FROM (SELECT * FROM orders) o",
+        sql: "SELECT id FROM (SELECT id FROM secret_orders) o",
         datasourceId: "sqlite_main",
         accessContext: {
           actorId: "user-1",
@@ -63,7 +63,7 @@ describe("SqlTableAccessGuardService", () => {
         }
       })
     ).rejects.toMatchObject({
-      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
+      code: "TABLE_PERMISSIONS_FORBIDDEN"
     } satisfies Partial<DomainError>);
   });
 
@@ -138,5 +138,27 @@ describe("SqlTableAccessGuardService", () => {
     ).rejects.toMatchObject({
       code: "TABLE_PERMISSIONS_PARSE_REJECTED"
     } satisfies Partial<DomainError>);
+  });
+
+  it("rejects denied columns without exposing their names in the error payload", async () => {
+    const promise = guard.assertTableAccess({
+      sql: "SELECT secret_amount FROM orders",
+      datasourceId: "sqlite_main",
+      accessContext: {
+        actorId: "user-1",
+        workspaceId: "ws-1",
+        allowedTables: ["orders"],
+        allowedColumnsByTable: {
+          orders: ["id"]
+        }
+      }
+    });
+
+    await expect(promise).rejects.toMatchObject({
+      code: "TABLE_PERMISSIONS_FORBIDDEN"
+    } satisfies Partial<DomainError>);
+    await expect(promise).rejects.not.toMatchObject({
+      message: expect.stringContaining("secret_amount")
+    });
   });
 });

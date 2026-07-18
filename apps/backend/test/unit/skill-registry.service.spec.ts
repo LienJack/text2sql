@@ -1,11 +1,12 @@
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
+  createDefaultSkillRegistryFixture,
   SkillRegistryService
 } from "../../src/modules/skill-registry/skill-registry.service";
 
 describe("SkillRegistryService", () => {
   it("returns mapped skills by domain and term lookup", async () => {
-    const service = new SkillRegistryService();
+    const service = createDefaultSkillRegistryFixture();
 
     const result = await service.resolveSkills({
       domain: "semantic_term",
@@ -33,7 +34,7 @@ describe("SkillRegistryService", () => {
   });
 
   it("returns empty context when no binding is matched", async () => {
-    const service = new SkillRegistryService();
+    const service = createDefaultSkillRegistryFixture();
 
     const result = await service.resolveSkills({
       domain: "semantic_term",
@@ -50,7 +51,7 @@ describe("SkillRegistryService", () => {
   });
 
   it("returns controlled degradation when registry lookup throws", async () => {
-    const service = new SkillRegistryService();
+    const service = createDefaultSkillRegistryFixture();
     jest
       .spyOn(service as unknown as { lookupBindings: () => Promise<unknown> }, "lookupBindings")
       .mockRejectedValue(new Error("registry unavailable"));

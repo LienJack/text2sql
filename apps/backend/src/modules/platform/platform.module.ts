@@ -8,6 +8,8 @@ import { PlatformDataPersistenceModule } from "./data/persistence.module";
 import { PlatformDataQueryModule } from "./data/query.module";
 import { SystemModule } from "../system/system.module";
 import { PlatformChatRuntimeFacade } from "./platform-chat-runtime.facade";
+import { PlatformArtifactsModule } from "./artifacts/platform-artifacts.module";
+import { PlatformDurableModule } from "./durable/platform-durable.module";
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { PlatformChatRuntimeFacade } from "./platform-chat-runtime.facade";
     PlatformDataQueryModule,
     PlatformDataBootstrapModule,
     PlatformLlmModule,
+    PlatformArtifactsModule,
+    PlatformDurableModule,
     EvalModule,
     SystemModule
   ],
@@ -29,6 +33,8 @@ import { PlatformChatRuntimeFacade } from "./platform-chat-runtime.facade";
     PlatformDataQueryModule,
     PlatformDataBootstrapModule,
     PlatformLlmModule,
+    PlatformArtifactsModule,
+    PlatformDurableModule,
     EvalModule,
     SystemModule
   ]

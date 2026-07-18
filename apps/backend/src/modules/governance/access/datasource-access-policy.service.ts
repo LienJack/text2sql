@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Datasource, WorkspaceMemberRole } from "@text2sql/shared-types";
+import { createHash } from "node:crypto";
 import { DomainError } from "../../../common/domain-error";
 import {
   DatasourceRepository,
@@ -23,7 +24,13 @@ export type AccessContext = {
 export type TableAccessDecision = "workspace_allow" | "default_deny";
 
 export type ReadableTableResolution = {
+  actorId: string;
+  workspaceId: string;
   datasourceId: string;
+  workspaceDatasourceBindingId: string;
+  roleSet: AccessRole[];
+  policyVersion: number;
+  policyDigest: string;
   readableTables: string[];
   decisions: Record<string, TableAccessDecision>;
 };
@@ -150,6 +157,16 @@ export class DatasourceAccessPolicyService {
       workspaceId: input.context.workspaceId,
       datasourceId
     });
+    const binding = (
+      await this.policyRepository.listWorkspaceDatasourceBindings(input.context.workspaceId)
+    ).find((item) => item.datasourceId === datasourceId);
+    if (!binding) {
+      throw new DomainError(
+        "DATASOURCE_ACCESS_DENIED",
+        "当前工作空间未绑定该数据源或 actor 无访问权限。",
+        403
+      );
+    }
     const allowedTableSet = new Set(this.normalizeTableNames(state.tableNames));
     const candidateTables =
       input.candidateTables && input.candidateTables.length > 0
@@ -166,8 +183,29 @@ export class DatasourceAccessPolicyService {
       }
     }
 
+    const roleSet = [...input.context.roleSet].sort();
+    const policyDigest = createHash("sha256")
+      .update(
+        JSON.stringify({
+          actorId: input.context.actorId,
+          workspaceId: input.context.workspaceId,
+          datasourceId,
+          workspaceDatasourceBindingId: binding.id,
+          roleSet,
+          policyVersion: state.policyVersion,
+          readableTables: [...readableTables].sort()
+        })
+      )
+      .digest("hex");
+
     return {
+      actorId: input.context.actorId,
+      workspaceId: input.context.workspaceId,
       datasourceId,
+      workspaceDatasourceBindingId: binding.id,
+      roleSet,
+      policyVersion: state.policyVersion,
+      policyDigest,
       readableTables,
       decisions
     };

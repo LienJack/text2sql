@@ -48,6 +48,7 @@ describe("memory promotion audit integration", () => {
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
     process.env.LLM_MOCK_MODE = "true";
+    process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE = "true";
 
     moduleRef = await Test.createTestingModule({
       imports: [AppModule]
@@ -68,6 +69,7 @@ describe("memory promotion audit integration", () => {
     if (cleanupFixture) {
       await cleanupFixture();
     }
+    delete process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE;
   });
 
   it("writes auditable promotion transition and replay linkage", async () => {

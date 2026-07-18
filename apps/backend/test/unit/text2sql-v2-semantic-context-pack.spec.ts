@@ -261,7 +261,6 @@ describe("text2sql v2 semantic context pack", () => {
       deniedEvidenceIds: ["chunk-secret-orders"],
       deniedEvidenceCount: 1,
       deniedTables: ["secret_orders"],
-      deniedColumns: ["secret_orders.internal_note"],
       reasonCodes: ["permission_filtered_not_in_allowed_tables"]
     });
     expect(pack.warnings).toEqual(
@@ -280,7 +279,6 @@ describe("text2sql v2 semantic context pack", () => {
         "permission_filter_status:applied",
         "permission_filter_reason:permission_filtered_not_in_allowed_tables",
         "permission_denied_table:secret_orders",
-        "permission_denied_column:secret_orders.internal_note",
         "permission_denied_evidence_count:1",
         "context_source_disclosure:retrieval_bundle"
       ])
@@ -301,5 +299,57 @@ describe("text2sql v2 semantic context pack", () => {
     expect(pack.selectedEvidenceIds).toHaveLength(64);
     expect(new Set(pack.selectedEvidenceIds).size).toBe(64);
     expect(pack.selectedContextSummary?.evidenceIds.length).toBeLessThanOrEqual(24);
+  });
+
+  it("binds policy/schema identity and fails closure when mandatory evidence was pruned", () => {
+    const pack = service.build({
+      retrievalBundle: {
+        status: "ready",
+        selected_context: [
+          {
+            chunk_id: "schema-orders",
+            metadata: {
+              tableNames: ["orders", "customers"],
+              columnNames: ["orders.customer_id", "customers.id"]
+            }
+          }
+        ],
+        permission_filtering: { status: "applied" },
+        context_pack: {
+          policy_version: 3,
+          policy_digest: "policy-3",
+          schema_snapshot_id: "snapshot-3",
+          schema_snapshot_digest: "schema-3",
+          allowed_columns_digest: "columns-3",
+          semantic_bindings: {
+            relationship_keys: ["rel.orders-customers"],
+            metric_keys: ["metric.revenue"]
+          },
+          permission_filtering: { status: "applied" },
+          pruning_decisions: [
+            {
+              removed_evidence_ids: ["metric.revenue"],
+              reason_codes: ["token_budget"]
+            }
+          ]
+        }
+      }
+    });
+
+    expect(pack.groundingIdentity).toEqual({
+      status: "ready",
+      policyVersion: 3,
+      policyDigest: "policy-3",
+      schemaSnapshotId: "snapshot-3",
+      schemaSnapshotDigest: "schema-3",
+      allowedColumnsDigest: "columns-3",
+      reasonCodes: []
+    });
+    expect(pack.dependencyClosure).toMatchObject({
+      status: "missing",
+      joinClosure: ["rel.orders-customers"],
+      mandatoryEvidenceRefs: ["rel.orders-customers", "metric.revenue"],
+      reasonCodes: ["mandatory_dependency_pruned"]
+    });
   });
 });

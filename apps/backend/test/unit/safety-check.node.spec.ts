@@ -64,7 +64,7 @@ describe("SafetyCheckNode", () => {
     });
   });
 
-  it("surfaces TABLE_PERMISSIONS_PARSE_REJECTED for unsupported table extraction pattern", async () => {
+  it("uses AST extraction to authorize nested subqueries and still rejects inner unauthorized tables", async () => {
     await expect(
       node.run({
         sql: "SELECT * FROM (SELECT * FROM orders) o",
@@ -76,11 +76,27 @@ describe("SafetyCheckNode", () => {
         }
       })
     ).resolves.toMatchObject({
+      allowed: true,
+      mode: "pass",
+      riskLevel: "low",
+      riskTags: []
+    });
+
+    await expect(
+      node.run({
+        sql: "SELECT * FROM (SELECT * FROM users) u",
+        datasourceId: "sqlite_main",
+        accessContext: {
+          actorId: "user-1",
+          workspaceId: "ws-1",
+          allowedTables: ["orders"]
+        }
+      })
+    ).resolves.toMatchObject({
       allowed: false,
       mode: "hard-block",
       riskLevel: "high",
-      riskTags: ["table_access_denied"],
-      reason: expect.stringContaining("无法穷尽引用表")
+      riskTags: ["table_access_denied"]
     });
   });
 });

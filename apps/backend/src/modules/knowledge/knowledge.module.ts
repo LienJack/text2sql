@@ -20,19 +20,23 @@ import {
   type KnowledgeSemanticRegistryContract
 } from "./contracts/knowledge-semantic-registry.contract";
 import { GlossaryModule } from "./glossary/glossary.module";
+import { KnowledgeAssetModule } from "./assets/knowledge-asset.module";
 import { KnowledgeChatSupportFacade } from "./knowledge-chat-support.facade";
 import { MemoryModule } from "./memory/memory.module";
 import { RagModule } from "./rag/rag.module";
+import { ResearchModule } from "./research/research.module";
 import { SemanticSpineModule } from "./semantic-spine/semantic-spine.module";
 import { SemanticRegistryModule } from "./semantic-registry/semantic-registry.module";
 
 @Module({
   imports: [
     RagModule,
+    ResearchModule,
     SemanticRegistryModule,
     SemanticSpineModule,
     GlossaryModule,
-    MemoryModule
+    MemoryModule,
+    KnowledgeAssetModule
   ],
   providers: [
     KnowledgeChatSupportFacade,
@@ -76,7 +80,9 @@ import { SemanticRegistryModule } from "./semantic-registry/semantic-registry.mo
     KNOWLEDGE_GLOSSARY_CONTRACT,
     KNOWLEDGE_SEMANTIC_REGISTRY_CONTRACT,
     KNOWLEDGE_MEMORY_CONTRACT,
-    SemanticSpineModule
+    SemanticSpineModule,
+    ResearchModule,
+    KnowledgeAssetModule
   ]
 })
 export class KnowledgeModule {}

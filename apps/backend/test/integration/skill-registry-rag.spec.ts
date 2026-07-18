@@ -6,7 +6,8 @@ import { RagIndexRepository } from "../../src/modules/rag/index/rag-index.reposi
 import { RagRetrievalService } from "../../src/modules/rag/retrieval/rag-retrieval.service";
 import {
   SKILL_REGISTRY_UNAVAILABLE_REASON,
-  SkillRegistryService
+  SkillRegistryService,
+  createDefaultSkillRegistryFixture
 } from "../../src/modules/skill-registry/skill-registry.service";
 
 describe("skill registry + rag retrieval integration", () => {
@@ -22,9 +23,13 @@ describe("skill registry + rag retrieval integration", () => {
   });
 
   it("injects skill context into retrieval bundle when term mapping is available", async () => {
-    const moduleRef = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
       imports: [AppModule]
-    }).compile();
+    });
+    builder
+      .overrideProvider(SkillRegistryService)
+      .useValue(createDefaultSkillRegistryFixture());
+    const moduleRef = await builder.compile();
 
     const indexRepository = moduleRef.get(RagIndexRepository);
     const indexBuilder = moduleRef.get(RagIndexBuilderService);
@@ -77,9 +82,13 @@ describe("skill registry + rag retrieval integration", () => {
   });
 
   it("keeps retrieval available and adds degrade reason when skill registry is unavailable", async () => {
-    const moduleRef = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
       imports: [AppModule]
-    }).compile();
+    });
+    builder
+      .overrideProvider(SkillRegistryService)
+      .useValue(createDefaultSkillRegistryFixture());
+    const moduleRef = await builder.compile();
 
     const indexRepository = moduleRef.get(RagIndexRepository);
     const indexBuilder = moduleRef.get(RagIndexBuilderService);

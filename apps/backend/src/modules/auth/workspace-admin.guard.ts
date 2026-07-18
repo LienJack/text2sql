@@ -12,9 +12,6 @@ type RequestLike = {
   params?: Record<string, unknown>;
   body?: Record<string, unknown>;
   query?: Record<string, unknown>;
-  header?: (name: string) => string | undefined;
-  headers?: Record<string, string | string[] | undefined>;
-  rawHeaders?: string[];
 };
 
 const ID_KEYS = ["workspaceId", "workspaceID", "workspace_id", "workspace", "id"] as const;
@@ -77,24 +74,7 @@ export class WorkspaceAdminGuard implements CanActivate {
 
   private isSystemAdmin(request: RequestLike): boolean {
     const actorRole = request.actor?.role?.toLowerCase();
-    if (request.actor?.isSystemAdmin || actorRole === "admin") {
-      return true;
-    }
-    const headerValue =
-      request.header?.("x-user-role") ??
-      request.headers?.["x-user-role"] ??
-      request.headers?.["X-User-Role"];
-    const roleFromHeader = normalizeValue(headerValue)?.toLowerCase();
-    if (roleFromHeader === "admin") {
-      return true;
-    }
-    const rawHeaders = request.rawHeaders ?? [];
-    for (let index = 0; index < rawHeaders.length; index += 2) {
-      if (rawHeaders[index]?.toLowerCase() === "x-user-role") {
-        return rawHeaders[index + 1]?.toLowerCase() === "admin";
-      }
-    }
-    return false;
+    return Boolean(request.actor?.isSystemAdmin || actorRole === "admin");
   }
 
   private resolveWorkspaceId(request: RequestLike): string | undefined {

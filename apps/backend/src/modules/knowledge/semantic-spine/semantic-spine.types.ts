@@ -21,6 +21,8 @@ export interface SemanticSpineRelationshipDefinition {
   toModel: string;
   relationshipType?: string;
   condition?: string;
+  cardinality?: "one_to_one" | "one_to_many" | "many_to_one" | "many_to_many";
+  joinConditionEvidenceRefs?: string[];
   binding?: string;
   metadata?: Record<string, unknown>;
 }
@@ -31,6 +33,12 @@ export interface SemanticSpineMetricDefinition {
   model: string;
   expression?: string;
   aggregation?: string;
+  grain?: string;
+  unit?: string;
+  timezone?: string;
+  additivity?: "additive" | "semi_additive" | "non_additive";
+  nullPolicy?: "exclude" | "zero" | "preserve";
+  currency?: string;
   binding: string;
   description?: string;
   metadata?: Record<string, unknown>;

@@ -1,5 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
+import type { DatasourceType } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
+import { SqlDialectAnalyzerService } from "../../platform/data/sql-analysis/sql-dialect-analyzer.service";
 import { RowFilterRewriteService } from "./row-filter-rewrite.service";
 
 const FORBIDDEN_KEYWORDS = [
@@ -23,6 +25,9 @@ export interface SqlTableAccessContext {
   actorId: string;
   workspaceId: string;
   roleSet?: string[];
+  workspaceDatasourceBindingId?: string;
+  policyVersion?: number;
+  policyDigest?: string;
   enforcementMode?: "off" | "shadow" | "enforce";
   allowedTables?: string[];
   allowedColumnsByTable?: Record<string, string[]>;
@@ -44,6 +49,7 @@ export type SqlPolicyLookupResolver = (
 export interface SqlTableAccessCheckInput {
   sql: string;
   datasourceId: string;
+  datasourceType?: DatasourceType;
   accessContext?: SqlTableAccessContext;
   allowedTables?: Iterable<string>;
   resolveAllowedTables?: SqlPolicyLookupResolver;
@@ -65,10 +71,12 @@ export interface SqlTableGuardResult {
 @Injectable()
 export class SqlTableAccessGuardService {
   constructor(
-    private readonly rowFilterRewriteService: RowFilterRewriteService = new RowFilterRewriteService()
+    private readonly rowFilterRewriteService: RowFilterRewriteService = new RowFilterRewriteService(),
+    @Optional()
+    private readonly sqlAnalyzer: SqlDialectAnalyzerService = new SqlDialectAnalyzerService()
   ) {}
 
-  assertReadOnlySql(sql: string): void {
+  assertReadOnlySql(sql: string, datasourceType: DatasourceType = "sqlite"): void {
     const normalized = sql.trim();
     const statementWithoutTailSemicolon = normalized.replace(/;+\s*$/, "");
     if (statementWithoutTailSemicolon.includes(";")) {
@@ -97,54 +105,39 @@ export class SqlTableAccessGuardService {
         );
       }
     }
+    const analysis = this.sqlAnalyzer.analyze({ sql, datasourceType });
+    if (analysis.status === "unavailable") {
+      return;
+    }
+    if (analysis.status !== "ready" || !analysis.readOnly) {
+      throw new DomainError(
+        "SQL_READONLY_REJECTED",
+        "SQL AST 无法证明该语句为单条只读查询，已拒绝。",
+        400,
+        {
+          reasonCode: analysis.diagnostics[0]?.code ?? "SQL_ANALYSIS_NOT_READY"
+        }
+      );
+    }
   }
 
-  extractReferencedTables(sql: string): SqlTableExtractResult {
-    const stripped = this.stripCommentsAndStringLiterals(sql);
-    const fromJoinPattern = /\b(from|join)\b/gi;
-    const derivedFromPattern = /\b(from|join)\s*\(/i;
-    const tableRefPattern = new RegExp(
-      `\\b(from|join)\\b\\s*(${IDENTIFIER_SEGMENT}(?:\\s*\\.\\s*${IDENTIFIER_SEGMENT})*)`,
-      "gi"
-    );
-
-    if (derivedFromPattern.test(stripped)) {
+  extractReferencedTables(
+    sql: string,
+    datasourceType: DatasourceType = "sqlite"
+  ): SqlTableExtractResult {
+    const analysis = this.sqlAnalyzer.analyze({ sql, datasourceType });
+    if (analysis.status !== "ready") {
       return {
         complete: false,
         tables: [],
-        reason: "检测到子查询或派生表 FROM/JOIN 语法，当前保守解析策略无法穷尽引用表。"
+        reason:
+          analysis.diagnostics[0]?.message ??
+          "SQL AST 无法完整解析引用表，已按 fail-closed 策略拒绝。"
       };
     }
-
-    const cteNames = this.extractCteNames(stripped);
-    const allFromJoinKeywords = stripped.match(fromJoinPattern)?.length ?? 0;
-    const tables = new Set<string>();
-    let parsedFromJoinCount = 0;
-    let match: RegExpExecArray | null;
-    while ((match = tableRefPattern.exec(stripped)) !== null) {
-      parsedFromJoinCount += 1;
-      const tableRef = this.normalizeIdentifierChain(match[2] ?? "");
-      if (!tableRef) {
-        continue;
-      }
-      const lastSegment = this.getLastSegment(tableRef);
-      if (cteNames.has(tableRef) || (lastSegment && cteNames.has(lastSegment))) {
-        continue;
-      }
-      tables.add(tableRef);
-    }
-
-    if (parsedFromJoinCount < allFromJoinKeywords) {
-      return {
-        complete: false,
-        tables: [],
-        reason: "检测到无法完整解析的 FROM/JOIN 片段，已按 fail-closed 策略拒绝。"
-      };
-    }
-
     return {
       complete: true,
-      tables: Array.from(tables.values())
+      tables: analysis.tables.map((table) => table.normalizedName)
     };
   }
 
@@ -159,7 +152,24 @@ export class SqlTableAccessGuardService {
       };
     }
 
-    const extraction = this.extractReferencedTables(input.sql);
+    const datasourceType = input.datasourceType ?? "sqlite";
+    const analysis = this.sqlAnalyzer.analyze({ sql: input.sql, datasourceType });
+    if (analysis.status === "unavailable" && accessContext.enforcementMode === "enforce") {
+      throw new DomainError(
+        "TABLE_PERMISSIONS_PARSE_REJECTED",
+        "当前数据源缺少可证明安全的 SQL AST 分析能力，已拒绝执行。",
+        400,
+        {
+          datasourceId: input.datasourceId,
+          workspaceId: accessContext.workspaceId,
+          reasonCode: analysis.diagnostics[0]?.code
+        }
+      );
+    }
+    const extraction =
+      analysis.status === "unavailable"
+        ? this.extractReferencedTablesLegacy(input.sql)
+        : this.extractReferencedTables(input.sql, datasourceType);
     if (!extraction.complete) {
       throw new DomainError(
         "TABLE_PERMISSIONS_PARSE_REJECTED",
@@ -233,11 +243,10 @@ export class SqlTableAccessGuardService {
     }
 
     const columnHookTriggered = this.hasColumnPolicyHook({
-      sql: input.sql,
       referencedTables: extraction.tables,
       allowedColumnsByTable: accessContext.allowedColumnsByTable
     });
-    if (columnHookTriggered && this.containsWildcardProjection(input.sql)) {
+    if (columnHookTriggered && analysis.wildcards.length > 0) {
       throw new DomainError(
         "TABLE_PERMISSIONS_PARSE_REJECTED",
         "检测到列级权限策略与通配符查询组合，当前改写策略无法安全裁剪列集合。",
@@ -248,10 +257,18 @@ export class SqlTableAccessGuardService {
         }
       );
     }
+    if (columnHookTriggered) {
+      this.assertColumnAccess({
+        analysis,
+        referencedTables: extraction.tables,
+        allowedColumnsByTable: accessContext.allowedColumnsByTable
+      });
+    }
 
     const rowFilterRewrite = this.rowFilterRewriteService.rewrite({
       sql: input.sql,
       referencedTables: extraction.tables,
+      datasourceType,
       rowFiltersByTable: accessContext.rowFiltersByTable
     });
     if (!rowFilterRewrite.ok) {
@@ -285,6 +302,28 @@ export class SqlTableAccessGuardService {
     return normalized;
   }
 
+  private extractReferencedTablesLegacy(sql: string): SqlTableExtractResult {
+    const stripped = this.stripCommentsAndStringLiterals(sql);
+    const matches = [
+      ...stripped.matchAll(
+        new RegExp(
+          `\\b(?:from|join)\\b\\s*(${IDENTIFIER_SEGMENT}(?:\\s*\\.\\s*${IDENTIFIER_SEGMENT})*)`,
+          "gi"
+        )
+      )
+    ];
+    const tables = matches
+      .map((match) => this.normalizeIdentifierChain(match[1] ?? ""))
+      .filter((table) => table.length > 0);
+    return {
+      complete: tables.length > 0,
+      tables: Array.from(new Set(tables)),
+      ...(tables.length === 0
+        ? { reason: "legacy file-datasource table extraction failed" }
+        : {})
+    };
+  }
+
   private isTableAllowed(table: string, allowSet: Set<string>): boolean {
     if (allowSet.has(table)) {
       return true;
@@ -297,7 +336,6 @@ export class SqlTableAccessGuardService {
   }
 
   private hasColumnPolicyHook(input: {
-    sql: string;
     referencedTables: string[];
     allowedColumnsByTable?: Record<string, string[]>;
   }): boolean {
@@ -312,6 +350,47 @@ export class SqlTableAccessGuardService {
         (lastSegment ? input.allowedColumnsByTable?.[lastSegment] : undefined);
       return Array.isArray(columns) && columns.length > 0;
     });
+  }
+
+  private assertColumnAccess(input: {
+    analysis: ReturnType<SqlDialectAnalyzerService["analyze"]>;
+    referencedTables: string[];
+    allowedColumnsByTable?: Record<string, string[]>;
+  }): void {
+    const allowedColumnsByTable = input.allowedColumnsByTable ?? {};
+    for (const reference of input.analysis.columns) {
+      if (reference.wildcard) {
+        continue;
+      }
+      const table = reference.table
+        ? this.getLastSegment(reference.table)
+        : input.referencedTables.length === 1
+          ? this.getLastSegment(input.referencedTables[0] ?? "")
+          : undefined;
+      if (!table) {
+        throw new DomainError(
+          "TABLE_PERMISSIONS_PARSE_REJECTED",
+          "列引用无法唯一绑定到授权表，已拒绝执行。",
+          400,
+          { reason: "column_reference_ambiguous" }
+        );
+      }
+      const allowed =
+        allowedColumnsByTable[table] ??
+        allowedColumnsByTable[input.referencedTables.find((item) => this.getLastSegment(item) === table) ?? ""];
+      if (
+        Array.isArray(allowed) &&
+        allowed.length > 0 &&
+        !allowed.map((column) => column.trim().toLowerCase()).includes(reference.name)
+      ) {
+        throw new DomainError(
+          "TABLE_PERMISSIONS_FORBIDDEN",
+          "SQL 引用了当前工作空间未授权的字段。",
+          403,
+          { reason: "column_not_allowed" }
+        );
+      }
+    }
   }
 
   private containsWildcardProjection(sql: string): boolean {

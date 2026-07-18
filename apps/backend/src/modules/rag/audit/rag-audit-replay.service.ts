@@ -1,4 +1,8 @@
-import type { ExecutionTrace } from "@text2sql/shared-types";
+import type {
+  ExecutionTrace,
+  Text2SqlAccuracyDeliverySummaryV1,
+  Text2SqlEvalVersionTupleV1
+} from "@text2sql/shared-types";
 import { Injectable } from "@nestjs/common";
 import { assertSupportedV2RunReadModel } from "../../platform/read-model/run-view-support.guard";
 import {
@@ -8,6 +12,10 @@ import {
 import { RagIndexRepository } from "../index/rag-index.repository";
 import type { RagReplayRecord } from "../observability/rag-replay.repository";
 import { RagReplayRepository } from "../observability/rag-replay.repository";
+import {
+  buildText2SqlAccuracyDeliverySummary,
+  withoutRawAccuracyEvidence
+} from "../../platform/read-model/text2sql-accuracy-evidence.projection";
 
 type GovernanceAuditLog = Awaited<ReturnType<AuditLogRepository["listEvents"]>>[number];
 
@@ -16,6 +24,7 @@ export interface RagAuditReplayQueryInput {
   requestId?: string;
   fromAt?: string;
   toAt?: string;
+  currentAccuracyVersions?: Text2SqlEvalVersionTupleV1;
 }
 
 export interface RagAuditReplayEventRecord {
@@ -65,6 +74,7 @@ export interface RagAuditReplayChain {
   runId: string;
   requestId?: string;
   runTrace?: ExecutionTrace;
+  accuracy?: Text2SqlAccuracyDeliverySummaryV1;
   preparationPlane?: {
     manifestFingerprints: string[];
     activeManifestFingerprint?: string;
@@ -152,11 +162,17 @@ export class RagAuditReplayService {
       resolvedRunId ? this.chatRepository.getRunById(resolvedRunId) : Promise.resolve(undefined)
     ]);
     let runTrace: ExecutionTrace | undefined;
+    let accuracy: Text2SqlAccuracyDeliverySummaryV1 | undefined;
     if (run && requestedRunId) {
       assertSupportedV2RunReadModel(run, {
         unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能回放审计链路。"
       });
-      runTrace = run.trace;
+      accuracy = buildText2SqlAccuracyDeliverySummary({
+        evidence: run.trace.v2?.accuracy,
+        terminationReason: run.trace.v2?.terminationReason,
+        currentVersions: input.currentAccuracyVersions
+      });
+      runTrace = withoutRawAccuracyEvidence(run.trace);
     }
 
     const fromAt = this.parseTimestamp(input.fromAt);
@@ -224,6 +240,7 @@ export class RagAuditReplayService {
       runId: resolvedRunId,
       requestId: requestedRequestId || undefined,
       runTrace,
+      accuracy,
       preparationPlane: this.buildPreparationPlaneSummary(replayRows),
       events,
       generatedAt: new Date().toISOString()

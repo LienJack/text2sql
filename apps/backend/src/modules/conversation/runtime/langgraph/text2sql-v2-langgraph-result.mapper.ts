@@ -173,7 +173,8 @@ export class Text2SqlV2LangGraphResultMapper {
         state.sqlValidationArtifact?.ledgerFulfillment ??
         state.semanticPlan?.planLedger?.summary,
       runtimePlan: this.resolveRuntimePlan(state, stageArtifacts),
-      smartDefaults: state.sqlGenerationArtifact?.smartDefaults
+      smartDefaults: state.sqlGenerationArtifact?.smartDefaults,
+      accuracy: state.accuracyEvidence
     });
   }
 

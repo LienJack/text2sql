@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
+    "predev": "pnpm --filter @text2sql/analysis-task-protocol build && pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
     "dev": "next dev -p 3001",
-    "prebuild": "pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
+    "prebuild": "pnpm --filter @text2sql/analysis-task-protocol build && pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
     "build": "next build",
     "start": "next start -p 3001",
-    "pretest": "pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
+    "pretest": "pnpm --filter @text2sql/analysis-task-protocol build && pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
     "test": "vitest run",
-    "prelint": "pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
+    "prelint": "pnpm --filter @text2sql/analysis-task-protocol build && pnpm --filter @text2sql/shared-types build && pnpm --filter @text2sql/chat-stream-protocol build",
     "lint": "eslint . --max-warnings 0 && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

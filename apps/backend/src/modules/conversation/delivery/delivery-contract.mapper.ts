@@ -19,6 +19,7 @@ import {
   type SandboxPostProcessOperation,
   type SandboxPostProcessRequest
 } from "./sandbox/sandbox-runtime.service";
+import { buildText2SqlAccuracyDeliverySummary } from "../../platform/read-model/text2sql-accuracy-evidence.projection";
 
 export interface DeliveryReplayRecordInput {
   replayKey: string;
@@ -282,6 +283,10 @@ export class DeliveryContractMapper {
               runtimePlan: this.readRuntimePlan(traceV2Artifact.runtimePlan),
               artifactRefs: this.readArtifactRefs(traceV2Artifact.artifactRefs),
               smartDefaults: this.readSmartDefaults(traceV2Artifact.smartDefaults),
+              accuracy: buildText2SqlAccuracyDeliverySummary({
+                evidence: traceV2Artifact.accuracy,
+                terminationReason: traceV2Artifact.terminationReason
+              }),
               loopEvidence: traceV2Artifact.loopEvidence,
               terminationReason: traceV2Artifact.terminationReason,
               failure: this.resolveTraceV2Failure(traceV2Artifact)
@@ -334,13 +339,19 @@ export class DeliveryContractMapper {
     };
   }
 
-  private toSafeSemanticPlan<T extends { planLedger?: unknown } | undefined>(
+  private toSafeSemanticPlan<
+    T extends { planLedger?: unknown; queryContract?: unknown } | undefined
+  >(
     semanticPlan: T
   ): T {
     if (!semanticPlan) {
       return semanticPlan;
     }
-    const { planLedger: _planLedger, ...safePlan } = semanticPlan;
+    const {
+      planLedger: _planLedger,
+      queryContract: _queryContract,
+      ...safePlan
+    } = semanticPlan;
     return safePlan as T;
   }
 

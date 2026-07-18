@@ -38,6 +38,8 @@ type PrismaClientLike = {
 type SessionRow = {
   id: string;
   datasource: string;
+  origin: string;
+  analysisTaskId: string | null;
   workspaceId: string | null;
   createdByUserId: string | null;
   title: string;
@@ -173,11 +175,15 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     statuses?: SessionSyncStatus[];
     datasource?: string;
     workspaceId?: string;
+    origins?: Array<"chat" | "analysis">;
   }): Promise<Session[]> {
     const includeDeleted = options?.includeDeleted ?? false;
     const statusFilter = options?.statuses;
     const datasourceFilter = options?.datasource?.trim() || undefined;
     const workspaceFilter = options?.workspaceId?.trim() || undefined;
+    const originFilter: Array<"chat" | "analysis"> = options?.origins?.length
+      ? options.origins
+      : ["chat"];
 
     const memory = Array.from(this.sessions.values());
     const fromMemory = this.filterAndSortSessions(
@@ -185,7 +191,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
       includeDeleted,
       statusFilter,
       datasourceFilter,
-      workspaceFilter
+      workspaceFilter,
+      originFilter
     );
 
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
@@ -197,7 +204,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
         where: {
           ...(includeDeleted ? {} : { deletedAt: null }),
           ...(datasourceFilter ? { datasource: datasourceFilter } : {}),
-          ...(workspaceFilter ? { workspaceId: workspaceFilter } : {})
+          ...(workspaceFilter ? { workspaceId: workspaceFilter } : {}),
+          origin: { in: originFilter }
         }
       })
     )) as SessionRow[] | null;
@@ -221,7 +229,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
       includeDeleted,
       statusFilter,
       datasourceFilter,
-      workspaceFilter
+      workspaceFilter,
+      originFilter
     );
   }
 
@@ -659,6 +668,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   private withSessionDefaults(session: Session): Session {
     return {
       ...session,
+      origin: session.origin ?? "chat",
+      analysisTaskId: session.analysisTaskId ?? null,
       workspaceId: session.workspaceId ?? null,
       createdByUserId: session.createdByUserId ?? null,
       title: session.title ?? "新会话",
@@ -677,6 +688,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     return {
       id: row.id,
       datasource: row.datasource,
+      origin: row.origin === "analysis" ? "analysis" : "chat",
+      analysisTaskId: row.analysisTaskId,
       workspaceId: row.workspaceId,
       createdByUserId: row.createdByUserId,
       title: row.title,
@@ -698,6 +711,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
   private toSessionWriteData(session: Session): Record<string, unknown> {
     return {
       datasource: session.datasource,
+      origin: session.origin ?? "chat",
+      analysisTaskId: session.analysisTaskId ?? null,
       workspaceId: session.workspaceId ?? null,
       createdByUserId: session.createdByUserId ?? null,
       title: session.title ?? "新会话",
@@ -885,7 +900,8 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
     includeDeleted: boolean,
     statuses?: SessionSyncStatus[],
     datasource?: string,
-    workspaceId?: string
+    workspaceId?: string,
+    origins: Array<"chat" | "analysis"> = ["chat"]
   ): Session[] {
     const filtered = sessions.filter((session) => {
       if (!includeDeleted && session.deletedAt) {
@@ -895,6 +911,9 @@ export class ChatRepository implements OnModuleInit, OnModuleDestroy {
         return false;
       }
       if (workspaceId && session.workspaceId !== workspaceId) {
+        return false;
+      }
+      if (!origins.includes(session.origin ?? "chat")) {
         return false;
       }
       if (!statuses || statuses.length === 0) {

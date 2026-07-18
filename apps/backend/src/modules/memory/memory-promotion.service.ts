@@ -1,6 +1,11 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import type { RagMemoryFeedbackResponse, RagMemoryStatus, SqlRun } from "@text2sql/shared-types";
 import { DomainError } from "../../common/domain-error";
+import { AppConfigService } from "../config/app-config.service";
+import {
+  KNOWLEDGE_ASSET_CONTRACT,
+  type KnowledgeAssetContract
+} from "../knowledge";
 import { AuditLogRepository, ChatRepository } from "../platform/data/persistence/index";
 import { RagReplayRepository } from "../knowledge/rag/observability/rag-replay.repository";
 import {
@@ -50,7 +55,11 @@ export class MemoryPromotionService {
     private readonly policy: MemoryPromotionPolicy,
     private readonly chatRepository: ChatRepository,
     private readonly auditLogRepository: AuditLogRepository,
-    private readonly ragReplayRepository: RagReplayRepository
+    private readonly ragReplayRepository: RagReplayRepository,
+    private readonly config: AppConfigService,
+    @Optional()
+    @Inject(KNOWLEDGE_ASSET_CONTRACT)
+    private readonly knowledgeAssets?: KnowledgeAssetContract
   ) {}
 
   async promoteFromRun(input: {
@@ -58,6 +67,9 @@ export class MemoryPromotionService {
     datasourceId: string;
     requestId?: string;
   }): Promise<MemoryPromotionResult> {
+    if (this.usesGovernedAssets()) {
+      return this.createGovernedCandidate(input);
+    }
     const now = new Date().toISOString();
     const candidateId = this.policy.buildCandidateId({
       datasourceId: input.datasourceId,
@@ -169,6 +181,9 @@ export class MemoryPromotionService {
   }
 
   getRecord(candidateId: string): MemoryPromotionRecord | undefined {
+    if (this.usesGovernedAssets()) {
+      return undefined;
+    }
     const record = this.records.get(candidateId);
     if (!record) {
       return undefined;
@@ -182,6 +197,9 @@ export class MemoryPromotionService {
   }
 
   listCompensations(): MemoryCompensationEntry[] {
+    if (this.usesGovernedAssets()) {
+      return [];
+    }
     return Array.from(this.compensations.values()).map((item) => ({
       ...item
     }));
@@ -217,6 +235,23 @@ export class MemoryPromotionService {
       throw new DomainError("RUN_NOT_FOUND", "运行记录不存在", 404, {
         runId: input.runId
       });
+    }
+
+    if (this.usesGovernedAssets()) {
+      const candidate = await this.createGovernedCandidate({
+        run,
+        datasourceId: session.datasource,
+        requestId: input.requestId
+      });
+      return {
+        runId: run.runId,
+        candidateId: candidate.candidateId,
+        beforeStatus: "candidate",
+        afterStatus: "candidate",
+        applied: false,
+        note: input.note?.trim() || "governed_candidate_requires_independent_evidence",
+        updatedAt: new Date().toISOString()
+      };
     }
 
     const candidateId = this.buildCandidateIdForRun({
@@ -316,6 +351,76 @@ export class MemoryPromotionService {
       return [];
     }
     return value.filter((item): item is string => typeof item === "string");
+  }
+
+  private async createGovernedCandidate(input: {
+    run: SqlRun;
+    datasourceId: string;
+    requestId?: string;
+  }): Promise<MemoryPromotionResult> {
+    if (!this.knowledgeAssets?.isReady()) {
+      throw new DomainError(
+        "ANALYSIS_CANONICAL_STORE_REQUIRED",
+        "Governed Memory/Skill 需要可用的 PostgreSQL canonical store。",
+        503
+      );
+    }
+    const session = await this.chatRepository.getSessionById(input.run.sessionId);
+    const workspaceId = session?.workspaceId?.trim();
+    if (!session || !workspaceId || !this.knowledgeAssets) {
+      throw new DomainError(
+        "KNOWLEDGE_ASSET_WORKSPACE_REQUIRED",
+        "生产 Memory candidate 需要可信 workspace scope。",
+        409
+      );
+    }
+    const candidateKey = this.policy.buildCandidateId({
+      datasourceId: input.datasourceId,
+      sessionId: input.run.sessionId,
+      question: input.run.question,
+      sql: input.run.sql
+    });
+    const idempotencyKey = `memory-candidate:${candidateKey}`;
+    const asset = await this.knowledgeAssets.createCandidate({
+      workspaceId,
+      assetKind: "memory",
+      assetKey: candidateKey,
+      scope: { type: "datasource", ref: input.datasourceId },
+      authority: {
+        level: "workspace_member",
+        actorId: session.createdByUserId ?? "system:post-run-hook"
+      },
+      content: {
+        datasourceId: input.datasourceId,
+        semanticType: "verified_sql",
+        canonicalKey: candidateKey,
+        question: input.run.question,
+        sql: input.run.sql ?? null,
+        confidence: 1,
+        sourceRunId: input.run.runId
+      },
+      sourceRefs: [`run:${input.run.runId}`],
+      capabilityCeiling: [],
+      evaluation: {
+        independentEvidenceRefs: [`run:${input.run.runId}`],
+        riskTags: this.extractRiskTags(input.run)
+      },
+      idempotencyKey
+    });
+    return {
+      candidateId: asset.id,
+      state: "held",
+      beforeStatus: "candidate",
+      afterStatus: "candidate",
+      rejectionReasons: ["governed_candidate_requires_independent_evidence"],
+      idempotencyKey
+    };
+  }
+
+  private usesGovernedAssets(): boolean {
+    return Boolean(
+      this.knowledgeAssets && !this.config.knowledgeAssetLegacyFixtureMode
+    );
   }
 
   private resolveFeedbackStatusTransition(

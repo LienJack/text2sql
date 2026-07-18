@@ -37,7 +37,9 @@ import { SemanticContextPackService } from "../adapters/semantic-context-pack.se
 import { SemanticPlanService } from "../adapters/semantic-plan.service";
 import { SemanticPlanValidator } from "../adapters/semantic-plan.validator";
 import { SqlValidationService } from "../adapters/sql-validation.service";
+import { ResultValidationService } from "../adapters/result-validation.service";
 import { SqlCorrectionService } from "../adapters/sql-correction.service";
+import { SqlRepairService } from "../adapters/sql-repair.service";
 import { Text2SqlV2ArtifactBuilder } from "../artifacts/text2sql-v2-artifact-builder";
 import { Text2SqlV2ArtifactRefService } from "../artifacts/text2sql-v2-artifact-ref.service";
 import { Text2SqlV2LangGraphResultMapper } from "../runtime/langgraph/text2sql-v2-langgraph-result.mapper";
@@ -101,7 +103,9 @@ import { ValidateSqlNode as LangGraphValidateSqlNode } from "../nodes/validate-s
     SemanticPlanService,
     SemanticPlanValidator,
     SqlValidationService,
+    ResultValidationService,
     SqlCorrectionService,
+    SqlRepairService,
     Text2SqlV2ArtifactRefService,
     Text2SqlSmartDefaultsService,
     LangGraphIntakeNode,

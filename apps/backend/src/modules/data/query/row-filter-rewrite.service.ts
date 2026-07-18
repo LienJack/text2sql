@@ -1,8 +1,11 @@
 import { Injectable } from "@nestjs/common";
+import type { DatasourceType } from "@text2sql/shared-types";
+import { SqlDialectAnalyzerService } from "../../platform/data/sql-analysis/sql-dialect-analyzer.service";
 
 export type RowFilterRewriteInput = {
   sql: string;
   referencedTables: string[];
+  datasourceType?: DatasourceType;
   rowFiltersByTable?: Record<string, string>;
 };
 
@@ -19,6 +22,10 @@ export type RowFilterRewriteResult =
 
 @Injectable()
 export class RowFilterRewriteService {
+  constructor(
+    private readonly sqlAnalyzer: SqlDialectAnalyzerService = new SqlDialectAnalyzerService()
+  ) {}
+
   rewrite(input: RowFilterRewriteInput): RowFilterRewriteResult {
     const tableFilters = this.resolveFilters(
       input.referencedTables,
@@ -41,6 +48,21 @@ export class RowFilterRewriteService {
       return {
         ok: false,
         reason: "检测到多条行过滤条件，当前策略无法安全合并。"
+      };
+    }
+
+    const datasourceType = input.datasourceType ?? "sqlite";
+    const originalAnalysis = this.sqlAnalyzer.analyze({
+      sql: input.sql,
+      datasourceType
+    });
+    if (
+      originalAnalysis.status !== "ready" ||
+      originalAnalysis.lineage.subqueryCount > 0
+    ) {
+      return {
+        ok: false,
+        reason: "SQL AST 无法证明当前行权限改写是安全的。"
       };
     }
 
@@ -67,6 +89,21 @@ export class RowFilterRewriteService {
     const rewrittenSql = hasWhere
       ? this.appendToExistingWhere(normalizedSql, rowFilter, clauseBoundaryIndex)
       : this.insertWhereClause(normalizedSql, rowFilter, clauseBoundaryIndex);
+
+    const rewrittenAnalysis = this.sqlAnalyzer.analyze({
+      sql: rewrittenSql,
+      datasourceType
+    });
+    if (
+      rewrittenAnalysis.status !== "ready" ||
+      rewrittenAnalysis.tables.map((table) => table.normalizedName).join("|") !==
+        originalAnalysis.tables.map((table) => table.normalizedName).join("|")
+    ) {
+      return {
+        ok: false,
+        reason: "行权限改写后的 SQL 无法通过等价结构校验。"
+      };
+    }
 
     return {
       ok: true,

@@ -11,6 +11,10 @@ import { DatasourceService } from "../../../governance/datasource/datasource.ser
 import { RedisBufferService } from "../../../platform/data/cache/index";
 import { ChatRepository } from "../../../platform/data/persistence/index";
 import {
+  DatasourceSchemaSnapshotService,
+  type DatasourceSchemaSnapshotV1
+} from "../../../platform/data/query/index";
+import {
   ChatPolicyGuardService,
   type ChatPolicyActorInput,
   type ChatSqlAccessContext
@@ -29,6 +33,11 @@ export interface Text2SqlPreparedRunContext {
   session: Session;
   datasource: Datasource;
   sqlAccessContext?: ChatSqlAccessContext;
+  schemaGrounding: {
+    status: "ready" | "unavailable";
+    snapshot?: DatasourceSchemaSnapshotV1;
+    reasonCodes: string[];
+  };
   question: string;
   requestId?: string;
   contextEnvelope?: ContextEnvelope;
@@ -43,7 +52,8 @@ export class PrepareRunStage {
     private readonly datasourceService: DatasourceService,
     private readonly redisBuffer: RedisBufferService,
     private readonly repository: ChatRepository,
-    private readonly chatPolicyGuardService: ChatPolicyGuardService
+    private readonly chatPolicyGuardService: ChatPolicyGuardService,
+    private readonly schemaSnapshotService: DatasourceSchemaSnapshotService
   ) {}
 
   async run(input: Text2SqlPrepareRunInput): Promise<Text2SqlPreparedRunContext> {
@@ -62,6 +72,10 @@ export class PrepareRunStage {
       session,
       input.actor
     );
+    const schemaGrounding = await this.captureSchemaGrounding({
+      datasource,
+      sqlAccessContext
+    });
 
     const userMessage: ChatMessage = {
       id: uuidv4(),
@@ -83,10 +97,56 @@ export class PrepareRunStage {
       session,
       datasource,
       sqlAccessContext,
+      schemaGrounding,
       question: input.message,
       requestId: input.requestId,
       contextEnvelope: input.contextEnvelope,
       userPersistResult
     };
+  }
+
+  private async captureSchemaGrounding(input: {
+    datasource: Datasource;
+    sqlAccessContext?: ChatSqlAccessContext;
+  }): Promise<Text2SqlPreparedRunContext["schemaGrounding"]> {
+    if (!input.sqlAccessContext) {
+      return {
+        status: "unavailable",
+        reasonCodes: ["policy_receipt_unavailable"]
+      };
+    }
+    if (input.sqlAccessContext.allowedTables.length === 0) {
+      return {
+        status: "unavailable",
+        reasonCodes: ["allowed_schema_empty"]
+      };
+    }
+    try {
+      const snapshot = await this.schemaSnapshotService.capture({
+        datasource: input.datasource,
+        policy: {
+          workspaceId: input.sqlAccessContext.workspaceId,
+          datasourceId: input.datasource.id,
+          workspaceDatasourceBindingId:
+            input.sqlAccessContext.workspaceDatasourceBindingId,
+          policyVersion: input.sqlAccessContext.policyVersion,
+          policyDigest: input.sqlAccessContext.policyDigest,
+          allowedTables: input.sqlAccessContext.allowedTables
+        }
+      });
+      input.sqlAccessContext.allowedColumnsByTable = {
+        ...snapshot.allowedSchemaSet.columnsByTable
+      };
+      return { status: "ready", snapshot, reasonCodes: [] };
+    } catch (error) {
+      return {
+        status: "unavailable",
+        reasonCodes: [
+          error instanceof DomainError
+            ? error.code.toLowerCase()
+            : "schema_snapshot_unavailable"
+        ]
+      };
+    }
   }
 }

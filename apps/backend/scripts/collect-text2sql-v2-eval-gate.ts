@@ -52,7 +52,7 @@ interface NoLegacyGateSnapshot extends GateSnapshot {
   scannedCount: number;
 }
 
-interface Text2SqlV2CloseoutGateReport {
+export interface Text2SqlV2CloseoutGateReport {
   generatedAt: string;
   fixturePath: string;
   characterizationFixturePath: string;

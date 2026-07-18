@@ -12,6 +12,8 @@ const config: Config = {
   coverageDirectory: "coverage",
   testEnvironment: "node",
   moduleNameMapper: {
+    "^@text2sql/analysis-task-protocol$":
+      "<rootDir>/../../packages/analysis-task-protocol/src",
     "^@text2sql/chat-stream-protocol$":
       "<rootDir>/../../packages/chat-stream-protocol/src",
     "^@text2sql/chat-stream-protocol/(.*)$":

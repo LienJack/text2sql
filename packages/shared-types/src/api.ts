@@ -1,4 +1,17 @@
 import type { ModelingCalculatedFieldExpressionErrorDetails } from "./modeling";
+export type {
+  AnalysisArtifactMetadata,
+  AnalysisAttemptRecord,
+  AnalysisEvent,
+  AnalysisGoalContract,
+  AnalysisManifestRecord,
+  AnalysisReceiptRecord,
+  AnalysisTaskCommand,
+  AnalysisTaskReadModel,
+  AnalysisTaskRecord,
+  AnalysisTaskRevisionRecord,
+  AnalysisTaskStatus
+} from "@text2sql/analysis-task-protocol";
 
 export type ChatRole = "user" | "assistant" | "system";
 export type RunStatus = "clarification" | "executionResult" | "rejected" | "failed";
@@ -33,10 +46,296 @@ export type RagTaskType = "embedding" | "rerank";
 export type RagConfigSource = "settings" | "env_fallback" | "missing";
 export type RagConfigHealthStatus = "unknown" | "healthy" | "degraded" | "failed";
 export type RagHealthCheckedAgainst = "draft" | "persisted";
+export type AuthenticationMode = "dev_headers" | "oidc_bearer";
+export type PrincipalTrustLevel = "verified" | "development";
+export type PrincipalRole =
+  | "system_admin"
+  | "workspace_admin"
+  | "workspace_member"
+  | "admin"
+  | "member";
+
+export interface TrustedPrincipalContext {
+  authenticationMethod: AuthenticationMode;
+  trustLevel: PrincipalTrustLevel;
+  subject: string;
+  actorId: string;
+  requestedWorkspaceId?: string;
+  roleSet: PrincipalRole[];
+  issuedAt?: string;
+  expiresAt?: string;
+  authPolicyVersion: string;
+  digest: string;
+}
+
+export type AnalysisEvidenceCompleteness =
+  | "complete"
+  | "partial"
+  | "conflicted"
+  | "insufficient"
+  | "unavailable";
+
+export interface AnalysisEvidenceObservationV1 {
+  metric: string;
+  value: string | number | null;
+  dimensions: Record<string, string>;
+  observedAt?: string;
+  unit?: string;
+  grain?: string;
+}
+
+export interface AnalysisEvidenceV1 {
+  version: "analysis-evidence.v1";
+  evidenceId: string;
+  sourceKind: "sql" | "web";
+  sourceArtifactRef: string;
+  sourceRef: string;
+  sourceDigest: string;
+  locator?: string;
+  authorization: {
+    principalDigest?: string;
+    policyRefs: string[];
+    receiptRefs: string[];
+  };
+  metadata: {
+    entities: string[];
+    entityAliases: Record<string, string>;
+    effectiveFrom?: string;
+    effectiveTo?: string;
+    observedAt?: string;
+    timezone?: string;
+    grain?: string;
+    units: Record<string, string>;
+    missingIntervals: string[];
+  };
+  observations: AnalysisEvidenceObservationV1[];
+  completeness: AnalysisEvidenceCompleteness;
+  qualityFlags: string[];
+  lineage: {
+    taskId: string;
+    revisionId: string;
+    attemptId?: string;
+    inputDigest: string;
+  };
+  calculationHint?: AnalysisCalculationContractV1;
+}
+
+export type AnalysisAlignmentDimension =
+  | "entity"
+  | "time"
+  | "unit"
+  | "grain"
+  | "missing"
+  | "conflict";
+
+export interface AnalysisAlignmentCheckV1 {
+  dimension: AnalysisAlignmentDimension;
+  status: "passed" | "failed" | "unknown";
+  reasonCodes: string[];
+  evidenceRefs: string[];
+}
+
+export interface AnalysisEvidenceAlignmentV1 {
+  version: "analysis-evidence-alignment.v1";
+  evidenceRefs: string[];
+  checks: AnalysisAlignmentCheckV1[];
+  closed: boolean;
+  requiresHumanDecision: boolean;
+  unresolvedDimensions: AnalysisAlignmentDimension[];
+  calculationContract?: AnalysisCalculationContractV1;
+}
+
+export type AnalysisCalculationOperator =
+  | "sum"
+  | "difference"
+  | "ratio"
+  | "percent_change"
+  | "contribution_share";
+
+export interface AnalysisCalculationContractV1 {
+  version: "analysis-calculation-contract.v1";
+  operatorVersion: "deterministic-decimal.v1";
+  operator: AnalysisCalculationOperator;
+  inputs: Array<{
+    name: string;
+    value: string | number | null;
+    evidenceRef: string;
+  }>;
+  precision: number;
+  rounding: "half_up";
+  nullPolicy: "reject" | "zero";
+  outputUnit?: string;
+}
+
+export interface AnalysisCalculationV1 {
+  version: "analysis-calculation.v1";
+  contract: AnalysisCalculationContractV1;
+  inputDigest: string;
+  output: {
+    value: string;
+    unit?: string;
+  };
+  outputDigest: string;
+  recomputable: true;
+}
+
+export interface AnalysisClaimV1 {
+  version: "analysis-claim.v1";
+  claimId: string;
+  kind: "fact" | "inference" | "judgment";
+  statement: string;
+  value?: string;
+  unit?: string;
+  supportingEvidenceRefs: string[];
+  contradictingEvidenceRefs: string[];
+  calculationRefs: string[];
+  alignmentRef: string;
+  scope: string;
+  validFrom?: string;
+  validTo?: string;
+  unknowns: string[];
+  alternatives: string[];
+  strength: "strong" | "moderate" | "weak" | "unsupported";
+}
+
+export interface AnalysisConflictSetV1 {
+  version: "analysis-conflict-set.v1";
+  conflictId: string;
+  comparisonKey: string;
+  competingValues: Array<{
+    value: string;
+    unit?: string;
+    evidenceRefs: string[];
+    conditions: string[];
+  }>;
+  status: "unresolved" | "resolved";
+  resolutionDecisionRef?: string;
+}
+
+export interface AnalysisReportV1 {
+  version: "analysis-report.v1";
+  title: string;
+  summary: string;
+  sections: Array<{
+    heading: string;
+    claimRefs: string[];
+    statements: string[];
+  }>;
+  claims: AnalysisClaimV1[];
+  conflictRefs: string[];
+  limitations: string[];
+  chartSpecs: Array<{
+    title: string;
+    type: "metric" | "bar" | "line" | "table";
+    claimRefs: string[];
+    evidenceRefs: string[];
+  }>;
+  projectionDigest: string;
+}
+
+export type KnowledgeAssetKind = "memory" | "skill";
+export type KnowledgeAssetStatus =
+  | "candidate"
+  | "verified"
+  | "shadow"
+  | "canary"
+  | "active"
+  | "held"
+  | "rolled_back"
+  | "tombstoned";
+export type KnowledgeAssetScopeType =
+  | "workspace"
+  | "datasource"
+  | "global"
+  | "system";
+
+export interface KnowledgeAssetEvaluationV1 {
+  version: "knowledge-asset-evaluation.v1";
+  independentEvidenceRefs: string[];
+  regressionReceiptRefs: string[];
+  pairedEvaluationRefs: string[];
+  canaryReceiptRefs: string[];
+  approvalDecisionRef?: string;
+  requestedCapabilities: string[];
+  invocationGrant: string[];
+  riskTags: string[];
+  heldFromStatus?: Exclude<KnowledgeAssetStatus, "held">;
+  reasonCodes: string[];
+}
+
+export interface KnowledgeAssetV1 {
+  version: "knowledge-asset.v1";
+  id: string;
+  workspaceId: string;
+  assetKind: KnowledgeAssetKind;
+  assetKey: string;
+  assetVersion: number;
+  status: KnowledgeAssetStatus;
+  stateVersion: number;
+  scope: {
+    type: KnowledgeAssetScopeType;
+    ref?: string;
+  };
+  authority: {
+    level: string;
+    actorId: string;
+  };
+  content: Record<string, unknown>;
+  contentDigest: string;
+  sourceRefs: string[];
+  capabilityCeiling: string[];
+  evaluation: KnowledgeAssetEvaluationV1;
+  rollbackRef?: string;
+  validFrom?: string;
+  validTo?: string;
+  heldAt?: string;
+  tombstonedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AnalysisCorrectionV1 {
+  version: "analysis-correction.v1";
+  correctionId: string;
+  targetArtifactRefs: string[];
+  replacementArtifactRefs: string[];
+  errorClass:
+    | "metric_definition"
+    | "source_data"
+    | "entity_mapping"
+    | "time_scope"
+    | "unit"
+    | "calculation"
+    | "other";
+  authority: {
+    actorId: string;
+    principalDigest: string;
+    decisionRef?: string;
+  };
+  scope: string;
+  effectiveAt: string;
+  reason: string;
+}
+
+export interface AnalysisCorrectionImpactV1 {
+  version: "analysis-correction-impact.v1";
+  correctionRef: string;
+  targetArtifactRefs: string[];
+  impactedArtifactRefs: string[];
+  invalidatedArtifactRefs: string[];
+  staleArtifactRefs: string[];
+  impactedKnowledgeAssetRefs: string[];
+  affectedKinds: string[];
+  requiresNewRevision: true;
+  computedAt: string;
+  impactDigest: string;
+}
 
 export interface Session {
   id: string;
   datasource: string;
+  origin?: "chat" | "analysis";
+  analysisTaskId?: string | null;
   workspaceId?: string | null;
   createdByUserId?: string | null;
   datasourceName?: string;
@@ -329,6 +628,32 @@ export interface SemanticContextPackPermissionFilteringV1 {
   reasonCodes?: string[];
 }
 
+export interface SemanticContextPackGroundingIdentityV1 {
+  status: "ready" | "unavailable";
+  policyVersion?: number;
+  policyDigest?: string;
+  schemaSnapshotId?: string;
+  schemaSnapshotDigest?: string;
+  allowedColumnsDigest?: string;
+  reasonCodes: string[];
+}
+
+export interface SemanticContextPackDependencyClosureV1 {
+  status: "ready" | "ambiguous" | "missing";
+  conflictSet: Array<{
+    subject: string;
+    competingEvidenceRefs: string[];
+  }>;
+  joinClosure: string[];
+  metricDependencies: string[];
+  calculatedDependencies: string[];
+  filterDependencies: string[];
+  timeDependencies: string[];
+  mandatoryEvidenceRefs: string[];
+  optionalEvidenceRefs: string[];
+  reasonCodes: string[];
+}
+
 export interface SemanticContextPackV1 {
   status: SemanticContextPackStatusV1;
   selectedEvidenceIds: string[];
@@ -346,6 +671,8 @@ export interface SemanticContextPackV1 {
   degradation?: SemanticContextPackDegradationV1;
   pruning?: SemanticContextPackPruningV1;
   permissionFiltering?: SemanticContextPackPermissionFilteringV1;
+  groundingIdentity?: SemanticContextPackGroundingIdentityV1;
+  dependencyClosure?: SemanticContextPackDependencyClosureV1;
 }
 
 export interface SemanticPlanV1 {
@@ -364,6 +691,7 @@ export interface SemanticPlanV1 {
   coverageGaps?: SemanticPlanCoverageGapV1[];
   snapshotId?: string;
   planLedger?: SemanticPlanLedgerV1;
+  queryContract?: Text2SqlQueryContractV1;
 }
 
 export interface SemanticPlanCoverageGapV1 {
@@ -496,6 +824,8 @@ export interface SqlGenerationArtifactV1 {
 export interface SqlValidationCheckV1 {
   check:
     | "parse"
+    | "structural"
+    | "catalog"
     | "read-only"
     | "permission"
     | "plan-coverage"
@@ -521,6 +851,296 @@ export interface SqlValidationArtifactV1 {
   failedObligationIds?: string[];
   terminalObligationIds?: string[];
   correctableObligationIds?: string[];
+  sqlAnalysis?: {
+    version: "sql-analysis.v1";
+    status: "ready" | "failed" | "unavailable";
+    dialect?: "sqlite" | "mysql" | "postgresql";
+    normalizedSqlDigest: string;
+    statementCount: number;
+    statementTypes: string[];
+    readOnly: boolean;
+    tables: string[];
+    columns: string[];
+    functions: string[];
+    wildcards: string[];
+    parameters: string[];
+    astNodeCount: number;
+    astDepth: number;
+    reasonCodes: string[];
+  };
+  catalogResolution?: {
+    version: "sql-catalog-resolution.v1";
+    status: "resolved" | "failed" | "unavailable";
+    schemaSnapshotId?: string;
+    schemaSnapshotDigest?: string;
+    allowedSchemaDigest?: string;
+    tables: string[];
+    columns: string[];
+    reasonCodes: string[];
+  };
+  accuracy?: Text2SqlAccuracyValidationEvidenceV1;
+}
+
+export interface Text2SqlEvalVersionTupleV1 {
+  questionSet: string;
+  semantic: string;
+  schema: string;
+  policy: string;
+  data: string;
+  model: string;
+  prompt: string;
+  workflow: string;
+  code: string;
+}
+
+export interface Text2SqlQueryContractTimeV1 {
+  field: string;
+  from?: string;
+  to?: string;
+  timezone: string;
+  grain?: string;
+}
+
+export interface Text2SqlQueryContractResultShapeV1 {
+  cardinality: "scalar" | "single_row" | "tabular" | "time_series";
+  columns: Array<{
+    name: string;
+    semanticType: "metric" | "dimension" | "time" | "identifier" | (string & {});
+    nullable?: boolean;
+  }>;
+}
+
+export interface Text2SqlQueryContractV1 {
+  version: "query-contract.v1";
+  id: string;
+  digest: string;
+  runId: string;
+  questionDigest: string;
+  route: "text_to_sql";
+  metrics: string[];
+  dimensions: string[];
+  requiredColumns: string[];
+  filters: string[];
+  time?: Text2SqlQueryContractTimeV1;
+  grain: string[];
+  sort: Array<{ field: string; direction: "asc" | "desc" }>;
+  limit?: number;
+  resultShape: Text2SqlQueryContractResultShapeV1;
+  ambiguityDecisions?: Array<{
+    subject: string;
+    decision: string;
+    source: "user" | "approved_default";
+    evidenceRefs: string[];
+  }>;
+  frozenAt: string;
+}
+
+export interface Text2SqlAccuracyReceiptBindingV1 {
+  receiptId: string;
+  receiptDigest: string;
+  runId: string;
+  queryContractDigest: string;
+  versions: Text2SqlEvalVersionTupleV1;
+}
+
+export interface Text2SqlPolicyReceiptV1 extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "policy-receipt.v1";
+  workspaceId: string;
+  datasourceId: string;
+  workspaceDatasourceBindingId: string;
+  policyVersion: string;
+  allowedTables: string[];
+  schemaSnapshotDigest: string;
+  status: "passed" | "failed" | "unavailable";
+  reasonCodes: string[];
+  issuedAt: string;
+}
+
+export interface Text2SqlClosureReceiptV1 extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "closure-receipt.v1";
+  status: "passed" | "failed" | "unavailable";
+  conflictSet: Array<{ subject: string; competingEvidenceRefs: string[] }>;
+  joinClosure: string[];
+  metricDependencies: string[];
+  calculatedDependencies: string[];
+  filterDependencies: string[];
+  timeDependencies: string[];
+  mandatoryEvidenceRefs: string[];
+  optionalEvidenceRefs: string[];
+  reasonCodes: string[];
+  issuedAt: string;
+}
+
+export type Text2SqlAccuracyGateKindV1 =
+  | "intent"
+  | "semantic"
+  | "structural"
+  | "policy"
+  | "resource"
+  | "sandbox"
+  | "result";
+
+export type Text2SqlAccuracyGateStatusV1 =
+  | "passed"
+  | "failed"
+  | "unavailable";
+
+export interface Text2SqlAccuracyGateReceiptV1
+  extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "accuracy-gate-receipt.v1";
+  sqlDigest: string;
+  gate: Text2SqlAccuracyGateKindV1;
+  status: Text2SqlAccuracyGateStatusV1;
+  capability: "available" | "unavailable";
+  reasonCodes: string[];
+  evidenceRefs: string[];
+  parentReceiptDigests: string[];
+  issuedAt: string;
+}
+
+export interface Text2SqlExecutionPermitReceiptV1
+  extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "execution-permit-receipt.v1";
+  sqlDigest: string;
+  status: "passed";
+  gateReceiptDigests: {
+    intent: string;
+    semantic: string;
+    structural: string;
+    policy: string;
+    resource: string;
+  };
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface Text2SqlExecutionReceiptV1
+  extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "execution-receipt.v1";
+  sqlDigest: string;
+  executionPermitDigest: string;
+  sandboxGateReceiptDigest: string;
+  status: Text2SqlAccuracyGateStatusV1;
+  readOnlyEnforced: boolean;
+  authorizationRechecked: boolean;
+  timeoutMs: number;
+  cancelled: boolean;
+  rowCount: number;
+  byteCount: number;
+  resultDigest?: string;
+  reasonCodes: string[];
+  startedAt: string;
+  completedAt: string;
+}
+
+export interface Text2SqlResultContractV1 {
+  version: "result-contract.v1";
+  digest: string;
+  queryContractDigest: string;
+  expectedShape: Text2SqlQueryContractResultShapeV1;
+  oracleIds: string[];
+  businessInvariantIds: string[];
+}
+
+export interface Text2SqlResultReceiptV1 extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "result-receipt.v1";
+  sqlDigest: string;
+  executionReceiptDigest: string;
+  resultContractDigest: string;
+  status: Text2SqlAccuracyGateStatusV1;
+  resultDigest?: string;
+  schemaMatched: boolean;
+  oracleVerdicts: Array<{
+    oracleId: string;
+    kind:
+      | "golden_result"
+      | "differential"
+      | "metamorphic"
+      | "mutation"
+      | "business_invariant"
+      | "llm_judge";
+    mandatory: boolean;
+    passed: boolean;
+    evidenceRefs: string[];
+  }>;
+  reasonCodes: string[];
+  issuedAt: string;
+}
+
+export interface Text2SqlRepairReceiptV1 extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "repair-receipt.v1";
+  parentSqlDigest: string;
+  patchedSqlDigest: string;
+  patchId: string;
+  patchKind:
+    | "identifier_qualification"
+    | "identifier_quoting"
+    | "dialect_equivalent"
+    | (string & {});
+  equivalenceStatus: "proven" | "rejected" | "unavailable";
+  attempt: 1 | 2;
+  changedSemanticDimensions: string[];
+  reasonCodes: string[];
+  issuedAt: string;
+}
+
+export interface Text2SqlValidationReceiptV1
+  extends Text2SqlAccuracyReceiptBindingV1 {
+  version: "validation-receipt.v1";
+  sqlDigest: string;
+  status: Text2SqlAccuracyGateStatusV1;
+  gateReceiptDigests: string[];
+  executionPermitDigest?: string;
+  executionReceiptDigest?: string;
+  resultReceiptDigest?: string;
+  repairReceiptDigests: string[];
+  reasonCodes: string[];
+  sealedAt: string;
+}
+
+export interface Text2SqlAccuracyValidationEvidenceV1 {
+  version: "accuracy-validation-evidence.v1";
+  queryContractDigest: string;
+  sqlDigest: string;
+  gateReceipts: Text2SqlAccuracyGateReceiptV1[];
+  executionPermit?: Text2SqlExecutionPermitReceiptV1;
+  finalReceipt?: Text2SqlValidationReceiptV1;
+}
+
+export interface Text2SqlAccuracyEvidenceV1 {
+  version: "text2sql-accuracy-evidence.v1";
+  mode?: "shadow" | "enforce";
+  queryContract?: Text2SqlQueryContractV1;
+  versions?: Text2SqlEvalVersionTupleV1;
+  policyReceipt?: Text2SqlPolicyReceiptV1;
+  closureReceipt?: Text2SqlClosureReceiptV1;
+  gateReceipts?: Text2SqlAccuracyGateReceiptV1[];
+  executionPermit?: Text2SqlExecutionPermitReceiptV1;
+  executionReceipt?: Text2SqlExecutionReceiptV1;
+  resultContract?: Text2SqlResultContractV1;
+  resultReceipt?: Text2SqlResultReceiptV1;
+  repairReceipts?: Text2SqlRepairReceiptV1[];
+  validationReceipt?: Text2SqlValidationReceiptV1;
+}
+
+export interface Text2SqlAccuracyDeliverySummaryV1 {
+  version: "text2sql-accuracy-summary.v1";
+  mode?: "shadow" | "enforce";
+  queryContractDigest?: string;
+  sqlDigest?: string;
+  finalStatus?: Text2SqlAccuracyGateStatusV1;
+  gateStatuses?: Partial<
+    Record<Text2SqlAccuracyGateKindV1, Text2SqlAccuracyGateStatusV1>
+  >;
+  failedGates?: Text2SqlAccuracyGateKindV1[];
+  repairCount?: number;
+  terminalReason?: string;
+  finalReceiptRef?: string;
+  evidenceValid?: boolean;
+  stale?: boolean;
+  staleReasonCodes?: string[];
+  reasonCodes?: string[];
+  receiptRefs?: string[];
 }
 
 export type Text2SqlV2RuntimePlanItemStatusV1 =
@@ -564,6 +1184,7 @@ export type Text2SqlV2ArtifactRefCategoryV1 =
   | "validation_diagnostics"
   | "correction_grounding"
   | "execution_preview"
+  | "accuracy_receipts"
   | (string & {});
 
 export interface Text2SqlV2ArtifactRefV1 {
@@ -606,6 +1227,7 @@ export interface Text2SqlV2RunArtifact {
   runtimePlan?: Text2SqlV2RuntimePlanV1;
   artifactRefs?: Text2SqlV2ArtifactRefV1[];
   smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
+  accuracy?: Text2SqlAccuracyEvidenceV1;
   loopEvidence?: Text2SqlV2LoopEvidence[];
   terminationReason?: Text2SqlV2TerminationReason;
 }
@@ -823,6 +1445,7 @@ export interface DeliveryEvidenceLayer {
     runtimePlan?: Text2SqlV2RuntimePlanV1;
     artifactRefs?: Text2SqlV2ArtifactRefV1[];
     smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
+    accuracy?: Text2SqlAccuracyDeliverySummaryV1;
     loopEvidence?: Text2SqlV2LoopEvidence[];
     terminationReason?: Text2SqlV2TerminationReason;
     failure?: Text2SqlV2FailureSemantic;

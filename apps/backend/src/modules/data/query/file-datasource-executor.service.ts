@@ -28,6 +28,8 @@ export class FileDatasourceExecutorService implements QueryExecutor {
   async execute(input: {
     datasource: Datasource;
     sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<QueryExecutionResult> {
     if (input.datasource.type === "csv") {
       return this.executeCsvDatasource(input.datasource, input.sql);

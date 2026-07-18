@@ -1,0 +1,49 @@
+{
+  "version": "text2sql-guideline-baseline/v1",
+  "baselineId": "data-agent-system-design-2026-07-17",
+  "capturedAt": "2026-07-17T15:19:00+08:00",
+  "adoptionStatus": "selected_requirements_adopted",
+  "source": {
+    "projectSlug": "data-agent-system-design",
+    "projectStatus": "exploring",
+    "projectUpdatedAt": "2026-07-17T15:06:14+08:00",
+    "rootPath": "/Users/lienli/Documents/work/深度调研/research/data-agent-system-design"
+  },
+  "artifacts": [
+    {
+      "id": "project-metadata",
+      "relativePath": "project.json",
+      "sha256": "12642732ea2bdb188d055767114967e52fe0adc248b2b32a2345824546fd4509",
+      "capturedAt": "2026-07-17T15:19:00+08:00",
+      "appliesToRequirements": ["R1", "R17"]
+    },
+    {
+      "id": "RQ012",
+      "relativePath": "answers/RQ012-当数据库表-字段和数据源很多时-Schema-Linking-Value-Grounding-依赖闭包与-Context-裁剪如何扩展.md",
+      "sha256": "3733e84a8173e7add62f90fd06fa270636aa49c83216b47003913c1288e94c4a",
+      "capturedAt": "2026-07-17T15:19:00+08:00",
+      "appliesToRequirements": ["R5", "R7", "R8"]
+    },
+    {
+      "id": "RQ014",
+      "relativePath": "answers/RQ014-如何证明-SQL-在意图-语义-结构-安全-资源-执行和结果层正确-并进行不改变原问题的有界修复.md",
+      "sha256": "2ddeffc6c283a07075204e9f3a849999597eb312bda4460cbdc4a16df36b7029",
+      "capturedAt": "2026-07-17T15:19:00+08:00",
+      "appliesToRequirements": ["R3", "R9", "R10", "R11", "R12", "R13"]
+    },
+    {
+      "id": "RQ020",
+      "relativePath": "answers/RQ020-如何建立覆盖路由-计划-Deep-Search-Text2SQL-Evidence-Memory-Skill-Runtime-与安全的分层评测体系.md",
+      "sha256": "0e8682c85d66e3152971c5f93946f0bba3dbf5fc32621a7d88921d780d37c8c8",
+      "capturedAt": "2026-07-17T15:19:00+08:00",
+      "appliesToRequirements": ["R2", "R15", "R16"]
+    },
+    {
+      "id": "RQ027",
+      "relativePath": "answers/RQ027-如何把以上设计转化为本地项目可执行的差距分析-技术决策-PoC-分阶段建设路线与上线门禁.md",
+      "sha256": "13a07617cb5fc7a3b8f6b031c708467860c323a939a23c9bc36ff3c61d044e5a",
+      "capturedAt": "2026-07-17T15:19:00+08:00",
+      "appliesToRequirements": ["R1", "R15", "R17"]
+    }
+  ]
+}

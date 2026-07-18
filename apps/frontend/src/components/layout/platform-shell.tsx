@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Menu,
   MessageSquare,
+  Microscope,
   Settings,
   Sparkles,
   User,
@@ -34,6 +35,7 @@ interface PlatformShellProps {
 const navItems = [
   { href: "/", label: "总览", icon: LayoutDashboard },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/analysis", label: "自治分析", icon: Microscope },
   { href: "/data-sources", label: "数据源", icon: Database },
   { href: "/modeling", label: "数据关系图", icon: Workflow },
   { href: "/dashboards", label: "看板", icon: LayoutDashboard },
@@ -122,6 +124,11 @@ export function PlatformShell({ children }: PlatformShellProps) {
     }
     writeActiveWorkspaceId(workspaceId);
     syncWorkspaceIdToQuery(workspaceId);
+    window.dispatchEvent(
+      new CustomEvent("text2sql:workspace-change", {
+        detail: { workspaceId }
+      })
+    );
     setWorkspaceSelection(workspaceId);
     setWorkspaceGateStatus("ready");
     setWorkspaceGateError("");

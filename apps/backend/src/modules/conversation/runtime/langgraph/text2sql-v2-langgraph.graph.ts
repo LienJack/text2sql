@@ -2,7 +2,10 @@ import { END, START, StateGraph } from "@langchain/langgraph";
 import type {
   ClarificationPrompt,
   ExecutionTraceStep,
+  Text2SqlAccuracyGateReceiptV1,
+  Text2SqlEvalVersionTupleV1,
   Text2SqlV2FailureSemantic,
+  Text2SqlV2LoopEvidence,
   Text2SqlV2RuntimePlanV1,
   Text2SqlV2StageArtifact,
   Text2SqlV2StageName
@@ -22,8 +25,14 @@ import type {
   GenerateSqlNodeResult
 } from "../../nodes/generate-sql.node";
 import type { IntakeNode } from "../../nodes/intake.node";
-import type { RetrieveContextNode } from "../../nodes/retrieve-context.node";
-import type { SemanticPlanNode } from "../../nodes/semantic-plan.node";
+import type {
+  RetrieveContextNode,
+  RetrieveContextNodeInput
+} from "../../nodes/retrieve-context.node";
+import type {
+  SemanticPlanNode,
+  SemanticPlanNodeResult
+} from "../../nodes/semantic-plan.node";
 import type { ValidateSqlNode } from "../../nodes/validate-sql.node";
 import {
   Text2SqlV2LangGraphStateAnnotation,
@@ -32,6 +41,10 @@ import {
   type Text2SqlV2LangGraphState,
   type Text2SqlV2LangGraphStateUpdate
 } from "./text2sql-v2-langgraph.state";
+import {
+  createText2SqlClosureReceipt,
+  createText2SqlPolicyReceipt
+} from "../../contracts/text2sql-v2.types";
 
 type NodeRouteKey = "answer" | "retrieve" | "assemble-context" | "semantic-plan" | "generate-sql" | "validate" | "correct" | "execute";
 
@@ -45,6 +58,7 @@ export interface Text2SqlV2LangGraphDeps {
   correctSqlNode: CorrectSqlNode;
   executeSqlNode: ExecuteSqlNode;
   answerNode: AnswerNode;
+  accuracyMode?: "shadow" | "enforce";
   resolveSqlTools: (
     state: Text2SqlV2LangGraphState
   ) => Record<string, LlmGatewayToolDefinition>;
@@ -121,6 +135,16 @@ const unique = (values: string[]): string[] => {
   return Array.from(
     new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
   );
+};
+
+const uniqueGateReceipts = (
+  receipts: Text2SqlAccuracyGateReceiptV1[]
+): Text2SqlAccuracyGateReceiptV1[] => {
+  const byGate = new Map<Text2SqlAccuracyGateReceiptV1["gate"], Text2SqlAccuracyGateReceiptV1>();
+  for (const receipt of receipts) {
+    byGate.set(receipt.gate, receipt);
+  }
+  return Array.from(byGate.values());
 };
 
 const safeJsonStringify = (payload: Record<string, unknown>): string | undefined => {
@@ -300,7 +324,7 @@ const readCorrectionIntent = (
     failedStage: "validate",
     ...(failureCode ? { failureCode } : {}),
     retryReason,
-    targetStage: "generate-sql"
+    targetStage: "validate"
   };
 };
 
@@ -511,7 +535,7 @@ const resolveCorrectRoute = (state: Text2SqlV2LangGraphState): NodeRouteKey => {
   if (state.failure?.terminal || state.correctionResult?.outcome === "terminal") {
     return "answer";
   }
-  return "generate-sql";
+  return "validate";
 };
 
 const assertStateNotAborted = (
@@ -548,6 +572,93 @@ const semanticFailClosedFailure = (reasons: string[]): Text2SqlV2FailureSemantic
     correctable: false
   };
 };
+
+const TARGETED_REPLAN_REASON_CODES = new Set([
+  "missing_join_path",
+  "join_closure_missing",
+  "mandatory_dependency_pruned"
+]);
+
+const buildRetrieveContextInput = (
+  state: Text2SqlV2LangGraphState,
+  question: string,
+  accuracyEnforced: boolean
+): RetrieveContextNodeInput => ({
+  question,
+  datasourceId: state.preparedRun.datasource.id,
+  datasource: state.preparedRun.datasource,
+  runId: state.runId,
+  workspaceId: state.preparedRun.session.workspaceId ?? undefined,
+  allowedTables: state.preparedRun.sqlAccessContext?.allowedTables,
+  requiresSqlPolicy:
+    accuracyEnforced &&
+    state.routeArtifact?.route === "text_to_sql" &&
+    Boolean(state.preparedRun.schemaGrounding),
+  policyVersion: state.preparedRun.sqlAccessContext?.policyVersion,
+  policyDigest: state.preparedRun.sqlAccessContext?.policyDigest,
+  schemaSnapshotId: state.preparedRun.schemaGrounding?.snapshot?.snapshotId,
+  schemaSnapshotDigest: state.preparedRun.schemaGrounding?.snapshot?.digest,
+  allowedColumnsDigest: state.preparedRun.schemaGrounding?.snapshot?.allowedSchemaSet.digest,
+  modelCatalogId: state.preparedRun.session.modelCatalogId ?? undefined,
+  pinnedTables: state.preparedRun.contextEnvelope?.pinnedTables,
+  pinnedColumns: state.preparedRun.contextEnvelope?.pinnedColumns
+});
+
+const resolveTargetedReplanReasons = (
+  result: SemanticPlanNodeResult,
+  contextPack: Text2SqlV2LangGraphState["contextPack"]
+): string[] => {
+  if (
+    result.validation.routeKind !== "text_to_sql" ||
+    (result.route !== "needs_clarification" && result.route !== "fail_closed")
+  ) {
+    return [];
+  }
+  const reasonCodes = unique([
+    ...result.validation.reasons,
+    ...(result.plan.planLedger?.summary.reasonCodes ?? []),
+    ...(contextPack?.dependencyClosure?.reasonCodes ?? [])
+  ]);
+  return reasonCodes.filter((reasonCode) => TARGETED_REPLAN_REASON_CODES.has(reasonCode));
+};
+
+const buildTargetedRetrievalQuestion = (input: {
+  question: string;
+  selectedTables: string[];
+  reasonCodes: string[];
+}): string => {
+  const dependencyScope = input.selectedTables.length > 0
+    ? `tables=${input.selectedTables.join(",")}`
+    : "tables=unresolved";
+  return [
+    input.question,
+    `[targeted_dependency_closure ${dependencyScope} reasons=${input.reasonCodes.join(",")}]`
+  ].join("\n");
+};
+
+const buildAccuracyVersionTuple = (
+  state: Text2SqlV2LangGraphState
+): Text2SqlEvalVersionTupleV1 => ({
+  questionSet: "online-runtime.v1",
+  semantic: [
+    state.contextPack?.semanticVersion ?? "none",
+    state.contextPack?.modelingRevision ?? "none",
+    state.contextPack?.semanticLockStatus ?? "none"
+  ].join(":"),
+  schema:
+    state.preparedRun.schemaGrounding?.snapshot?.digest ?? "schema-unavailable",
+  policy:
+    state.preparedRun.sqlAccessContext?.policyDigest ?? "policy-unavailable",
+  data:
+    state.preparedRun.schemaGrounding?.snapshot?.digest ?? "data-version-unavailable",
+  model: [
+    state.preparedRun.session.modelProvider ?? "unknown",
+    state.preparedRun.session.modelName ?? "unknown"
+  ].join(":"),
+  prompt: state.preparedRun.session.modelCatalogId ?? "runtime-default",
+  workflow: "text2sql-v2-langgraph.v1",
+  code: "text2sql-accuracy-closure.v1"
+});
 
 const enrichSemanticPlanFromSqlArtifact = (
   semanticPlan: Text2SqlV2LangGraphState["semanticPlan"],
@@ -598,6 +709,7 @@ const summarizeSqlDraft = (
 export const createText2SqlV2LangGraph = (
   deps: Text2SqlV2LangGraphDeps
 ) => {
+  const accuracyEnforced = deps.accuracyMode !== "shadow";
   const graph = new StateGraph(Text2SqlV2LangGraphStateAnnotation)
     .addNode("intake", async (state) => {
       const stageStartedAt = await emitRunningStep({
@@ -663,17 +775,13 @@ export const createText2SqlV2LangGraph = (
         detail: "retrieve-context running"
       });
       try {
-        const output = await deps.retrieveContextNode.run({
-          question: state.standaloneQuestion ?? state.question,
-          datasourceId: state.preparedRun.datasource.id,
-          datasource: state.preparedRun.datasource,
-          runId: state.runId,
-          workspaceId: state.preparedRun.session.workspaceId ?? undefined,
-          allowedTables: state.preparedRun.sqlAccessContext?.allowedTables,
-          modelCatalogId: state.preparedRun.session.modelCatalogId ?? undefined,
-          pinnedTables: state.preparedRun.contextEnvelope?.pinnedTables,
-          pinnedColumns: state.preparedRun.contextEnvelope?.pinnedColumns
-        });
+        const output = await deps.retrieveContextNode.run(
+          buildRetrieveContextInput(
+            state,
+            state.standaloneQuestion ?? state.question,
+            accuracyEnforced
+          )
+        );
         const stageArtifact = createStageArtifact({
           stage: "retrieve",
           status: output.state.status === "degraded" ? "degraded" : "success",
@@ -685,7 +793,6 @@ export const createText2SqlV2LangGraph = (
           },
           startedAt: stageStartedAt
         });
-
         return createNodeUpdate({
           state,
           node: "retrieve",
@@ -747,7 +854,6 @@ export const createText2SqlV2LangGraph = (
           },
           startedAt: stageStartedAt
         });
-
         return createNodeUpdate({
           state,
           node: "assemble-context",
@@ -800,12 +906,105 @@ export const createText2SqlV2LangGraph = (
           );
         }
 
-        const result = deps.semanticPlanNode.run({
+        const semanticPlanInput = {
           question: state.standaloneQuestion ?? state.question,
           contextPack: state.contextPack,
           semanticIntent: state.routeArtifact?.semanticIntent,
-          allowedTables: state.preparedRun.sqlAccessContext?.allowedTables
-        });
+          allowedTables: state.preparedRun.sqlAccessContext?.allowedTables,
+          runId: state.runId,
+          frozenAt: state.createdAt,
+          requiresTrustedGrounding:
+            accuracyEnforced &&
+            state.routeArtifact?.route === "text_to_sql" &&
+            Boolean(state.preparedRun.schemaGrounding)
+        };
+        const initialResult = deps.semanticPlanNode.run(semanticPlanInput);
+        let result = initialResult;
+        let effectiveContextPack = state.contextPack;
+        let targetedRetrieveState = state.retrieveState;
+        let targetedRetrievedArtifact = state.retrievedArtifact;
+        let targetedContextPackSummary = state.contextPackSummary;
+        const loopEvidence: Text2SqlV2LoopEvidence[] = [];
+        const targetedReplanReasons = resolveTargetedReplanReasons(
+          initialResult,
+          state.contextPack
+        );
+
+        if (targetedReplanReasons.length > 0) {
+          try {
+            const targetedQuestion = buildTargetedRetrievalQuestion({
+              question: semanticPlanInput.question,
+              selectedTables: initialResult.plan.selectedTables,
+              reasonCodes: targetedReplanReasons
+            });
+            const targetedRetrieval = await deps.retrieveContextNode.run(
+              buildRetrieveContextInput(state, targetedQuestion, accuracyEnforced)
+            );
+            const targetedAssembly = deps.assembleContextNode.run({
+              retrievalBundle: targetedRetrieval.artifact.retrievalBundle,
+              selectedContext:
+                targetedRetrieval.artifact.retrievalBundle?.selected_context,
+              additionalWarnings: targetedRetrieval.state.warnings
+            });
+            effectiveContextPack = targetedAssembly.contextPack;
+            targetedRetrieveState = targetedRetrieval.state;
+            targetedRetrievedArtifact = targetedRetrieval.artifact;
+            targetedContextPackSummary = targetedAssembly.typedSummary;
+            result = deps.semanticPlanNode.run({
+              ...semanticPlanInput,
+              contextPack: effectiveContextPack
+            });
+            loopEvidence.push({
+              loopIndex: 1,
+              triggerReason: targetedReplanReasons.join("|"),
+              actionType: "replan",
+              planDelta: {
+                route: {
+                  from: initialResult.plan.route,
+                  to: result.plan.route
+                },
+                snapshotId: result.plan.snapshotId,
+                reasonCodes: unique([
+                  "targeted_dependency_retrieval",
+                  ...targetedReplanReasons,
+                  ...result.validation.reasons
+                ])
+              },
+              convergencePath: [
+                "semantic-plan",
+                "retrieve:targeted",
+                "assemble-context:targeted",
+                "semantic-plan:replan"
+              ]
+            });
+          } catch (error) {
+            loopEvidence.push({
+              loopIndex: 1,
+              triggerReason: targetedReplanReasons.join("|"),
+              actionType: "replan",
+              planDelta: {
+                route: {
+                  from: initialResult.plan.route,
+                  to: initialResult.plan.route
+                },
+                snapshotId: initialResult.plan.snapshotId,
+                reasonCodes: unique([
+                  "targeted_dependency_retrieval_failed",
+                  ...targetedReplanReasons,
+                  normalizeFailure(error, {
+                    category: "retrieval",
+                    terminal: false
+                  }).code
+                ])
+              },
+              convergencePath: [
+                "semantic-plan",
+                "retrieve:targeted",
+                "semantic-plan:original-result"
+              ]
+            });
+          }
+        }
         const ledgerSummary = result.plan.planLedger?.summary;
         const ledgerReasons = ledgerSummary?.reasonCodes ?? [];
         const reasons = unique([...result.validation.reasons, ...ledgerReasons]);
@@ -847,6 +1046,53 @@ export const createText2SqlV2LangGraph = (
           },
           startedAt: stageStartedAt
         });
+        const accuracyVersions = buildAccuracyVersionTuple(state);
+        const queryContract = result.plan.queryContract;
+        const access = state.preparedRun.sqlAccessContext;
+        const schemaSnapshot = state.preparedRun.schemaGrounding?.snapshot;
+        const closure = effectiveContextPack?.dependencyClosure;
+        const policyReceipt = queryContract
+          ? createText2SqlPolicyReceipt({
+              runId: state.runId,
+              queryContractDigest: queryContract.digest,
+              versions: accuracyVersions,
+              workspaceId: access?.workspaceId ?? "unavailable",
+              datasourceId: state.preparedRun.datasource.id,
+              workspaceDatasourceBindingId:
+                access?.workspaceDatasourceBindingId ?? "unavailable",
+              policyVersion: String(access?.policyVersion ?? "unavailable"),
+              allowedTables: access?.allowedTables ?? [],
+              schemaSnapshotDigest: schemaSnapshot?.digest ?? "unavailable",
+              status: access && schemaSnapshot ? "passed" : "unavailable",
+              reasonCodes:
+                access && schemaSnapshot
+                  ? ["frozen_policy_schema_bound"]
+                  : ["frozen_policy_schema_unavailable"],
+              issuedAt: state.createdAt
+            })
+          : undefined;
+        const closureReceipt = queryContract
+          ? createText2SqlClosureReceipt({
+              runId: state.runId,
+              queryContractDigest: queryContract.digest,
+              versions: accuracyVersions,
+              status: closure
+                ? closure.status === "ready"
+                  ? "passed"
+                  : "failed"
+                : "unavailable",
+              conflictSet: closure?.conflictSet,
+              joinClosure: closure?.joinClosure,
+              metricDependencies: closure?.metricDependencies,
+              calculatedDependencies: closure?.calculatedDependencies,
+              filterDependencies: closure?.filterDependencies,
+              timeDependencies: closure?.timeDependencies,
+              mandatoryEvidenceRefs: closure?.mandatoryEvidenceRefs,
+              optionalEvidenceRefs: closure?.optionalEvidenceRefs,
+              reasonCodes: closure?.reasonCodes ?? ["dependency_closure_unavailable"],
+              issuedAt: state.createdAt
+            })
+          : undefined;
 
         return createNodeUpdate({
           state,
@@ -861,8 +1107,25 @@ export const createText2SqlV2LangGraph = (
             }
           },
           patch: {
+            retrieveState: targetedRetrieveState,
+            retrievedArtifact: targetedRetrievedArtifact,
+            contextPack: effectiveContextPack,
+            contextPackSummary: targetedContextPackSummary,
             semanticPlanResult: result,
             semanticPlan: result.plan,
+            ...(queryContract
+              ? {
+                  accuracyEvidence: {
+                    version: "text2sql-accuracy-evidence.v1" as const,
+                    mode: accuracyEnforced ? "enforce" as const : "shadow" as const,
+                    queryContract,
+                    versions: accuracyVersions,
+                    policyReceipt,
+                    closureReceipt
+                  }
+                }
+              : {}),
+            loopEvidence,
             clarification,
             directAnswer,
             failure,
@@ -1022,13 +1285,21 @@ export const createText2SqlV2LangGraph = (
             422
           );
         }
+        const accuracyVersions = buildAccuracyVersionTuple(state);
         const result = await deps.validateSqlNode.run({
           sqlArtifact: state.sqlGenerationArtifact,
           datasourceId: state.preparedRun.datasource.id,
           datasourceType: state.preparedRun.datasource.type,
           semanticPlan: state.semanticPlan,
           accessContext: state.preparedRun.sqlAccessContext,
-          allowedTables: state.preparedRun.sqlAccessContext?.allowedTables
+          allowedTables: state.preparedRun.sqlAccessContext?.allowedTables,
+          schemaSnapshot: state.preparedRun.schemaGrounding?.snapshot,
+          requiresCatalog: state.preparedRun.schemaGrounding?.status === "ready",
+          runId: state.runId,
+          accuracyVersions,
+          requiresAccuracyReceipts: Boolean(
+            accuracyEnforced && state.semanticPlan?.queryContract
+          )
         });
         const stageStatus: Text2SqlV2StageArtifact["status"] =
           result.outcome === "pass"
@@ -1063,6 +1334,22 @@ export const createText2SqlV2LangGraph = (
           patch: {
             validationOutcome: result.outcome,
             sqlValidationArtifact: result.artifact,
+            ...(result.artifact.accuracy
+              ? {
+                  accuracyEvidence: {
+                    version: "text2sql-accuracy-evidence.v1" as const,
+                    ...state.accuracyEvidence,
+                    queryContract: state.semanticPlan?.queryContract,
+                    versions: accuracyVersions,
+                    gateReceipts: result.artifact.accuracy.gateReceipts,
+                    executionPermit: undefined,
+                    executionReceipt: undefined,
+                    resultContract: undefined,
+                    resultReceipt: undefined,
+                    validationReceipt: undefined
+                  }
+                }
+              : {}),
             failure:
               result.outcome === "terminal"
                 ? result.artifact.failure
@@ -1116,7 +1403,13 @@ export const createText2SqlV2LangGraph = (
           attemptCount: state.correctionAttemptCount,
           maxAttempts: state.correctionResult?.budget.maxAttempts,
           semanticPlan: state.semanticPlan,
-          contextPack: state.contextPack
+          contextPack: state.contextPack,
+          runId: state.runId,
+          versions: state.accuracyEvidence?.versions ?? buildAccuracyVersionTuple(state),
+          datasourceType: state.preparedRun.datasource.type,
+          schemaSnapshot: state.preparedRun.schemaGrounding?.snapshot,
+          seenSqlDigests: state.seenSqlDigests,
+          seenFailureSignatures: state.seenFailureSignatures
         });
         const terminal = result.outcome === "terminal";
         const stageArtifact = createStageArtifact({
@@ -1145,7 +1438,7 @@ export const createText2SqlV2LangGraph = (
               : {}),
             convergencePath: terminal
               ? ["validate", "correct", "answer"]
-              : ["validate", "correct", "generate-sql"],
+              : ["validate", "correct", "validate"],
             planDelta: {
               snapshotId: state.semanticPlan?.snapshotId,
               reasonCodes: [result.artifact.failureCode ?? result.artifact.category]
@@ -1168,6 +1461,39 @@ export const createText2SqlV2LangGraph = (
             correctionResult: result,
             correctionAttemptCount: result.budget.attemptCount,
             correctionArtifacts: [result.artifact],
+            ...(result.artifact.repairReceipt
+              ? {
+                  seenSqlDigests: [result.artifact.repairReceipt.parentSqlDigest],
+                  seenFailureSignatures: result.artifact.failureSignature
+                    ? [result.artifact.failureSignature]
+                    : [],
+                  accuracyEvidence: {
+                    version: "text2sql-accuracy-evidence.v1" as const,
+                    ...state.accuracyEvidence,
+                    repairReceipts: [
+                      ...(state.accuracyEvidence?.repairReceipts ?? []),
+                      result.artifact.repairReceipt
+                    ],
+                    gateReceipts: undefined,
+                    executionPermit: undefined,
+                    executionReceipt: undefined,
+                    resultContract: undefined,
+                    resultReceipt: undefined,
+                    validationReceipt: undefined
+                  }
+                }
+              : {}),
+            ...(!terminal && result.artifact.patchedSql && state.sqlGenerationArtifact
+              ? {
+                  sqlGenerationArtifact: {
+                    ...state.sqlGenerationArtifact,
+                    sql: result.artifact.patchedSql,
+                    correctionGrounding: result.artifact.grounding
+                  },
+                  validationOutcome: undefined,
+                  sqlValidationArtifact: undefined
+                }
+              : {}),
             loopEvidence,
             failure: terminal ? result.failure : undefined,
             ...(terminal
@@ -1223,7 +1549,19 @@ export const createText2SqlV2LangGraph = (
           sessionId: state.sessionId,
           requestId: state.requestId,
           accessContext: state.preparedRun.sqlAccessContext,
-          semanticPlan: state.semanticPlan
+          semanticPlan: state.semanticPlan,
+          datasourceType: state.preparedRun.datasource.type,
+          runId: state.runId,
+          accuracyVersions: accuracyEnforced
+            ? state.accuracyEvidence?.versions
+            : undefined,
+          accuracyGateReceipts: accuracyEnforced
+            ? state.accuracyEvidence?.gateReceipts
+            : undefined,
+          repairReceipts: accuracyEnforced
+            ? state.accuracyEvidence?.repairReceipts
+            : undefined,
+          abortSignal: state.streamOptions?.abortSignal
         });
         const stageArtifact = createStageArtifact({
           stage: "execute",
@@ -1231,7 +1569,10 @@ export const createText2SqlV2LangGraph = (
           evidenceIds: state.sqlGenerationArtifact.evidenceRefs,
           metadata: {
             rowCount: result.rowCount,
-            emptyResult: result.emptyResult
+            byteCount: result.byteCount,
+            emptyResult: result.emptyResult,
+            executionReceiptRef: result.executionReceipt?.receiptId,
+            validationReceiptRef: result.validationReceipt?.receiptId
           },
           startedAt: stageStartedAt
         });
@@ -1245,7 +1586,32 @@ export const createText2SqlV2LangGraph = (
             emptyResult: result.emptyResult
           },
           patch: {
-            executionResult: result
+            executionResult: result,
+            ...(result.executionPermit && result.executionReceipt
+              ? {
+                  accuracyEvidence: {
+                    version: "text2sql-accuracy-evidence.v1" as const,
+                    ...state.accuracyEvidence,
+                    gateReceipts: uniqueGateReceipts([
+                      ...(state.accuracyEvidence?.gateReceipts ?? []),
+                      ...(result.resourceGateReceipt
+                        ? [result.resourceGateReceipt]
+                        : []),
+                      ...(result.sandboxGateReceipt
+                        ? [result.sandboxGateReceipt]
+                        : []),
+                      ...(result.resultGateReceipt
+                        ? [result.resultGateReceipt]
+                        : [])
+                    ]),
+                    executionPermit: result.executionPermit,
+                    executionReceipt: result.executionReceipt,
+                    resultContract: result.resultContract,
+                    resultReceipt: result.resultReceipt,
+                    validationReceipt: result.validationReceipt
+                  }
+                }
+              : {})
           }
         });
       } catch (error) {
@@ -1298,7 +1664,8 @@ export const createText2SqlV2LangGraph = (
         routeKind:
           state.semanticPlanResult?.validation.routeKind ?? state.routeArtifact?.route,
         failure: state.failure,
-        warnings
+        warnings,
+        requiresFinalValidationReceipt: accuracyEnforced
       });
 
       const stageStatus: Text2SqlV2StageArtifact["status"] =
@@ -1364,7 +1731,7 @@ export const createText2SqlV2LangGraph = (
       answer: "answer"
     })
     .addConditionalEdges("correct", resolveCorrectRoute, {
-      "generate-sql": "generate-sql",
+      validate: "validate",
       answer: "answer"
     })
     .addEdge("execute", "answer")

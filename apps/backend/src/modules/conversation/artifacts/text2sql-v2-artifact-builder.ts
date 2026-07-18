@@ -4,6 +4,7 @@ import type {
   SemanticContextPackV1,
   SemanticPlanLedgerSummaryV1,
   SemanticPlanV1,
+  Text2SqlAccuracyEvidenceV1,
   Text2SqlV2ArtifactRefV1,
   SqlGenerationArtifactV1,
   SqlRun,
@@ -29,6 +30,7 @@ export interface BuildRunArtifactOptions {
   runtimePlan?: Text2SqlV2RuntimePlanV1;
   artifactRefs?: Text2SqlV2ArtifactRefV1[];
   smartDefaults?: Text2SqlV2SmartDefaultsEvidenceV1;
+  accuracy?: Text2SqlAccuracyEvidenceV1;
 }
 
 @Injectable()
@@ -63,6 +65,7 @@ export class Text2SqlV2ArtifactBuilder {
       smartDefaults:
         options?.smartDefaults ??
         this.readSmartDefaults(run.trace.v2?.smartDefaults),
+      accuracy: options?.accuracy ?? run.trace.v2?.accuracy,
       loopEvidence: this.readLoopEvidence(run.trace.loopEvidence),
       terminationReason: this.readTerminationReason(run.trace.terminationReason)
     };

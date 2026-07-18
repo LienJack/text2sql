@@ -21,7 +21,8 @@ export const REQUIRED_TEXT2SQL_V2_ARTIFACT_CATEGORIES = [
   "provider_output_summary",
   "validation_diagnostics",
   "correction_grounding",
-  "execution_preview"
+  "execution_preview",
+  "accuracy_receipts"
 ] as const satisfies readonly Text2SqlV2ArtifactRefCategoryV1[];
 
 type ArtifactSensitivity = NonNullable<Text2SqlV2ArtifactRefV1["sensitivity"]>;
@@ -79,6 +80,12 @@ export const TEXT2SQL_V2_ARTIFACT_CATEGORY_POLICIES: Record<
     sensitivity: "none",
     allowPayload: true,
     reasonCode: "execution_preview_compacted"
+  },
+  accuracy_receipts: {
+    visibility: "internal",
+    sensitivity: "sensitive",
+    allowPayload: false,
+    reasonCode: "accuracy_receipts_compacted"
   }
 };
 
@@ -223,8 +230,47 @@ export class Text2SqlV2ArtifactRefService {
       this.buildProviderOutputArtifact(input),
       this.buildValidationDiagnosticsArtifact(input),
       this.buildCorrectionGroundingArtifact(input),
-      this.buildExecutionPreviewArtifact(input)
+      this.buildExecutionPreviewArtifact(input),
+      this.buildAccuracyReceiptArtifact(input)
     ].filter((item): item is Text2SqlV2ArtifactProducerInput => Boolean(item));
+  }
+
+  private buildAccuracyReceiptArtifact(input: {
+    run: SqlRun;
+    datasourceId: string;
+  }): Text2SqlV2ArtifactProducerInput | undefined {
+    const accuracy = input.run.trace.v2?.accuracy;
+    if (!accuracy) {
+      return undefined;
+    }
+    const receiptRefs = [
+      ...(accuracy.policyReceipt ? [accuracy.policyReceipt.receiptId] : []),
+      ...(accuracy.closureReceipt ? [accuracy.closureReceipt.receiptId] : []),
+      ...(accuracy.gateReceipts ?? []).map((receipt) => receipt.receiptId),
+      ...(accuracy.repairReceipts ?? []).map((receipt) => receipt.receiptId),
+      ...(accuracy.executionPermit ? [accuracy.executionPermit.receiptId] : []),
+      ...(accuracy.executionReceipt ? [accuracy.executionReceipt.receiptId] : []),
+      ...(accuracy.resultReceipt ? [accuracy.resultReceipt.receiptId] : []),
+      ...(accuracy.validationReceipt ? [accuracy.validationReceipt.receiptId] : [])
+    ];
+    if (receiptRefs.length === 0) {
+      return undefined;
+    }
+    const stableId = this.stableHashId({
+      runId: input.run.runId,
+      receiptRefs
+    });
+    return {
+      runId: input.run.runId,
+      datasourceId: input.datasourceId,
+      category: "accuracy_receipts",
+      stableId,
+      summary: `Compacted ${receiptRefs.length} Text2SQL accuracy receipt references.`,
+      visibility: "internal",
+      sensitivity: "sensitive",
+      evidenceRefs: receiptRefs,
+      reasonCodes: ["accuracy_receipts_compacted"]
+    };
   }
 
   private buildContextPackArtifact(input: {

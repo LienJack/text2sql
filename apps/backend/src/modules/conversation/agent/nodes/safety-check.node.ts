@@ -65,7 +65,11 @@ export class SafetyCheckNode {
       }
     }
 
-    const readonlyDecision = this.evaluateReadonly(input.sql, input.riskTags);
+    const readonlyDecision = this.evaluateReadonly(
+      input.sql,
+      input.datasourceType,
+      input.riskTags
+    );
     if (!readonlyDecision.allowed) {
       return readonlyDecision;
     }
@@ -75,6 +79,7 @@ export class SafetyCheckNode {
         await this.tableAccessGuard.assertTableAccess({
           sql: input.sql,
           datasourceId: input.datasourceId,
+          datasourceType: input.datasourceType,
           accessContext: input.accessContext,
           allowedTables: input.accessContext.allowedTables
         });
@@ -97,13 +102,17 @@ export class SafetyCheckNode {
     return readonlyDecision;
   }
 
-  private evaluateReadonly(sql: string, riskTags?: string[]): SqlSafetyDecision {
+  private evaluateReadonly(
+    sql: string,
+    datasourceType?: DatasourceType,
+    riskTags?: string[]
+  ): SqlSafetyDecision {
     if (this.safetyGuard) {
       return this.safetyGuard.evaluate(sql, riskTags);
     }
 
     try {
-      this.tableAccessGuard.assertReadOnlySql(sql);
+      this.tableAccessGuard.assertReadOnlySql(sql, datasourceType ?? "sqlite");
     } catch (error) {
       return {
         allowed: false,

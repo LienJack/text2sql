@@ -9,19 +9,19 @@ describe("agent relationship correction loop", () => {
     return decision.correctable && input.retryCount < decision.maxAttempts;
   };
 
-  it("retries only when relationship-path errors are detected within retry budget", () => {
+  it("does not infer repairability from free-text relationship errors", () => {
     expect(
       shouldRetryCorrection({
         error: "cannot resolve join path for relationship binding",
         retryCount: 0
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldRetryCorrection({
         error: "relationship binding mismatch",
         retryCount: 1
       })
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("stops retrying after v2 correction max attempts", () => {
@@ -64,19 +64,43 @@ describe("agent relationship correction loop", () => {
     expect(decision.category).toBe("governance");
   });
 
-  it("retries for correctable syntax/column/dialect style execution errors", () => {
+  it("does not infer repairability from free-text syntax/column errors", () => {
     expect(
       shouldRetryCorrection({
         error: "SQL syntax error near FROM",
         retryCount: 0
       })
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldRetryCorrection({
         error: "unknown column `foo`",
         retryCount: 1
       })
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("retries only for structured allowlisted mechanical validation failures", () => {
+    const correctable = new DomainError(
+      "SQL_VALIDATION_FAILED",
+      "unknown column",
+      422,
+      {
+        validationFailure: {
+          code: "SQL_MISSING_COLUMN",
+          message: "unknown column",
+          category: "validation",
+          terminal: false,
+          correctable: true
+        }
+      }
+    );
+    const decision = correctionService.decide(correctable);
+    expect(decision).toMatchObject({
+      correctable: true,
+      maxAttempts: 2,
+      category: "validation",
+      failureCode: "SQL_MISSING_COLUMN"
+    });
   });
 
   it("pins relationship retry hints when context pack includes modeling revision", async () => {

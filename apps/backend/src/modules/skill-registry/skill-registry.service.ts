@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 
 export const SKILL_REGISTRY_UNAVAILABLE_REASON = "skill_registry_unavailable";
 
@@ -6,6 +6,8 @@ export interface SkillRegistryLookupInput {
   domain: string;
   term: string;
   context?: Record<string, unknown>;
+  workspaceId?: string;
+  capabilityGrant?: string[];
 }
 
 export interface SkillRegistrySkill {
@@ -26,7 +28,7 @@ export interface SkillRegistryLookupResult {
   degrade_reason?: string;
 }
 
-interface SkillRegistryBinding {
+export interface SkillRegistryBinding {
   domain: string;
   term: string;
   term_aliases: string[];
@@ -43,9 +45,25 @@ interface SkillRegistryLookupContext {
   domain: string;
   term: string;
   contextTokens: Set<string>;
+  workspaceId?: string;
+  capabilityGrant: string[];
 }
 
 const SKILL_REGISTRY_SOURCE: SkillRegistryContextEntry["source"] = "skill_registry";
+
+export const SKILL_REGISTRY_FIXTURE_BINDINGS = Symbol(
+  "SKILL_REGISTRY_FIXTURE_BINDINGS"
+);
+export const SKILL_REGISTRY_BINDING_SOURCE = Symbol(
+  "SKILL_REGISTRY_BINDING_SOURCE"
+);
+
+export interface SkillRegistryBindingSource {
+  listActiveBindings(input: {
+    workspaceId: string;
+    capabilityGrant: string[];
+  }): Promise<readonly SkillRegistryBinding[]>;
+}
 
 const DEFAULT_BINDINGS: readonly SkillRegistryBinding[] = [
   {
@@ -82,6 +100,15 @@ const DEFAULT_BINDINGS: readonly SkillRegistryBinding[] = [
 
 @Injectable()
 export class SkillRegistryService {
+  constructor(
+    @Optional()
+    @Inject(SKILL_REGISTRY_BINDING_SOURCE)
+    private readonly bindingSource?: SkillRegistryBindingSource,
+    @Optional()
+    @Inject(SKILL_REGISTRY_FIXTURE_BINDINGS)
+    private readonly fixtureBindings?: readonly SkillRegistryBinding[]
+  ) {}
+
   async resolveSkills(input: SkillRegistryLookupInput): Promise<SkillRegistryLookupResult> {
     const domain = this.normalize(input.domain);
     const term = this.normalize(input.term);
@@ -91,7 +118,9 @@ export class SkillRegistryService {
     const lookupContext: SkillRegistryLookupContext = {
       domain,
       term,
-      contextTokens: this.collectContextTokens(input.context)
+      contextTokens: this.collectContextTokens(input.context),
+      workspaceId: input.workspaceId?.trim(),
+      capabilityGrant: input.capabilityGrant ?? []
     };
 
     try {
@@ -114,8 +143,9 @@ export class SkillRegistryService {
   protected async lookupBindings(
     input: SkillRegistryLookupContext
   ): Promise<SkillRegistryBindingMatch[]> {
+    const bindings = await this.resolveBindings(input);
     const matches: SkillRegistryBindingMatch[] = [];
-    for (const binding of DEFAULT_BINDINGS) {
+    for (const binding of bindings) {
       if (this.normalize(binding.domain) !== input.domain) {
         continue;
       }
@@ -128,6 +158,21 @@ export class SkillRegistryService {
       }
     }
     return matches;
+  }
+
+  private async resolveBindings(
+    input: SkillRegistryLookupContext
+  ): Promise<readonly SkillRegistryBinding[]> {
+    if (this.fixtureBindings) {
+      return this.fixtureBindings;
+    }
+    if (!input.workspaceId || !this.bindingSource) {
+      return [];
+    }
+    return this.bindingSource.listActiveBindings({
+      workspaceId: input.workspaceId,
+      capabilityGrant: input.capabilityGrant
+    });
   }
 
   private matchesTerm(binding: SkillRegistryBinding, term: string): boolean {
@@ -232,4 +277,8 @@ export class SkillRegistryService {
       context: []
     };
   }
+}
+
+export function createDefaultSkillRegistryFixture(): SkillRegistryService {
+  return new SkillRegistryService(undefined, DEFAULT_BINDINGS);
 }

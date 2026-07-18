@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
+import { AppConfigModule } from "../../config/config.module";
 import { AdminOnlyGuard } from "../../auth/admin-only.guard";
 import { PlatformDataPersistenceModule } from "../../platform/data/persistence.module";
 import { RagModule } from "../rag/rag.module";
+import { KnowledgeAssetModule } from "../assets/knowledge-asset.module";
 import { MemoryController } from "../../memory/memory.controller";
 import { MemoryPromotionPolicy } from "../../memory/memory-promotion-policy";
 import { MemoryPromotionService as LegacyMemoryPromotionService } from "../../memory/memory-promotion.service";
@@ -16,7 +18,12 @@ export const KNOWLEDGE_MEMORY_COMPAT_BRIDGE = Object.freeze({
 });
 
 @Module({
-  imports: [PlatformDataPersistenceModule, RagModule],
+  imports: [
+    AppConfigModule,
+    PlatformDataPersistenceModule,
+    RagModule,
+    KnowledgeAssetModule
+  ],
   controllers: [MemoryController],
   providers: [
     MemoryPromotionPolicy,

@@ -41,6 +41,7 @@ describe("memory promotion integration", () => {
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
     process.env.LLM_MOCK_MODE = "true";
+    process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE = "true";
 
     moduleRef = await Test.createTestingModule({
       imports: [AppModule]
@@ -55,6 +56,7 @@ describe("memory promotion integration", () => {
     if (cleanupFixture) {
       await cleanupFixture();
     }
+    delete process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE;
   });
 
   it("promotes candidate -> verified -> production and ignores duplicate trigger", async () => {

@@ -13,10 +13,32 @@ export class SqliteExecutorService implements QueryExecutor {
   async execute(input: {
     datasource: Datasource;
     sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<QueryExecutionResult> {
     return this.sqliteQuery.query(input.sql, {
-      filePath: this.resolveDatasourcePath(input.datasource)
+      filePath: this.resolveDatasourcePath(input.datasource),
+      abortSignal: input.abortSignal,
+      timeoutMs: input.timeoutMs
     });
+  }
+
+  async explain(input: {
+    datasource: Datasource;
+    sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }) {
+    await this.sqliteQuery.dryRun(input.sql, {
+      filePath: this.resolveDatasourcePath(input.datasource),
+      abortSignal: input.abortSignal,
+      timeoutMs: input.timeoutMs
+    });
+    return {
+      capability: "available" as const,
+      evidenceRefs: ["sqlite:explain-query-plan"],
+      reasonCodes: ["sqlite_explain_passed"]
+    };
   }
 
   private resolveDatasourcePath(datasource: Datasource): string {

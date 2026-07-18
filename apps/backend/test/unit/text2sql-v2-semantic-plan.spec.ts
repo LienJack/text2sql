@@ -39,6 +39,11 @@ describe("text2sql v2 semantic plan", () => {
     expect(result.plan.selectedTables).toEqual(["orders"]);
     expect(result.plan.selectedColumns).toEqual(["id", "amount", "status"]);
     expect(result.plan.evidenceRefs).toEqual(["chunk-orders-1"]);
+    expect(result.plan.queryContract).toMatchObject({
+      version: "query-contract.v1",
+      route: "text_to_sql",
+      requiredColumns: ["amount"]
+    });
     expect(result.plan.snapshotId).toBe("semantic-plan:text-to-sql:ready:t1:c3:e1:g0:orders");
     expect(result.plan.coverageGaps).toBeUndefined();
     expect(result.plan.planLedger?.summary.failedHardBlockerIds).toEqual([]);
@@ -271,6 +276,65 @@ describe("text2sql v2 semantic plan", () => {
           status: "failed",
           reasonCodes: ["missing_join_path"]
         })
+      ])
+    );
+  });
+
+  it("does not guess when the dependency closure contains competing metric definitions", () => {
+    const result = planService.build({
+      question: "统计收入",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: ["metric.revenue.gross", "metric.revenue.net"],
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.amount"],
+        dependencyClosure: {
+          status: "ambiguous",
+          conflictSet: [
+            {
+              subject: "metric:revenue",
+              competingEvidenceRefs: ["metric.revenue.gross", "metric.revenue.net"]
+            }
+          ],
+          joinClosure: [],
+          metricDependencies: ["metric.revenue.gross", "metric.revenue.net"],
+          calculatedDependencies: [],
+          filterDependencies: [],
+          timeDependencies: [],
+          mandatoryEvidenceRefs: ["metric.revenue.gross", "metric.revenue.net"],
+          optionalEvidenceRefs: [],
+          reasonCodes: ["metric_definition_ambiguous"]
+        }
+      },
+      allowedTables: ["orders"]
+    });
+
+    expect(result.plan.route).toBe("clarify");
+    expect(result.validation.outcome).toBe("needs_clarification");
+    expect(result.plan.queryContract).toBeUndefined();
+  });
+
+  it("fails closed for text_to_sql when trusted policy/schema grounding is unavailable", () => {
+    const result = planService.build({
+      question: "统计订单金额",
+      contextPack: {
+        status: "ready",
+        selectedEvidenceIds: ["schema-orders"],
+        selectedTables: ["orders"],
+        selectedColumns: ["orders.amount"],
+        groundingIdentity: {
+          status: "unavailable",
+          reasonCodes: ["schema_snapshot_unavailable"]
+        }
+      },
+      allowedTables: ["orders"],
+      requiresTrustedGrounding: true
+    });
+
+    expect(result.validation.outcome).toBe("fail_closed");
+    expect(result.plan.planLedger?.summary.failedHardBlockerIds).toEqual(
+      expect.arrayContaining([
+        "ledger:evidence:general:trusted_sql_grounding_unavailable"
       ])
     );
   });

@@ -1,0 +1,6 @@
+# Reserved for an external Temporal Server deployment. Local development uses
+# the supported temporalio/temporal CLI development server with embedded SQLite.
+frontend.enableUpdateWorkflowExecution:
+  - value: true
+history.enableActivityEagerExecution:
+  - value: true

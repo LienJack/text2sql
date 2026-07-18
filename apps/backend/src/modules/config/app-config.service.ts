@@ -3,6 +3,9 @@ import { ConfigService } from "@nestjs/config";
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
+export type AuthenticationMode = "dev_headers" | "oidc_bearer";
+export type AnalysisDurableProvider = "temporal" | "in_memory";
+
 @Injectable()
 export class AppConfigService {
   private readonly logger = new Logger(AppConfigService.name);
@@ -26,6 +29,189 @@ export class AppConfigService {
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  get authMode(): AuthenticationMode {
+    const fallback = this.nodeEnv === "production" ? "oidc_bearer" : "dev_headers";
+    const configured = this.config
+      .get<string>("AUTH_MODE", fallback)
+      .trim()
+      .toLowerCase();
+    if (configured === "dev_headers" || configured === "oidc_bearer") {
+      return configured;
+    }
+    throw new Error(
+      `AUTH_MODE 配置无效（${configured}），仅支持 dev_headers 或 oidc_bearer。`
+    );
+  }
+
+  get authOidcIssuer(): string {
+    return this.config.get<string>("AUTH_OIDC_ISSUER", "").trim();
+  }
+
+  get authOidcAudience(): string[] {
+    return this.config
+      .get<string>("AUTH_OIDC_AUDIENCE", "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  get authOidcJwksUrl(): string {
+    return this.config.get<string>("AUTH_OIDC_JWKS_URL", "").trim();
+  }
+
+  get authOidcAllowedAlgorithms(): string[] {
+    return this.config
+      .get<string>("AUTH_OIDC_ALLOWED_ALGORITHMS", "RS256")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  get authOidcClockToleranceSeconds(): number {
+    return this.readPositiveNumber("AUTH_OIDC_CLOCK_TOLERANCE_SECONDS", 5);
+  }
+
+  get authPolicyVersion(): string {
+    return this.config.get<string>("AUTH_POLICY_VERSION", "trusted-principal-v1").trim();
+  }
+
+  get authHeaderActorEnabled(): boolean {
+    return this.authMode === "dev_headers";
+  }
+
+  get analysisArtifactMaxBytes(): number {
+    return this.readPositiveNumber("ANALYSIS_ARTIFACT_MAX_BYTES", 256 * 1024);
+  }
+
+  get analysisTaskArtifactMaxBytes(): number {
+    return this.readPositiveNumber("ANALYSIS_TASK_ARTIFACT_MAX_BYTES", 8 * 1024 * 1024);
+  }
+
+  get analysisDurableProvider(): AnalysisDurableProvider {
+    const fallback = this.nodeEnv === "test" ? "in_memory" : "temporal";
+    const configured = this.config
+      .get<string>("ANALYSIS_DURABLE_PROVIDER", fallback)
+      .trim()
+      .toLowerCase();
+    if (configured === "temporal" || configured === "in_memory") {
+      return configured;
+    }
+    throw new Error(
+      `ANALYSIS_DURABLE_PROVIDER 配置无效（${configured}），仅支持 temporal 或 in_memory。`
+    );
+  }
+
+  get temporalAddress(): string {
+    return this.config.get<string>("TEMPORAL_ADDRESS", "127.0.0.1:7233").trim();
+  }
+
+  get temporalNamespace(): string {
+    return this.config.get<string>("TEMPORAL_NAMESPACE", "default").trim();
+  }
+
+  get temporalTaskQueue(): string {
+    return this.config
+      .get<string>("TEMPORAL_ANALYSIS_TASK_QUEUE", "text2sql-analysis-v1")
+      .trim();
+  }
+
+  get temporalConnectionTimeoutMs(): number {
+    return this.readPositiveNumber("TEMPORAL_CONNECTION_TIMEOUT_MS", 5_000);
+  }
+
+  get analysisEventPollIntervalMs(): number {
+    return this.readPositiveNumber("ANALYSIS_EVENT_POLL_INTERVAL_MS", 500);
+  }
+
+  get analysisMultiWorkerMode(): "off" | "shadow" {
+    return this.config
+      .get<string>("ANALYSIS_MULTI_WORKER_MODE", "off")
+      .trim()
+      .toLowerCase() === "shadow"
+      ? "shadow"
+      : "off";
+  }
+
+  get analysisResearchEnabled(): boolean {
+    return this.config.get<string>("ANALYSIS_RESEARCH_ENABLED", "false") === "true";
+  }
+
+  get knowledgeAssetLegacyFixtureMode(): boolean {
+    return (
+      this.config.get<string>("KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE", "false") ===
+      "true"
+    );
+  }
+
+  get analysisResearchProvider(): "tavily" {
+    const configured = this.config
+      .get<string>("ANALYSIS_RESEARCH_PROVIDER", "tavily")
+      .trim()
+      .toLowerCase();
+    if (configured !== "tavily") {
+      throw new Error(
+        `ANALYSIS_RESEARCH_PROVIDER 配置无效（${configured}），当前仅支持 tavily。`
+      );
+    }
+    return "tavily";
+  }
+
+  get tavilyApiKey(): string {
+    return this.config.get<string>("TAVILY_API_KEY", "").trim();
+  }
+
+  get tavilyApiBaseUrl(): string {
+    return this.config.get<string>("TAVILY_API_BASE_URL", "").trim();
+  }
+
+  get analysisResearchSearchTimeoutMs(): number {
+    return this.readPositiveNumber("ANALYSIS_RESEARCH_SEARCH_TIMEOUT_MS", 10_000);
+  }
+
+  get analysisResearchExtractTimeoutMs(): number {
+    return this.readPositiveNumber("ANALYSIS_RESEARCH_EXTRACT_TIMEOUT_MS", 20_000);
+  }
+
+  get analysisResearchMaxContentBytes(): number {
+    return this.readPositiveNumber(
+      "ANALYSIS_RESEARCH_MAX_CONTENT_BYTES",
+      256 * 1024
+    );
+  }
+
+  get analysisResearchDefaultRetentionDays(): number {
+    return this.readPositiveNumber("ANALYSIS_RESEARCH_RETENTION_DAYS", 30);
+  }
+
+  get analysisResearchAllowedDomains(): string[] {
+    return this.config
+      .get<string>("ANALYSIS_RESEARCH_ALLOWED_DOMAINS", "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  get corsAllowedHeaders(): string[] {
+    const common = [
+      "content-type",
+      "x-request-id",
+      "x-workspace-id",
+      "x-idempotency-key"
+    ];
+    if (this.authMode === "oidc_bearer") {
+      return [...common, "authorization"];
+    }
+    return [
+      ...common,
+      "x-user-id",
+      "x-user-role",
+      "x-workspace-role",
+      "x-workspace-admin-ids",
+      "x-workspace-member-ids",
+      "x-workspace-roles"
+    ];
   }
 
   get sqlitePath(): string {
@@ -318,6 +504,80 @@ export class AppConfigService {
     return Number(this.config.get<string>("LANGSMITH_TIMEOUT_MS", "5000"));
   }
 
+  get text2sqlAccuracyFixtureRoot(): string {
+    const raw = this.config.get<string>(
+      "TEXT2SQL_ACCURACY_FIXTURE_ROOT",
+      "../../data/text2sql-accuracy"
+    );
+    return this.resolveConfiguredPath(raw);
+  }
+
+  get text2sqlAccuracyTrustedPublicKeys(): Record<string, string> {
+    const raw = this.config
+      .get<string>("TEXT2SQL_ACCURACY_TRUSTED_PUBLIC_KEYS_JSON", "{}")
+      .trim();
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return {};
+      }
+      return Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>).filter(
+          (entry): entry is [string, string] =>
+            entry[0].trim().length > 0 &&
+            typeof entry[1] === "string" &&
+            entry[1].trim().length > 0
+        )
+      );
+    } catch {
+      this.logger.warn(
+        "TEXT2SQL_ACCURACY_TRUSTED_PUBLIC_KEYS_JSON 配置无效，将拒绝外部 Outcome Receipt。"
+      );
+      return {};
+    }
+  }
+
+  get text2sqlAccuracyEvidenceMaxAgeMs(): number {
+    return this.readPositiveNumber("TEXT2SQL_ACCURACY_EVIDENCE_MAX_AGE_MS", 3_600_000);
+  }
+
+  get text2sqlAccuracyMode(): "shadow" | "enforce" {
+    return this.config.get<string>("TEXT2SQL_ACCURACY_MODE", "shadow") === "enforce"
+      ? "enforce"
+      : "shadow";
+  }
+
+  get text2sqlAccuracySupportedSlices(): string[] {
+    return this.config
+      .get<string>("TEXT2SQL_ACCURACY_SUPPORTED_SLICES", "sanitized-sqlite-reference")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  get text2sqlAccuracyGuidelineDigest(): string {
+    return this.config.get<string>(
+      "TEXT2SQL_ACCURACY_GUIDELINE_DIGEST",
+      "data-agent-system-design-2026-07-17"
+    );
+  }
+
+  get text2sqlExecutionTimeoutMs(): number {
+    return this.readPositiveNumber("TEXT2SQL_EXECUTION_TIMEOUT_MS", 10_000);
+  }
+
+  get text2sqlExecutionMaxRows(): number {
+    return this.readPositiveNumber("TEXT2SQL_EXECUTION_MAX_ROWS", 200);
+  }
+
+  get text2sqlExecutionMaxBytes(): number {
+    return this.readPositiveNumber("TEXT2SQL_EXECUTION_MAX_BYTES", 2 * 1024 * 1024);
+  }
+
+  get text2sqlExecutionMaxAstNodes(): number {
+    return this.readPositiveNumber("TEXT2SQL_EXECUTION_MAX_AST_NODES", 20_000);
+  }
+
   get langsmithConfigured(): boolean {
     return Boolean(this.langsmithApiKey);
   }
@@ -359,8 +619,73 @@ export class AppConfigService {
         "LANGSMITH_TRACING 已启用但 LANGSMITH_API_KEY 未配置，系统将降级为本地可观测模式。"
       );
     }
+    if (this.nodeEnv === "production" && this.authMode !== "oidc_bearer") {
+      throw new Error(
+        "生产环境必须使用 AUTH_MODE=oidc_bearer，禁止启用客户端身份请求头。"
+      );
+    }
+    if (
+      this.nodeEnv === "production" &&
+      this.analysisDurableProvider !== "temporal"
+    ) {
+      throw new Error(
+        "生产环境必须使用 ANALYSIS_DURABLE_PROVIDER=temporal，禁止以内存 adapter 承载自治任务。"
+      );
+    }
+    if (this.nodeEnv === "production" && this.knowledgeAssetLegacyFixtureMode) {
+      throw new Error(
+        "生产环境禁止 KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE，Memory/Skill 必须使用 canonical store。"
+      );
+    }
+    if (this.analysisResearchEnabled && !this.tavilyApiKey) {
+      missing.push("TAVILY_API_KEY");
+    }
+    if (this.analysisDurableProvider === "temporal") {
+      if (!this.temporalAddress) {
+        missing.push("TEMPORAL_ADDRESS");
+      }
+      if (!this.temporalNamespace) {
+        missing.push("TEMPORAL_NAMESPACE");
+      }
+      if (!this.temporalTaskQueue) {
+        missing.push("TEMPORAL_ANALYSIS_TASK_QUEUE");
+      }
+    }
+    if (this.authMode === "oidc_bearer") {
+      if (!this.authOidcIssuer) {
+        missing.push("AUTH_OIDC_ISSUER");
+      }
+      if (this.authOidcAudience.length === 0) {
+        missing.push("AUTH_OIDC_AUDIENCE");
+      }
+      if (!this.authOidcJwksUrl) {
+        missing.push("AUTH_OIDC_JWKS_URL");
+      }
+      if (this.authOidcAllowedAlgorithms.length === 0) {
+        missing.push("AUTH_OIDC_ALLOWED_ALGORITHMS");
+      }
+    }
+    if (!this.authPolicyVersion) {
+      missing.push("AUTH_POLICY_VERSION");
+    }
     if (missing.length > 0) {
       throw new Error(`缺少必要配置: ${missing.join(", ")}`);
+    }
+  }
+
+  assertAnalysisWorkerConfig(): void {
+    if (this.analysisDurableProvider !== "temporal") {
+      throw new Error("analysis-worker 只能在 temporal durable provider 下启动。");
+    }
+    const missing = [
+      ["TEMPORAL_ADDRESS", this.temporalAddress],
+      ["TEMPORAL_NAMESPACE", this.temporalNamespace],
+      ["TEMPORAL_ANALYSIS_TASK_QUEUE", this.temporalTaskQueue]
+    ]
+      .filter(([, value]) => !value)
+      .map(([name]) => name);
+    if (missing.length > 0) {
+      throw new Error(`analysis-worker 缺少关键配置: ${missing.join(", ")}`);
     }
   }
 
@@ -371,6 +696,15 @@ export class AppConfigService {
       return parsed;
     }
     this.logger.warn(`${key} 配置无效（${raw}），已回退默认值 ${defaultValue}。`);
+    return defaultValue;
+  }
+
+  private readPositiveNumber(key: string, defaultValue: number): number {
+    const parsed = this.readNumber(key, defaultValue);
+    if (parsed > 0) {
+      return parsed;
+    }
+    this.logger.warn(`${key} 必须大于 0，已回退默认值 ${defaultValue}。`);
     return defaultValue;
   }
 

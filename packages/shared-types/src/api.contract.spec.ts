@@ -16,6 +16,13 @@ import type {
   RollbackGlossaryAnchorResponse,
   SendMessageRequest,
   SqlRun,
+  Text2SqlAccuracyEvidenceV1,
+  Text2SqlAccuracyGateReceiptV1,
+  Text2SqlAccuracyGateStatusV1,
+  Text2SqlEvalVersionTupleV1,
+  Text2SqlExecutionPermitReceiptV1,
+  Text2SqlQueryContractV1,
+  Text2SqlValidationReceiptV1,
   Text2SqlV2RunArtifact,
   UpdatePromptTemplateRequest,
   UpsertGlossaryTermResponse
@@ -391,6 +398,130 @@ const runtimeIntelligenceV2Sample: Text2SqlV2RunArtifact = {
       version: promptTemplateSample.version
     }
   }
+};
+
+const accuracyVersionTupleSample: Text2SqlEvalVersionTupleV1 = {
+  questionSet: "questions-v1",
+  semantic: "semantic-v1",
+  schema: "schema-v1",
+  policy: "policy-v1",
+  data: "data-v1",
+  model: "model-v1",
+  prompt: "prompt-v1",
+  workflow: "workflow-v1",
+  code: "code-v1"
+};
+
+const queryContractSample: Text2SqlQueryContractV1 = {
+  version: "query-contract.v1",
+  id: "query-contract:001",
+  digest: "sha256:query-contract-001",
+  runId: "run_123",
+  questionDigest: "sha256:question-001",
+  route: "text_to_sql",
+  metrics: ["net_revenue"],
+  dimensions: ["month"],
+  requiredColumns: ["orders.paid_at", "orders.amount"],
+  filters: ["region=east_china"],
+  time: {
+    field: "orders.paid_at",
+    from: "2026-01-01",
+    to: "2026-03-31",
+    timezone: "Asia/Shanghai",
+    grain: "month"
+  },
+  grain: ["month"],
+  sort: [{ field: "month", direction: "asc" }],
+  limit: 100,
+  resultShape: {
+    cardinality: "tabular",
+    columns: [
+      { name: "month", semanticType: "time" },
+      { name: "net_revenue", semanticType: "metric" }
+    ]
+  },
+  frozenAt: "2026-07-17T01:00:00.000Z"
+};
+
+const preExecutionGateReceiptsSample: Text2SqlAccuracyGateReceiptV1[] = [
+  "intent",
+  "semantic",
+  "structural",
+  "policy",
+  "resource"
+].map((gate) => ({
+  version: "accuracy-gate-receipt.v1",
+  receiptId: `receipt:${gate}`,
+  receiptDigest: `sha256:${gate}`,
+  runId: "run_123",
+  queryContractDigest: queryContractSample.digest,
+  sqlDigest: "sha256:sql-001",
+  versions: accuracyVersionTupleSample,
+  gate: gate as Text2SqlAccuracyGateReceiptV1["gate"],
+  status: "passed",
+  capability: "available",
+  reasonCodes: [],
+  evidenceRefs: [],
+  parentReceiptDigests: [],
+  issuedAt: "2026-07-17T01:00:01.000Z"
+}));
+
+const executionPermitSample: Text2SqlExecutionPermitReceiptV1 = {
+  version: "execution-permit-receipt.v1",
+  receiptId: "receipt:permit:001",
+  receiptDigest: "sha256:permit-001",
+  runId: "run_123",
+  queryContractDigest: queryContractSample.digest,
+  sqlDigest: "sha256:sql-001",
+  versions: accuracyVersionTupleSample,
+  status: "passed",
+  gateReceiptDigests: {
+    intent: "sha256:intent",
+    semantic: "sha256:semantic",
+    structural: "sha256:structural",
+    policy: "sha256:policy",
+    resource: "sha256:resource"
+  },
+  issuedAt: "2026-07-17T01:00:02.000Z",
+  expiresAt: "2026-07-17T01:05:02.000Z"
+};
+
+const validationReceiptSample: Text2SqlValidationReceiptV1 = {
+  version: "validation-receipt.v1",
+  receiptId: "receipt:validation:001",
+  receiptDigest: "sha256:validation-001",
+  runId: "run_123",
+  queryContractDigest: queryContractSample.digest,
+  sqlDigest: "sha256:sql-001",
+  versions: accuracyVersionTupleSample,
+  status: "passed",
+  gateReceiptDigests: [
+    ...preExecutionGateReceiptsSample.map((item) => item.receiptDigest),
+    "sha256:sandbox",
+    "sha256:result"
+  ],
+  executionPermitDigest: executionPermitSample.receiptDigest,
+  executionReceiptDigest: "sha256:execution-001",
+  resultReceiptDigest: "sha256:result-001",
+  repairReceiptDigests: [],
+  reasonCodes: [],
+  sealedAt: "2026-07-17T01:00:04.000Z"
+};
+
+const accuracyEvidenceSample: Text2SqlAccuracyEvidenceV1 = {
+  version: "text2sql-accuracy-evidence.v1",
+  queryContract: queryContractSample,
+  versions: accuracyVersionTupleSample,
+  gateReceipts: preExecutionGateReceiptsSample,
+  executionPermit: executionPermitSample,
+  validationReceipt: validationReceiptSample
+};
+
+const v2WithAccuracyEvidenceSample: Text2SqlV2RunArtifact = {
+  version: "v2",
+  stageOrder: runtimeIntelligenceV2Sample.stageOrder,
+  stages: runtimeIntelligenceV2Sample.stages,
+  accuracy: accuracyEvidenceSample
 };
 
 const oldV2WithoutRuntimeIntelligenceSample: Text2SqlV2RunArtifact = {
@@ -886,6 +1017,15 @@ type DeliveryV2PlanLedgerSummaryShape = Expect<
   IsAssignable<
     typeof runtimeIntelligenceV2Sample.planLedger,
     NonNullable<NonNullable<DeliveryContract["evidence"]>["v2"]>["planLedger"]
+  >
+>;
+type HardGateStatusRejectsSkipped = ExpectFalse<
+  IsAssignable<"skipped", Text2SqlAccuracyGateStatusV1>
+>;
+type TraceV2AccuracyEvidenceShape = Expect<
+  IsAssignable<
+    typeof v2WithAccuracyEvidenceSample.accuracy,
+    NonNullable<SqlRun["trace"]["v2"]>["accuracy"]
   >
 >;
 type OldV2WithoutRuntimeIntelligenceShape = Expect<
