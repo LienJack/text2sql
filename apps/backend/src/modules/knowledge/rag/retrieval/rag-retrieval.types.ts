@@ -15,6 +15,17 @@ export interface RagRetrievalRequest {
   runId: string;
   workspaceId?: string;
   allowedTables?: string[];
+  allowedColumnsDigest?: string;
+  requiresSqlPolicy?: boolean;
+  policyVersion?: number;
+  policyDigest?: string;
+  schemaSnapshotId?: string;
+  schemaSnapshotDigest?: string;
+  semanticVersion?: number;
+  modelingRevision?: number;
+  valueSketchVersion?: string;
+  priorSqlVersion?: string;
+  promptVersion?: string;
   activeIndexVersionId?: string;
   perLaneLimit?: number;
   finalCandidateLimit?: number;
@@ -236,6 +247,11 @@ export interface RagContextPack {
   selectedContextLanes?: string[];
   degradeReasons?: string[];
   riskTags?: string[];
+  policy_version?: number;
+  policy_digest?: string;
+  schema_snapshot_id?: string;
+  schema_snapshot_digest?: string;
+  allowed_columns_digest?: string;
 }
 
 export interface RagPriorSqlLaneEvidence {

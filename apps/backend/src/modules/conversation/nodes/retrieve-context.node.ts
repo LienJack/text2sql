@@ -13,6 +13,12 @@ export interface RetrieveContextNodeInput {
   runId: string;
   workspaceId?: string;
   allowedTables?: string[];
+  requiresSqlPolicy?: boolean;
+  policyVersion?: number;
+  policyDigest?: string;
+  schemaSnapshotId?: string;
+  schemaSnapshotDigest?: string;
+  allowedColumnsDigest?: string;
   modelCatalogId?: string;
   pinnedTables?: string[];
   pinnedColumns?: string[];

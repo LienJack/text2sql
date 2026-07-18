@@ -102,6 +102,10 @@ describe("datasource access policy service", () => {
     expect(tableResolution.decisions.payroll).toBe("workspace_allow");
     expect(tableResolution.decisions.inventory).toBe("default_deny");
     expect(tableResolution.policySource).toBe("workspace_table_permissions");
+    expect(tableResolution.policyVersion).toBe(1);
+    expect(tableResolution.workspaceDatasourceBindingId).toBeTruthy();
+    expect(tableResolution.policyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(tableResolution.roleSet).toEqual(expect.arrayContaining(["member"]));
   });
 
   it("rejects missing or unverified workspace context for non-admin actor", async () => {

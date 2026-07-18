@@ -11,6 +11,9 @@ import { UserRepository } from "../../data/persistence/user.repository";
 import { WorkspaceRepository } from "../../data/persistence/workspace.repository";
 import { WorkspaceDatasourcePolicyRepository } from "../../data/persistence/workspace-datasource-policy.repository";
 import { SqliteQueryService } from "../../data/sqlite/sqlite-query.service";
+import { AnalysisCommandOutboxRepository } from "./persistence/analysis-command-outbox.repository";
+import { AnalysisLedgerPrismaService } from "./persistence/analysis-ledger-prisma.service";
+import { AnalysisTaskRepository } from "./persistence/analysis-task.repository";
 import { ModelingGraphRepository } from "./persistence/modeling-graph.repository";
 import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
 
@@ -29,7 +32,10 @@ import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
     LlmConfigRepository,
     RagTaskConfigRepository,
     UserRepository,
-    WorkspaceRepository
+    WorkspaceRepository,
+    AnalysisLedgerPrismaService,
+    AnalysisTaskRepository,
+    AnalysisCommandOutboxRepository
   ],
   exports: [
     SqliteQueryService,
@@ -44,7 +50,10 @@ import { ModelingGraphValidator } from "./persistence/modeling-graph.validator";
     LlmConfigRepository,
     RagTaskConfigRepository,
     UserRepository,
-    WorkspaceRepository
+    WorkspaceRepository,
+    AnalysisLedgerPrismaService,
+    AnalysisTaskRepository,
+    AnalysisCommandOutboxRepository
   ]
 })
 export class PlatformDataPersistenceModule {}

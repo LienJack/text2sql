@@ -1,0 +1,68 @@
+{
+  "version": "text2sql-accuracy-slice/v1",
+  "sliceId": "sanitized-reference",
+  "frozenAt": "2026-07-17T01:00:00.000Z",
+  "questionSetDigest": "9558bd0a4a1ec6724641e37e2329a941d9e0b3d8911261f3ee57abc6643f3d36",
+  "thresholdProfile": "sanitized-reference-v1",
+  "oracleApproval": {
+    "approvedBy": "reference-slice-owner",
+    "approvedAt": "2026-07-17T00:00:00.000Z"
+  },
+  "baseline": {
+    "id": "golden-sql-baseline-v1",
+    "versions": {
+      "questionSet": "9558bd0a4a1ec6724641e37e2329a941d9e0b3d8911261f3ee57abc6643f3d36",
+      "semantic": "semantic-release-reference-v1",
+      "schema": "schema-snapshot-reference-v1",
+      "policy": "policy-reference-v1",
+      "data": "sanitized-data-pack-v1",
+      "model": "deterministic-golden-sql",
+      "prompt": "golden-sql-v1",
+      "workflow": "accuracy-runner-v1",
+      "code": "reference-baseline-v1"
+    }
+  },
+  "candidate": {
+    "id": "sum-distinct-mutation-v1",
+    "versions": {
+      "questionSet": "9558bd0a4a1ec6724641e37e2329a941d9e0b3d8911261f3ee57abc6643f3d36",
+      "semantic": "semantic-release-reference-v1",
+      "schema": "schema-snapshot-reference-v1",
+      "policy": "policy-reference-v1",
+      "data": "sanitized-data-pack-v1",
+      "model": "deterministic-mutant",
+      "prompt": "sum-distinct-mutant-v1",
+      "workflow": "accuracy-runner-v1",
+      "code": "reference-candidate-v1"
+    }
+  },
+  "cases": [
+    {
+      "id": "ae1-sum-distinct",
+      "question": "支付表中的总支付金额是多少？",
+      "questionDigest": "f75f644c073829c9ffb72e342961ce8635ebdbcfa5522536ca13ddec59379466",
+      "queryContractDigest": "3092366faa6fc1a72a5972a81138638f447bf84908d85d9923efb85e2e658ae0",
+      "baselineSql": "SELECT SUM(amount) AS total_amount FROM payments;",
+      "candidateSql": "SELECT SUM(DISTINCT amount) AS total_amount FROM payments;",
+      "oracle": {
+        "id": "golden-result-ae1",
+        "kind": "golden_result",
+        "mandatory": true
+      },
+      "fixtures": [
+        {
+          "id": "unique-amounts",
+          "digest": "17f1a5f3040d55198a9328b31f997f3a18f19c522b985a88fd2d56049bd37379",
+          "setupSql": "CREATE TABLE payments (amount INTEGER NOT NULL);\nINSERT INTO payments(amount) VALUES (10), (20);",
+          "expectedRows": [{ "total_amount": 30 }]
+        },
+        {
+          "id": "duplicate-amounts",
+          "digest": "349376f9922469143841f227ee085634eaae9fb6a87766e02f70e47f8de67f59",
+          "setupSql": "CREATE TABLE payments (amount INTEGER NOT NULL);\nINSERT INTO payments(amount) VALUES (10), (10), (20);",
+          "expectedRows": [{ "total_amount": 40 }]
+        }
+      ]
+    }
+  ]
+}

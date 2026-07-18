@@ -66,7 +66,13 @@ export class PolicyEvaluatorService {
   }): Promise<PolicyEvaluatorReadableResolution> {
     const resolved = await this.accessPolicyService.resolveReadableTables(input);
     return {
+      actorId: resolved.actorId,
+      workspaceId: resolved.workspaceId,
       datasourceId: resolved.datasourceId,
+      workspaceDatasourceBindingId: resolved.workspaceDatasourceBindingId,
+      roleSet: [...resolved.roleSet],
+      policyVersion: resolved.policyVersion,
+      policyDigest: resolved.policyDigest,
       readableTables: resolved.readableTables,
       decisions: resolved.decisions,
       mode: "workspace_table_permissions",

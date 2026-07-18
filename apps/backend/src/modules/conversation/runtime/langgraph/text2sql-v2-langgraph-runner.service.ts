@@ -25,6 +25,7 @@ import { RetrieveContextNode } from "../../nodes/retrieve-context.node";
 import { SemanticPlanNode } from "../../nodes/semantic-plan.node";
 import { ValidateSqlNode } from "../../nodes/validate-sql.node";
 import { Text2SqlV2ArtifactRefService } from "../../artifacts/text2sql-v2-artifact-ref.service";
+import { AppConfigService } from "../../../config/app-config.service";
 
 @Injectable()
 export class Text2SqlV2LangGraphRunnerService {
@@ -43,7 +44,8 @@ export class Text2SqlV2LangGraphRunnerService {
     private readonly sqlToolRegistry: SqlToolRegistryService,
     private readonly langsmithTrace: LangsmithTraceService,
     private readonly resultMapper: Text2SqlV2LangGraphResultMapper,
-    private readonly artifactRefService: Text2SqlV2ArtifactRefService
+    private readonly artifactRefService: Text2SqlV2ArtifactRefService,
+    private readonly appConfig: AppConfigService
   ) {}
 
   async runSync(input: Text2SqlPreparedRunContext, route: string): Promise<SqlRun> {
@@ -180,6 +182,7 @@ export class Text2SqlV2LangGraphRunnerService {
         correctSqlNode: this.correctSqlNode,
         executeSqlNode: this.executeSqlNode,
         answerNode: this.answerNode,
+        accuracyMode: this.appConfig.text2sqlAccuracyMode,
         resolveSqlTools: (state) =>
           this.sqlToolRegistry.getToolsForDatasource(
             state.preparedRun.datasource,

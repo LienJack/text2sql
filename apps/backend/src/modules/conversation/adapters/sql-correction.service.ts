@@ -23,15 +23,12 @@ export interface SqlCorrectionBudget {
   exhausted: boolean;
 }
 
-const CORRECTABLE_ERROR_MARKERS = [
-  "syntax",
-  "missing column",
-  "unknown column",
-  "dialect",
-  "join path",
-  "relationship",
-  "ambiguous_join_path"
-];
+const MECHANICAL_REPAIR_CODES = new Set([
+  "SQL_CATALOG_REFERENCE_AMBIGUOUS",
+  "SQL_MISSING_COLUMN",
+  "SQL_DIALECT_MISMATCH",
+  "SQL_ANALYSIS_DIALECT_FUNCTION_UNSUPPORTED"
+]);
 
 @Injectable()
 export class SqlCorrectionService {
@@ -80,14 +77,11 @@ export class SqlCorrectionService {
 
     const message = error instanceof Error ? error.message : String(error ?? "");
     const normalized = message.trim().toLowerCase();
-    const correctable = CORRECTABLE_ERROR_MARKERS.some((marker) =>
-      normalized.includes(marker)
-    );
     return {
-      correctable,
+      correctable: false,
       reason: normalized || "unknown",
-      maxAttempts: correctable ? this.maxAttempts : 0,
-      category: correctable ? "execution" : "unknown",
+      maxAttempts: 0,
+      category: "unknown",
       source: "execution"
     };
   }
@@ -116,9 +110,8 @@ export class SqlCorrectionService {
     const category = this.mapFailureCategory(failure);
     const failureCode = failure.code;
     const terminal = Boolean(failure.terminal);
-    const explicitlyCorrectable = Boolean(failure.correctable);
     const codeCorrectable = this.isCorrectableValidationCode(failureCode);
-    const correctable = !terminal && (explicitlyCorrectable || codeCorrectable);
+    const correctable = !terminal && codeCorrectable;
 
     return {
       correctable,
@@ -152,18 +145,7 @@ export class SqlCorrectionService {
   }
 
   private isCorrectableValidationCode(code: string): boolean {
-    return (
-      code === "SQL_PARSE_EMPTY" ||
-      code === "SQL_PARSE_UNSUPPORTED_STATEMENT" ||
-      code === "SQL_PARSE_MULTI_STATEMENT" ||
-      code === "SQL_DIALECT_MISMATCH" ||
-      code === "SQL_RELATIONSHIP_PATH_MISMATCH" ||
-      code === "SQL_RELATIONSHIP_PATH_MISSING_JOIN" ||
-      code === "SQL_DRY_RUN_PARSE_REJECTED" ||
-      code === "SQL_DRY_PLAN_RELATIONSHIP_MISMATCH" ||
-      code === "SQL_PLAN_COVERAGE_OUTSIDE_SELECTED_TABLES" ||
-      code === "SQL_MISSING_COLUMN"
-    );
+    return MECHANICAL_REPAIR_CODES.has(code);
   }
 
   private readValidationFailure(error: unknown): Text2SqlV2FailureSemantic | undefined {
@@ -268,6 +250,8 @@ export class SqlCorrectionService {
         const status = this.readString(item.status);
         if (
           (check !== "parse" &&
+            check !== "structural" &&
+            check !== "catalog" &&
             check !== "read-only" &&
             check !== "permission" &&
             check !== "plan-coverage" &&

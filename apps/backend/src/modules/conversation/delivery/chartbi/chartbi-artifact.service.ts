@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { DeliveryArtifactLayer, SqlRun } from "@text2sql/shared-types";
+import { DomainError } from "../../../../common/domain-error";
 import { ChartBiGroundingGuard } from "./chartbi-grounding.guard";
 import {
   ChartBiIntentParser,
@@ -26,6 +27,11 @@ export interface ChartBiArtifactBuildInput {
 }
 
 export interface ChartBiArtifactLayer extends DeliveryArtifactLayer {
+  grounding?: {
+    mode: "committed_analysis_refs";
+    claimRefs: string[];
+    evidenceRefs: string[];
+  };
   summary: ChartBiSummaryBlock;
   table: {
     columns: string[];
@@ -89,6 +95,31 @@ export class ChartBiArtifactService {
       hasError: Boolean(run.error),
       visualIntentRaw: options?.visualIntentRaw ?? run.llmRaw?.rawText
     });
+  }
+
+  buildFromCommittedAnalysis(
+    input: ChartBiArtifactBuildInput & {
+      claimRefs: string[];
+      evidenceRefs: string[];
+    }
+  ): ChartBiArtifactLayer {
+    const claimRefs = [...new Set(input.claimRefs)].filter(Boolean).sort();
+    const evidenceRefs = [...new Set(input.evidenceRefs)].filter(Boolean).sort();
+    if (claimRefs.length === 0 || evidenceRefs.length === 0) {
+      throw new DomainError(
+        "CHARTBI_ANALYSIS_GROUNDING_REQUIRED",
+        "Analysis ChartBI 必须引用 committed Claim 与 Evidence。",
+        409
+      );
+    }
+    return {
+      ...this.build(input),
+      grounding: {
+        mode: "committed_analysis_refs",
+        claimRefs,
+        evidenceRefs
+      }
+    };
   }
 
   build(input: ChartBiArtifactBuildInput): ChartBiArtifactLayer {

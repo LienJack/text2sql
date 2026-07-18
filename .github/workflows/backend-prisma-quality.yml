@@ -5,6 +5,7 @@ on:
     paths:
       - "apps/backend/**"
       - "packages/shared-types/**"
+      - "packages/analysis-task-protocol/**"
       - "pnpm-lock.yaml"
       - "package.json"
       - "scripts/check-backend-capability-boundaries.ts"
@@ -15,6 +16,7 @@ on:
     paths:
       - "apps/backend/**"
       - "packages/shared-types/**"
+      - "packages/analysis-task-protocol/**"
       - "pnpm-lock.yaml"
       - "package.json"
       - "scripts/check-backend-capability-boundaries.ts"
@@ -66,6 +68,15 @@ jobs:
       - name: Prisma generate
         run: pnpm --filter @text2sql/backend run prisma:generate
 
+      - name: Prepare canonical PostgreSQL schema
+        env:
+          PGPASSWORD: postgres
+        run: |
+          if ! psql -h localhost -U postgres -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='text2sql_ci'" | grep -q 1; then
+            psql -h localhost -U postgres -d postgres -c "CREATE DATABASE text2sql_ci"
+          fi
+          pnpm --filter @text2sql/backend exec prisma migrate deploy
+
       - name: Backend lint
         run: pnpm --filter @text2sql/backend run lint
 
@@ -75,16 +86,39 @@ jobs:
       - name: Backend build
         run: pnpm --filter @text2sql/backend run build
 
-      - name: Backend test
-        run: pnpm --filter @text2sql/backend run test
+      - name: Backend test with coverage
+        run: pnpm --filter @text2sql/backend exec jest --coverage --runInBand
 
       - name: Text2SQL v2 focused coverage report
+        run: pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict
+
+      - name: Text2SQL accuracy contracts and composite gates
         run: |
-          pnpm --filter @text2sql/backend exec jest \
-            --coverage \
-            --runInBand \
-            text2sql-v2-focused-coverage-gate.spec.ts
-          pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate
+          pnpm run text2sql:no-legacy-compat:check
+          pnpm run governance:terminology:check
+          pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate
+          pnpm --filter @text2sql/backend exec jest --runInBand \
+            test/integration/text2sql-accuracy-gate.spec.ts \
+            test/integration/text2sql-accuracy-replay-parity.spec.ts
+          TS_NODE_TRANSPILE_ONLY=1 pnpm --filter @text2sql/backend exec ts-node \
+            --project tsconfig.json \
+            scripts/collect-text2sql-accuracy-gate.ts \
+            > /tmp/text2sql-accuracy-gate.json
+          jq -e '.rollout.releaseDecision == "HOLD"' /tmp/text2sql-accuracy-gate.json
+          jq -e '.summary.realOutcomePairCount == 0' /tmp/text2sql-accuracy-gate.json
+
+      - name: Data Agent composite release manifest
+        run: |
+          pnpm --filter @text2sql/backend exec jest --runInBand \
+            test/integration/data-agent-release-gate.spec.ts
+          TS_NODE_TRANSPILE_ONLY=1 pnpm --filter @text2sql/backend exec ts-node \
+            --project tsconfig.json \
+            scripts/collect-data-agent-release-gate.ts \
+            > /tmp/data-agent-release-gate.json
+          jq -e '.version == "data-agent-release-manifest/v1"' /tmp/data-agent-release-gate.json
+          jq -e '.rollout.releaseDecision == "HOLD"' /tmp/data-agent-release-gate.json
+          jq -e '.rollout.gatePass == false' /tmp/data-agent-release-gate.json
+          jq -e '.topology.mode == "single_workflow"' /tmp/data-agent-release-gate.json
 
       - name: R6 scenario package tests
         env:
@@ -148,6 +182,8 @@ jobs:
 
           jq -e '.status == "success"' /tmp/health.json
           jq -e '.data.dependencies.postgres.configured == true' /tmp/health.json
+          jq -e '.data.dependencies.text2sqlAccuracy.mode == "shadow"' /tmp/health.json
+          jq -e '.data.dependencies.text2sqlAccuracy.capabilities.parser == "available"' /tmp/health.json
 
           session_json=$(curl -sS -X POST http://127.0.0.1:3100/api/v1/sessions \
             -H "content-type: application/json" \

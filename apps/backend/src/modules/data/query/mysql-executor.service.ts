@@ -16,6 +16,7 @@ interface MysqlModuleLike {
           }
     ) => Promise<[unknown, Array<{ name?: string }>]>
     end: () => Promise<void>;
+    destroy?: () => void;
   }>;
 }
 
@@ -28,6 +29,8 @@ export class MysqlExecutorService implements QueryExecutor {
   async execute(input: {
     datasource: Datasource;
     sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<QueryExecutionResult> {
     const mysql = await this.loadMysqlModule();
     const config = this.requireConnectionConfig(input.datasource);
@@ -41,10 +44,17 @@ export class MysqlExecutorService implements QueryExecutor {
       connectTimeout: this.appConfig.datasourceConnectTimeoutMs
     });
 
+    const onAbort = () => connection.destroy?.();
+    input.abortSignal?.addEventListener("abort", onAbort, { once: true });
+    const bounded = Boolean(input.abortSignal || input.timeoutMs);
     try {
+      if (bounded) {
+        await connection.query("SET TRANSACTION READ ONLY");
+        await connection.query("START TRANSACTION");
+      }
       const [rowsRaw, fields] = await connection.query({
         sql: input.sql,
-        timeout: this.appConfig.datasourceQueryTimeoutMs
+        timeout: input.timeoutMs ?? this.appConfig.datasourceQueryTimeoutMs
       });
       const rows = Array.isArray(rowsRaw)
         ? (rowsRaw as Array<Record<string, unknown>>)
@@ -65,8 +75,29 @@ export class MysqlExecutorService implements QueryExecutor {
         }
       );
     } finally {
+      if (bounded) {
+        await connection.query("ROLLBACK").catch(() => undefined);
+      }
+      input.abortSignal?.removeEventListener("abort", onAbort);
       await connection.end().catch(() => undefined);
     }
+  }
+
+  async explain(input: {
+    datasource: Datasource;
+    sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }) {
+    await this.execute({
+      ...input,
+      sql: `EXPLAIN FORMAT=JSON ${input.sql}`
+    });
+    return {
+      capability: "available" as const,
+      evidenceRefs: ["mysql:explain-format-json"],
+      reasonCodes: ["mysql_explain_passed"]
+    };
   }
 
   private async loadMysqlModule(): Promise<MysqlModuleLike> {

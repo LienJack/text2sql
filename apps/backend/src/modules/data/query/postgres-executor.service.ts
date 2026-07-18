@@ -8,7 +8,12 @@ import type { QueryExecutionResult, QueryExecutor } from "./query-executor.inter
 interface PostgresClientLike {
   connect: () => Promise<void>;
   query: (
-    sql: string
+    sql:
+      | string
+      | {
+          text: string;
+          signal?: AbortSignal;
+        }
   ) => Promise<{ rows: Array<Record<string, unknown>>; fields: Array<{ name: string }> }>;
   end: () => Promise<void>;
 }
@@ -26,6 +31,8 @@ export class PostgresExecutorService implements QueryExecutor {
   async execute(input: {
     datasource: Datasource;
     sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
   }): Promise<QueryExecutionResult> {
     const pg = await this.loadPgModule();
     const config = this.requireConnectionConfig(input.datasource);
@@ -37,12 +44,29 @@ export class PostgresExecutorService implements QueryExecutor {
       password: config.password,
       database: config.database,
       connectionTimeoutMillis: this.appConfig.datasourceConnectTimeoutMs,
-      query_timeout: this.appConfig.datasourceQueryTimeoutMs
+      query_timeout: input.timeoutMs ?? this.appConfig.datasourceQueryTimeoutMs
     });
 
+    const bounded = Boolean(input.abortSignal || input.timeoutMs);
     try {
       await client.connect();
-      const result = await client.query(input.sql);
+      if (bounded) {
+        await client.query("BEGIN READ ONLY");
+        await client.query(
+          `SET LOCAL statement_timeout = ${Math.max(1, input.timeoutMs ?? this.appConfig.datasourceQueryTimeoutMs)}`
+        );
+      }
+      const result = await client.query(
+        bounded
+          ? {
+              text: input.sql,
+              signal: input.abortSignal
+            }
+          : input.sql
+      );
+      if (bounded) {
+        await client.query("ROLLBACK");
+      }
       return {
         columns: result.fields.map((field: { name: string }) => field.name),
         rows: result.rows
@@ -57,8 +81,28 @@ export class PostgresExecutorService implements QueryExecutor {
         }
       );
     } finally {
+      if (bounded) {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
       await client.end().catch(() => undefined);
     }
+  }
+
+  async explain(input: {
+    datasource: Datasource;
+    sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }) {
+    await this.execute({
+      ...input,
+      sql: `EXPLAIN (FORMAT JSON) ${input.sql}`
+    });
+    return {
+      capability: "available" as const,
+      evidenceRefs: ["postgresql:explain-format-json"],
+      reasonCodes: ["postgresql_explain_passed"]
+    };
   }
 
   private async loadPgModule(): Promise<PostgresModuleLike> {

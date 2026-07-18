@@ -41,6 +41,8 @@ export class SessionLifecycleUsecase {
     options?: {
       workspaceId?: string;
       createdByUserId?: string;
+      origin?: "chat" | "analysis";
+      analysisTaskId?: string;
       actor?: {
         id?: string;
         role?: string;
@@ -123,6 +125,8 @@ export class SessionLifecycleUsecase {
     const session: Session = {
       id: uuidv4(),
       datasource: normalizedDatasource,
+      origin: options?.origin ?? "chat",
+      analysisTaskId: options?.analysisTaskId?.trim() || null,
       workspaceId: normalizedWorkspaceId ?? null,
       createdByUserId: normalizedCreatedByUserId ?? null,
       datasourceName: datasourceMeta.name,

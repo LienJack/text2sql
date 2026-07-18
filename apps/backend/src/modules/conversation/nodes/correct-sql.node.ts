@@ -1,9 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  DatasourceType,
   SqlCorrectionGroundingV1,
   SemanticContextPackV1,
   SemanticPlanV1,
   SqlValidationArtifactV1,
+  Text2SqlEvalVersionTupleV1,
   Text2SqlV2FailureSemantic
 } from "@text2sql/shared-types";
 import { createHash } from "node:crypto";
@@ -13,6 +15,11 @@ import {
   type SqlCorrectionBudget,
   type SqlCorrectionDecision
 } from "../adapters/sql-correction.service";
+import {
+  SqlRepairService,
+  type SqlRepairResult
+} from "../adapters/sql-repair.service";
+import type { DatasourceSchemaSnapshotV1 } from "../../platform/data/schema/schema-snapshot.types";
 
 export interface SqlCorrectionArtifact {
   failedSql: string;
@@ -26,10 +33,13 @@ export interface SqlCorrectionArtifact {
   evidenceRefs: string[];
   grounding: SqlCorrectionGroundingV1;
   shouldRevalidate: boolean;
+  patchedSql?: string;
+  repairReceipt?: SqlRepairResult["receipt"];
+  failureSignature?: string;
 }
 
 export interface CorrectSqlNodeResult {
-  outcome: "retry_generation" | "terminal";
+  outcome: "retry_validation" | "terminal";
   budget: SqlCorrectionBudget;
   artifact: SqlCorrectionArtifact;
   failure?: Text2SqlV2FailureSemantic;
@@ -37,7 +47,10 @@ export interface CorrectSqlNodeResult {
 
 @Injectable()
 export class CorrectSqlNode {
-  constructor(private readonly sqlCorrectionService: SqlCorrectionService) {}
+  constructor(
+    private readonly sqlCorrectionService: SqlCorrectionService,
+    private readonly sqlRepairService: SqlRepairService = new SqlRepairService()
+  ) {}
 
   run(input: {
     failedSql: string;
@@ -47,14 +60,27 @@ export class CorrectSqlNode {
     maxAttempts?: number;
     semanticPlan?: SemanticPlanV1;
     contextPack?: SemanticContextPackV1;
+    runId?: string;
+    versions?: Text2SqlEvalVersionTupleV1;
+    datasourceType?: DatasourceType;
+    schemaSnapshot?: DatasourceSchemaSnapshotV1;
+    seenSqlDigests?: string[];
+    seenFailureSignatures?: string[];
   }): CorrectSqlNodeResult {
     const decision = this.sqlCorrectionService.decide(
       input.error ?? this.toValidationError(input.validationArtifact)
     );
-    const nextAttemptCount = input.attemptCount + 1;
+    const configuredMaxAttempts = input.maxAttempts ?? decision.maxAttempts;
+    const priorBudget = this.sqlCorrectionService.resolveBudget({
+      attemptCount: input.attemptCount,
+      maxAttempts: configuredMaxAttempts
+    });
+    const nextAttemptCount = priorBudget.exhausted
+      ? input.attemptCount
+      : input.attemptCount + 1;
     const budget = this.sqlCorrectionService.resolveBudget({
       attemptCount: nextAttemptCount,
-      maxAttempts: input.maxAttempts ?? decision.maxAttempts
+      maxAttempts: configuredMaxAttempts
     });
     const evidenceRefs = this.unique([
       ...(input.semanticPlan?.evidenceRefs ?? []),
@@ -85,11 +111,11 @@ export class CorrectSqlNode {
         contextPack: input.contextPack,
         failedObligationIds
       }),
-      shouldRevalidate: decision.correctable && !budget.exhausted
+      shouldRevalidate: false
     };
 
-    if (!decision.correctable || budget.exhausted) {
-      const exhausted = budget.exhausted && decision.correctable;
+    if (!decision.correctable || priorBudget.exhausted) {
+      const exhausted = priorBudget.exhausted && decision.correctable;
       return {
         outcome: "terminal",
         budget,
@@ -117,8 +143,60 @@ export class CorrectSqlNode {
       };
     }
 
+    if (
+      !input.runId ||
+      !input.versions ||
+      !input.datasourceType ||
+      !input.schemaSnapshot ||
+      !input.semanticPlan?.queryContract
+    ) {
+      return {
+        outcome: "terminal",
+        budget,
+        artifact,
+        failure: {
+          code: "SQL_REPAIR_BINDING_UNAVAILABLE",
+          message: "SQL repair requires frozen QueryContract, versions, dialect, and schema.",
+          category: "validation",
+          terminal: true,
+          correctable: false
+        }
+      };
+    }
+
+    const repair = this.sqlRepairService.repair({
+      failedSql: input.failedSql,
+      failureCode: decision.failureCode,
+      runId: input.runId,
+      queryContract: input.semanticPlan.queryContract,
+      versions: input.versions,
+      datasourceType: input.datasourceType,
+      schemaSnapshot: input.schemaSnapshot,
+      attempt: nextAttemptCount as 1 | 2,
+      seenSqlDigests: input.seenSqlDigests,
+      seenFailureSignatures: input.seenFailureSignatures
+    });
+    artifact.repairReceipt = repair.receipt;
+    artifact.failureSignature = repair.failureSignature;
+    if (repair.status !== "applied" || !repair.patchedSql) {
+      return {
+        outcome: "terminal",
+        budget,
+        artifact,
+        failure: {
+          code: repair.failureCode ?? "SQL_REPAIR_EQUIVALENCE_REJECTED",
+          message: "SQL repair could not prove an allowlisted semantics-preserving patch.",
+          category: "validation",
+          terminal: true,
+          correctable: false
+        }
+      };
+    }
+    artifact.patchedSql = repair.patchedSql;
+    artifact.shouldRevalidate = true;
+
     return {
-      outcome: "retry_generation",
+      outcome: "retry_validation",
       budget,
       artifact
     };

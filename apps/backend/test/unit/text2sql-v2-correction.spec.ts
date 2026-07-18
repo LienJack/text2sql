@@ -41,11 +41,11 @@ describe("text2sql v2 sql correction decision", () => {
   }
 
   it.each([
-    ["SQL_PARSE_UNSUPPORTED_STATEMENT", "syntax failure"],
     ["SQL_MISSING_COLUMN", "missing column `orders.city`"],
     ["SQL_DIALECT_MISMATCH", "dialect mismatch"],
-    ["SQL_RELATIONSHIP_PATH_MISMATCH", "join path mismatch"]
-  ])("marks %s validation failure as correctable", (code, message) => {
+    ["SQL_CATALOG_REFERENCE_AMBIGUOUS", "ambiguous identifier"],
+    ["SQL_ANALYSIS_DIALECT_FUNCTION_UNSUPPORTED", "unsupported dialect function"]
+  ])("allows mechanical %s validation failure into repair", (code, message) => {
     const decision = service.decide(
       validationError({
         code,
@@ -63,7 +63,7 @@ describe("text2sql v2 sql correction decision", () => {
     });
   });
 
-  it("reads validation artifacts before generic domain error classification", () => {
+  it("reads validation artifacts but rejects non-mechanical relationship repair", () => {
     const decision = service.decide(
       artifactError({
         code: "SQL_DRY_PLAN_RELATIONSHIP_MISMATCH",
@@ -74,28 +74,31 @@ describe("text2sql v2 sql correction decision", () => {
     );
 
     expect(decision).toMatchObject({
-      correctable: true,
+      correctable: false,
       source: "validation",
       failureCode: "SQL_DRY_PLAN_RELATIONSHIP_MISMATCH"
     });
   });
 
   it.each([
+    ["SQL_PARSE_UNSUPPORTED_STATEMENT", "validation", "syntax failure"],
+    ["SQL_RELATIONSHIP_PATH_MISMATCH", "validation", "join path mismatch"],
+    ["SQL_DRY_PLAN_RELATIONSHIP_MISMATCH", "validation", "dry-plan mismatch"],
     ["SQL_READ_ONLY_VIOLATION", "governance", "read-only failure"],
     ["SQL_TABLE_PERMISSION_DENIED", "governance", "table permission failure"],
     ["SQL_COLUMN_PERMISSION_DENIED", "governance", "column permission failure"],
     ["SQL_PLAN_FAIL_CLOSED", "validation", "fail-closed plan"],
     ["SQL_PLAN_REQUIRES_CLARIFICATION", "validation", "clarification required"]
   ] as const)(
-    "skips correction for terminal %s",
+    "skips free-form correction for %s",
     (code, category, message) => {
       const decision = service.decide(
         validationError({
           code,
           message,
           category,
-          terminal: true,
-          correctable: false
+          terminal: code.includes("READ_ONLY") || code.includes("PERMISSION") || code.includes("PLAN_"),
+          correctable: !code.includes("READ_ONLY")
         })
       );
 
@@ -126,12 +129,12 @@ describe("text2sql v2 sql correction decision", () => {
     "unknown column `orders.city`",
     "dialect error: strftime unsupported",
     "cannot resolve join path for relationship binding"
-  ])("keeps execution marker '%s' inside bounded retry budget", (message) => {
+  ])("does not infer repair authority from execution marker '%s'", (message) => {
     const decision = service.decide(new Error(message));
 
-    expect(decision.correctable).toBe(true);
-    expect(decision.maxAttempts).toBe(service.maxAttempts);
-    expect(decision.category).toBe("execution");
+    expect(decision.correctable).toBe(false);
+    expect(decision.maxAttempts).toBe(0);
+    expect(decision.category).toBe("unknown");
     expect(decision.source).toBe("execution");
   });
 
@@ -165,7 +168,7 @@ describe("text2sql v2 sql correction decision", () => {
     ).toBe(true);
   });
 
-  it("carries failed ledger obligation ids into correction grounding", () => {
+  it("carries failed ledger obligation ids while rejecting semantic replanning", () => {
     const node = new CorrectSqlNode(service);
     const result = node.run({
       failedSql: "SELECT COUNT(*) FROM orders",
@@ -204,7 +207,7 @@ describe("text2sql v2 sql correction decision", () => {
       }
     });
 
-    expect(result.outcome).toBe("retry_generation");
+    expect(result.outcome).toBe("terminal");
     expect(result.artifact.grounding.failedObligationIds).toEqual([
       "ledger:join-path:orders-customers"
     ]);

@@ -6,6 +6,19 @@ declare namespace Express {
     | "admin"
     | "member";
 
+  interface TrustedPrincipalContext {
+    authenticationMethod: "dev_headers" | "oidc_bearer";
+    trustLevel: "verified" | "development";
+    subject: string;
+    actorId: string;
+    requestedWorkspaceId?: string;
+    roleSet: AccessRole[];
+    issuedAt?: string;
+    expiresAt?: string;
+    authPolicyVersion: string;
+    digest: string;
+  }
+
   interface RequestActor {
     id: string;
     role: "admin" | "user";
@@ -17,6 +30,7 @@ declare namespace Express {
       workspaceId?: string | null;
       roleSet: AccessRole[];
     };
+    principal?: TrustedPrincipalContext;
   }
 
   interface Request {

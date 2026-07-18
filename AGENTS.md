@@ -72,6 +72,8 @@ CI 参考：
 - `RAG 配置` 健康检查需同时覆盖 `dry-check`（草稿）与 `persisted-check`（已保存），并校验返回 `checkedAgainst=draft|persisted`、`reasonCode` 可解释，且检测失败不应清空草稿输入。
 - 网关 smoke：`node tests/smoke/nginx-dev-gateway-smoke.mjs` 可区分 frontend/backend/stream 三类上游失败。
 - 健康检查：`GET http://localhost:3002/health` 应可用（后端内部端口检查），且 `dependencies.ragConfig.embedding/rerank` 应可见当前激活 provider+model+configSource 摘要。
+- Text2SQL accuracy 健康摘要还需包含 `dependencies.text2sqlAccuracy.mode/supportedSlices/supportedDialects/guidelineDigest/capabilities`，不得暴露连接、授权明细或真实 Fixture 路径。
+- 自治分析健康摘要还需包含 `dependencies.analysisRuntime.canonicalStore/durableWorkflow/commandOutbox/telemetry`；telemetry 不得含 Prompt、SQL rows、网页正文、token、URL secret、PII 或高基数 metric label。
 - 若本次改动涉及流式/工具调用：需关注 stream 与 tool 相关字段一致性（细节见 LLM 迁移规范）。
 - 若本次改动涉及 Text2SQL v2 read-model/delivery hard-cut：执行
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
@@ -79,6 +81,15 @@ CI 参考：
   - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
   - `pnpm run text2sql:no-legacy-compat:check`
   - 并核对 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
+- 若本次改动涉及 Text2SQL 准确率、Receipt、修复或 replay parity：执行
+  - `pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate`
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate`
+  - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate`
+  - 发布阻断使用 `collect:text2sql-accuracy-gate:strict`；没有受信 real Outcome Receipt 时必须保持 `HOLD`，不得以现有 focused/eval 全过替代。
+- 若本次改动涉及自治 AnalysisTask、Deep Search、Evidence/Claim、Memory/Skill 或 ReleaseManifest：执行
+  - `pnpm --filter @text2sql/backend run collect:data-agent-release-gate`
+  - 核对每个 component 的 exact version/scope/freshness/evidence refs/owner approval，以及 `topology.mode`。
+  - 发布阻断使用 `collect:data-agent-release-gate:strict`；缺真实签名 Text2SQL Outcome 或代表性 analyst Outcome 时必须保持 `HOLD`。
 - 若本次改动涉及 modeling parity 指标：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate`，确认 `relationshipPlatform/semanticSpine/modelingWorkspace` 三维输出可生成。
 - 若本次改动需要发布门禁（go/no-go）：执行 `pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate:strict`，并检查 `rollout.recommendedStage` 与 `rollout.rollbackSuggested`。
 
@@ -142,6 +153,8 @@ CI 参考：
 - `pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate` 输出需包含 scoped coverage、关键文件门槛、A-M flow blockers 与 eval fixture 行为测试追溯。
 - strict-completion 语义补齐后，focused coverage 输出还需包含 `strictCompletionRows` 评估结果（metadata grounding / correction grounding / context-pack parity）。
 - runtime-intelligence 生效后，focused/eval 输出还需覆盖 `runtime-plan-consistency`、`artifact-ref-compaction`、`smart-defaults-evidence`、`plain-general-no-sql`、`large-context-compaction`、`validation-diagnostics`、`correction-grounding`、`execution-preview`、`all-stage-stream-lifecycle`；focused coverage 还需包含 `runtimeArtifactProducerRows` 与 `streamLifecycleRows`。
+- accuracy closure 生效后，runtime artifact producer 还必须覆盖 `accuracy_receipts`；sync/stream/run view/save view/replay 共享安全 accuracy summary，correction 固定为 allowlisted AST Patch、最多两次并回到完整 validation。
+- `TEXT2SQL_ACCURACY_MODE=shadow` 只记录候选证据摘要，不得阻断现有 baseline 用户链路或贡献 `GO`；`enforce` 才要求 trusted policy/schema、七层 passed Receipt 与 final ValidationReceipt 后交付。
 - `pnpm run text2sql:no-legacy-compat:check` 必须通过。
 
 ### D. Governance 术语硬切规范
@@ -181,6 +194,47 @@ CI 参考：
 
 必跑检查：
 - `pnpm run backend:capability-boundary:check`（落地后）
+
+### F. Text2SQL 准确率门禁规范
+来源：`docs/standards/text2sql-accuracy-gate-spec.md`
+
+适用范围：
+- Text2SQL QueryContract、版本元组、Receipt chain、结果 Oracle、有界 AST 修复与 replay parity。
+- `apps/backend/src/modules/conversation/runtime/evaluation/**`
+- `apps/backend/scripts/collect-text2sql-accuracy-gate.ts`
+
+关键 MUST：
+- 合成评测只能证明 closeout，不能替代真实、受信、签名的 Outcome Receipt。
+- `shadow` 不阻断 baseline；`enforce` 才以七层 Receipt、Execution Permit 与 final ValidationReceipt 为硬条件。
+- 修复最多两次，只允许 AST 等价 allowlist，且每次修复后回到完整 validation。
+- 最终发布决策只允许 `GO/HOLD/NO_GO/ROLLBACK`；无真实证据时必须 `HOLD`。
+
+必跑检查：
+- `pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate`
+- `pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate:strict`（发布阻断）
+
+### G. Data Agent 自治分析规范
+来源：`docs/standards/data-agent-autonomous-analysis-spec.md`
+
+适用范围：
+- `apps/backend/src/modules/conversation/analysis/**`
+- `apps/backend/src/modules/platform/{durable,artifacts,observability}/**`
+- `apps/backend/src/modules/knowledge/{research,assets}/**`
+- `apps/frontend/src/{app,components}/analysis/**`
+- `apps/backend/scripts/collect-data-agent-release-gate.ts`
+
+关键 MUST：
+- PostgreSQL Analysis Ledger 是 Task/Revision/Attempt/Event/Artifact/Receipt/Manifest 权威；Temporal、UI、SSE 与 OTel 都是 orchestration/projection。
+- Worker 只能提出 candidate，Commit Guard 才能提交；Correction 追加 Revision 并传播 stale/invalidated，旧 replay 保留。
+- 网页内容始终 untrusted；Report 只能从 Claim projection 生成；生产 Memory/Skill 只能来自治理后的 active KnowledgeAsset。
+- ReleaseManifest 的 required evidence 若 unknown/stale/failed 不得 GO；缺真实签名 Outcome 固定 HOLD；安全失败给出 NO_GO/ROLLBACK。
+
+必跑检查：
+- `pnpm --filter @text2sql/backend run collect:data-agent-release-gate`
+- `pnpm --filter @text2sql/backend run collect:data-agent-release-gate:strict`（发布阻断）
+
+恢复与回滚：
+- `docs/runbooks/data-agent-task-recovery-and-release.md`
 
 说明：
 - 以上仅为执行摘要，细节规则以 standards 原文为准。

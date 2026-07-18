@@ -14,6 +14,10 @@ import { RagQualityService } from "../rag/quality/rag-quality.service";
 import { SemanticAssetReadinessService } from "../knowledge/rag/preparation/semantic-asset-readiness.service";
 import { SemanticSpineShadowGateService } from "../observability/semantic-spine-shadow-gate.service";
 import { RagTaskConfigService } from "../llm/rag-task-config.service";
+import { AnalysisCommandOutboxRepository } from "../platform/data/persistence/analysis-command-outbox.repository";
+import { AnalysisLedgerPrismaService } from "../platform/data/persistence/analysis-ledger-prisma.service";
+import { DurableWorkflowPort } from "../platform/durable/contracts/durable-workflow.port";
+import { AnalysisTelemetryService } from "../platform/observability/analysis-telemetry.service";
 
 @Controller()
 export class HealthController {
@@ -29,7 +33,11 @@ export class HealthController {
     private readonly ragQuality: RagQualityService,
     private readonly semanticAssetReadiness: SemanticAssetReadinessService,
     private readonly semanticSpineShadow: SemanticSpineShadowGateService,
-    private readonly ragTaskConfigService: RagTaskConfigService
+    private readonly ragTaskConfigService: RagTaskConfigService,
+    private readonly analysisLedger: AnalysisLedgerPrismaService,
+    private readonly analysisOutbox: AnalysisCommandOutboxRepository,
+    private readonly durableWorkflow: DurableWorkflowPort,
+    private readonly analysisTelemetry: AnalysisTelemetryService
   ) {}
 
   private async buildHealthResponse(req: Request): Promise<ApiResponse<unknown>> {
@@ -51,13 +59,35 @@ export class HealthController {
       ragConfigView.items.find((item) => item.taskType === "embedding") ?? null;
     const rerankConfig =
       ragConfigView.items.find((item) => item.taskType === "rerank") ?? null;
+    const durableHealth = await this.durableWorkflow.health();
+    const analysisOutboxBacklog = this.analysisLedger.isReady()
+      ? await this.analysisOutbox.backlogCount().catch(() => null)
+      : null;
     return ok(req.requestId, {
-      status: sqliteReady ? "ok" : "degraded",
+      status:
+        sqliteReady &&
+        this.analysisLedger.isReady() &&
+        (durableHealth.provider === "in_memory" || durableHealth.clientReady)
+          ? "ok"
+          : "degraded",
       runtime: {
         nodeEnv: this.config.nodeEnv,
         port: this.config.port
       },
       dependencies: {
+        authentication: {
+          mode: this.config.authMode,
+          trustedBoundary:
+            this.config.authMode === "oidc_bearer" ? "verified" : "development_only",
+          headerActorEnabled: this.config.authHeaderActorEnabled,
+          policyVersion: this.config.authPolicyVersion,
+          oidc: {
+            issuerConfigured: Boolean(this.config.authOidcIssuer),
+            audienceConfigured: this.config.authOidcAudience.length > 0,
+            jwksConfigured: Boolean(this.config.authOidcJwksUrl),
+            allowedAlgorithms: this.config.authOidcAllowedAlgorithms
+          }
+        },
         sqlite: {
           ready: sqliteReady,
           path: this.config.sqlitePath
@@ -68,6 +98,19 @@ export class HealthController {
         },
         postgres: {
           configured: postgresEnabled
+        },
+        analysisRuntime: {
+          canonicalStore: {
+            provider: "postgresql",
+            configured: postgresEnabled,
+            ready: this.analysisLedger.isReady()
+          },
+          durableWorkflow: durableHealth,
+          commandOutbox: {
+            backlog: analysisOutboxBacklog,
+            ready: analysisOutboxBacklog !== null
+          },
+          telemetry: this.analysisTelemetry.snapshot()
         },
         llm: {
           provider: this.config.llmProvider,
@@ -124,10 +167,30 @@ export class HealthController {
         },
         semanticSpineShadow: {
           gate: semanticSpineShadowGate
+        },
+        text2sqlAccuracy: {
+          mode: this.config.text2sqlAccuracyMode,
+          supportedSlices: this.config.text2sqlAccuracySupportedSlices,
+          supportedDialects: ["sqlite", "mysql", "postgresql"],
+          guidelineDigest: this.config.text2sqlAccuracyGuidelineDigest,
+          capabilities: {
+            parser: "available",
+            frozenCatalog: "available",
+            explain: {
+              sqlite: "available",
+              mysql: "available",
+              postgresql: "available"
+            },
+            cancellation: "available",
+            boundedReadOnlyExecution: "available",
+            deterministicResultOracles: "available",
+            safeReplaySummary: "available"
+          }
         }
       },
       cors: {
-        allowedOrigins: this.config.corsAllowedOrigins
+        allowedOrigins: this.config.corsAllowedOrigins,
+        allowedHeaders: this.config.corsAllowedHeaders
       },
       datasources
     });

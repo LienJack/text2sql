@@ -555,6 +555,264 @@ describe("text2sql v2 runtime artifacts", () => {
     });
   });
 
+  it("runs one targeted dependency retrieval before replanning a missing join closure", async () => {
+    const intakeNode = {
+      run: jest.fn().mockReturnValue({
+        standaloneQuestion: "统计每个客户的订单金额",
+        route: "text_to_sql",
+        reasonCodes: ["intake_ready_for_text_to_sql"],
+        confidence: 0.9,
+        evidenceRefs: [],
+        semanticIntent: "sum"
+      })
+    };
+    const retrievalOutput = (evidenceRef: string) => ({
+      state: {
+        status: "ready",
+        typedSummary: {
+          denseState: "ready",
+          rerankState: "ready",
+          degradeReasons: []
+        },
+        evidenceRefs: [evidenceRef],
+        selectedContextSummary: {
+          count: 1,
+          snippetPreviews: [evidenceRef]
+        },
+        warnings: []
+      },
+      artifact: {
+        status: "ready",
+        evidenceRefs: [evidenceRef],
+        typedSummary: {
+          denseState: "ready",
+          rerankState: "ready",
+          degradeReasons: []
+        },
+        retrievalBundle: {
+          run_id: "run-targeted-replan",
+          datasource_id: "sqlite_main",
+          status: "ready",
+          selected_context: [{ chunk_id: evidenceRef, content: evidenceRef }],
+          degrade_reasons: []
+        }
+      }
+    });
+    const retrieveContextNode = {
+      run: jest
+        .fn()
+        .mockResolvedValueOnce(retrievalOutput("schema-orders-customers"))
+        .mockResolvedValueOnce(retrievalOutput("relationship-orders-customers"))
+    };
+    const contextPackSummary = {
+      status: "ready",
+      selectedEvidenceCount: 1,
+      selectedTableCount: 2,
+      selectedColumnCount: 3,
+      laneStateCounts: {
+        ready: 1,
+        degraded: 0,
+        unavailable: 0,
+        skipped: 0
+      },
+      pruningDecisionCount: 0,
+      permissionReasonCount: 0,
+      warningCount: 0
+    };
+    const assembleContextNode = {
+      run: jest
+        .fn()
+        .mockReturnValueOnce({
+          contextPack: {
+            status: "ready",
+            selectedEvidenceIds: ["schema-orders-customers"],
+            selectedTables: ["orders", "customers"],
+            selectedColumns: [
+              "orders.customer_id",
+              "orders.amount",
+              "customers.id"
+            ],
+            dependencyClosure: {
+              status: "missing",
+              conflictSet: [],
+              joinClosure: [],
+              metricDependencies: [],
+              calculatedDependencies: [],
+              filterDependencies: [],
+              timeDependencies: [],
+              mandatoryEvidenceRefs: [],
+              optionalEvidenceRefs: ["schema-orders-customers"],
+              reasonCodes: ["join_closure_missing"]
+            }
+          },
+          typedSummary: contextPackSummary,
+          evidenceRefs: ["schema-orders-customers"]
+        })
+        .mockReturnValueOnce({
+          contextPack: {
+            status: "ready",
+            selectedEvidenceIds: ["relationship-orders-customers"],
+            selectedTables: ["orders", "customers"],
+            selectedColumns: [
+              "orders.customer_id",
+              "orders.amount",
+              "customers.id"
+            ],
+            dependencyClosure: {
+              status: "ready",
+              conflictSet: [],
+              joinClosure: ["relationship-orders-customers"],
+              metricDependencies: [],
+              calculatedDependencies: [],
+              filterDependencies: [],
+              timeDependencies: [],
+              mandatoryEvidenceRefs: ["relationship-orders-customers"],
+              optionalEvidenceRefs: [],
+              reasonCodes: []
+            }
+          },
+          typedSummary: contextPackSummary,
+          evidenceRefs: ["relationship-orders-customers"]
+        })
+    };
+    const readyPlan = {
+      route: "answer" as const,
+      standaloneQuestion: "统计每个客户的订单金额",
+      selectedTables: ["orders", "customers"],
+      selectedColumns: ["orders.customer_id", "orders.amount", "customers.id"],
+      confidence: 0.9,
+      evidenceRefs: ["relationship-orders-customers"],
+      filters: ["route_kind:text_to_sql"],
+      joinPath: ["orders->customers"],
+      snapshotId: "semantic-plan-replanned"
+    };
+    const semanticPlanNode = {
+      run: jest
+        .fn()
+        .mockReturnValueOnce({
+          route: "needs_clarification",
+          plan: {
+            ...readyPlan,
+            route: "clarify",
+            joinPath: [],
+            snapshotId: "semantic-plan-missing-join",
+            planLedger: {
+              summary: {
+                reasonCodes: ["missing_join_path"],
+                failedHardBlockerIds: ["ledger:join-path:orders-customers"]
+              }
+            }
+          },
+          validation: {
+            valid: false,
+            reasons: ["missing_join_path"],
+            routeKind: "text_to_sql",
+            outcome: "needs_clarification"
+          }
+        })
+        .mockReturnValueOnce({
+          route: "ready",
+          plan: readyPlan,
+          validation: {
+            valid: true,
+            reasons: [],
+            routeKind: "text_to_sql",
+            outcome: "ready"
+          }
+        })
+    };
+    const graph = createText2SqlV2LangGraph({
+      intakeNode: intakeNode as never,
+      retrieveContextNode: retrieveContextNode as never,
+      assembleContextNode: assembleContextNode as never,
+      semanticPlanNode: semanticPlanNode as never,
+      generateSqlNode: {
+        run: jest.fn().mockResolvedValue({
+          draft: {
+            sql: "SELECT customers.id, SUM(orders.amount) FROM orders JOIN customers ON orders.customer_id = customers.id GROUP BY customers.id",
+            provider: "mock",
+            model: "mock",
+            explanation: "grounded join",
+            rawText: "sql",
+            prompt: { systemPrompt: "system", userPrompt: "user" }
+          },
+          artifact: {
+            sql: "SELECT 1",
+            assumptions: [],
+            usedTables: ["orders", "customers"],
+            usedColumns: ["orders.customer_id", "customers.id", "orders.amount"],
+            evidenceRefs: ["relationship-orders-customers"],
+            cause: "initial",
+            dialect: "sqlite"
+          }
+        })
+      } as never,
+      validateSqlNode: {
+        run: jest.fn().mockResolvedValue({
+          outcome: "pass",
+          artifact: { status: "passed", checks: [], correctable: false }
+        })
+      } as never,
+      correctSqlNode: { run: jest.fn() } as never,
+      executeSqlNode: {
+        run: jest.fn().mockResolvedValue({
+          rows: [{ customer_id: 1, amount: 20 }],
+          columns: ["customer_id", "amount"],
+          rowCount: 1,
+          emptyResult: false
+        })
+      } as never,
+      answerNode: {
+        run: jest.fn().mockReturnValue({
+          mode: "execution_result",
+          answer: "客户 1 的订单金额为 20",
+          status: "executionResult",
+          evidenceRefs: ["relationship-orders-customers"],
+          warnings: []
+        })
+      } as never,
+      resolveSqlTools: jest.fn().mockReturnValue({})
+    });
+
+    const finalState = await graph.invoke(
+      createText2SqlV2LangGraphInitialState({
+        preparedRun: {
+          runId: "run-targeted-replan",
+          requestId: "req-targeted-replan",
+          question: "统计每个客户的订单金额",
+          session: {
+            id: "session-targeted-replan",
+            datasource: "sqlite_main",
+            modelProvider: "mock",
+            modelName: "mock"
+          },
+          datasource: { id: "sqlite_main", type: "sqlite" },
+          userPersistResult: { primaryPersisted: true }
+        } as never,
+        route: "/api/v1/sessions/:sessionId/messages",
+        streamMode: false
+      })
+    );
+
+    expect(retrieveContextNode.run).toHaveBeenCalledTimes(2);
+    expect(retrieveContextNode.run).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        question: expect.stringContaining("targeted_dependency_closure")
+      })
+    );
+    expect(semanticPlanNode.run).toHaveBeenCalledTimes(2);
+    expect(finalState.loopEvidence).toEqual([
+      expect.objectContaining({
+        loopIndex: 1,
+        actionType: "replan",
+        triggerReason: expect.stringContaining("missing_join_path"),
+        convergencePath: expect.arrayContaining(["semantic-plan:replan"])
+      })
+    ]);
+    expect(finalState.answerResult?.status).toBe("executionResult");
+  });
+
   it("routes metadata intent through retrieve/assemble/semantic-plan and skips SQL stages", async () => {
     const intakeNode = {
       run: jest.fn().mockReturnValue({
@@ -759,7 +1017,7 @@ describe("text2sql v2 runtime artifacts", () => {
     }
   });
 
-  it("passes correction grounding into second generation attempt after correctable validation", async () => {
+  it("applies a bounded patch and revalidates without a second generation call", async () => {
     const intakeNode = {
       run: jest.fn().mockReturnValue({
         originalQuestion: "统计订单总数",
@@ -946,7 +1204,7 @@ describe("text2sql v2 runtime artifacts", () => {
     };
     const correctSqlNode = {
       run: jest.fn().mockReturnValue({
-        outcome: "retry_generation",
+        outcome: "retry_validation",
         budget: {
           attemptCount: 1,
           maxAttempts: 2,
@@ -964,6 +1222,7 @@ describe("text2sql v2 runtime artifacts", () => {
           semanticPlanSnapshotId: "semantic-plan-1",
           evidenceRefs: ["chunk-orders-1"],
           shouldRevalidate: true,
+          patchedSql: "SELECT orders.id FROM orders",
           grounding: {
             failedSqlRef: "sql.sha256.abc123abc123abcd",
             retryReason: "missing column orders.missing_city",
@@ -1041,17 +1300,19 @@ describe("text2sql v2 runtime artifacts", () => {
       })
     );
 
-    expect(generateSqlNode.run).toHaveBeenCalledTimes(2);
-    expect(generateSqlNode.run).toHaveBeenNthCalledWith(
+    expect(generateSqlNode.run).toHaveBeenCalledTimes(1);
+    expect(validateSqlNode.run).toHaveBeenCalledTimes(2);
+    expect(validateSqlNode.run).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        cause: "correction",
-        retryReason: "missing column orders.missing_city",
-        correctionGrounding: expect.objectContaining({
-          failedSqlRef: "sql.sha256.abc123abc123abcd",
-          attemptCount: 1,
-          maxAttempts: 2,
-          failureCode: "SQL_MISSING_COLUMN"
+        sqlArtifact: expect.objectContaining({
+          sql: "SELECT orders.id FROM orders",
+          correctionGrounding: expect.objectContaining({
+            failedSqlRef: "sql.sha256.abc123abc123abcd",
+            attemptCount: 1,
+            maxAttempts: 2,
+            failureCode: "SQL_MISSING_COLUMN"
+          })
         })
       })
     );
@@ -1064,7 +1325,7 @@ describe("text2sql v2 runtime artifacts", () => {
         failedStage: "validate",
         failureCode: "SQL_MISSING_COLUMN",
         retryReason: "missing column orders.missing_city",
-        targetStage: "generate-sql"
+        targetStage: "validate"
       }
     });
   });

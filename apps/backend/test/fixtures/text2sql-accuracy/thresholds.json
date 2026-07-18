@@ -1,0 +1,12 @@
+{
+  "version": "text2sql-accuracy-thresholds/v1",
+  "profileId": "sanitized-reference-v1",
+  "approvedBy": "reference-slice-owner",
+  "approvedAt": "2026-07-17T00:00:00.000Z",
+  "minRealOutcomePairs": 2,
+  "minOutcomeAccuracyLowerBound": 0.8,
+  "minPairedImprovementLowerBound": 0,
+  "maxLatencyP95Ms": 1500,
+  "releaseUse": "contract_validation_only",
+  "note": "Reference thresholds exercise the gate contract; a domain owner must approve production thresholds before real trials."
+}

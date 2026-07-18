@@ -11,6 +11,7 @@ import {
   type KnowledgeMemoryContract,
   type SavedPriorSqlCaptureResult
 } from "../../../knowledge/contracts/knowledge-memory.contract";
+import { verifyText2SqlAccuracyEvidence } from "../../../platform/read-model/text2sql-accuracy-evidence.projection";
 
 const VIEW_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -77,6 +78,29 @@ export class SaveViewFromRunUsecase {
     assertSupportedV2RunReadModel(run, {
       unsupportedMessage: "该运行记录为历史兼容结构，需迁移后才能保存为视图。"
     });
+    const accuracyEvidence = run.trace.v2?.accuracy;
+    const accuracyVerification = verifyText2SqlAccuracyEvidence(accuracyEvidence);
+    if (!accuracyVerification.valid) {
+      throw new DomainError(
+        "TEXT2SQL_ACCURACY_EVIDENCE_INVALID",
+        "该运行的准确率证据链无效，不能保存为视图。",
+        409,
+        { reasonCodes: accuracyVerification.reasonCodes }
+      );
+    }
+    if (
+      accuracyEvidence?.queryContract &&
+      (accuracyEvidence.mode ?? "enforce") === "enforce" &&
+      run.status === "executionResult" &&
+      accuracyEvidence.validationReceipt?.status !== "passed"
+    ) {
+      throw new DomainError(
+        "TEXT2SQL_ACCURACY_RECEIPT_REQUIRED",
+        "该运行缺少已封存的最终 Validation Receipt，不能保存为视图。",
+        409,
+        { runId }
+      );
+    }
 
     const sql = run.sql?.trim();
     if (!sql) {

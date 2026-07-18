@@ -6,7 +6,8 @@ import { GraphAccelerationCircuitBreaker } from "../graph/adapter/graph-accelera
 import { GraphService } from "../graph/graph.service";
 import { LlmModule } from "../../llm/llm.module";
 import { ObservabilityModule } from "../../observability/observability.module";
-import { SkillRegistryModule } from "../../skill-registry/skill-registry.module";
+import { SkillRegistryService } from "../../skill-registry/skill-registry.service";
+import { KnowledgeAssetModule } from "../assets/knowledge-asset.module";
 import { RagAuditReplayService } from "../../rag/audit/rag-audit-replay.service";
 import { RagEventConsumerService } from "../../rag/events/rag-event-consumer.service";
 import { RagIndexBuilderService } from "../../rag/index/rag-index-builder.service";
@@ -82,7 +83,7 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     PlatformDataPersistenceModule,
     LlmModule,
     ObservabilityModule,
-    SkillRegistryModule
+    KnowledgeAssetModule
   ],
   controllers: [RagQualityController],
   providers: [
@@ -105,6 +106,7 @@ export function assertKnowledgeCompatBridgeRetirementReady(
     RagAuditReplayService,
     LegacyRagReplayRepository,
     RagQualityService,
+    SkillRegistryService,
     SemanticAssetFamilyChunkMapper,
     SemanticAssetManifestBuilder,
     SemanticAssetPreparerService,

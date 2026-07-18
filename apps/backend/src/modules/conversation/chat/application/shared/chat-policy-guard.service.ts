@@ -21,6 +21,9 @@ export interface ChatSqlAccessContext {
   actorId: string;
   workspaceId: string;
   roleSet: string[];
+  workspaceDatasourceBindingId: string;
+  policyVersion: number;
+  policyDigest: string;
   allowedTables: string[];
   allowedColumnsByTable: Record<string, string[]>;
   rowFiltersByTable: Record<string, string>;
@@ -124,6 +127,9 @@ export class ChatPolicyGuardService {
       actorId: context.actorId,
       workspaceId: context.workspaceId,
       roleSet: [...context.roleSet],
+      workspaceDatasourceBindingId: readable.workspaceDatasourceBindingId,
+      policyVersion: readable.policyVersion,
+      policyDigest: readable.policyDigest,
       allowedTables: [...readable.readableTables],
       allowedColumnsByTable: { ...readable.allowedColumnsByTable },
       rowFiltersByTable: { ...readable.rowFiltersByTable },

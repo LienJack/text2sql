@@ -117,6 +117,11 @@ interface SemanticContextRetrievalBundle {
     pruningDecisions?: SemanticContextPruningDecision[];
     permission_filtering?: SemanticContextPermissionFiltering;
     permissionFiltering?: SemanticContextPermissionFiltering;
+    policy_version?: number;
+    policy_digest?: string;
+    schema_snapshot_id?: string;
+    schema_snapshot_digest?: string;
+    allowed_columns_digest?: string;
   };
 }
 
@@ -247,6 +252,16 @@ export class SemanticContextPackService {
       semanticBindings,
       instructionSets
     });
+    const groundingIdentity = this.buildGroundingIdentity({
+      contextPack: input.retrievalBundle?.context_pack,
+      permissionFiltering: permissionFilteringSummary
+    });
+    const dependencyClosure = this.buildDependencyClosure({
+      selectedTables,
+      selectedEvidenceIds,
+      lanes,
+      pruning
+    });
 
     return {
       status,
@@ -268,7 +283,92 @@ export class SemanticContextPackService {
       ...(laneStates.length > 0 ? { laneStates } : {}),
       degradation,
       pruning,
-      permissionFiltering: permissionFilteringSummary
+      permissionFiltering: permissionFilteringSummary,
+      groundingIdentity,
+      dependencyClosure
+    };
+  }
+
+  private buildGroundingIdentity(input: {
+    contextPack?: SemanticContextRetrievalBundle["context_pack"];
+    permissionFiltering: NonNullable<SemanticContextPackV1["permissionFiltering"]>;
+  }): NonNullable<SemanticContextPackV1["groundingIdentity"]> {
+    const policyVersion = input.contextPack?.policy_version;
+    const policyDigest = input.contextPack?.policy_digest?.trim();
+    const schemaSnapshotId = input.contextPack?.schema_snapshot_id?.trim();
+    const schemaSnapshotDigest = input.contextPack?.schema_snapshot_digest?.trim();
+    const allowedColumnsDigest = input.contextPack?.allowed_columns_digest?.trim();
+    const reasonCodes: string[] = [];
+    if (!Number.isInteger(policyVersion) || !policyDigest) {
+      reasonCodes.push("policy_receipt_unavailable");
+    }
+    if (!schemaSnapshotId || !schemaSnapshotDigest || !allowedColumnsDigest) {
+      reasonCodes.push("schema_snapshot_unavailable");
+    }
+    if (input.permissionFiltering.status !== "applied") {
+      reasonCodes.push("permission_filtering_not_applied");
+    }
+    return {
+      status: reasonCodes.length === 0 ? "ready" : "unavailable",
+      ...(Number.isInteger(policyVersion) ? { policyVersion } : {}),
+      ...(policyDigest ? { policyDigest } : {}),
+      ...(schemaSnapshotId ? { schemaSnapshotId } : {}),
+      ...(schemaSnapshotDigest ? { schemaSnapshotDigest } : {}),
+      ...(allowedColumnsDigest ? { allowedColumnsDigest } : {}),
+      reasonCodes
+    };
+  }
+
+  private buildDependencyClosure(input: {
+    selectedTables: string[];
+    selectedEvidenceIds: string[];
+    lanes: NonNullable<SemanticContextPackV1["lanes"]>;
+    pruning: NonNullable<SemanticContextPackV1["pruning"]>;
+  }): NonNullable<SemanticContextPackV1["dependencyClosure"]> {
+    const relationshipRefs = input.lanes.relationships?.refs ?? [];
+    const metricRefs = input.lanes.metrics?.refs ?? [];
+    const calculatedRefs = input.lanes.semanticBindings?.calculatedFieldKeys ?? [];
+    const mandatoryEvidenceRefs = this.unique([
+      ...relationshipRefs,
+      ...metricRefs,
+      ...calculatedRefs
+    ]);
+    const removedEvidenceIds = new Set(
+      input.pruning.decisions.flatMap((decision) => decision.removedEvidenceIds ?? [])
+    );
+    const mandatoryPruned = mandatoryEvidenceRefs.some((ref) => removedEvidenceIds.has(ref));
+    const joinMissing = input.selectedTables.length > 1 && relationshipRefs.length === 0;
+    const joinAmbiguous = input.selectedTables.length > 1 && relationshipRefs.length > 1;
+    const reasonCodes = this.unique([
+      ...(joinMissing ? ["join_closure_missing"] : []),
+      ...(joinAmbiguous ? ["join_closure_ambiguous"] : []),
+      ...(mandatoryPruned ? ["mandatory_dependency_pruned"] : [])
+    ]);
+    return {
+      status:
+        joinAmbiguous
+          ? "ambiguous"
+          : joinMissing || mandatoryPruned
+            ? "missing"
+            : "ready",
+      conflictSet: joinAmbiguous
+        ? [
+            {
+              subject: input.selectedTables.join("->"),
+              competingEvidenceRefs: relationshipRefs
+            }
+          ]
+        : [],
+      joinClosure: joinAmbiguous ? [] : relationshipRefs,
+      metricDependencies: metricRefs,
+      calculatedDependencies: calculatedRefs,
+      filterDependencies: [],
+      timeDependencies: [],
+      mandatoryEvidenceRefs,
+      optionalEvidenceRefs: input.selectedEvidenceIds.filter(
+        (ref) => !mandatoryEvidenceRefs.includes(ref)
+      ),
+      reasonCodes
     };
   }
 
@@ -567,11 +667,6 @@ export class SemanticContextPackService {
         permissionFiltering?.deniedTableNames ??
         []
     );
-    const deniedColumns = this.unique(
-      permissionFiltering?.denied_column_names ??
-        permissionFiltering?.deniedColumnNames ??
-        []
-    );
     const reasonCodes = this.unique(
       permissionFiltering?.reason_codes ?? permissionFiltering?.reasonCodes ?? []
     );
@@ -583,7 +678,6 @@ export class SemanticContextPackService {
         ? { deniedEvidenceCount: deniedEvidenceIds.length }
         : {}),
       ...(deniedTables.length > 0 ? { deniedTables } : {}),
-      ...(deniedColumns.length > 0 ? { deniedColumns } : {}),
       ...(reasonCodes.length > 0 ? { reasonCodes } : {})
     };
   }
@@ -772,8 +866,6 @@ export class SemanticContextPackService {
     }
     const deniedTables =
       permissionFiltering.denied_table_names ?? permissionFiltering.deniedTableNames ?? [];
-    const deniedColumns =
-      permissionFiltering.denied_column_names ?? permissionFiltering.deniedColumnNames ?? [];
     const reasonCodes = permissionFiltering.reason_codes ?? permissionFiltering.reasonCodes ?? [];
     const deniedEvidenceIds =
       permissionFiltering.denied_evidence_ids ?? permissionFiltering.deniedEvidenceIds ?? [];
@@ -783,7 +875,6 @@ export class SemanticContextPackService {
         : []),
       ...reasonCodes.map((code) => `permission_filter_reason:${code}`),
       ...deniedTables.map((table) => `permission_denied_table:${table}`),
-      ...deniedColumns.map((column) => `permission_denied_column:${column}`),
       ...(deniedEvidenceIds.length > 0
         ? [`permission_denied_evidence_count:${deniedEvidenceIds.length}`]
         : [])

@@ -91,7 +91,7 @@ describe("query executor router table-permissions integration", () => {
     } satisfies Partial<DomainError>);
   });
 
-  it("returns TABLE_PERMISSIONS_PARSE_REJECTED for unsupported extraction pattern", async () => {
+  it("uses AST lineage for derived-table extraction", async () => {
     await expect(
       router.execute({
         datasource: datasource("sqlite"),
@@ -101,9 +101,9 @@ describe("query executor router table-permissions integration", () => {
           allowedTables: ["orders"]
         }
       })
-    ).rejects.toMatchObject({
-      code: "TABLE_PERMISSIONS_PARSE_REJECTED"
-    } satisfies Partial<DomainError>);
+    ).resolves.toMatchObject({
+      rows: expect.any(Array)
+    });
   });
 
   it("keeps fail-closed behavior when row filter rewrite cannot safely handle SQL", async () => {

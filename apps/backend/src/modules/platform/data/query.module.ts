@@ -8,7 +8,11 @@ import { RowFilterRewriteService } from "../../data/query/row-filter-rewrite.ser
 import { SqlTableAccessGuardService } from "../../data/query/sql-table-access-guard.service";
 import { SqliteExecutorService } from "../../data/query/sqlite-executor.service";
 import { RelationshipDryRunService } from "./query/relationship-dry-run.service";
+import { BoundedQueryExecutionService } from "./query/bounded-query-execution.service";
 import { RelationshipPublishGateFacade } from "./query/relationship-publish-gate.facade";
+import { DatasourceSchemaSnapshotService } from "./schema/datasource-schema-snapshot.service";
+import { SqlCatalogResolverService } from "./sql-analysis/sql-catalog-resolver.service";
+import { SqlDialectAnalyzerService } from "./sql-analysis/sql-dialect-analyzer.service";
 import { PlatformDataPersistenceModule } from "./persistence.module";
 
 @Module({
@@ -17,8 +21,12 @@ import { PlatformDataPersistenceModule } from "./persistence.module";
     RowFilterRewriteService,
     SqlTableAccessGuardService,
     QueryExecutorRouterService,
+    BoundedQueryExecutionService,
     RelationshipDryRunService,
     RelationshipPublishGateFacade,
+    DatasourceSchemaSnapshotService,
+    SqlDialectAnalyzerService,
+    SqlCatalogResolverService,
     SqliteExecutorService,
     MysqlExecutorService,
     PostgresExecutorService,
@@ -28,8 +36,12 @@ import { PlatformDataPersistenceModule } from "./persistence.module";
     RowFilterRewriteService,
     SqlTableAccessGuardService,
     QueryExecutorRouterService,
+    BoundedQueryExecutionService,
     RelationshipDryRunService,
-    RelationshipPublishGateFacade
+    RelationshipPublishGateFacade,
+    DatasourceSchemaSnapshotService,
+    SqlDialectAnalyzerService,
+    SqlCatalogResolverService
   ]
 })
 export class PlatformDataQueryModule {}

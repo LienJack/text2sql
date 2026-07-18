@@ -5,6 +5,7 @@ import { GovernanceAccessModule } from "../../governance/access/access.module";
 import { KnowledgeModule } from "../../knowledge/knowledge.module";
 import { ObservabilityModule } from "../../observability/observability.module";
 import { PlatformDataPersistenceModule } from "../../platform/data/persistence.module";
+import { PlatformDataQueryModule } from "../../platform/data/query.module";
 import { DeliveryContractMapper } from "../delivery/delivery-contract.mapper";
 import { ChartBiArtifactService } from "../delivery/chartbi/chartbi-artifact.service";
 import { ChartBiGroundingGuard } from "../delivery/chartbi/chartbi-grounding.guard";
@@ -29,6 +30,7 @@ import { Text2SqlStreamEventMapper } from "./stream/text2sql-stream-event.mapper
   imports: [
     AgentModule,
     PlatformDataPersistenceModule,
+    PlatformDataQueryModule,
     GovernanceAccessModule,
     DatasourceModule,
     ObservabilityModule,

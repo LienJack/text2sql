@@ -19,6 +19,34 @@ describe("rag retrieval service integration", () => {
     process.env.LLM_MOCK_MODE = "true";
   });
 
+  it("fails closed before lane retrieval when trusted SQL grounding is incomplete", async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const retrievalService = moduleRef.get(RagRetrievalService);
+
+    const response = await retrievalService.retrieve({
+      query: "统计订单金额",
+      datasourceId: "ds-trusted-grounding-missing",
+      runId: "run-trusted-grounding-missing",
+      workspaceId: "ws-1",
+      allowedTables: ["orders"],
+      requiresSqlPolicy: true,
+      policyVersion: 1,
+      policyDigest: "policy-1"
+    });
+
+    expect(response.retrieval_bundle.status).toBe("degraded");
+    expect(response.retrieval_bundle.candidates).toEqual([]);
+    expect(response.retrieval_bundle.selected_context).toEqual([]);
+    expect(response.retrieval_bundle.degrade_reasons).toEqual([
+      "trusted_sql_grounding_unavailable"
+    ]);
+    expect(response.retrieval_bundle.permission_filtering).toMatchObject({
+      status: "skipped",
+      kept_candidate_count: 0
+    });
+    await moduleRef.close();
+  });
+
   it("returns reproducible candidates and keeps domain coverage across schema/sql_example/semantic_term", async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule]

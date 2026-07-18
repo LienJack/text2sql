@@ -1,5 +1,6 @@
 import { SqlValidationService } from "../../src/modules/conversation/adapters/sql-validation.service";
 import { DomainError } from "../../src/common/domain-error";
+import type { DatasourceSchemaSnapshotV1 } from "../../src/modules/platform/data/schema/schema-snapshot.types";
 
 describe("text2sql v2 sql validation", () => {
   const createService = (overrides?: {
@@ -60,6 +61,41 @@ describe("text2sql v2 sql validation", () => {
       ...overrides
     }) as never;
 
+  const schemaSnapshot: DatasourceSchemaSnapshotV1 = {
+    version: "datasource-schema-snapshot.v1",
+    snapshotId: "snapshot-orders-v1",
+    digest: "schema-orders-v1",
+    datasourceId: "sqlite_main",
+    datasourceType: "sqlite",
+    workspaceId: "ws-1",
+    workspaceDatasourceBindingId: "binding-1",
+    policyVersion: 1,
+    policyDigest: "policy-1",
+    tables: [
+      {
+        name: "orders",
+        columns: [
+          { name: "id", dataType: "integer", nullable: false, primaryKey: true, ordinal: 0 },
+          { name: "amount", dataType: "numeric", nullable: false, primaryKey: false, ordinal: 1 },
+          { name: "customer_id", dataType: "integer", nullable: false, primaryKey: false, ordinal: 2 }
+        ]
+      }
+    ],
+    relationships: [],
+    allowedSchemaSet: {
+      version: "allowed-schema-set.v1",
+      datasourceId: "sqlite_main",
+      policyVersion: 1,
+      schemaSnapshotDigest: "schema-orders-v1",
+      tables: ["orders"],
+      columnsByTable: {
+        orders: ["id", "amount", "customer_id"]
+      },
+      digest: "allowed-orders-v1"
+    },
+    capturedAt: "2026-07-17T00:00:00.000Z"
+  };
+
   it("returns terminal governance failure for read-only violations", async () => {
     const result = await service.validate({
       sql: "DELETE FROM orders WHERE id = 1"
@@ -73,16 +109,77 @@ describe("text2sql v2 sql validation", () => {
     expect(result.failure?.code).toBe("SQL_READ_ONLY_VIOLATION");
   });
 
-  it("returns correctable validation failure for parse errors", async () => {
+  it("passes only after AST and frozen authorized Catalog both resolve", async () => {
+    const result = await service.validate({
+      sql: "SELECT SUM(amount) AS total FROM orders",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite",
+      semanticPlan: plan({ selectedColumns: ["orders.amount"] }),
+      schemaSnapshot,
+      requiresCatalog: true
+    });
+
+    expect(result.status).toBe("passed");
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ check: "structural", status: "passed" }),
+        expect.objectContaining({ check: "catalog", status: "passed" })
+      ])
+    );
+    expect(result.sqlAnalysis).toMatchObject({
+      status: "ready",
+      tables: ["orders"],
+      columns: ["orders.amount"]
+    });
+    expect(result.catalogResolution).toMatchObject({
+      status: "resolved",
+      schemaSnapshotId: "snapshot-orders-v1",
+      allowedSchemaDigest: "allowed-orders-v1"
+    });
+  });
+
+  it("fails closed without leaking hidden CTE columns when frozen Catalog denies them", async () => {
+    const result = await service.validate({
+      sql: "WITH hidden AS (SELECT secret_value FROM secrets) SELECT secret_value FROM hidden",
+      datasourceId: "sqlite_main",
+      datasourceType: "sqlite",
+      semanticPlan: plan({ selectedColumns: ["orders.id"] }),
+      schemaSnapshot,
+      requiresCatalog: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.failure?.terminal).toBe(true);
+    expect(result.checks.find((check) => check.check === "catalog")).toMatchObject({
+      status: "failed"
+    });
+    expect(JSON.stringify(result)).not.toContain("secret_value");
+    expect(JSON.stringify(result)).not.toContain("secrets");
+  });
+
+  it("fails closed when trusted Catalog evidence is required but missing", async () => {
+    const result = await service.validate({
+      sql: "SELECT amount FROM orders",
+      datasourceType: "sqlite",
+      semanticPlan: plan({ selectedColumns: ["orders.amount"] }),
+      requiresCatalog: true
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.failure?.code).toBe("SQL_CATALOG_SNAPSHOT_UNAVAILABLE");
+    expect(result.correctable).toBe(false);
+  });
+
+  it("fails closed for parse errors that have no mechanical AST patch", async () => {
     const result = await service.validate({
       sql: "show tables"
     });
 
     expect(result.status).toBe("failed");
-    expect(result.correctable).toBe(true);
-    expect(service.resolveOutcome(result)).toBe("correctable");
+    expect(result.correctable).toBe(false);
+    expect(service.resolveOutcome(result)).toBe("terminal");
     expect(result.failure?.category).toBe("validation");
-    expect(result.failure?.terminal).toBe(false);
+    expect(result.failure?.terminal).toBe(true);
     expect(result.failure?.code).toBe("SQL_PARSE_UNSUPPORTED_STATEMENT");
   });
 
@@ -92,7 +189,7 @@ describe("text2sql v2 sql validation", () => {
     });
 
     expect(result.failure?.code).toBe("SQL_PARSE_MULTI_STATEMENT");
-    expect(result.correctable).toBe(true);
+    expect(result.correctable).toBe(false);
     expect(result.checks.find((check) => check.check === "dry-run")).toMatchObject({
       status: "skipped",
       message: "dry-run skipped because parse/read-only check already failed"
@@ -126,7 +223,7 @@ describe("text2sql v2 sql validation", () => {
     expect(result.correctable).toBe(false);
   });
 
-  it("fails plan coverage correctably when SQL references a table outside selected tables", async () => {
+  it("fails plan coverage terminally instead of allowing semantic replanning", async () => {
     const result = await createService().validate({
       sql: "SELECT COUNT(*) FROM invoices",
       semanticPlan: plan({
@@ -138,8 +235,8 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_PLAN_COVERAGE_OUTSIDE_SELECTED_TABLES");
-    expect(result.failure?.terminal).toBe(false);
-    expect(result.correctable).toBe(true);
+    expect(result.failure?.terminal).toBe(true);
+    expect(result.correctable).toBe(false);
   });
 
   it("fails terminally when semantic plan requires clarification", async () => {
@@ -194,10 +291,10 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_RELATIONSHIP_PATH_MISSING_JOIN");
-    expect(result.correctable).toBe(true);
+    expect(result.correctable).toBe(false);
   });
 
-  it("reports failed ledger obligation ids as correctable fulfillment misses", async () => {
+  it("reports failed ledger obligation ids without allowing semantic repair", async () => {
     const result = await service.validate({
       sql: "SELECT COUNT(*) FROM orders",
       semanticPlan: plan({
@@ -233,7 +330,7 @@ describe("text2sql v2 sql validation", () => {
     });
 
     expect(result.status).toBe("failed");
-    expect(result.correctable).toBe(true);
+    expect(result.correctable).toBe(false);
     expect(result.failedObligationIds).toEqual(["ledger:join-path:orders-customers"]);
     expect(result.checks.find((check) => check.check === "ledger-fulfillment")).toMatchObject({
       status: "failed",
@@ -338,23 +435,25 @@ describe("text2sql v2 sql validation", () => {
   });
 
   it.each([
-    ["sqlite", "SELECT show tables FROM orders", "SQLite 不支持 SHOW TABLES 语法"],
-    ["mysql", "SELECT * FROM pragma", "MySQL 不支持 PRAGMA 语法"],
-    ["postgresql", "SELECT strftime('%Y', created_at) FROM orders", "PostgreSQL 不支持 strftime 函数"]
-  ] as const)("fails %s dialect mismatches correctably", async (datasourceType, sql, message) => {
+    ["sqlite", "SELECT date_trunc('month', created_at) FROM orders"],
+    ["mysql", "SELECT strftime('%Y', created_at) FROM orders"],
+    ["postgresql", "SELECT strftime('%Y', created_at) FROM orders"]
+  ] as const)("fails %s dialect mismatches correctably", async (datasourceType, sql) => {
     const result = await service.validate({
       sql,
       datasourceType,
       semanticPlan: plan({
-        selectedTables: datasourceType === "mysql" ? ["pragma"] : ["orders"],
+        selectedTables: ["orders"],
         selectedColumns: [],
-        allowedTables: ["orders", "pragma"]
+        allowedTables: ["orders"]
       })
     });
 
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_DIALECT_MISMATCH");
-    expect(result.failure?.message).toBe(message);
+    expect(result.failure?.message).toBe(
+      "SQL could not be proven valid for the target datasource dialect."
+    );
     expect(result.failure?.terminal).toBe(false);
   });
 
@@ -373,7 +472,7 @@ describe("text2sql v2 sql validation", () => {
     });
   });
 
-  it("fails dry-run parse rejection correctably", async () => {
+  it("fails dry-run parse rejection terminally", async () => {
     const result = await createService({
       dryRunComplete: false,
       dryRunReason: "unable to extract referenced tables"
@@ -385,7 +484,7 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_DRY_RUN_PARSE_REJECTED");
-    expect(result.failure?.terminal).toBe(false);
+    expect(result.failure?.terminal).toBe(true);
   });
 
   it("fails sqlite dry-run missing columns as correctable validation errors", async () => {
@@ -435,7 +534,7 @@ describe("text2sql v2 sql validation", () => {
     });
   });
 
-  it("fails dry-plan relationship mismatch correctably", async () => {
+  it("fails dry-plan relationship mismatch terminally", async () => {
     const result = await createService({
       dryPlanPass: false,
       dryPlanReason: "missing tables from relationship plan: customers"
@@ -452,6 +551,6 @@ describe("text2sql v2 sql validation", () => {
 
     expect(result.status).toBe("failed");
     expect(result.failure?.code).toBe("SQL_DRY_PLAN_RELATIONSHIP_MISMATCH");
-    expect(result.failure?.terminal).toBe(false);
+    expect(result.failure?.terminal).toBe(true);
   });
 });

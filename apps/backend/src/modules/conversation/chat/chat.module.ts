@@ -33,6 +33,6 @@ import { Text2SqlModule } from "../text2sql/text2sql.module";
     RunViewUsecase,
     SaveViewFromRunUsecase,
   ],
-  exports: [ChatService]
+  exports: [ChatService, SessionLifecycleUsecase]
 })
 export class ChatModule {}

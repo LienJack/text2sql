@@ -415,38 +415,67 @@ export class WorkspaceRepository implements OnModuleInit, OnModuleDestroy {
     return existed;
   }
 
-  async isWorkspaceAdmin(userId: string, workspaceId: string): Promise<boolean> {
+  async getWorkspaceMember(
+    userId: string,
+    workspaceId: string
+  ): Promise<WorkspaceMember | undefined> {
     const workspace = await this.getWorkspaceById(workspaceId);
     if (!workspace) {
-      return false;
+      return undefined;
     }
 
     const key = toMembershipKey(userId, workspaceId);
     const memory = this.memberships.get(key);
     if (memory) {
-      return memory.role === "admin";
+      return memory;
     }
 
     if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
-      return false;
+      return undefined;
     }
 
     const row = (await this.tryPrismaRead(async () =>
       this.prisma?.workspaceMember.findFirst({
         where: {
           userId,
-          workspaceId,
-          role: "admin"
+          workspaceId
         }
       })
     )) as WorkspaceMemberRow | null;
 
     if (!row) {
-      return false;
+      return undefined;
     }
     const member = this.fromWorkspaceMemberRow(row);
     this.memberships.set(key, member);
-    return member.role === "admin";
+    return member;
+  }
+
+  async getWorkspaceMemberCurrent(
+    userId: string,
+    workspaceId: string
+  ): Promise<WorkspaceMember | undefined> {
+    if (!this.isPrimaryPersistenceConfigured() || !this.prisma) {
+      return this.memberships.get(toMembershipKey(userId, workspaceId));
+    }
+    const row = (await this.tryPrismaRead(async () =>
+      this.prisma?.workspaceMember.findFirst({
+        where: { userId, workspaceId }
+      })
+    )) as WorkspaceMemberRow | null;
+    const key = toMembershipKey(userId, workspaceId);
+    if (!row) {
+      this.memberships.delete(key);
+      return undefined;
+    }
+    const member = this.fromWorkspaceMemberRow(row);
+    this.memberships.set(key, member);
+    return member;
+  }
+
+  async isWorkspaceAdmin(userId: string, workspaceId: string): Promise<boolean> {
+    const member = await this.getWorkspaceMember(userId, workspaceId);
+    return member?.role === "admin";
   }
 
   private async patchWorkspace(

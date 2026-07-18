@@ -43,6 +43,8 @@ export class SqliteQueryService {
     sql: string,
     options?: {
       filePath?: string;
+      abortSignal?: AbortSignal;
+      timeoutMs?: number;
     }
   ): Promise<{
     columns: string[];
@@ -52,11 +54,15 @@ export class SqliteQueryService {
     const finalSql = this.withLimit(safeSql);
     const dbPath = options?.filePath?.trim() || this.dbPath;
     try {
-      const { stdout, stderr } = await execFileAsync("sqlite3", [
-        "-json",
-        dbPath,
-        finalSql
-      ]);
+      const { stdout, stderr } = await execFileAsync(
+        "sqlite3",
+        ["-readonly", "-json", "-cmd", "PRAGMA query_only=ON;", dbPath, finalSql],
+        {
+          timeout: options?.timeoutMs,
+          signal: options?.abortSignal,
+          maxBuffer: 4 * 1024 * 1024
+        }
+      );
       if (stderr?.trim()) {
         throw new DomainError("SQL_EXECUTION_ERROR", stderr.trim(), 400);
       }
@@ -78,16 +84,23 @@ export class SqliteQueryService {
     sql: string,
     options?: {
       filePath?: string;
+      abortSignal?: AbortSignal;
+      timeoutMs?: number;
     }
   ): Promise<void> {
     const safeSql = this.ensureSelectQuery(sql);
     const finalSql = this.withLimit(safeSql);
     const dbPath = options?.filePath?.trim() || this.dbPath;
     try {
-      const { stderr } = await execFileAsync("sqlite3", [
-        dbPath,
-        `EXPLAIN QUERY PLAN ${finalSql}`
-      ]);
+      const { stderr } = await execFileAsync(
+        "sqlite3",
+        ["-readonly", "-cmd", "PRAGMA query_only=ON;", dbPath, `EXPLAIN QUERY PLAN ${finalSql}`],
+        {
+          timeout: options?.timeoutMs,
+          signal: options?.abortSignal,
+          maxBuffer: 1024 * 1024
+        }
+      );
       if (stderr?.trim()) {
         throw new DomainError("SQL_DRY_RUN_FAILED", stderr.trim(), 400);
       }

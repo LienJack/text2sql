@@ -1,10 +1,12 @@
 import { Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import type {
   SemanticContextPackV1,
   SemanticPlanLedgerObligationV1,
   SemanticPlanLedgerSummaryV1,
   SemanticPlanCoverageGapV1,
-  SemanticPlanV1
+  SemanticPlanV1,
+  Text2SqlQueryContractV1
 } from "@text2sql/shared-types";
 import type { SqlSemanticIntent } from "../agent/sql/sql-prompt.builder";
 import { SemanticPlanValidator } from "./semantic-plan.validator";
@@ -14,6 +16,10 @@ export interface BuildSemanticPlanInput {
   contextPack: SemanticContextPackV1;
   semanticIntent?: SqlSemanticIntent;
   allowedTables?: string[];
+  runId?: string;
+  frozenAt?: string;
+  queryContract?: Text2SqlQueryContractV1;
+  requiresTrustedGrounding?: boolean;
 }
 
 export type SemanticPlanRouteKind =
@@ -55,7 +61,7 @@ export class SemanticPlanService {
     const allowedTables = this.normalizeList(input.allowedTables ?? []);
     const evidenceRefs = this.normalizeEvidenceRefs(input.contextPack.selectedEvidenceIds);
     const clarificationPolicy = this.resolveClarificationPolicy(input.contextPack.warnings);
-    const routeKind = this.resolveRouteKind({
+    let routeKind = this.resolveRouteKind({
       question: input.question,
       semanticIntent: input.semanticIntent,
       contextStatus: input.contextPack.status,
@@ -65,6 +71,19 @@ export class SemanticPlanService {
       warningCount: input.contextPack.warnings?.length ?? 0,
       clarificationPolicy
     });
+    if (
+      input.contextPack.dependencyClosure?.conflictSet.some((item) =>
+        /metric|口径|收入|revenue/i.test(item.subject)
+      )
+    ) {
+      routeKind = "clarify";
+    }
+    if (
+      input.requiresTrustedGrounding &&
+      input.contextPack.groundingIdentity?.status !== "ready"
+    ) {
+      routeKind = "fail_closed";
+    }
     const route = this.toContractRoute(routeKind);
     const confidence = this.resolveConfidence({
       routeKind,
@@ -107,6 +126,32 @@ export class SemanticPlanService {
       evidenceRefs,
       clarificationPolicy
     });
+    if (
+      input.requiresTrustedGrounding &&
+      input.contextPack.groundingIdentity?.status !== "ready"
+    ) {
+      coverageGaps.push({
+        gapType: "evidence_gap",
+        subjectKind: "general",
+        reasonCode: "trusted_sql_grounding_unavailable",
+        evidenceRefs: [],
+        impactScope: "sql_generation"
+      });
+    }
+    const grain = this.extractGrain(standaloneQuestion);
+    const queryContract =
+      routeKind === "text_to_sql"
+        ? input.queryContract ??
+          this.buildQueryContract({
+            runId: input.runId ?? "unbound",
+            question: standaloneQuestion,
+            metrics,
+            selectedColumns,
+            filters,
+            grain,
+            frozenAt: input.frozenAt ?? "1970-01-01T00:00:00.000Z"
+          })
+        : undefined;
     const snapshotId = this.buildSnapshotId({
       routeKind,
       contextStatus: input.contextPack.status,
@@ -120,15 +165,16 @@ export class SemanticPlanService {
       question: standaloneQuestion,
       selectedTables,
       selectedColumns,
-      metrics,
-      grain: this.extractGrain(standaloneQuestion),
-      filters,
+      metrics: queryContract?.metrics ?? metrics,
+      grain: queryContract?.grain[0] ?? grain,
+      filters: queryContract?.filters ?? filters,
       joinPath,
       forbiddenTables,
       evidenceRefs,
       coverageGaps,
       snapshotId,
-      contextPack: input.contextPack
+      contextPack: input.contextPack,
+      queryContract
     });
 
     const plan: SemanticPlanV1 = {
@@ -137,9 +183,7 @@ export class SemanticPlanService {
       selectedTables,
       selectedColumns,
       ...(metrics.length > 0 ? { metrics } : {}),
-      ...(this.extractGrain(standaloneQuestion)
-        ? { grain: this.extractGrain(standaloneQuestion) }
-        : {}),
+      ...(grain ? { grain } : {}),
       ...(filters.length > 0 ? { filters } : {}),
       ...(joinPath.length > 0 ? { joinPath } : {}),
       ...(allowedTables.length > 0 ? { allowedTables } : {}),
@@ -148,7 +192,8 @@ export class SemanticPlanService {
       evidenceRefs,
       ...(coverageGaps.length > 0 ? { coverageGaps } : {}),
       snapshotId,
-      planLedger
+      planLedger,
+      ...(queryContract ? { queryContract } : {})
     };
 
     return {
@@ -349,6 +394,11 @@ export class SemanticPlanService {
     if (input.selectedTables.length < 2) {
       return [];
     }
+    if (input.contextPack.dependencyClosure) {
+      return input.contextPack.dependencyClosure.status === "ready"
+        ? [...input.contextPack.dependencyClosure.joinClosure]
+        : [];
+    }
     const relationshipRefs = input.contextPack.lanes?.relationships?.refs ?? [];
     if (input.contextPack.lanes?.relationships && relationshipRefs.length === 0) {
       return [];
@@ -378,13 +428,19 @@ export class SemanticPlanService {
     coverageGaps: SemanticPlanCoverageGapV1[];
     snapshotId: string;
     contextPack: SemanticContextPackV1;
+    queryContract?: Text2SqlQueryContractV1;
   }): NonNullable<SemanticPlanV1["planLedger"]> {
     const obligations: SemanticPlanLedgerObligationV1[] = [];
     const hasEvidence = input.evidenceRefs.length > 0;
-    const requiredColumns = this.resolveRequiredColumns({
-      question: input.question,
-      selectedColumns: input.selectedColumns
-    });
+    const requiredColumns = new Set(
+      input.queryContract?.requiredColumns.map((column) =>
+        this.normalizeQualifiedIdentifier(column)
+      ).filter((column): column is string => Boolean(column)) ??
+        this.resolveRequiredColumns({
+          question: input.question,
+          selectedColumns: input.selectedColumns
+        })
+    );
     const warningOnlyDegraded =
       input.contextPack.status === "degraded" &&
       input.selectedTables.length === 0 &&
@@ -533,6 +589,75 @@ export class SemanticPlanService {
       obligations,
       summary: this.summarizePlanLedger(input.snapshotId, obligations, input.evidenceRefs)
     };
+  }
+
+  private buildQueryContract(input: {
+    runId: string;
+    question: string;
+    metrics: string[];
+    selectedColumns: string[];
+    filters: string[];
+    grain?: string;
+    frozenAt: string;
+  }): Text2SqlQueryContractV1 {
+    const requiredColumns = Array.from(
+      this.resolveRequiredColumns({
+        question: input.question,
+        selectedColumns: input.selectedColumns
+      })
+    ).sort();
+    const dimensions = requiredColumns.filter(
+      (column) => !/(amount|total|count|rate|ratio|score|gmv|qty|quantity)$/i.test(column)
+    );
+    const contractPayload = {
+      version: "query-contract.v1" as const,
+      runId: input.runId,
+      questionDigest: this.hash(input.question),
+      route: "text_to_sql" as const,
+      metrics: [...input.metrics],
+      dimensions,
+      requiredColumns,
+      filters: input.filters.filter(
+        (filter) =>
+          !filter.startsWith("route_kind:") &&
+          !filter.startsWith("context_warning:") &&
+          !filter.startsWith("clarification_")
+      ),
+      ...(input.grain
+        ? {
+            time: {
+              field:
+                requiredColumns.find((column) =>
+                  /(created_at|updated_at|paid_at|date|day|month|year)$/i.test(column)
+                ) ?? "unresolved_time_field",
+              timezone: "UTC",
+              grain: input.grain
+            }
+          }
+        : {}),
+      grain: input.grain ? [input.grain] : [],
+      sort: [] as Array<{ field: string; direction: "asc" | "desc" }>,
+      resultShape: {
+        cardinality: input.grain ? ("time_series" as const) : ("tabular" as const),
+        columns: this.unique([...dimensions, ...input.metrics]).map((name) => ({
+          name,
+          semanticType: input.metrics.includes(name)
+            ? ("metric" as const)
+            : ("dimension" as const)
+        }))
+      },
+      frozenAt: input.frozenAt
+    };
+    const contractDigest = this.hash(JSON.stringify(contractPayload));
+    return {
+      ...contractPayload,
+      id: `query-contract:${contractDigest}`,
+      digest: contractDigest
+    };
+  }
+
+  private hash(value: string): string {
+    return createHash("sha256").update(value).digest("hex");
   }
 
   private summarizePlanLedger(

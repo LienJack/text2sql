@@ -212,6 +212,43 @@ export class RagRetrievalService {
       };
     }
 
+    if (
+      input.requiresSqlPolicy &&
+      (allowedTables.length === 0 ||
+        !input.policyDigest?.trim() ||
+        !Number.isInteger(input.policyVersion) ||
+        !input.schemaSnapshotDigest?.trim() ||
+        !input.allowedColumnsDigest?.trim())
+    ) {
+      const degradeReasons = ["trusted_sql_grounding_unavailable"];
+      return {
+        retrieval_bundle: {
+          query,
+          run_id: runId,
+          datasource_id: datasourceId,
+          status: "degraded",
+          degrade_reasons: degradeReasons,
+          lane_results: this.createEmptyLaneResults(
+            laneTimeoutMs,
+            "trusted_sql_grounding_unavailable"
+          ),
+          candidates: [],
+          selected_context: [],
+          permission_filtering: {
+            status: "skipped",
+            reason_codes: ["trusted_sql_grounding_unavailable"],
+            kept_candidate_count: 0
+          },
+          context_pack: await this.buildContextPack({
+            workspaceId,
+            datasourceId,
+            status: "degraded",
+            degradeReasons
+          })
+        }
+      };
+    }
+
     const activeVersion = input.activeIndexVersionId?.trim()
       ? await this.indexRepository.getVersionById(input.activeIndexVersionId.trim())
       : await this.indexRepository.getActiveVersion(datasourceId);
@@ -269,7 +306,18 @@ export class RagRetrievalService {
       query,
       budgetProfile: budgetLaneProfile,
       perLaneLimit,
-      finalCandidateLimit
+      finalCandidateLimit,
+      workspaceId,
+      allowedTables: [...allowedTables],
+      allowedColumnsDigest: input.allowedColumnsDigest,
+      policyVersion: input.policyVersion,
+      policyDigest: input.policyDigest,
+      schemaSnapshotDigest: input.schemaSnapshotDigest,
+      semanticVersion: input.semanticVersion,
+      modelingRevision: input.modelingRevision,
+      valueSketchVersion: input.valueSketchVersion,
+      priorSqlVersion: input.priorSqlVersion,
+      promptVersion: input.promptVersion
     });
     const cacheRead = this.queryCache.get<RagRetrievalResponse["retrieval_bundle"]>(cacheKey);
     if (cacheRead.hit && cacheRead.value) {
@@ -356,7 +404,11 @@ export class RagRetrievalService {
       preRankingPermissionFiltering.evidence,
       permissionFiltering.evidence
     ]);
-    const skillContext = await this.resolveSkillContext(query, candidates);
+    const skillContext = await this.resolveSkillContext(
+      query,
+      candidates,
+      workspaceId
+    );
 
     const degradeReasons = this.collectDegradeReasons(laneResults);
     degradeReasons.push(...this.collectSemanticLinkageDegradeReasons(candidates));
@@ -2975,7 +3027,8 @@ export class RagRetrievalService {
 
   private async resolveSkillContext(
     query: string,
-    candidates: RagRetrievalCandidate[]
+    candidates: RagRetrievalCandidate[],
+    workspaceId?: string
   ): Promise<RagSkillContext> {
     if (candidates.length === 0) {
       return {
@@ -2998,6 +3051,7 @@ export class RagRetrievalService {
       return await this.skillRegistry.resolveSkills({
         domain,
         term: query,
+        workspaceId,
         context: {
           query,
           tableNames,

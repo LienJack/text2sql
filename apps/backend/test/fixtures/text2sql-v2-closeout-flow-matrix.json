@@ -487,11 +487,14 @@
       "evidenceOwners": [
         "run.trace.v2",
         "run.delivery.evidence.v2",
+        "run.delivery.evidence.v2.accuracy",
+        "replay.accuracy",
         "SSE.state.data.v2.stageArtifact"
       ],
       "expectedTestFiles": [
         "apps/backend/test/unit/text2sql-stream-event.mapper.spec.ts",
         "apps/backend/test/integration/text2sql-v2-characterization-gate.spec.ts",
+        "apps/backend/test/integration/text2sql-accuracy-replay-parity.spec.ts",
         "apps/backend/test/integration/save-view-from-run.spec.ts"
       ],
       "gateRelevance": true,
@@ -1260,6 +1263,22 @@
       ],
       "expectedTestFiles": [
         "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts"
+      ],
+      "behaviorTestStatus": "covered",
+      "coverageOwnerStatus": "covered"
+    },
+    {
+      "category": "accuracy_receipts",
+      "producerOwners": [
+        "apps/backend/src/modules/conversation/artifacts/text2sql-v2-artifact-ref.service.ts"
+      ],
+      "evidenceOwners": [
+        "run.trace.v2.artifactRefs[accuracy_receipts]",
+        "run.delivery.evidence.v2.accuracy"
+      ],
+      "expectedTestFiles": [
+        "apps/backend/test/unit/text2sql-v2-artifact-ref.service.spec.ts",
+        "apps/backend/test/integration/text2sql-accuracy-replay-parity.spec.ts"
       ],
       "behaviorTestStatus": "covered",
       "coverageOwnerStatus": "covered"

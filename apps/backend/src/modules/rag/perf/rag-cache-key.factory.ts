@@ -13,6 +13,18 @@ export interface RagCacheKeyInput {
   finalCandidateLimit?: number;
   secondaryTopK?: number;
   selectedContextLimit?: number;
+  workspaceId?: string;
+  allowedTables?: string[];
+  allowedColumnsDigest?: string;
+  policyVersion?: number;
+  policyDigest?: string;
+  schemaSnapshotDigest?: string;
+  semanticVersion?: number;
+  modelingRevision?: number;
+  valueSketchVersion?: string;
+  priorSqlVersion?: string;
+  modelVersion?: string;
+  promptVersion?: string;
 }
 
 @Injectable()
@@ -42,6 +54,26 @@ export class RagCacheKeyFactory {
     }
     if (typeof input.budgetProfile === "string" && input.budgetProfile.trim()) {
       parts.push(`bp=${input.budgetProfile.trim().toLowerCase()}`);
+    }
+    const identity = {
+      workspaceId: input.workspaceId?.trim().toLowerCase(),
+      allowedTables: [...(input.allowedTables ?? [])]
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean)
+        .sort(),
+      allowedColumnsDigest: input.allowedColumnsDigest?.trim().toLowerCase(),
+      policyVersion: input.policyVersion,
+      policyDigest: input.policyDigest?.trim().toLowerCase(),
+      schemaSnapshotDigest: input.schemaSnapshotDigest?.trim().toLowerCase(),
+      semanticVersion: input.semanticVersion,
+      modelingRevision: input.modelingRevision,
+      valueSketchVersion: input.valueSketchVersion?.trim().toLowerCase(),
+      priorSqlVersion: input.priorSqlVersion?.trim().toLowerCase(),
+      modelVersion: input.modelVersion?.trim().toLowerCase(),
+      promptVersion: input.promptVersion?.trim().toLowerCase()
+    };
+    if (Object.values(identity).some((value) => value !== undefined)) {
+      parts.push(`identity=${this.hash(JSON.stringify(identity))}`);
     }
 
     return parts.join("|");

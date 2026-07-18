@@ -8,7 +8,7 @@
     "prisma:studio": "pnpm --filter @text2sql/backend run prisma:studio",
     "db:studio": "pnpm --filter @text2sql/backend run prisma:studio",
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
+    "test": "pnpm -r --workspace-concurrency=1 test",
     "test:backend": "pnpm --filter @text2sql/backend test",
     "test:frontend": "pnpm --filter @text2sql/frontend test",
     "format:check": "pnpm -r lint",
@@ -17,6 +17,10 @@
     "text2sql:no-legacy-compat:check": "pnpm --filter @text2sql/backend run check:text2sql-no-legacy-compat",
     "text2sql:v2-eval:gate": "pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate",
     "text2sql:v2-eval:gate:strict": "pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate:strict",
+    "text2sql:accuracy:gate": "pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate",
+    "text2sql:accuracy:gate:strict": "pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate:strict",
+    "data-agent:release:gate": "pnpm --filter @text2sql/backend run collect:data-agent-release-gate",
+    "data-agent:release:gate:strict": "pnpm --filter @text2sql/backend run collect:data-agent-release-gate:strict",
     "text2sql:v2-focused-coverage:gate": "pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate",
     "text2sql:v2-focused-coverage:gate:strict": "pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate:strict"
   }

@@ -9,60 +9,64 @@ datasource db {
 }
 
 model Session {
-  id                String    @id
+  id                String          @id
   datasource        String
   workspaceId       String?
   createdByUserId   String?
-  title             String    @default("新会话")
+  title             String          @default("新会话")
   modelCatalogId    String?
   modelProvider     String?
   modelName         String?
-  debugEnabled      Boolean   @default(false)
-  syncStatus        String    @default("healthy")
-  syncFailedCount   Int       @default(0)
+  debugEnabled      Boolean         @default(false)
+  syncStatus        String          @default("healthy")
+  syncFailedCount   Int             @default(0)
   lastMessageAt     DateTime?
   lastSyncFailureAt DateTime?
   deletedAt         DateTime?
-  createdAt         DateTime  @default(now())
+  createdAt         DateTime        @default(now())
+  origin            String          @default("chat")
+  analysisTaskId    String?
   messages          Message[]
   runs              SqlRun[]
   auditLogs         AgentAuditLog[]
-  datasourceRef     Datasource @relation(fields: [datasource], references: [id], onDelete: Restrict)
-  workspaceRef      Workspace? @relation("workspace_sessions", fields: [workspaceId], references: [id], onDelete: SetNull)
-  modelCatalog      ModelCatalog? @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
+  datasourceRef     Datasource      @relation(fields: [datasource], references: [id], onDelete: Restrict)
+  workspaceRef      Workspace?      @relation("workspace_sessions", fields: [workspaceId], references: [id], onDelete: SetNull)
+  modelCatalog      ModelCatalog?   @relation(fields: [modelCatalogId], references: [id], onDelete: SetNull)
+  analysisTask      AnalysisTask?   @relation("analysis_task_sessions", fields: [analysisTaskId], references: [id], onDelete: SetNull)
 
   @@index([deletedAt, lastMessageAt])
   @@index([workspaceId, deletedAt, lastMessageAt])
   @@index([createdByUserId])
   @@index([modelCatalogId])
+  @@index([origin, analysisTaskId, deletedAt])
   @@map("sessions")
 }
 
 model Datasource {
-  id            String    @id
-  name          String
-  type          String
-  status        String    @default("available")
-  readonly      Boolean   @default(true)
-  shared        Boolean   @default(true)
-  config        String?
-  fileMeta      String?
-  unavailableAt DateTime?
-  deletedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  sessions      Session[]
-  workspaceBindings WorkspaceDatasourceBinding[]
+  id                           String                                  @id
+  name                         String
+  type                         String
+  status                       String                                  @default("available")
+  readonly                     Boolean                                 @default(true)
+  shared                       Boolean                                 @default(true)
+  config                       String?
+  fileMeta                     String?
+  unavailableAt                DateTime?
+  deletedAt                    DateTime?
+  createdAt                    DateTime                                @default(now())
+  updatedAt                    DateTime                                @updatedAt
+  sessions                     Session[]
+  workspaceBindings            WorkspaceDatasourceBinding[]
   workspaceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
-  workspaceTablePermissions WorkspaceDatasourceTablePermission[]
-  modelingGraphRevisions WorkspaceModelingGraphRevision[]
-  ragDocuments       RagDocument[]        @relation("datasource_rag_documents")
-  ragChunks          RagChunk[]           @relation("datasource_rag_chunks")
-  ragIndexVersions   RagIndexVersion[]    @relation("datasource_rag_index_versions")
-  ragChunkIndexes    RagChunkIndexEntry[] @relation("datasource_rag_chunk_index_entries")
-  ragRunReplays      RagRunReplay[]       @relation("datasource_rag_run_replays")
-  glossaryTerms      GlossaryTerm[]       @relation("datasource_glossary_terms")
-  glossaryAnchors    GlossaryAnchor[]     @relation("datasource_glossary_anchors")
+  workspaceTablePermissions    WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions       WorkspaceModelingGraphRevision[]
+  ragDocuments                 RagDocument[]                           @relation("datasource_rag_documents")
+  ragChunks                    RagChunk[]                              @relation("datasource_rag_chunks")
+  ragIndexVersions             RagIndexVersion[]                       @relation("datasource_rag_index_versions")
+  ragChunkIndexes              RagChunkIndexEntry[]                    @relation("datasource_rag_chunk_index_entries")
+  ragRunReplays                RagRunReplay[]                          @relation("datasource_rag_run_replays")
+  glossaryTerms                GlossaryTerm[]                          @relation("datasource_glossary_terms")
+  glossaryAnchors              GlossaryAnchor[]                        @relation("datasource_glossary_anchors")
 
   @@index([deletedAt, status])
   @@index([type, status])
@@ -83,52 +87,52 @@ model Message {
 }
 
 model SqlRun {
-  runId         String   @id
-  sessionId     String
-  status        String
-  provider      String
-  model         String?
-  question      String
-  sql           String?
-  explanation   String?
-  answer        String?
-  columns       String?
-  rows          String?
-  error         String?
-  clarification String?
-  trace         String
-  llmRaw        String?
-  createdAt     DateTime @default(now())
-  session       Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  auditLogs         AgentAuditLog[]
-  graphSnapshots    GraphSnapshot[]
-  semanticEdges     SemanticEdge[]
-  semanticMemories  SemanticMemory[]
+  runId                             String                    @id
+  sessionId                         String
+  status                            String
+  provider                          String
+  model                             String?
+  question                          String
+  sql                               String?
+  explanation                       String?
+  answer                            String?
+  columns                           String?
+  rows                              String?
+  error                             String?
+  clarification                     String?
+  trace                             String
+  llmRaw                            String?
+  createdAt                         DateTime                  @default(now())
+  session                           Session                   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  auditLogs                         AgentAuditLog[]
+  graphSnapshots                    GraphSnapshot[]
+  semanticEdges                     SemanticEdge[]
+  semanticMemories                  SemanticMemory[]
   semanticRegistryVersionsPublished SemanticRegistryVersion[] @relation("semantic_registry_published_by_run")
   semanticRegistryVersionsActivated SemanticRegistryVersion[] @relation("semantic_registry_activated_by_run")
-  semanticSpineSnapshotsPublished SemanticSpineSnapshot[] @relation("semantic_spine_published_by_run")
-  semanticSpineSnapshotsActivated SemanticSpineSnapshot[] @relation("semantic_spine_activated_by_run")
-  ragIndexVersionsBuilt     RagIndexVersion[] @relation("rag_index_created_by_run")
-  ragIndexVersionsActivated RagIndexVersion[] @relation("rag_index_activated_by_run")
-  ragRunReplays             RagRunReplay[]    @relation("rag_run_replays")
-  glossaryAnchorsCreated    GlossaryAnchor[]  @relation("glossary_anchor_created_by_run")
+  semanticSpineSnapshotsPublished   SemanticSpineSnapshot[]   @relation("semantic_spine_published_by_run")
+  semanticSpineSnapshotsActivated   SemanticSpineSnapshot[]   @relation("semantic_spine_activated_by_run")
+  ragIndexVersionsBuilt             RagIndexVersion[]         @relation("rag_index_created_by_run")
+  ragIndexVersionsActivated         RagIndexVersion[]         @relation("rag_index_activated_by_run")
+  ragRunReplays                     RagRunReplay[]            @relation("rag_run_replays")
+  glossaryAnchorsCreated            GlossaryAnchor[]          @relation("glossary_anchor_created_by_run")
 
   @@index([sessionId, createdAt])
   @@map("sql_runs")
 }
 
 model GraphSnapshot {
-  id          String   @id
-  datasource  String
-  graphType   String
-  graphVersion Int     @default(1)
-  status      String   @default("active")
-  checksum    String?
-  payload     String
-  sourceRunId String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  sourceRun   SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
+  id           String   @id
+  datasource   String
+  graphType    String
+  graphVersion Int      @default(1)
+  status       String   @default("active")
+  checksum     String?
+  payload      String
+  sourceRunId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  sourceRun    SqlRun?  @relation(fields: [sourceRunId], references: [runId], onDelete: SetNull)
 
   @@index([datasource, graphType, status])
   @@index([sourceRunId])
@@ -174,20 +178,20 @@ model SemanticEdge {
 }
 
 model SemanticRegistryVersion {
-  id               String   @id
+  id               String                 @id
   domain           String
   semanticVersion  Int
-  status           String   @default("active")
+  status           String                 @default("active")
   releaseSummary   String
   auditSummary     String
   publishedByRunId String?
   activatedByRunId String?
   activatedAt      DateTime?
   riskTags         String[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  publishedByRun   SqlRun?  @relation("semantic_registry_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
-  activatedByRun   SqlRun?  @relation("semantic_registry_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  publishedByRun   SqlRun?                @relation("semantic_registry_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?                @relation("semantic_registry_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
   terms            SemanticRegistryTerm[]
 
   @@unique([domain, semanticVersion])
@@ -198,7 +202,7 @@ model SemanticRegistryVersion {
 }
 
 model SemanticRegistryTerm {
-  id           String   @id
+  id           String                  @id
   versionId    String
   domain       String
   term         String
@@ -206,8 +210,8 @@ model SemanticRegistryTerm {
   definition   String
   binding      String
   metadata     String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
   version      SemanticRegistryVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
   @@unique([versionId, term])
@@ -217,10 +221,10 @@ model SemanticRegistryTerm {
 }
 
 model SemanticSpineSnapshot {
-  id               String   @id
+  id               String    @id
   domain           String
   semanticVersion  Int
-  status           String   @default("active")
+  status           String    @default("active")
   releaseSummary   String
   auditSummary     String
   riskTags         String[]
@@ -229,10 +233,10 @@ model SemanticSpineSnapshot {
   publishedByRunId String?
   activatedByRunId String?
   activatedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  publishedByRun   SqlRun?  @relation("semantic_spine_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
-  activatedByRun   SqlRun?  @relation("semantic_spine_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  publishedByRun   SqlRun?   @relation("semantic_spine_published_by_run", fields: [publishedByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?   @relation("semantic_spine_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
 
   @@unique([domain, semanticVersion])
   @@index([domain, status, semanticVersion])
@@ -281,24 +285,24 @@ model PromptTemplate {
 }
 
 model GlossaryAnchor {
-  id                   String   @id
-  scope                String   @default("global")
+  id                   String           @id
+  scope                String           @default("global")
   scopeKey             String
   datasourceId         String?
   version              Int
-  anchorType           String   @default("release")
-  status               String   @default("active")
+  anchorType           String           @default("release")
+  status               String           @default("active")
   summary              String?
   rollbackFromAnchorId String?
   rollbackReason       String?
   metadata             String?
   createdByUserId      String?
   createdByRunId       String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
-  datasource           Datasource?   @relation("datasource_glossary_anchors", fields: [datasourceId], references: [id], onDelete: SetNull)
-  createdByRun         SqlRun?       @relation("glossary_anchor_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
-  rollbackFromAnchor   GlossaryAnchor? @relation("glossary_anchor_rollbacks", fields: [rollbackFromAnchorId], references: [id], onDelete: SetNull)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  datasource           Datasource?      @relation("datasource_glossary_anchors", fields: [datasourceId], references: [id], onDelete: SetNull)
+  createdByRun         SqlRun?          @relation("glossary_anchor_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  rollbackFromAnchor   GlossaryAnchor?  @relation("glossary_anchor_rollbacks", fields: [rollbackFromAnchorId], references: [id], onDelete: SetNull)
   rollbackTargets      GlossaryAnchor[] @relation("glossary_anchor_rollbacks")
   versionTerms         GlossaryTerm[]   @relation("glossary_terms_version_anchor")
   rollbackTerms        GlossaryTerm[]   @relation("glossary_terms_rollback_anchor")
@@ -312,26 +316,26 @@ model GlossaryAnchor {
 }
 
 model GlossaryTerm {
-  id                 String   @id
+  id                 String          @id
   term               String
   normalizedTerm     String
   definition         String
   synonyms           String[]
-  scope              String   @default("global")
+  scope              String          @default("global")
   scopeKey           String
   datasourceId       String?
-  priority           Int      @default(50)
-  conflictResolution String   @default("priority_then_updated_at")
-  status             String   @default("active")
-  version            Int      @default(1)
+  priority           Int             @default(50)
+  conflictResolution String          @default("priority_then_updated_at")
+  status             String          @default("active")
+  version            Int             @default(1)
   versionAnchorId    String?
   rollbackAnchorId   String?
   metadata           String?
   createdByUserId    String?
   updatedByUserId    String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  datasource         Datasource?    @relation("datasource_glossary_terms", fields: [datasourceId], references: [id], onDelete: SetNull)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  datasource         Datasource?     @relation("datasource_glossary_terms", fields: [datasourceId], references: [id], onDelete: SetNull)
   versionAnchor      GlossaryAnchor? @relation("glossary_terms_version_anchor", fields: [versionAnchorId], references: [id], onDelete: SetNull)
   rollbackAnchor     GlossaryAnchor? @relation("glossary_terms_rollback_anchor", fields: [rollbackAnchorId], references: [id], onDelete: SetNull)
 
@@ -344,18 +348,18 @@ model GlossaryTerm {
 }
 
 model AgentAuditLog {
-  id         String   @id
-  runId      String?
-  sessionId  String?
-  phase      String
-  severity   String   @default("info")
-  eventType  String
-  eventCode  String?
-  message    String
-  metadata   String?
-  createdAt  DateTime @default(now())
-  run        SqlRun?  @relation(fields: [runId], references: [runId], onDelete: SetNull)
-  session    Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  id        String   @id
+  runId     String?
+  sessionId String?
+  phase     String
+  severity  String   @default("info")
+  eventType String
+  eventCode String?
+  message   String
+  metadata  String?
+  createdAt DateTime @default(now())
+  run       SqlRun?  @relation(fields: [runId], references: [runId], onDelete: SetNull)
+  session   Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
   @@index([runId, createdAt])
   @@index([sessionId, createdAt])
@@ -376,22 +380,22 @@ model EvaluationReport {
 }
 
 model ProviderConfig {
-  id               String   @id
+  id               String         @id
   provider         String
   displayName      String
   baseUrl          String?
   apiKeyCiphertext String?
   apiKeyMasked     String?
-  enabled          Boolean  @default(true)
+  enabled          Boolean        @default(true)
   metadata         String?
   lastSyncAt       DateTime?
-  lastSyncStatus   String   @default("idle")
+  lastSyncStatus   String         @default("idle")
   lastSyncError    String?
   createdBy        String?
   updatedBy        String?
   deletedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   models           ModelCatalog[]
 
   @@index([provider, deletedAt])
@@ -404,47 +408,47 @@ enum RagTaskType {
 }
 
 model RagTaskConfig {
-  id                String      @id
-  taskType          RagTaskType @unique
-  provider          String
-  model             String
-  baseUrl           String?
-  apiKeyCiphertext  String?
-  apiKeyMasked      String?
-  enabled           Boolean     @default(true)
-  dimensions        Int?
-  vectorVersion     String?
-  timeoutMs         Int?
-  note              String?
-  healthStatus      String      @default("unknown")
-  lastCheckedAt     DateTime?
+  id                  String      @id
+  taskType            RagTaskType @unique
+  provider            String
+  model               String
+  baseUrl             String?
+  apiKeyCiphertext    String?
+  apiKeyMasked        String?
+  enabled             Boolean     @default(true)
+  dimensions          Int?
+  vectorVersion       String?
+  timeoutMs           Int?
+  note                String?
+  healthStatus        String      @default("unknown")
+  lastCheckedAt       DateTime?
   lastHealthLatencyMs Int?
-  lastHealthMessage String?
-  lastError         String?
-  createdBy         String?
-  updatedBy         String?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  lastHealthMessage   String?
+  lastError           String?
+  createdBy           String?
+  updatedBy           String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   @@map("rag_task_configs")
 }
 
 model ModelCatalog {
-  id                String   @id
+  id                String         @id
   providerConfigId  String
   provider          String
   model             String
   displayName       String
   capabilities      String?
   contextWindow     Int?
-  enabled           Boolean  @default(true)
-  healthStatus      String   @default("unknown")
+  enabled           Boolean        @default(true)
+  healthStatus      String         @default("unknown")
   lastHealthCheckAt DateTime?
   lastSyncedAt      DateTime?
   metadata          String?
   deletedAt         DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
   providerConfig    ProviderConfig @relation(fields: [providerConfigId], references: [id], onDelete: Cascade)
   sessions          Session[]
 
@@ -455,19 +459,19 @@ model ModelCatalog {
 }
 
 model PlatformUser {
-  id                 String   @id
+  id                 String            @id
   account            String
   name               String
   email              String
-  status             String   @default("active")
-  isSystemAdmin      Boolean  @default(false)
+  status             String            @default("active")
+  isSystemAdmin      Boolean           @default(false)
   passwordHash       String?
   systemVariables    String?
   defaultWorkspaceId String?
   deletedAt          DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  defaultWorkspace   Workspace? @relation("workspace_default_users", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  defaultWorkspace   Workspace?        @relation("workspace_default_users", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
   workspaceMembers   WorkspaceMember[]
 
   @@unique([account])
@@ -478,35 +482,447 @@ model PlatformUser {
 }
 
 model Workspace {
-  id               String   @id
-  name             String
-  status           String   @default("active")
-  isDefault        Boolean  @default(false)
-  deletedAt        DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  defaultUsers     PlatformUser[] @relation("workspace_default_users")
-  workspaceMembers WorkspaceMember[]
-  sessions         Session[] @relation("workspace_sessions")
-  datasourceBindings WorkspaceDatasourceBinding[]
+  id                            String                                  @id
+  name                          String
+  status                        String                                  @default("active")
+  isDefault                     Boolean                                 @default(false)
+  deletedAt                     DateTime?
+  createdAt                     DateTime                                @default(now())
+  updatedAt                     DateTime                                @updatedAt
+  defaultUsers                  PlatformUser[]                          @relation("workspace_default_users")
+  workspaceMembers              WorkspaceMember[]
+  sessions                      Session[]                               @relation("workspace_sessions")
+  datasourceBindings            WorkspaceDatasourceBinding[]
   datasourceTablePermissionSets WorkspaceDatasourceTablePermissionSet[]
-  datasourceTablePermissions WorkspaceDatasourceTablePermission[]
-  modelingGraphRevisions WorkspaceModelingGraphRevision[]
+  datasourceTablePermissions    WorkspaceDatasourceTablePermission[]
+  modelingGraphRevisions        WorkspaceModelingGraphRevision[]
+  analysisTasks                 AnalysisTask[]
+  researchConnectorConfigs      ResearchConnectorConfig[]
+  researchSourcePolicies        ResearchSourcePolicy[]
+  researchSourceSnapshots       ResearchSourceSnapshot[]
+  knowledgeAssets               KnowledgeAsset[]
 
   @@unique([name])
   @@index([status, deletedAt])
   @@map("workspaces")
 }
 
+model AnalysisTask {
+  id                    String                  @id
+  workspaceId           String
+  createdByActorId      String
+  status                String                  @default("draft")
+  version               Int                     @default(1)
+  currentRevisionNumber Int                     @default(1)
+  authorityEpoch        Int                     @default(1)
+  goalDigest            String
+  idempotencyKey        String
+  retentionExpiresAt    DateTime?
+  terminalAt            DateTime?
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  workspace             Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  revisions             AnalysisTaskRevision[]
+  attempts              AnalysisAttempt[]
+  events                AnalysisEvent[]
+  artifacts             AnalysisArtifact[]
+  artifactLinks         AnalysisArtifactLink[]
+  receipts              AnalysisReceipt[]
+  decisions             AnalysisDecision[]
+  manifests             AnalysisManifest[]
+  commands              AnalysisCommandOutbox[]
+  sessions              Session[]               @relation("analysis_task_sessions")
+  researchSourceSnapshots ResearchSourceSnapshot[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdByActorId, updatedAt])
+  @@map("analysis_tasks")
+}
+
+model AnalysisTaskRevision {
+  id                   String                 @id
+  taskId               String
+  revision             Int
+  status               String                 @default("active")
+  goalContract         String
+  goalDigest           String
+  principalDigest      String
+  authPolicyVersion    String
+  createdByActorId     String
+  supersedesRevisionId String?
+  createdAt            DateTime               @default(now())
+  task                 AnalysisTask           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  supersedes           AnalysisTaskRevision?  @relation("analysis_revision_lineage", fields: [supersedesRevisionId], references: [id], onDelete: SetNull)
+  supersededBy         AnalysisTaskRevision[] @relation("analysis_revision_lineage")
+  attempts             AnalysisAttempt[]
+  events               AnalysisEvent[]
+  artifacts            AnalysisArtifact[]
+  receipts             AnalysisReceipt[]
+  decisions            AnalysisDecision[]
+  manifests            AnalysisManifest[]
+  researchSourceSnapshots ResearchSourceSnapshot[]
+
+  @@unique([taskId, revision])
+  @@index([taskId, status, createdAt])
+  @@index([supersedesRevisionId])
+  @@map("analysis_task_revisions")
+}
+
+model AnalysisAttempt {
+  id                String               @id
+  taskId            String
+  revisionId        String
+  attempt           Int
+  status            String               @default("queued")
+  authorityEpoch    Int
+  idempotencyKey    String
+  failureReasonCode String?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  task              AnalysisTask         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision          AnalysisTaskRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  events            AnalysisEvent[]
+  artifacts         AnalysisArtifact[]
+  receipts          AnalysisReceipt[]
+  manifests         AnalysisManifest[]
+
+  @@unique([taskId, attempt])
+  @@unique([taskId, idempotencyKey])
+  @@index([revisionId, status, updatedAt])
+  @@map("analysis_attempts")
+}
+
+model AnalysisEvent {
+  id             String                @id
+  taskId         String
+  revisionId     String?
+  attemptId      String?
+  sequence       Int
+  idempotencyKey String
+  eventType      String
+  visibility     String                @default("user")
+  data           String
+  createdAt      DateTime              @default(now())
+  task           AnalysisTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision       AnalysisTaskRevision? @relation(fields: [revisionId], references: [id], onDelete: SetNull)
+  attempt        AnalysisAttempt?      @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@unique([taskId, sequence])
+  @@unique([taskId, idempotencyKey])
+  @@index([taskId, createdAt])
+  @@index([attemptId, sequence])
+  @@map("analysis_events")
+}
+
+model AnalysisArtifact {
+  id                 String                   @id
+  taskId             String
+  revisionId         String
+  attemptId          String?
+  artifactType       String
+  schemaVersion      String
+  status             String                   @default("candidate")
+  classification     String                   @default("internal")
+  visibility         String                   @default("internal")
+  payloadDigest      String
+  payloadSizeBytes   Int
+  completeness       String                   @default("complete")
+  retentionExpiresAt DateTime?
+  staleAt            DateTime?
+  invalidatedAt      DateTime?
+  createdAt          DateTime                 @default(now())
+  task               AnalysisTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision           AnalysisTaskRevision     @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  attempt            AnalysisAttempt?         @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  payload            AnalysisArtifactPayload?
+  outgoingLinks      AnalysisArtifactLink[]   @relation("analysis_artifact_link_source")
+  incomingLinks      AnalysisArtifactLink[]   @relation("analysis_artifact_link_target")
+  receipts           AnalysisReceipt[]
+
+  @@index([taskId, artifactType, createdAt])
+  @@index([revisionId, status, createdAt])
+  @@index([attemptId, createdAt])
+  @@index([retentionExpiresAt])
+  @@map("analysis_artifacts")
+}
+
+model AnalysisArtifactPayload {
+  artifactId String           @id
+  payload    String
+  digest     String
+  sizeBytes  Int
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime?
+  deletedAt  DateTime?
+  artifact   AnalysisArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt, deletedAt])
+  @@map("analysis_artifact_payloads")
+}
+
+model AnalysisArtifactLink {
+  id               String           @id
+  taskId           String
+  sourceArtifactId String
+  targetArtifactId String
+  relationType     String
+  createdAt        DateTime         @default(now())
+  task             AnalysisTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  sourceArtifact   AnalysisArtifact @relation("analysis_artifact_link_source", fields: [sourceArtifactId], references: [id], onDelete: Cascade)
+  targetArtifact   AnalysisArtifact @relation("analysis_artifact_link_target", fields: [targetArtifactId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceArtifactId, targetArtifactId, relationType])
+  @@index([taskId, relationType, createdAt])
+  @@index([targetArtifactId, relationType])
+  @@map("analysis_artifact_links")
+}
+
+model AnalysisReceipt {
+  id              String               @id
+  taskId          String
+  revisionId      String
+  attemptId       String?
+  artifactId      String?
+  receiptType     String
+  subjectType     String
+  subjectRef      String
+  subjectDigest   String
+  decision        String
+  reasonCodes     String[]
+  authorityEpoch  Int
+  principalDigest String
+  policyRefs      String
+  createdAt       DateTime             @default(now())
+  task            AnalysisTask         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision        AnalysisTaskRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  attempt         AnalysisAttempt?     @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+  artifact        AnalysisArtifact?    @relation(fields: [artifactId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, receiptType, createdAt])
+  @@index([subjectRef, subjectDigest])
+  @@index([artifactId])
+  @@map("analysis_receipts")
+}
+
+model AnalysisDecision {
+  id           String               @id
+  taskId       String
+  revisionId   String
+  decisionType String
+  status       String
+  scopeDigest  String
+  actorId      String
+  payload      String
+  expiresAt    DateTime?
+  createdAt    DateTime             @default(now())
+  task         AnalysisTask         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision     AnalysisTaskRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, decisionType, createdAt])
+  @@index([revisionId, status, expiresAt])
+  @@map("analysis_decisions")
+}
+
+model AnalysisManifest {
+  id            String               @id
+  taskId        String
+  revisionId    String
+  attemptId     String?
+  manifestType  String
+  schemaVersion String
+  status        String
+  digest        String
+  artifactRefs  String
+  receiptRefs   String
+  limitations   String
+  staleAt       DateTime?
+  sealedAt      DateTime             @default(now())
+  createdAt     DateTime             @default(now())
+  task          AnalysisTask         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision      AnalysisTaskRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  attempt       AnalysisAttempt?     @relation(fields: [attemptId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, manifestType, sealedAt])
+  @@index([revisionId, status, sealedAt])
+  @@map("analysis_manifests")
+}
+
+model AnalysisCommandOutbox {
+  id             String       @id
+  taskId         String
+  commandId      String
+  commandType    String
+  payload        String
+  status         String       @default("pending")
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  lastReasonCode String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  task           AnalysisTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, commandId])
+  @@index([status, nextAttemptAt, createdAt])
+  @@map("analysis_command_outbox")
+}
+
+model ResearchConnectorConfig {
+  id                 String                   @id
+  workspaceId        String
+  provider           String
+  version            Int
+  status             String                   @default("active")
+  baseUrl            String?
+  hasApiKey          Boolean                  @default(false)
+  apiKeyMasked       String?
+  configDigest       String
+  metadata           String
+  createdByActorId   String
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  workspace          Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourcePolicies     ResearchSourcePolicy[]
+  sourceSnapshots    ResearchSourceSnapshot[]
+
+  @@unique([workspaceId, provider, version])
+  @@index([workspaceId, provider, status, version])
+  @@map("research_connector_configs")
+}
+
+model ResearchSourcePolicy {
+  id                    String                    @id
+  workspaceId           String
+  connectorConfigId     String
+  version               Int
+  status                String                    @default("active")
+  allowedDomains        String[]
+  deniedDomains         String[]
+  allowedQueryParams    String[]
+  allowedMimeTypes      String[]
+  maxRedirects          Int                       @default(2)
+  maxContentBytes       Int
+  retentionDays         Int
+  minIndependentSources Int                       @default(2)
+  requireCounterEvidence Boolean                  @default(true)
+  policyDigest          String
+  createdByActorId      String
+  effectiveAt           DateTime                  @default(now())
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  workspace             Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectorConfig       ResearchConnectorConfig   @relation(fields: [connectorConfigId], references: [id], onDelete: Restrict)
+  sourceSnapshots       ResearchSourceSnapshot[]
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId, status, effectiveAt, version])
+  @@index([connectorConfigId])
+  @@map("research_source_policies")
+}
+
+model ResearchSourceSnapshot {
+  id                 String                   @id
+  workspaceId        String
+  taskId             String
+  revisionId         String
+  policyId           String
+  connectorConfigId  String
+  provider           String
+  providerRequestId  String?
+  canonicalUrl       String
+  locator            String
+  title              String?
+  mimeType           String
+  contentDigest      String
+  normalizedContent  String
+  contentSizeBytes   Int
+  completeness       String                   @default("complete")
+  injectionIndicators String[]
+  providerMetadata   String
+  publishedAt        DateTime?
+  retrievedAt        DateTime                 @default(now())
+  retentionExpiresAt DateTime
+  deletedAt          DateTime?
+  workspace          Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task               AnalysisTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  revision           AnalysisTaskRevision     @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  policy             ResearchSourcePolicy     @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  connectorConfig    ResearchConnectorConfig  @relation(fields: [connectorConfigId], references: [id], onDelete: Restrict)
+
+  @@unique([taskId, policyId, canonicalUrl, contentDigest])
+  @@index([workspaceId, retrievedAt])
+  @@index([taskId, revisionId, completeness])
+  @@index([retentionExpiresAt, deletedAt])
+  @@map("research_source_snapshots")
+}
+
+model KnowledgeAsset {
+  id                String                     @id
+  workspaceId       String
+  assetKind         String
+  assetKey          String
+  version           Int
+  status            String                     @default("candidate")
+  stateVersion      Int                        @default(1)
+  scopeType         String                     @default("workspace")
+  scopeRef          String?
+  authorityLevel    String                     @default("workspace_member")
+  createdByActorId  String
+  content           String
+  contentDigest     String
+  sourceRefs        String
+  capabilityCeiling String
+  evaluation        String
+  rollbackRef       String?
+  idempotencyKey    String
+  validFrom         DateTime?
+  validTo           DateTime?
+  heldAt            DateTime?
+  tombstonedAt      DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  workspace         Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transitions       KnowledgeAssetTransition[]
+
+  @@unique([workspaceId, assetKind, assetKey, version])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, assetKind, status, updatedAt])
+  @@index([workspaceId, scopeType, scopeRef, status])
+  @@index([contentDigest])
+  @@map("knowledge_assets")
+}
+
+model KnowledgeAssetTransition {
+  id             String         @id
+  assetId        String
+  fromStatus     String?
+  toStatus       String
+  actorId        String
+  decisionRef    String?
+  evidenceRefs   String
+  reasonCodes    String[]
+  idempotencyKey String
+  createdAt      DateTime       @default(now())
+  asset          KnowledgeAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, idempotencyKey])
+  @@index([assetId, createdAt])
+  @@index([toStatus, createdAt])
+  @@map("knowledge_asset_transitions")
+}
+
 model WorkspaceMember {
-  id          String   @id
+  id          String       @id
   userId      String
   workspaceId String
-  role        String   @default("member")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  role        String       @default("member")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   user        PlatformUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([userId, workspaceId])
   @@index([workspaceId, role])
@@ -515,13 +931,13 @@ model WorkspaceMember {
 }
 
 model WorkspaceDatasourceBinding {
-  id              String   @id
+  id              String     @id
   workspaceId     String
   datasourceId    String
   createdByUserId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   datasource      Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, datasourceId])
@@ -532,14 +948,14 @@ model WorkspaceDatasourceBinding {
 }
 
 model WorkspaceDatasourceTablePermissionSet {
-  id           String   @id
-  workspaceId  String
-  datasourceId String
-  policyVersion Int     @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+  id            String     @id
+  workspaceId   String
+  datasourceId  String
+  policyVersion Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource    Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, datasourceId])
   @@index([workspaceId, datasourceId, policyVersion])
@@ -547,13 +963,13 @@ model WorkspaceDatasourceTablePermissionSet {
 }
 
 model WorkspaceDatasourceTablePermission {
-  id           String   @id
+  id           String     @id
   workspaceId  String
   datasourceId String
   tableName    String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   datasource   Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, datasourceId, tableName])
@@ -562,21 +978,21 @@ model WorkspaceDatasourceTablePermission {
 }
 
 model WorkspaceModelingGraphRevision {
-  id               String   @id
-  workspaceId      String
-  datasourceId     String
-  revision         Int
-  status           String   @default("draft")
-  graphHash        String
-  graphPayload     String
-  graphPayloadVersion Int  @default(2)
-  createdByActorId String?
-  activatedByActorId String?
-  activatedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  datasource       Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+  id                  String     @id
+  workspaceId         String
+  datasourceId        String
+  revision            Int
+  status              String     @default("draft")
+  graphHash           String
+  graphPayload        String
+  graphPayloadVersion Int        @default(2)
+  createdByActorId    String?
+  activatedByActorId  String?
+  activatedAt         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  workspace           Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  datasource          Datasource @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, datasourceId, revision])
   @@index([workspaceId, datasourceId, status, revision], map: "workspace_modeling_graph_revisions_status_revision_idx")
@@ -585,7 +1001,7 @@ model WorkspaceModelingGraphRevision {
 }
 
 model RagDocument {
-  id              String   @id
+  id              String         @id
   datasourceId    String
   domain          String
   sourceType      String
@@ -597,9 +1013,9 @@ model RagDocument {
   tableNames      String[]
   columnNames     String[]
   metadata        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  datasource      Datasource @relation("datasource_rag_documents", fields: [datasourceId], references: [id], onDelete: Restrict)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  datasource      Datasource     @relation("datasource_rag_documents", fields: [datasourceId], references: [id], onDelete: Restrict)
   chunks          RagChunk[]
   replayLogs      RagRunReplay[]
 
@@ -612,7 +1028,7 @@ model RagDocument {
 }
 
 model RagChunk {
-  id              String   @id
+  id              String               @id
   documentId      String
   datasourceId    String
   domain          String
@@ -623,10 +1039,10 @@ model RagChunk {
   tableNames      String[]
   columnNames     String[]
   metadata        String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  document        RagDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  datasource      Datasource  @relation("datasource_rag_chunks", fields: [datasourceId], references: [id], onDelete: Restrict)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  document        RagDocument          @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  datasource      Datasource           @relation("datasource_rag_chunks", fields: [datasourceId], references: [id], onDelete: Restrict)
   indexEntries    RagChunkIndexEntry[]
   replayLogs      RagRunReplay[]
 
@@ -638,7 +1054,7 @@ model RagChunk {
 }
 
 model RagIndexVersion {
-  id               String   @id
+  id               String               @id
   datasourceId     String
   status           String
   buildReason      String?
@@ -646,11 +1062,11 @@ model RagIndexVersion {
   createdByRunId   String?
   activatedByRunId String?
   activatedAt      DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  datasource       Datasource @relation("datasource_rag_index_versions", fields: [datasourceId], references: [id], onDelete: Restrict)
-  createdByRun     SqlRun?    @relation("rag_index_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
-  activatedByRun   SqlRun?    @relation("rag_index_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  datasource       Datasource           @relation("datasource_rag_index_versions", fields: [datasourceId], references: [id], onDelete: Restrict)
+  createdByRun     SqlRun?              @relation("rag_index_created_by_run", fields: [createdByRunId], references: [runId], onDelete: SetNull)
+  activatedByRun   SqlRun?              @relation("rag_index_activated_by_run", fields: [activatedByRunId], references: [runId], onDelete: SetNull)
   chunkEntries     RagChunkIndexEntry[]
   replayLogs       RagRunReplay[]
 
@@ -661,7 +1077,7 @@ model RagIndexVersion {
 }
 
 model RagChunkIndexEntry {
-  id             String   @id
+  id             String          @id
   indexVersionId String
   chunkId        String
   datasourceId   String
@@ -669,8 +1085,8 @@ model RagChunkIndexEntry {
   lexicalContent String
   denseVector    String?
   metadata       String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
   indexVersion   RagIndexVersion @relation(fields: [indexVersionId], references: [id], onDelete: Cascade)
   chunk          RagChunk        @relation(fields: [chunkId], references: [id], onDelete: Cascade)
   datasource     Datasource      @relation("datasource_rag_chunk_index_entries", fields: [datasourceId], references: [id], onDelete: Restrict)
@@ -690,7 +1106,7 @@ model RagRunReplay {
   documentId     String?
   chunkId        String?
   payload        String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime         @default(now())
   run            SqlRun           @relation("rag_run_replays", fields: [runId], references: [runId], onDelete: Cascade)
   datasource     Datasource       @relation("datasource_rag_run_replays", fields: [datasourceId], references: [id], onDelete: Restrict)
   indexVersion   RagIndexVersion? @relation(fields: [indexVersionId], references: [id], onDelete: SetNull)

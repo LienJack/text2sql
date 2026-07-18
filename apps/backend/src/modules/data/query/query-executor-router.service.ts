@@ -1,7 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import type { Datasource, DatasourceType } from "@text2sql/shared-types";
 import { DomainError } from "../../../common/domain-error";
-import type { QueryExecutionResult } from "./query-executor.interface";
+import type {
+  QueryExecutionResult,
+  QueryExplainResult
+} from "./query-executor.interface";
 import { FileDatasourceExecutorService } from "./file-datasource-executor.service";
 import { MysqlExecutorService } from "./mysql-executor.service";
 import { PostgresExecutorService } from "./postgres-executor.service";
@@ -37,7 +40,18 @@ export interface QueryExecutionTablePermissionsOptions {
 export class QueryExecutorRouterService {
   private readonly tableAccessGuard = new SqlTableAccessGuardService();
   private readonly executors: Map<DatasourceType, {
-    execute: (input: { datasource: Datasource; sql: string }) => Promise<QueryExecutionResult>;
+    execute: (input: {
+      datasource: Datasource;
+      sql: string;
+      abortSignal?: AbortSignal;
+      timeoutMs?: number;
+    }) => Promise<QueryExecutionResult>;
+    explain?: (input: {
+      datasource: Datasource;
+      sql: string;
+      abortSignal?: AbortSignal;
+      timeoutMs?: number;
+    }) => Promise<QueryExplainResult>;
   }>;
 
   constructor(
@@ -61,12 +75,15 @@ export class QueryExecutorRouterService {
     datasource: Datasource;
     sql: string;
     limit?: number;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
     tablePermissions?: QueryExecutionTablePermissionsOptions;
   }): Promise<QueryExecutionResult> {
-    this.tableAccessGuard.assertReadOnlySql(input.sql);
+    this.tableAccessGuard.assertReadOnlySql(input.sql, input.datasource.type);
     const guarded = await this.tableAccessGuard.assertTableAccess({
       sql: input.sql,
       datasourceId: input.datasource.id,
+      datasourceType: input.datasource.type,
       accessContext: input.tablePermissions?.accessContext,
       allowedTables: input.tablePermissions?.allowedTables,
       resolveAllowedTables: input.tablePermissions?.resolveAllowedTables
@@ -88,7 +105,9 @@ export class QueryExecutorRouterService {
 
     return executor.execute({
       datasource: input.datasource,
-      sql: normalizedSql
+      sql: normalizedSql,
+      abortSignal: input.abortSignal,
+      timeoutMs: input.timeoutMs
     });
   }
 
@@ -106,8 +125,28 @@ export class QueryExecutorRouterService {
     };
   }
 
-  buildDryPlan(sql: string): QueryDryPlanSnapshot {
-    const extraction = this.tableAccessGuard.extractReferencedTables(sql);
+  async explain(input: {
+    datasource: Datasource;
+    sql: string;
+    abortSignal?: AbortSignal;
+    timeoutMs?: number;
+  }): Promise<QueryExplainResult> {
+    const executor = this.executors.get(input.datasource.type);
+    if (!executor?.explain) {
+      return {
+        capability: "unavailable",
+        evidenceRefs: [],
+        reasonCodes: ["explain_capability_unavailable"]
+      };
+    }
+    return executor.explain(input);
+  }
+
+  buildDryPlan(
+    sql: string,
+    datasourceType: DatasourceType = "sqlite"
+  ): QueryDryPlanSnapshot {
+    const extraction = this.tableAccessGuard.extractReferencedTables(sql, datasourceType);
     return {
       complete: extraction.complete,
       referencedTables: extraction.tables,

@@ -3,6 +3,13 @@
 /vibe/*
 /docs/*
 !/docs/text2sql-project-architecture-business-flow-review.md
+!/docs/standards/
+/docs/standards/*
+!/docs/standards/text2sql-accuracy-gate-spec.md
+!/docs/standards/data-agent-autonomous-analysis-spec.md
+!/docs/runbooks/
+/docs/runbooks/*
+!/docs/runbooks/data-agent-task-recovery-and-release.md
 # Node / monorepo artifacts
 node_modules/
 dist/

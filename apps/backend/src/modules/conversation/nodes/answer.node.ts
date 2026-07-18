@@ -38,6 +38,7 @@ export class AnswerNode {
     routeKind?: string;
     failure?: Text2SqlV2FailureSemantic;
     warnings?: string[];
+    requiresFinalValidationReceipt?: boolean;
   }): AnswerNodeResult {
     const routeKind = this.resolveRouteKind(input.semanticPlan, input.routeKind);
     const metadataRoute = routeKind === "metadata";
@@ -114,6 +115,28 @@ export class AnswerNode {
         evidenceRefs,
         warnings,
         failure: input.failure
+      };
+    }
+
+    if (
+      input.semanticPlan?.queryContract &&
+      (input.requiresFinalValidationReceipt ?? true) &&
+      input.executionResult.validationReceipt?.status !== "passed"
+    ) {
+      const failure: Text2SqlV2FailureSemantic = {
+        code: "FINAL_VALIDATION_RECEIPT_REQUIRED",
+        message: "最终结果尚未通过封存验证，系统已拒绝生成业务答案。",
+        category: "validation",
+        terminal: true,
+        correctable: false
+      };
+      return {
+        mode: "fail_closed",
+        answer: this.formatAnswerNode.runFailClosed(failure.message),
+        status: "rejected",
+        evidenceRefs,
+        warnings: this.unique([...warnings, failure.code]),
+        failure
       };
     }
 

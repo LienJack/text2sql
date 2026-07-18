@@ -5,6 +5,7 @@ import type {
   SemanticContextPackV1,
   SemanticPlanV1,
   SqlValidationArtifactV1,
+  Text2SqlAccuracyEvidenceV1,
   Text2SqlV2FailureSemantic,
   Text2SqlV2LoopEvidence,
   Text2SqlV2RuntimePlanV1,
@@ -195,6 +196,10 @@ export const Text2SqlV2LangGraphStateAnnotation = Annotation.Root({
     reducer: replaceValueReducer,
     default: () => undefined
   }),
+  accuracyEvidence: Annotation<Text2SqlAccuracyEvidenceV1 | undefined>({
+    reducer: replaceValueReducer,
+    default: () => undefined
+  }),
   correctionResult: Annotation<CorrectSqlNodeResult | undefined>({
     reducer: replaceValueReducer,
     default: () => undefined
@@ -205,6 +210,14 @@ export const Text2SqlV2LangGraphStateAnnotation = Annotation.Root({
   }),
   correctionArtifacts: Annotation<CorrectSqlNodeResult["artifact"][]>({
     reducer: (left, right) => left.concat(right),
+    default: () => []
+  }),
+  seenSqlDigests: Annotation<string[]>({
+    reducer: (left, right) => Array.from(new Set(left.concat(right))),
+    default: () => []
+  }),
+  seenFailureSignatures: Annotation<string[]>({
+    reducer: (left, right) => Array.from(new Set(left.concat(right))),
     default: () => []
   }),
   loopEvidence: Annotation<Text2SqlV2LoopEvidence[]>({
@@ -260,9 +273,12 @@ export const createText2SqlV2LangGraphInitialState = (
   sqlGenerationArtifact: undefined,
   validationOutcome: undefined,
   sqlValidationArtifact: undefined,
+  accuracyEvidence: undefined,
   correctionResult: undefined,
   correctionAttemptCount: 0,
   correctionArtifacts: [],
+  seenSqlDigests: [],
+  seenFailureSignatures: [],
   loopEvidence: [],
   executionResult: undefined,
   answerResult: undefined

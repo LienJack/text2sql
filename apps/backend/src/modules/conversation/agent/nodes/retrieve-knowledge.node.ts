@@ -100,6 +100,12 @@ export class RetrieveKnowledgeNode {
     runId: string;
     workspaceId?: string;
     allowedTables?: string[];
+    requiresSqlPolicy?: boolean;
+    policyVersion?: number;
+    policyDigest?: string;
+    schemaSnapshotId?: string;
+    schemaSnapshotDigest?: string;
+    allowedColumnsDigest?: string;
     modelCatalogId?: string;
     pinnedTables?: string[];
     pinnedColumns?: string[];
@@ -111,6 +117,27 @@ export class RetrieveKnowledgeNode {
       pinnedTables: input.pinnedTables,
       pinnedColumns: input.pinnedColumns
     });
+
+    if (
+      input.requiresSqlPolicy &&
+      (!input.allowedTables?.length ||
+        !input.policyDigest?.trim() ||
+        !Number.isInteger(input.policyVersion) ||
+        !input.schemaSnapshotId?.trim() ||
+        !input.schemaSnapshotDigest?.trim() ||
+        !input.allowedColumnsDigest?.trim())
+    ) {
+      return this.createDisabledKnowledge({
+        query: question,
+        datasourceId,
+        datasource: input.datasource,
+        runId,
+        allowedTables: undefined,
+        pinningConfig,
+        degradeReason: "trusted_sql_grounding_unavailable",
+        summary: "缺少可信授权或 Schema Snapshot，Text2SQL 检索已 fail closed。"
+      });
+    }
 
     const normalized = question.trim();
     if (!normalized) {
@@ -144,6 +171,12 @@ export class RetrieveKnowledgeNode {
       datasourceId,
       workspaceId: input.workspaceId,
       allowedTables: input.allowedTables,
+      allowedColumnsDigest: input.allowedColumnsDigest,
+      requiresSqlPolicy: input.requiresSqlPolicy,
+      policyVersion: input.policyVersion,
+      policyDigest: input.policyDigest,
+      schemaSnapshotId: input.schemaSnapshotId,
+      schemaSnapshotDigest: input.schemaSnapshotDigest,
       runId
     });
     const reranked = await this.ragContract.rerank.rerank({
@@ -151,7 +184,7 @@ export class RetrieveKnowledgeNode {
       modelCatalogId: input.modelCatalogId
     });
     const pinningResult = this.applyPinningConstraints(
-      reranked.retrieval_bundle,
+      this.withGroundingIdentity(reranked.retrieval_bundle, input),
       pinningConfig
     );
     const bundle = await this.withAllowedTableSchemaSupplement(
@@ -187,6 +220,32 @@ export class RetrieveKnowledgeNode {
       pinning: pinningResult.pinning,
       typedSummary,
       evidenceRefs
+    };
+  }
+
+  private withGroundingIdentity(
+    bundle: RagRetrievalBundle,
+    input: {
+      policyVersion?: number;
+      policyDigest?: string;
+      schemaSnapshotId?: string;
+      schemaSnapshotDigest?: string;
+      allowedColumnsDigest?: string;
+    }
+  ): RagRetrievalBundle {
+    if (!bundle.context_pack) {
+      return bundle;
+    }
+    return {
+      ...bundle,
+      context_pack: {
+        ...bundle.context_pack,
+        policy_version: input.policyVersion,
+        policy_digest: input.policyDigest,
+        schema_snapshot_id: input.schemaSnapshotId,
+        schema_snapshot_digest: input.schemaSnapshotDigest,
+        allowed_columns_digest: input.allowedColumnsDigest
+      }
     };
   }
 

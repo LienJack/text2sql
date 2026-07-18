@@ -400,7 +400,7 @@ describe("text2sql v2 langgraph nodes", () => {
           datasourceType: "sqlite"
         })
       ).resolves.toMatchObject({
-        outcome: "correctable",
+        outcome: "terminal",
         artifact: {
           failure: {
             code: "SQL_PARSE_UNSUPPORTED_STATEMENT"
@@ -426,18 +426,79 @@ describe("text2sql v2 langgraph nodes", () => {
   });
 
   describe("correct-sql node", () => {
-    const node = new CorrectSqlNode(new SqlCorrectionService());
+    const repairReceipt = {
+      version: "repair-receipt.v1",
+      receiptId: "repair:1",
+      receiptDigest: "repair-digest-1",
+      runId: "run-1",
+      queryContractDigest: "query-digest-1",
+      versions: {
+        questionSet: "q1",
+        semantic: "s1",
+        schema: "sc1",
+        policy: "p1",
+        data: "d1",
+        model: "m1",
+        prompt: "pr1",
+        workflow: "w1",
+        code: "c1"
+      },
+      parentSqlDigest: "parent-digest",
+      patchedSqlDigest: "patched-digest",
+      patchId: "qualify:orders.id",
+      patchKind: "identifier_qualification",
+      equivalenceStatus: "proven",
+      attempt: 1,
+      changedSemanticDimensions: ["identifier_qualification"],
+      reasonCodes: ["repair_ast_equivalence_proven"],
+      issuedAt: "2026-07-17T00:00:00.000Z"
+    } as const;
+    const repair = jest.fn().mockReturnValue({
+      status: "applied",
+      patchedSql: "SELECT orders.id FROM orders",
+      failureSignature: "failure-signature-1",
+      receipt: repairReceipt
+    });
+    const node = new CorrectSqlNode(
+      new SqlCorrectionService(),
+      { repair } as never
+    );
 
-    it("increments correction budget and routes back to generation for correctable failures", () => {
+    it("applies a bounded patch and routes directly back to validation", () => {
       const result = node.run({
         failedSql: "SELECT missing_city FROM orders",
         attemptCount: 0,
-        semanticPlan: readyPlan,
         contextPack: {
           status: "ready",
           selectedEvidenceIds: ["chunk-orders-1"],
           selectedTables: ["orders"],
           selectedColumns: ["orders.id"]
+        },
+        runId: "run-1",
+        datasourceType: "sqlite",
+        versions: repairReceipt.versions,
+        schemaSnapshot: {} as never,
+        semanticPlan: {
+          ...readyPlan,
+          queryContract: {
+            version: "query-contract.v1",
+            id: "query-1",
+            digest: "query-digest-1",
+            runId: "run-1",
+            questionDigest: "question-1",
+            route: "text_to_sql",
+            metrics: [],
+            dimensions: ["orders.id"],
+            requiredColumns: ["orders.id"],
+            filters: [],
+            grain: ["orders.id"],
+            sort: [],
+            resultShape: {
+              cardinality: "tabular",
+              columns: [{ name: "id", semanticType: "identifier" }]
+            },
+            frozenAt: "2026-07-17T00:00:00.000Z"
+          }
         },
         validationArtifact: {
           status: "failed",
@@ -454,7 +515,7 @@ describe("text2sql v2 langgraph nodes", () => {
       });
 
       expect(result).toMatchObject({
-        outcome: "retry_generation",
+        outcome: "retry_validation",
         budget: {
           attemptCount: 1,
           maxAttempts: 2,
@@ -463,6 +524,8 @@ describe("text2sql v2 langgraph nodes", () => {
         },
         artifact: {
           shouldRevalidate: true,
+          patchedSql: "SELECT orders.id FROM orders",
+          repairReceipt,
           semanticPlanSnapshotId: readyPlan.snapshotId,
           evidenceRefs: ["chunk-orders-1"],
           grounding: {
@@ -511,7 +574,7 @@ describe("text2sql v2 langgraph nodes", () => {
       expect(
         node.run({
           failedSql: "SELECT missing_city FROM orders",
-          attemptCount: 1,
+          attemptCount: 2,
           validationArtifact: {
             status: "failed",
             checks: [],

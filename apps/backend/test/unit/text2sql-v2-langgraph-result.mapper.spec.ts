@@ -142,6 +142,28 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
           failedHardBlockerIds: []
         }
       },
+      accuracyEvidence: {
+        version: "text2sql-accuracy-evidence.v1",
+        queryContract: {
+          version: "query-contract.v1",
+          id: "query-contract:orders-count",
+          digest: "sha256:query-contract-orders-count",
+          runId: "run-v2-langgraph",
+          questionDigest: "sha256:orders-count-question",
+          route: "text_to_sql",
+          metrics: ["order_count"],
+          dimensions: [],
+          requiredColumns: ["orders.id"],
+          filters: [],
+          grain: [],
+          sort: [],
+          resultShape: {
+            cardinality: "scalar",
+            columns: [{ name: "total", semanticType: "metric" }]
+          },
+          frozenAt: "2026-04-27T00:00:00.000Z"
+        }
+      },
       executionResult: {
         rows: [{ total: 10 }],
         columns: ["total"],
@@ -198,6 +220,11 @@ describe("Text2SqlV2LangGraphResultMapper", () => {
       warningCount: 0,
       fulfilledCount: 1,
       failedCount: 0
+    });
+    expect(mapped.trace.v2?.accuracy?.queryContract).toMatchObject({
+      version: "query-contract.v1",
+      digest: "sha256:query-contract-orders-count",
+      route: "text_to_sql"
     });
   });
 

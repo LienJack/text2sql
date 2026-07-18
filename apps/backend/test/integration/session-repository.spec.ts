@@ -33,6 +33,13 @@ describe("session repository", () => {
       datasource: "sqlite_main",
       createdAt: "2026-04-10T00:00:01.000Z"
     });
+    await repository.createSession({
+      id: "repo-session-analysis-internal",
+      datasource: "sqlite_main",
+      origin: "analysis",
+      analysisTaskId: "analysis-task-1",
+      createdAt: "2026-04-10T00:00:02.000Z"
+    });
 
     await repository.markSessionMessageActivity(firstId, "2026-04-10T00:00:10.000Z");
     await repository.renameSession(firstId, "仓库测试会话");
@@ -43,6 +50,14 @@ describe("session repository", () => {
     expect(first?.syncStatus).toBe("healthy");
     expect(first?.debugEnabled).toBe(false);
     expect(list[0]?.id).toBe(firstId);
+    expect(list.some((item) => item.origin === "analysis")).toBe(false);
+    const internalSessions = await repository.listSessions({ origins: ["analysis"] });
+    expect(internalSessions).toEqual([
+      expect.objectContaining({
+        id: "repo-session-analysis-internal",
+        analysisTaskId: "analysis-task-1"
+      })
+    ]);
   });
 
   it("should persist llm raw payload and read latest run by session", async () => {

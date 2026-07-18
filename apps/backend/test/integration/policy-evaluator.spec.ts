@@ -81,5 +81,8 @@ describe("policy evaluator service", () => {
     expect(resolution.decisions.orders).toBe("workspace_allow");
     expect(resolution.decisions.payments).toBe("default_deny");
     expect(resolution.conflictDetected).toBe(false);
+    expect(resolution.policyVersion).toBe(1);
+    expect(resolution.policyDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(resolution.workspaceDatasourceBindingId).toBeTruthy();
   });
 });

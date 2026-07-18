@@ -2,6 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../../src/app.module";
+import { AnalysisTaskCommandService } from "../../src/modules/conversation/analysis/application/analysis-task-command.service";
 import { KNOWLEDGE_MEMORY_COMPAT_BRIDGE } from "../../src/modules/knowledge/memory/memory.module";
 import {
   assertKnowledgeCompatBridgeRetirementReady,
@@ -48,10 +49,16 @@ describe("memory feedback api integration", () => {
     process.env.REDIS_URL = "";
     process.env.LLM_PROVIDER = "volcengine";
     process.env.LLM_MOCK_MODE = "true";
+    process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE = "true";
 
-    const moduleRef = await Test.createTestingModule({
+    const builder = Test.createTestingModule({
       imports: [AppModule]
-    }).compile();
+    });
+    builder.overrideProvider(AnalysisTaskCommandService).useValue({
+      onModuleInit: jest.fn(),
+      onModuleDestroy: jest.fn()
+    });
+    const moduleRef = await builder.compile();
     app = moduleRef.createNestApplication();
     await app.init();
   });
@@ -61,6 +68,7 @@ describe("memory feedback api integration", () => {
     if (cleanupFixture) {
       await cleanupFixture();
     }
+    delete process.env.KNOWLEDGE_ASSET_LEGACY_FIXTURE_MODE;
   });
 
   it("allows admin to submit memory feedback", async () => {

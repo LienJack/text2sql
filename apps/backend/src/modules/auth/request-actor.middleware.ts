@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
+import type { TrustedPrincipalService } from "../governance/auth/trusted-principal.service";
 
 type WorkspaceScopedRole = "admin" | "member";
 type AccessRole =
@@ -129,3 +130,16 @@ export const requestActorMiddleware = (
   };
   next();
 };
+
+export const createRequestActorMiddleware = (
+  trustedPrincipalService: TrustedPrincipalService
+) =>
+  async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const resolved = await trustedPrincipalService.resolveRequest(req);
+      req.actor = resolved.actor;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };

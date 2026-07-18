@@ -16,6 +16,7 @@ This project is not a prompt-only SQL generator. It is a Text2SQL platform proto
 - Before SQL generation, the agent retrieves schema, glossary terms, historical examples, and semantic assets.
 - Generated SQL must pass read-only, safety, permission, dialect, and execution checks.
 - Each run has a `runId` for tracing, RAG evidence, delivery artifacts, and replay.
+- Long-running autonomous analysis uses a durable `AnalysisTask` ledger, bounded workers, evidence/claim lineage, correction revisions, and a composite release manifest.
 - Frontend and backend stay aligned through shared types and an SSE protocol package for sync responses, streaming responses, and run details.
 
 ## Problems Solved
@@ -34,6 +35,9 @@ This project is not a prompt-only SQL generator. It is a Text2SQL platform proto
 
 5. **End-to-end demos across multiple datasource types**
    The project supports SQLite, MySQL, PostgreSQL, CSV, and Excel datasources, with frontend workbench pages such as `/data-sources`, `/chat`, `/settings`, and `/modeling` for demos and continued extension.
+
+6. **Durable autonomous analysis without unverifiable autonomy**
+   `/analysis` turns a decision goal into a versioned WorkGraph. PostgreSQL owns task truth, Temporal owns durable orchestration, and deterministic commit guards decide which Evidence, Calculation, Claim, Conflict, and Report artifacts may become visible. Missing signed business or analyst Outcome evidence keeps release status at `HOLD`.
 
 ## Feature Preview
 
@@ -85,6 +89,7 @@ apps/backend                  NestJS API, Text2SQL runtime, governance, knowledg
 apps/frontend                 Next.js frontend workbench
 packages/shared-types         Shared frontend/backend types
 packages/chat-stream-protocol SSE envelope, parser, terminal guard, and UI projection helpers
+packages/analysis-task-protocol Durable task event, replay, and terminal-state contracts
 infra                         Local PostgreSQL, Redis, and Nginx orchestration
 data                          Local uploads, SQLite files, and runtime data
 docs                          Solutions, standards, troubleshooting, and understanding documents
@@ -118,7 +123,7 @@ flowchart LR
 
 | Domain | Directory | Responsibility |
 | --- | --- | --- |
-| `conversation` | `apps/backend/src/modules/conversation` | Chat entry points, Text2SQL workflow, LangGraph runtime, delivery contract |
+| `conversation` | `apps/backend/src/modules/conversation` | Chat entry points, Text2SQL workflow, autonomous analysis, LangGraph runtime, delivery contract |
 | `governance` | `apps/backend/src/modules/governance` | Workspaces, datasource binding, table permissions, users, and settings governance |
 | `knowledge` | `apps/backend/src/modules/knowledge` | RAG retrieval, semantic assets, glossary, memory, graph, and modeling context |
 | `platform` | `apps/backend/src/modules/platform` | Persistence, query execution, cache, configuration, observability, and read-model guards |
@@ -241,6 +246,7 @@ Default URLs:
 
 - Gateway: `http://localhost:3000`
 - Datasource entry: `http://localhost:3000/data-sources`
+- Autonomous analysis: `http://localhost:3000/analysis`
 - Frontend direct debugging: `http://localhost:3001`
 - Backend health check: `http://localhost:3002/health`
 
@@ -266,6 +272,14 @@ node tests/smoke/nginx-dev-gateway-smoke.mjs
 - `/glossary`: business glossary maintenance
 - `/modeling`: datasource modeling, relationships, and semantic views
 - `/prompts`: prompt template management
+
+### Autonomous Analysis
+
+1. Open `/analysis` in a selected workspace.
+2. Create a Goal Contract with objective, decision use, datasource scope, deliverables, risk, and budgets.
+3. Start the task and inspect the versioned WorkGraph, mandatory obligations, live event cursor, budget, Evidence, Conflict, and Report projections.
+4. Pause, resume, cancel, revise, or reconnect without treating a closed browser tab as task cancellation.
+5. Use `taskId` replay and ReleaseManifest for audit; UI progress and telemetry are projections, not Outcome truth.
 
 ## Quality Gates
 
@@ -303,7 +317,11 @@ pnpm run text2sql:no-legacy-compat:check
 pnpm --filter @text2sql/backend run collect:text2sql-v2-eval-gate
 pnpm --filter @text2sql/backend run collect:text2sql-v2-focused-coverage-gate
 pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
+pnpm --filter @text2sql/backend run collect:text2sql-accuracy-gate
+pnpm --filter @text2sql/backend run collect:data-agent-release-gate
 ```
+
+`collect:data-agent-release-gate:strict` is the final release blocker. Without fresh, signed, owner-approved Text2SQL and representative analyst Outcome evidence, the expected decision is `HOLD`, even when synthetic, focused, and eval gates pass.
 
 ## Important Rules
 
@@ -325,3 +343,5 @@ pnpm --filter @text2sql/backend run collect:modeling-parity-shadow-gate
 - `docs/standards/llm-stream-tool-migration-spec.md`: LLM stream and tool calling migration standard
 - `docs/standards/governance-terminology-spec.md`: governance terminology hard-cut standard
 - `docs/standards/backend-business-capability-topology-spec.md`: backend capability topology standard
+- `docs/standards/data-agent-autonomous-analysis-spec.md`: autonomous AnalysisTask, Evidence/Claim, KnowledgeAsset, telemetry, and ReleaseManifest standard
+- `docs/runbooks/data-agent-task-recovery-and-release.md`: task recovery, replay, correction, release, and rollback runbook
